@@ -32,9 +32,13 @@ void setup()
         // Set the dry contact pin as an input
         pinMode(INP1, INPUT);
     }
+    else
+    {
+        DS18B20.begin(); // initialize the DS18B20 sensor
+    }
 
-    pinMode(2, OUTPUT); // Set the LED pin as an output
-    pinMode(RLY1, OUTPUT); // Set the relay pin as an output - on tx only if local echo is enabled
+    pinMode(2, OUTPUT);           // Set the LED pin as an output
+    pinMode(RLY1, OUTPUT);        // Set the relay pin as an output - on tx only if local echo is enabled
     LoRa.setPins(nss, rst, dio0); // Set the LoRa module pins
     // Wait
     delay(1000);
@@ -47,8 +51,13 @@ void setup()
         setupWiFi();
         setupOta();
         setupMdns();
-        mqttClient.setServer(mqtt_server, mqtt_port);
-        mqttClient.setCallback(mqttCallback);
+
+        // Connect to the MQTT broker
+        if (enableMqtt)
+        {
+            mqttClient.setServer(mqtt_server, mqtt_port);
+            mqttClient.setCallback(mqttCallback);
+        }
     }
 
     // Print the encryption key
@@ -74,4 +83,5 @@ void loop()
 
     // Blink the LED
     updateLED();
+
 }
