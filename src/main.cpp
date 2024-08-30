@@ -8,9 +8,6 @@
  * The code includes a heartbeat, ackknowledgement and timeout mechanism to ensure the reliability of the communication.
  */
 
-// TODO: Decide on MQTT, will it be writeable on TX and RX?
-// TODO: Decide on MQTT, will it be a mode switch that disables to digital input
-// TODO: Or should there be an option for an OR gate to combine the digital input and MQTT input
 
 #include "functions.h"
 

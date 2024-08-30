@@ -23,10 +23,12 @@
 #endif
 
 /* Notes about MQTT and multiple nodes
-- It would be desirable for the TX device to act as a gateway and publish topics for all devices known to it
-- Presently, a tex device is paired with a single RX device, but the address matching logic could be extended to multiple RX devices.
+
+// TODO: Decide on MQTT, will it be writeable on TX and RX?
+// TODO: Decide on MQTT, will it be a mode switch that disables to digital input
+// TODO: Or should there be an option for an OR gate to combine the digital input and MQTT input
+- Presently, a TX device is paired with a single RX device, but the address matching logic could be extended to multiple RX devices.
 - Communication between the TX and RX devices would remain LoRa only despite the WiFi capability of the ESP8266
-- The TX device would be responsible for publishing the state of all RX devices to the MQTT broker
 - A user could then control RX devices via the TX device by sending MQTT messages to the TX device eg. with Node-RED
 - This would require the rxAddress variable to beccome an array of addresses
 - And the MQTT logic to populate the relayTopicStr and inputTopicStr variables with the address of each RX device
@@ -48,11 +50,11 @@
 
 #define KEY_LENGTH 16 // AES key length in bytes
 
-bool isTransmitter = true; // Set to true for transmitter
-// bool isTransmitter = false; // Set to false for receiver
+// bool isTransmitter = true; // Set to true for transmitter
+bool isTransmitter = false; // Set to false for receiver
 
 byte txAddress = 0xFF; // address of tx device
-byte rxAddress = 0x13; // address of rx device
+byte rxAddress = 0x0C; // address of rx device
 
 // Use the AES key from the TX device on the RX device to decrypt messages
 byte aesKey[KEY_LENGTH] = {0x36, 0x6F, 0x88, 0x00, 0x37, 0x6F, 0x88, 0x00, 0x37, 0x6F, 0x88, 0x00, 0x37, 0x6F, 0x88, 0x00};
@@ -126,12 +128,16 @@ const int mqtt_port = 1883;
 const char *mqtt_user = "";     // Not needed if no authentication set
 const char *mqtt_password = ""; // Not needed if no authentication set
 
+// Hostname
+String hostName = "thanda-lrs-" + String(ESP.getChipId()) + "-" + (isTransmitter ? "tx" : "rx");
+
 // MQTT Topics
-String relayTopicStr = "lora/thanda-lrs-" + String(ESP.getChipId()) + "/relay";
-String inputTopicStr = "lora/thanda-lrs-" + String(ESP.getChipId()) + "/input";
-String nodeTopicStr = "lora/thanda-lrs-" + String(ESP.getChipId()) + "/type";
-String addrTopicStr = "lora/thanda-lrs-" + String(ESP.getChipId()) + "/addr";
-String controlTopicStr = "lora/thanda-lrs-" + String(ESP.getChipId()) + "/control";
+String topicBase = "lora/" + hostName;
+String relayTopicStr = topicBase + "/relay";
+String inputTopicStr = topicBase + "/input";
+String nodeTopicStr = topicBase + "/type";
+String addrTopicStr = topicBase + "/addr";
+String controlTopicStr = topicBase + "/control";
 const char *relayTopic = relayTopicStr.c_str();
 const char *inputTopic = inputTopicStr.c_str();
 const char *nodeTopic = nodeTopicStr.c_str();
@@ -689,8 +695,12 @@ void handleReceiving()
     byte thisAddress = packet[0];
     byte remoteAddress = packet[1];
 
-    if ((isTransmitter && (thisAddress != txAddress || remoteAddress != rxAddress)) ||
-        (!isTransmitter && (thisAddress != rxAddress || remoteAddress != txAddress)))
+    // Make sure node type and addresses match
+    bool isTransmitterMismatch = isTransmitter && (thisAddress != txAddress || remoteAddress != rxAddress);
+    bool isReceiverMismatch = !isTransmitter && (thisAddress != rxAddress || remoteAddress != txAddress);
+
+    // Throw away packets that are not for this node
+    if (isTransmitterMismatch || isReceiverMismatch)
     {
         if (DEBUG_VERBOSE)
         {
@@ -699,6 +709,7 @@ void handleReceiving()
         return;
     }
 
+    // Check the packet size
     else if (packetSize != 18)
     {
         if (DEBUG)
@@ -758,24 +769,6 @@ void handleReceiving()
         break;
     }
 
-    // DELETE
-    // if (messageType == T_MQTT && localRlyState != relayState)
-    // {
-    //     handleChangeRelayState(relayState, T_CHANGE);
-    // }
-    // if (messageType == T_CHANGE && localRlyState != relayState)
-    // {
-    //     handleChangeRelayState(relayState, T_CHANGE);
-    // }
-    // else if (messageType == T_HEARTBEAT || messageType == T_ACK)
-    // {
-    //     handleHeartbeatOrAck(messageType, relayState, localRlyState);
-    // }
-    // else if (messageType == T_CHANGE && localRlyState == relayState)
-    // {
-    //     logEntry(txAddress, rxAddress, T_ACK, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
-    // }
-
     // Get temperature
     if (!isTransmitter)
     {
@@ -800,6 +793,7 @@ void handleTimeout()
 void setupWiFi()
 {
     /* Connect WiFi */
+    WiFi.hostname(hostName);
     WiFi.mode(WIFI_STA);
     WiFi.begin(defaultAPssid, defaultAPpassword);
     if (WiFi.waitForConnectResult() != WL_CONNECTED)
@@ -850,7 +844,7 @@ void setupMdns()
     MDNS.update();
 
     // Hostname
-    String mdnsHostname = String("lora_") + String(ESP.getChipId()) + String(isTransmitter ? "_tx" : "_rx");
+    String mdnsHostname = hostName;
     Serial.println("mDNS hostname: " + mdnsHostname);
     // Start mDNS
     if (MDNS.begin(mdnsHostname))
@@ -906,20 +900,26 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
 
         // Extract addr and relay values
         byte addr;
-        if (doc["addr"].is<const char *>()) {
+        if (doc["addr"].is<const char *>())
+        {
             const char *addrStr = doc["addr"];
             addr = strtol(addrStr, NULL, 16); // Convert hex string to byte
-        } else if (doc["addr"].is<int>()) {
+        }
+        else if (doc["addr"].is<int>())
+        {
             int addrInt = doc["addr"];
             addr = static_cast<byte>(addrInt); // Convert to byte
-        } else {
+        }
+        else
+        {
             // Handle unexpected type
             Serial.println("Unexpected type for addr");
             return;
         }
         int mqttRelayState = doc["relay"];
-        
-        if (DEBUG_VERBOSE) {
+
+        if (DEBUG_VERBOSE)
+        {
             Serial.print("Control message arrived [");
             Serial.print(topic);
             Serial.print("] addr: ");
