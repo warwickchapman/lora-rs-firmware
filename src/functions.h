@@ -7,8 +7,8 @@
 #include <deque>               // deque library which is required for log buffer
 #include <string>              // string library which is required for log buffer
 #include <PubSubClient.h>      // PubSubClient library which is required for MQTT communication
-#include <OneWire.h>           // OneWire library which is required for DS18B20 temperature sensor
-#include <DallasTemperature.h> // DallasTemperature library which is required for DS18B20 temperature sensor
+// #include <OneWire.h>           // OneWire library which is required for DS18B20 temperature sensor
+// #include <DallasTemperature.h> // DallasTemperature library which is required for DS18B20 temperature sensor
 #include <ArduinoJson.h>       // Include Arduino JSON library
 
 #if defined(ESP8266)
@@ -149,27 +149,27 @@ WiFiClient espClient;               // Use WiFiClient class to create TCP connec
 PubSubClient mqttClient(espClient); // Setup MQTT client
 
 // Define the oneWire instance to communicate with the DS18B20 temperature sensor
-OneWire oneWire(INP1);
-DallasTemperature DS18B20(&oneWire);
+// OneWire oneWire(INP1);
+// DallasTemperature DS18B20(&oneWire);
 
 float temperature_C; // temperature in Celsius
 float temperature_F; // temperature in Fahrenheit
 
-void getTemperature()
-{
-    // Request temperature conversion
-    DS18B20.requestTemperatures();
-    // Read temperature in Celsius
-    temperature_C = DS18B20.getTempCByIndex(0);
-    // Read temperature in Fahrenheit
-    temperature_F = DS18B20.getTempFByIndex(0);
-    // Print temperature to Serial console
-    Serial.print("Temperature: ");
-    Serial.print(temperature_C);
-    Serial.print("°C ");
-    Serial.print(temperature_F);
-    Serial.println("°F");
-}
+// void getTemperature()
+// {
+//     // Request temperature conversion
+//     DS18B20.requestTemperatures();
+//     // Read temperature in Celsius
+//     temperature_C = DS18B20.getTempCByIndex(0);
+//     // Read temperature in Fahrenheit
+//     temperature_F = DS18B20.getTempFByIndex(0);
+//     // Print temperature to Serial console
+//     Serial.print("Temperature: ");
+//     Serial.print(temperature_C);
+//     Serial.print("°C ");
+//     Serial.print(temperature_F);
+//     Serial.println("°F");
+// }
 
 void mqttReconnect()
 {
@@ -772,7 +772,7 @@ void handleReceiving()
     // Get temperature
     if (!isTransmitter)
     {
-        getTemperature();
+        // getTemperature();
     }
 }
 
