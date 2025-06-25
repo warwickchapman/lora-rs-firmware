@@ -1,13 +1,15 @@
 // functions.h
-
-// Include the SPI and LoRa libraries
-#include <SPI.h>        // SPI library which is required by LoRa
-#include <LoRa.h>       // LoRa library which is required for LoRa communication
-#include <ArduinoOTA.h> // ArduinoOTA library which is required for OTA updates
-#include <EEPROM.h>     // EEPROM library which is required for EEPROM read/write
-#include <AESLib.h>     // AES library which is required for encryption
-#include <deque>        // deque library which is required for log buffer
-#include <string>       // string library which is required for log buffer
+#include <SPI.h>               // SPI library which is required by LoRa
+#include <LoRa.h>              // LoRa library which is required for LoRa communication
+#include <ArduinoOTA.h>        // ArduinoOTA library which is required for OTA updates
+#include <EEPROM.h>            // EEPROM library which is required for EEPROM read/write
+#include <AESLib.h>            // AES library which is required for encryption
+#include <deque>               // deque library which is required for log buffer
+#include <string>              // string library which is required for log buffer
+#include <PubSubClient.h>      // PubSubClient library which is required for MQTT communication
+// #include <OneWire.h>           // OneWire library which is required for DS18B20 temperature sensor
+// #include <DallasTemperature.h> // DallasTemperature library which is required for DS18B20 temperature sensor
+#include <ArduinoJson.h>       // Include Arduino JSON library
 
 #if defined(ESP8266)
 /* ESP8266 Dependencies */
@@ -20,6 +22,25 @@
 #include <ESPmDNS.h> // ESP8266mDNS library which is required for mDNS
 #endif
 
+/* Notes about MQTT and multiple nodes
+
+// TODO: Decide on MQTT, will it be writeable on TX and RX?
+// TODO: Decide on MQTT, will it be a mode switch that disables to digital input
+// TODO: Or should there be an option for an OR gate to combine the digital input and MQTT input
+- Presently, a TX device is paired with a single RX device, but the address matching logic could be extended to multiple RX devices.
+- Communication between the TX and RX devices would remain LoRa only despite the WiFi capability of the ESP8266
+- A user could then control RX devices via the TX device by sending MQTT messages to the TX device eg. with Node-RED
+- This would require the rxAddress variable to beccome an array of addresses
+- And the MQTT logic to populate the relayTopicStr and inputTopicStr variables with the address of each RX device
+- We will need to determine what must be saved in the EEPROM & be managed via the web UI:
+    - The address of the TX device
+    - The address(es) of the RX device(s)
+    - The AES key & IV
+    - The WiFi SSID and password
+    - The MQTT broker details
+ - BUG: When tx and rx units are set relay 1 by MQTT, and HEARTBEAT comes along, RX is set off but TX seems to bounce off and on again
+ */
+
 #ifndef FUNCTIONS_H
 #define FUNCTIONS_H
 
@@ -29,23 +50,25 @@
 
 #define KEY_LENGTH 16 // AES key length in bytes
 
-byte txAddress = 0xFF; // address of this device
-byte rxAddress = 0x13; // remoteAddress to send to
+// bool isTransmitter = true; // Set to true for transmitter
+bool isTransmitter = false; // Set to false for receiver
 
-// Set to true for transmitter, false for receiver
-bool isTransmitter = true;
-//bool isTransmitter = false;
+byte txAddress = 0xFF; // address of tx device
+byte rxAddress = 0x0C; // address of rx device
 
 // Use the AES key from the TX device on the RX device to decrypt messages
 byte aesKey[KEY_LENGTH] = {0x36, 0x6F, 0x88, 0x00, 0x37, 0x6F, 0x88, 0x00, 0x37, 0x6F, 0x88, 0x00, 0x37, 0x6F, 0x88, 0x00};
 // byte aesKey[KEY_LENGTH]; // use this on a TX device to generate a new key
-//byte aesIv[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F}; // 16 bytes IV
-const char* ivString = "ThandaLoRaRange!";
+// byte aesIv[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F}; // 16 bytes IV
+const char *ivString = "ThandaLoRaRange!";
 byte aesIv[16];
 
 // Set to true to enable WiFi on the ESP8266
-bool enableWiFi = false;
-// bool enableWiFi = true;
+// bool enableWiFi = false;
+bool enableWiFi = true;
+
+// Toggle MQTT
+bool enableMqtt = true;
 
 String defaultAPssid = "Sensible IOT"; // default AP SSID
 String defaultAPpassword = "13371337"; // default AP password
@@ -57,11 +80,11 @@ uint16_t relayStateControlId; // Declare the control ID globally
 #define rst 16 // LoRa reset
 #define dio0 0 // LoRa DIO0
 
-// Define the pin for the dry contact input
+// Define the pin for the dry contact input GPIO4
 const int INP1 = 4;
 
-// Define the pin for the relay
-const int RLY1 = 5; // replace with your relay pin
+// Define the pin for the relay output GPIO5
+const int RLY1 = 5;
 
 // Declare a variable to store the previous state of the dry contact
 int previousState = -1;
@@ -83,11 +106,12 @@ const unsigned long HEARTBEAT_INTERVAL = 60000;
 const char NODE_RX = 'R'; // HEX 0x52
 const char NODE_TX = 'T'; // HEX 0x54
 
-const char T_ACK = 'A';       // HEX 0x41
-const char T_CHANGE = 'C';    // HEX 0x43
-const char T_HEARTBEAT = 'H'; // HEX 0x48
-const char T_LOCAL = 'L';     // HEX 0x4C
-const char T_TIMEOUT = 'T';   // HEX 0x54
+const char T_ACK = 'A';       // HEX 0x41 ACK message from RX to confirm C or H
+const char T_CHANGE = 'C';    // HEX 0x43 Change relay state
+const char T_HEARTBEAT = 'H'; // HEX 0x48 Heartbeat message from TX to RX
+const char T_LOCAL = 'L';     // HEX 0x4C Local relay state change
+const char T_TIMEOUT = 'T';   // HEX 0x54 Timeout waiting for ACK
+const char T_MQTT = 'M';      // HEX 0x4D MQTT relay state change
 
 #define __FUNC_NAME__ __PRETTY_FUNCTION__
 // unsigned long lastPrintTime = 0;
@@ -98,7 +122,138 @@ unsigned long previousMillisLED = 0;
 // log buffer
 std::deque<std::string> logEntries;
 
-AESLib aesLib;
+// MQTT Broker settings
+const char *mqtt_server = "192.168.0.4";
+const int mqtt_port = 1883;
+const char *mqtt_user = "";     // Not needed if no authentication set
+const char *mqtt_password = ""; // Not needed if no authentication set
+
+// Hostname
+String hostName = "thanda-lrs-" + String(ESP.getChipId()) + "-" + (isTransmitter ? "tx" : "rx");
+
+// MQTT Topics
+String topicBase = "lora/" + hostName;
+String relayTopicStr = topicBase + "/relay";
+String inputTopicStr = topicBase + "/input";
+String nodeTopicStr = topicBase + "/type";
+String addrTopicStr = topicBase + "/addr";
+String controlTopicStr = topicBase + "/control";
+const char *relayTopic = relayTopicStr.c_str();
+const char *inputTopic = inputTopicStr.c_str();
+const char *nodeTopic = nodeTopicStr.c_str();
+const char *addrTopic = addrTopicStr.c_str();
+const char *controlTopic = controlTopicStr.c_str();
+
+AESLib aesLib;                      // Create an instance of the AESLib library
+WiFiClient espClient;               // Use WiFiClient class to create TCP connections
+PubSubClient mqttClient(espClient); // Setup MQTT client
+
+// Define the oneWire instance to communicate with the DS18B20 temperature sensor
+// OneWire oneWire(INP1);
+// DallasTemperature DS18B20(&oneWire);
+
+float temperature_C; // temperature in Celsius
+float temperature_F; // temperature in Fahrenheit
+
+// void getTemperature()
+// {
+//     // Request temperature conversion
+//     DS18B20.requestTemperatures();
+//     // Read temperature in Celsius
+//     temperature_C = DS18B20.getTempCByIndex(0);
+//     // Read temperature in Fahrenheit
+//     temperature_F = DS18B20.getTempFByIndex(0);
+//     // Print temperature to Serial console
+//     Serial.print("Temperature: ");
+//     Serial.print(temperature_C);
+//     Serial.print("°C ");
+//     Serial.print(temperature_F);
+//     Serial.println("°F");
+// }
+
+void mqttReconnect()
+{
+    static unsigned long lastAttemptTime = 0;
+    unsigned long currentMillis = millis();
+
+    // Check if 30 seconds have passed
+    if (currentMillis - lastAttemptTime > 30000)
+    {
+        lastAttemptTime = currentMillis;
+
+        if (!mqttClient.connected())
+        {
+            Serial.print("Attempting MQTT connection... ");
+            // Attempt to connect
+            String clientId = "Thanda-LRS-" + String(ESP.getChipId());
+            if (mqttClient.connect(clientId.c_str()))
+            {
+                Serial.println("MQTT Connected");
+                // Subscribe to topics here
+                mqttClient.subscribe(relayTopic);
+                mqttClient.subscribe(controlTopic);
+            }
+            else
+            {
+                Serial.print("MQTT Failed, rc=");
+                Serial.print(mqttClient.state());
+                Serial.println("... trying again in 30 seconds.");
+            }
+        }
+    }
+}
+
+void handleMqtt()
+{
+    // handle MQTT
+    if (!mqttClient.connected())
+    {
+        mqttReconnect();
+    }
+    mqttClient.loop(); // MQTT
+
+    static long lastMsg = 0;
+    long now = millis();
+
+    if (now - lastMsg > 10000)
+    {
+        lastMsg = now;
+        // INPUT STATE
+        // Read the input pin, publish input state
+        bool inputState = digitalRead(INP1);
+        mqttClient.publish(inputTopic, inputState ? "1" : "0");
+        if (DEBUG_VERBOSE)
+            Serial.println(String(__FUNC_NAME__) + " Publish: " + inputState);
+
+        // RELAY STATE
+        // Read the relay pin, publish relay state
+        bool relayState = digitalRead(RLY1);
+        mqttClient.publish(relayTopic, relayState ? "1" : "0");
+        if (DEBUG_VERBOSE)
+            Serial.println(String(__FUNC_NAME__) + " Publish: " + relayState);
+
+        // NODE TYPE
+        // Publish node type
+        mqttClient.publish(nodeTopic, isTransmitter ? "tx" : "rx");
+        if (DEBUG_VERBOSE)
+            Serial.println(String(__FUNC_NAME__) + " Publish: " + isTransmitter ? "tx" : "rx");
+
+        // CONTROL NODE
+        // Publish control node
+        // {
+        //     mqttClient.publish(controlTopic, "{}");
+        //     if (DEBUG_VERBOSE)
+        //         Serial.println(String(__FUNC_NAME__) + " Publish: {}");
+        // }
+
+        // LORA ADDR
+        // Publish lora addr
+        String addrHex = String(isTransmitter ? txAddress : rxAddress, HEX);
+        mqttClient.publish(addrTopic, addrHex.c_str());
+        if (DEBUG_VERBOSE)
+            Serial.println(String(__FUNC_NAME__) + " Publish: 0x" + addrHex);
+    }
+}
 
 char getMessageType(byte typeByte)
 {
@@ -114,6 +269,8 @@ char getMessageType(byte typeByte)
         return T_LOCAL;
     case 0x54:
         return T_TIMEOUT;
+    case 0x4D:
+        return T_MQTT;
     default:
         return '?'; // return a question mark if the byte doesn't match any known type
     }
@@ -273,7 +430,7 @@ void logEntry(byte localAddress, byte remoteAddress, byte type, byte state, byte
     String logEntry = "";
 
     // Handle type ACK, HEARTHBEAT, RELAY CHANGE, LOCAL RELAY
-    if ((type == 'A') || (type == 'H') || (type == 'C') || (type == 'L'))
+    if ((type == 'A') || (type == 'H') || (type == 'C') || (type == 'L') || (type == 'M'))
     {
         String message = "";
         if (type == 'L')
@@ -317,35 +474,24 @@ void logEntry(byte localAddress, byte remoteAddress, byte type, byte state, byte
  * @param state The relay state to send.
  * @param nodeType The type of the node (TX or RX).
  */
-void sendRelayState(byte localAddress, byte remoteAddress, byte type, byte state, byte nodeType)
-// Consider using local/remote instead of localAddress/remoteAddress
+void sendRelayState(byte localAddress, byte remoteAddress, byte type, bool state, byte nodeType)
 {
-
     // Create a buffer to hold the packet data
-    byte packet[18]; // Adjust the size as needed
+    byte packet[18];
     unsigned int packetSize = 18;
 
     // Write the remoteAddress address to the packet
     packet[0] = remoteAddress;
-
     // Write the local address to the packet
     packet[1] = localAddress;
 
     // Bundle the messageType and relayState together
     byte payload[16] = {type, state};
     int payloadLength = 2; // Length of actual data
-    if (DEBUG)
-    {
-        /*        Serial.print("Message type: ");
-                Serial.print(payload[0], HEX);
-                Serial.print(" | Relay state: ");
-                Serial.println(payload[1], HEX);*/
-    }
 
     // Encrypt the message
     byte encryptedPayload[16];
     encrypt(payload, encryptedPayload, payloadLength);
-
     // Copy encrypted payload to packet
     memcpy(&packet[2], encryptedPayload, 16);
 
@@ -376,7 +522,6 @@ void sendRelayState(byte localAddress, byte remoteAddress, byte type, byte state
 
     // Switch the LoRa module back into receive mode
     LoRa.receive();
-
     logEntry(localAddress, remoteAddress, payload[0], payload[1], nodeType, String(__FUNC_NAME__));
 }
 
@@ -447,19 +592,25 @@ void handleSwitchStateChange(int state)
 }
 
 // RX - Receiver (and local TX echo of confirmed relay state change)
-void handleChangeRelayState(int relayState)
+void handleChangeRelayState(bool relayState, char type)
 {
     digitalWrite(RLY1, relayState);
+
+    if (type != T_MQTT)
+    {
+        type = T_LOCAL;
+    }
     if (!isTransmitter)
     {
         // on RX, log local relay change and send T_ACK to TX
-        logEntry(txAddress, rxAddress, T_LOCAL, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
-        sendRelayState(rxAddress, txAddress, T_ACK, relayState, (isTransmitter) ? 'T' : 'R');
+        logEntry(txAddress, rxAddress, type, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
+        if (type != T_MQTT)
+            sendRelayState(rxAddress, txAddress, T_ACK, relayState, (isTransmitter) ? 'T' : 'R');
     }
     else
     {
         // on TX, log the local relay change
-        logEntry(txAddress, rxAddress, T_LOCAL, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
+        logEntry(txAddress, rxAddress, type, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
     }
 }
 
@@ -483,10 +634,8 @@ void handleHeartbeatOrAck(char messageType, int relayState, int localRlyState)
     if (localRlyState != relayState)
     {
         if (messageType == T_ACK)
-        {
             delay(500);
-        }
-        handleChangeRelayState(relayState);
+        handleChangeRelayState(relayState, T_ACK);
         return;
     }
     else if (messageType == T_HEARTBEAT)
@@ -546,8 +695,12 @@ void handleReceiving()
     byte thisAddress = packet[0];
     byte remoteAddress = packet[1];
 
-    if ((isTransmitter && (thisAddress != txAddress || remoteAddress != rxAddress)) ||
-        (!isTransmitter && (thisAddress != rxAddress || remoteAddress != txAddress)))
+    // Make sure node type and addresses match
+    bool isTransmitterMismatch = isTransmitter && (thisAddress != txAddress || remoteAddress != rxAddress);
+    bool isReceiverMismatch = !isTransmitter && (thisAddress != rxAddress || remoteAddress != txAddress);
+
+    // Throw away packets that are not for this node
+    if (isTransmitterMismatch || isReceiverMismatch)
     {
         if (DEBUG_VERBOSE)
         {
@@ -556,6 +709,7 @@ void handleReceiving()
         return;
     }
 
+    // Check the packet size
     else if (packetSize != 18)
     {
         if (DEBUG)
@@ -589,17 +743,36 @@ void handleReceiving()
 
     int localRlyState = digitalRead(RLY1);
 
-    if (messageType == T_CHANGE && localRlyState != relayState)
+    switch (messageType)
     {
-        handleChangeRelayState(relayState);
-    }
-    else if (messageType == T_HEARTBEAT || messageType == T_ACK)
-    {
+    case T_MQTT:
+    case T_CHANGE:
+        if (localRlyState != relayState)
+        {
+            handleChangeRelayState(relayState, messageType);
+        }
+        // if the local relay state is the same as the received relay state, log an ACK
+        else if (messageType == T_CHANGE && localRlyState == relayState)
+        {
+            logEntry(txAddress, rxAddress, T_ACK, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
+        }
+        break;
+
+    // Other cases like T_HEARTBEAT and T_ACK can be handled similarly
+    case T_HEARTBEAT:
+    case T_ACK:
         handleHeartbeatOrAck(messageType, relayState, localRlyState);
+        break;
+
+    default:
+        // Handle other message types if necessary
+        break;
     }
-    else if (messageType == T_CHANGE && localRlyState == relayState)
+
+    // Get temperature
+    if (!isTransmitter)
     {
-        logEntry(txAddress, rxAddress, T_ACK, relayState, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
+        // getTemperature();
     }
 }
 
@@ -612,8 +785,152 @@ void handleTimeout()
     if (timeoutMillis - ackMillis >= HEARTBEAT_INTERVAL * 2)
     {
         logEntry(txAddress, rxAddress, T_TIMEOUT, 0, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
-        handleChangeRelayState(0);
+        handleChangeRelayState(0, T_TIMEOUT);
         timeoutActive = true;
+    }
+}
+
+void setupWiFi()
+{
+    /* Connect WiFi */
+    WiFi.hostname(hostName);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(defaultAPssid, defaultAPpassword);
+    if (WiFi.waitForConnectResult() != WL_CONNECTED)
+    {
+        Serial.printf("WiFi Failed!\n");
+        return;
+    }
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+}
+
+void setupOta()
+{
+    // Initialise OTA update service
+    ArduinoOTA.onStart([]()
+                       {
+        String type;
+        if (ArduinoOTA.getCommand() == U_FLASH)
+          type = "sketch";
+        else // U_SPIFFS
+          type = "filesystem";
+
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+        Serial.println("Start updating " + type); });
+
+    ArduinoOTA.onEnd([]()
+                     { Serial.println("\nEnd"); });
+
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
+                          { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); });
+
+    ArduinoOTA.onError([](ota_error_t error)
+                       {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+        else if (error == OTA_END_ERROR) Serial.println("End Failed"); });
+
+    // Start OTA update service
+    ArduinoOTA.begin();
+}
+
+void setupMdns()
+{
+    // Update mDNS
+    MDNS.update();
+
+    // Hostname
+    String mdnsHostname = hostName;
+    Serial.println("mDNS hostname: " + mdnsHostname);
+    // Start mDNS
+    if (MDNS.begin(mdnsHostname))
+    {
+        Serial.println("mDNS responder started. Connect to http://" + mdnsHostname + ".local to view the Dashboard.");
+    }
+    else
+    {
+        Serial.println("Error setting up MDNS responder!");
+    }
+}
+
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+    if (String(topic) == relayTopic)
+    {
+        String messageTemp;
+        if (length > 0)
+        {
+            messageTemp = (char)payload[0];
+        }
+
+        bool localRlyState = digitalRead(RLY1);
+        bool mqttRelayState = messageTemp.toInt();
+
+        if (DEBUG_VERBOSE)
+        {
+            Serial.print("Relay message arrived [");
+            Serial.print(topic);
+            Serial.print("] ");
+            Serial.println(messageTemp);
+            Serial.print("Local relay state ");
+            Serial.println(localRlyState);
+        }
+
+        if (localRlyState != mqttRelayState)
+        {
+            if (DEBUG_VERBOSE)
+                Serial.println(String("Setting Relay ") + (mqttRelayState ? "ON" : "OFF") + " via MQTT");
+            // TODO: error message assumes this is a tx device
+            logEntry(txAddress, rxAddress, T_MQTT, mqttRelayState ? 1 : 0, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
+            handleChangeRelayState(mqttRelayState ? 1 : 0, T_MQTT);
+            // sendRelayState(rxAddress, txAddress, T_MQTT, mqttRelayState ? 1 : 0, (isTransmitter) ? 'T' : 'R');
+        }
+    }
+    else if (String(topic) == controlTopic && isTransmitter)
+    {
+        // Parse JSON object
+        JsonDocument doc;
+        deserializeJson(doc, payload, length);
+
+        // byte addr = doc["addr"];
+
+        // Extract addr and relay values
+        byte addr;
+        if (doc["addr"].is<const char *>())
+        {
+            const char *addrStr = doc["addr"];
+            addr = strtol(addrStr, NULL, 16); // Convert hex string to byte
+        }
+        else if (doc["addr"].is<int>())
+        {
+            int addrInt = doc["addr"];
+            addr = static_cast<byte>(addrInt); // Convert to byte
+        }
+        else
+        {
+            // Handle unexpected type
+            Serial.println("Unexpected type for addr");
+            return;
+        }
+        int mqttRelayState = doc["relay"];
+
+        if (DEBUG_VERBOSE)
+        {
+            Serial.print("Control message arrived [");
+            Serial.print(topic);
+            Serial.print("] addr: ");
+            Serial.print(addr, HEX); // Print addr in hexadecimal format
+            Serial.print(" relay: ");
+            Serial.println(mqttRelayState);
+        }
+
+        // Call sendRelayState with extracted values
+        logEntry(txAddress, addr, T_MQTT, mqttRelayState ? 1 : 0, (isTransmitter) ? 'T' : 'R', String(__FUNC_NAME__));
+        sendRelayState(txAddress, addr, T_MQTT, mqttRelayState, (isTransmitter) ? 'T' : 'R');
     }
 }
 
