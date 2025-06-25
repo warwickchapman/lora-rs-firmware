@@ -7,8 +7,8 @@
 #include <deque>               // deque library which is required for log buffer
 #include <string>              // string library which is required for log buffer
 #include <PubSubClient.h>      // PubSubClient library which is required for MQTT communication
-// #include <OneWire.h>           // OneWire library which is required for DS18B20 temperature sensor
-// #include <DallasTemperature.h> // DallasTemperature library which is required for DS18B20 temperature sensor
+#include <OneWire.h>           // OneWire library which is required for DS18B20 temperature sensor
+#include <DallasTemperature.h> // DallasTemperature library which is required for DS18B20 temperature sensor
 #include <ArduinoJson.h>       // Include Arduino JSON library
 
 #if defined(ESP8266)
@@ -50,7 +50,7 @@
 
 #define KEY_LENGTH 16 // AES key length in bytes
 
-// bool isTransmitter = true; // Set to true for transmitter
+//bool isTransmitter = true; // Set to true for transmitter
 bool isTransmitter = false; // Set to false for receiver
 
 byte txAddress = 0xFF; // address of tx device
@@ -64,11 +64,14 @@ const char *ivString = "ThandaLoRaRange!";
 byte aesIv[16];
 
 // Set to true to enable WiFi on the ESP8266
-// bool enableWiFi = false;
-bool enableWiFi = true;
+bool enableWiFi = false;
+//bool enableWiFi = true;
 
 // Toggle MQTT
 bool enableMqtt = true;
+
+// Remote input monitoring
+bool remoteInputMonitoring = true;
 
 String defaultAPssid = "Sensible IOT"; // default AP SSID
 String defaultAPpassword = "13371337"; // default AP password
@@ -149,27 +152,31 @@ WiFiClient espClient;               // Use WiFiClient class to create TCP connec
 PubSubClient mqttClient(espClient); // Setup MQTT client
 
 // Define the oneWire instance to communicate with the DS18B20 temperature sensor
-// OneWire oneWire(INP1);
-// DallasTemperature DS18B20(&oneWire);
+// The ESP8266 pin to DS18B20 sensor's DQ pin
+#define SENSOR_PIN 0 
+// Create an instance of OneWire on the specified pin
+OneWire oneWire(SENSOR_PIN);
+// Create an instance of DallasTemperature to manage the DS18B20 sensor
+DallasTemperature DS18B20(&oneWire);
 
 float temperature_C; // temperature in Celsius
 float temperature_F; // temperature in Fahrenheit
 
-// void getTemperature()
-// {
-//     // Request temperature conversion
-//     DS18B20.requestTemperatures();
-//     // Read temperature in Celsius
-//     temperature_C = DS18B20.getTempCByIndex(0);
-//     // Read temperature in Fahrenheit
-//     temperature_F = DS18B20.getTempFByIndex(0);
-//     // Print temperature to Serial console
-//     Serial.print("Temperature: ");
-//     Serial.print(temperature_C);
-//     Serial.print("°C ");
-//     Serial.print(temperature_F);
-//     Serial.println("°F");
-// }
+void getTemperature()
+{
+    // Request temperature conversion
+    DS18B20.requestTemperatures();
+    // Read temperature in Celsius
+    temperature_C = DS18B20.getTempCByIndex(0);
+    // Read temperature in Fahrenheit
+    temperature_F = DS18B20.getTempFByIndex(0);
+    // Print temperature to Serial console
+    Serial.print("Temperature: ");
+    Serial.print(temperature_C);
+    Serial.print("°C ");
+    Serial.print(temperature_F);
+    Serial.println("°F");
+}
 
 void mqttReconnect()
 {
@@ -769,10 +776,23 @@ void handleReceiving()
         break;
     }
 
-    // Get temperature
+    // Remote monitorning features
     if (!isTransmitter)
     {
-        // getTemperature();
+        // Print temperature to Serial console
+        getTemperature();
+
+        if (remoteInputMonitoring) {
+            // Get INPT1 state and publish log entry of "Dry Contact" state
+            int dryContactState = digitalRead(INP1);
+            Serial.print("Dry Contact State: ");
+            Serial.println(dryContactState ? "Closed" : "Open");
+            // Publish the dry contact state to MQTT
+            // mqttClient.publish(inputTopic, dryContactState ? "Closed" : "Open");
+            if (DEBUG_VERBOSE)
+                Serial.println(String(__FUNC_NAME__) + " Publish: " + (dryContactState ? "Closed" : "Open"));
+
+        }
     }
 }
 

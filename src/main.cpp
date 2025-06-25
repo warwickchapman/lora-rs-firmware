@@ -31,7 +31,7 @@ void setup()
     }
     else
     {
-        // DS18B20.begin(); // initialize the DS18B20 sensor
+        DS18B20.begin(); // initialize the DS18B20 sensor
     }
 
     pinMode(2, OUTPUT);           // Set the LED pin as an output
