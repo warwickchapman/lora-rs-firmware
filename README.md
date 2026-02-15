@@ -8,6 +8,28 @@ Both hardware units are identical. Behavior is selected by configuration:
 
 The codebase has been rebuilt as a modular state-machine firmware with a protected web console, LittleFS settings, OTA support, and factory metadata generation.
 
+## Release Flashing (No VSCode/PlatformIO)
+For shipped release `.bin` files, use `esptool` and the included helper:
+
+- Helper script (recommended):
+  - Windows: `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.2.1-alpha.bin`
+  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.2.1-alpha.bin`
+
+The helper reads chip ID, flashes firmware, and prints:
+- SoftAP SSID: `lrs-<chipid>`
+- SoftAP password
+- Admin password
+
+Direct `esptool` fallback:
+- Read chip ID:
+  - Windows: `py -m esptool --port COM7 chip_id`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
+- Flash at address `0x00000`:
+  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.1-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.1-alpha.bin`
+
+Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
+
 ## Start Here
 - User/operator quickstart: `/Users/warwick/Code/LoRa/lora_rs/docs/USER_GUIDE.md`
 - Developer onboarding and architecture: `/Users/warwick/Code/LoRa/lora_rs/docs/DEVELOPER_GUIDE.md`

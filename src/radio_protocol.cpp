@@ -14,6 +14,7 @@ constexpr uint8_t kRst = 16;
 constexpr uint8_t kDio0 = 0;
 constexpr size_t kPayloadSize = 8;
 constexpr size_t kMacSize = 8;
+constexpr const char *kDefaultDeploymentKey = "lora-default-passphrase";
 
 struct __attribute__((packed)) Packet {
   uint8_t dst;
@@ -44,6 +45,12 @@ void computeMac(const uint8_t macKey[32], const Packet &p, uint8_t out[32]) {
   hash.update(reinterpret_cast<const uint8_t *>(&p), sizeof(Packet) - kMacSize);
   hash.finalize(out, 32);
 }
+
+bool isDefaultDeploymentKey(const String &v) {
+  String key = v;
+  key.trim();
+  return key == kDefaultDeploymentKey;
+}
 }
 
 bool RadioProtocol::begin(const Settings &cfg, LogBuffer *logs) {
@@ -59,9 +66,9 @@ bool RadioProtocol::begin(const Settings &cfg, LogBuffer *logs) {
   LoRa.setSignalBandwidth(cfg_.lora_bandwidth_hz);
   LoRa.setCodingRate4(cfg_.lora_coding_rate);
   LoRa.enableCrc();
-  LoRa.receive();
 
   deriveKeys();
+  refreshRadioRuntimeState();
   return true;
 }
 
@@ -73,12 +80,16 @@ void RadioProtocol::applyConfig(const Settings &cfg) {
   LoRa.setSpreadingFactor(cfg_.lora_spreading_factor);
   LoRa.setSignalBandwidth(cfg_.lora_bandwidth_hz);
   LoRa.setCodingRate4(cfg_.lora_coding_rate);
-  LoRa.receive();
   deriveKeys();
+  refreshRadioRuntimeState();
 }
 
 bool RadioProtocol::send(MessageType type, uint8_t relay, uint8_t input, uint8_t flags, uint32_t counter, uint8_t src, uint8_t dst,
                          uint8_t temp_code, uint8_t sensor_mask, uint8_t sensor_digital0, uint16_t sensor_analog0) {
+  if (!lora_enabled_) {
+    return false;
+  }
+
   Packet p{};
   p.dst = dst;
   p.src = src;
@@ -124,6 +135,10 @@ bool RadioProtocol::send(MessageType type, uint8_t relay, uint8_t input, uint8_t
 }
 
 bool RadioProtocol::receive(ProtocolMessage &msg) {
+  if (!lora_enabled_) {
+    return false;
+  }
+
   int packetSize = LoRa.parsePacket();
   if (packetSize == 0) {
     return false;
@@ -198,4 +213,14 @@ void RadioProtocol::deriveKeys() {
   hash.update(reinterpret_cast<const uint8_t *>(macMaterial.c_str()), macMaterial.length());
   hash.finalize(digest, sizeof(digest));
   memcpy(mac_key_, digest, sizeof(mac_key_));
+}
+
+void RadioProtocol::refreshRadioRuntimeState() {
+  lora_enabled_ = !isDefaultDeploymentKey(cfg_.fleet_passphrase);
+  if (lora_enabled_) {
+    LoRa.idle();
+    LoRa.receive();
+  } else {
+    LoRa.sleep();
+  }
 }

@@ -41,6 +41,33 @@ In `Network` tab:
 - Set LAN hostname (`<name>.local`).
 - Choose whether AP remains enabled after STA connects.
 
+## USB Flash (No VSCode/PlatformIO)
+You can flash release binaries and derive the login password with Python + `esptool`.
+
+Prerequisites:
+- Python 3 installed.
+- `esptool` installed: `python3 -m pip install esptool`
+- Device connected over USB serial.
+
+Use helper tool (recommended):
+- Windows:
+  - `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.2.1-alpha.bin`
+- macOS:
+  - `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.2.1-alpha.bin`
+
+What it prints:
+- `chip_id`
+- AP SSID (`lrs-<chipid>`)
+- AP/admin password (same derived value)
+
+Direct `esptool` fallback:
+- Read chip id:
+  - Windows: `py -m esptool --port COM7 chip_id`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
+- Flash image at `0x00000`:
+  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.1-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.1-alpha.bin`
+
 ## OTA Update Test
 Prerequisites:
 - Device is already flashed once over USB.

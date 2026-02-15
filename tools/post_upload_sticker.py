@@ -35,6 +35,15 @@ def _run(*args) -> str:
     return subprocess.check_output([sys.executable, "-m", "esptool", *args], text=True, stderr=subprocess.STDOUT)
 
 
+def _looks_like_serial_port(port: str) -> bool:
+    p = (port or "").strip().lower()
+    if p.startswith("/dev/"):
+        return True
+    if re.fullmatch(r"com\d+", p):
+        return True
+    return False
+
+
 def _parse_chip_id(output: str) -> str:
     match = re.search(r"Chip ID:\s*0x([0-9A-Fa-f]+)", output)
     if not match:
@@ -77,6 +86,12 @@ def _post_upload(source, target, env, **kwargs):
     upload_port = env.subst("$UPLOAD_PORT")
     if not upload_port:
         print("[sticker] Upload port not set, skipping sticker output")
+        return
+
+    upload_protocol = env.subst("$UPLOAD_PROTOCOL").strip().lower()
+    if upload_protocol == "espota" or not _looks_like_serial_port(upload_port):
+        print("[sticker] OTA/non-serial upload detected; skipping esptool sticker read (serial-only)")
+        print("[sticker] Use the web console Factory panel (/api/factory) to read current values")
         return
 
     try:

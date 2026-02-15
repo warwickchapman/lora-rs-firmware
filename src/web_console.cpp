@@ -126,18 +126,21 @@ bool isDefaultDeploymentKey(const String &v) {
 }
 
 const char kLoginHtml[] PROGMEM = R"HTML(
-<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Login</title>
 <style>
 :root{--bg:#0b1220;--card:#111827;--txt:#e5e7eb;--muted:#94a3b8;--border:#334155;--field:#0f172a;--btn:#005f73}
 body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--muted:#4b5563;--border:#d4dbe2;--field:#fff}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--bg),#111827);font-family:ui-sans-serif,system-ui;color:var(--txt)}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--bg),#111827);font-family:ui-sans-serif,system-ui;color:var(--txt);-webkit-text-size-adjust:100%}
 body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
 .card{width:min(92vw,420px);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:0 12px 30px rgba(0,0,0,.22)}
 h1{margin:0 0 10px;font-size:1.4rem}
 p{margin:0 0 10px;color:var(--muted)}
 label{display:block;margin:0 0 6px;color:var(--txt);font-size:14px;font-weight:600}
-input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:16px;background:var(--field);color:var(--txt)}
+input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:17px;background:var(--field);color:var(--txt)}
+.pass-field{display:flex;align-items:center;gap:8px}
+.pass-field input{flex:1 1 auto}
+.pass-toggle{width:auto;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--txt);font-size:13px}
 button{margin-top:10px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:16px}
 .msg{margin-top:8px;font-size:14px;min-height:1.2em}.err{color:#b42318}.ok{color:#166534}
 .top{display:flex;justify-content:flex-end}
@@ -149,7 +152,7 @@ button{margin-top:10px;width:100%;padding:12px;border:0;border-radius:10px;backg
 <form id="loginForm" autocomplete="on">
 <input id="uname" name="username" type="text" autocomplete="username" value="admin" aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" />
 <label for="pw">Admin password</label>
-<input id="pw" name="password" type="password" autocomplete="current-password" placeholder="Enter admin password" />
+<div class="pass-field"><input id="pw" name="password" type="password" autocomplete="current-password" placeholder="Enter admin password" /><button class="pass-toggle" type="button" onclick="togglePasswordField('pw',this)">Show</button></div>
 <button id="btn" type="submit">Login</button>
 </form>
 <div id="msg" class="msg"></div>
@@ -171,6 +174,13 @@ function applyTheme(theme){
  try{ localStorage.setItem('lrs_theme', currentTheme); }catch(e){}
 }
 function toggleTheme(){ applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+function togglePasswordField(id,btn){
+ const el=document.getElementById(id);
+ if(!el) return;
+ const show=el.type==='password';
+ el.type=show?'text':'password';
+ if(btn){ btn.innerText=show?'Hide':'Show'; }
+}
 async function login(){
  btn.disabled=true; msg.className='msg'; msg.innerText='Signing in...';
  try{
@@ -194,13 +204,13 @@ pw.focus();
 )HTML";
 
 const char kIndexHtml[] PROGMEM = R"HTML(
-<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Console</title>
 <style>
 :root{--bg:#0b1220;--card:#111827;--accent:#005f73;--txt:#e5e7eb;--border:#334155;--field:#0f172a;--muted:#94a3b8;--link:#67e8f9}
 body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--border:#d4dbe2;--field:#fff;--muted:#4b5563;--link:#0b5f75}
 *{box-sizing:border-box}
-body{margin:0;font-family:ui-sans-serif,system-ui;background:linear-gradient(135deg,var(--bg),#111827);color:var(--txt)}
+body{margin:0;font-family:ui-sans-serif,system-ui;background:linear-gradient(135deg,var(--bg),#111827);color:var(--txt);-webkit-text-size-adjust:100%}
 body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
 header{background:var(--accent);color:#fff;padding:12px 16px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 header .title{font-size:1.1rem}
@@ -217,7 +227,10 @@ main{padding:12px;display:grid;gap:12px;max-width:860px;margin:0 auto}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:0 8px 20px rgba(0,0,0,.12)}
 label{display:block;font-size:12px;margin-top:8px}
 .grid{display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
-input,select,textarea{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;background:var(--field);color:var(--txt)}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:17px;background:var(--field);color:var(--txt)}
+.pass-field{display:flex;align-items:center;gap:8px}
+.pass-field input{flex:1 1 auto}
+.pass-toggle{margin-top:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--txt);white-space:nowrap}
 input[type=checkbox]{width:18px;height:18px;padding:0}
 .check-row{display:flex;align-items:center;gap:8px;margin-top:8px}
 .radio-row{display:flex;align-items:center;gap:0;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:max-content;max-width:100%}
@@ -305,7 +318,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head>
-<body><header><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="relayReasonHeader" class="reason-head">reason: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa: no link</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi: checking...</span></div><button class="logout" onclick="logout()">Logout</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+<body><header><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card topnav">
 <button class="tabbtn active" id="tab-status" onclick="showPage('status')">Status</button>
 <button class="tabbtn" id="tab-lora" onclick="showPage('lora')">LoRa</button>
@@ -358,7 +371,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 </section>
 <section class="card page" id="page-network"><h3>Network</h3><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
-<div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div>
+<div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)">Show</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label>LAN hostname (mDNS)</label><input id="lan_hostname" /><div class="hint">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
 </div>
@@ -386,7 +399,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div class="sensor-tile" id="sensorDiagLast">Last read: n/a</div>
 </div>
 <div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions"><button onclick="saveSensors()">Save Sensors</button></div></section>
-<section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><div id="diagText" class="small"></div></section>
+<section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><h4 style="margin:10px 0 6px 0">System Information</h4><div id="diagSystem" class="status-table"></div><div id="diagText" class="small"></div></section>
 <section class="card page" id="page-factory"><h3>System</h3><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save Password</button></div><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div></div><pre id="factory"></pre></section>
 <section class="card page" id="page-logs"><h3>Logs</h3><div class="actions"><button onclick="refreshLogs()">Refresh</button><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button></div><pre id="logView" style="max-height:320px;overflow:auto"></pre></section>
 </main>
@@ -645,6 +658,13 @@ function applyTheme(theme){
  try{ localStorage.setItem('lrs_theme', currentTheme); }catch(e){}
 }
 function toggleTheme(){ applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+function togglePasswordField(id,btn){
+ const el=document.getElementById(id);
+ if(!el) return;
+ const show=el.type==='password';
+ el.type=show?'text':'password';
+ if(btn){ btn.innerText=show?'Hide':'Show'; }
+}
 async function refreshStatus(){
  const st=await apiJson('/api/status',{silent:true});
  if(!st){
@@ -677,8 +697,7 @@ async function refreshStatus(){
  if(titleEl){ titleEl.innerText = pageTitle; }
  document.title = pageTitle;
  const level = st.sta_connected ? rssiToLevel(st.sta_rssi) : 0;
- const wifiText = st.sta_connected ? 'WiFi connected' : `WiFi ${st.sta_status_text}`;
- setWifiBadge(level, wifiText);
+ setWifiBadge(level, 'WiFi');
   const apUrl = st.mdns_ap ? `http://${st.mdns_ap}` : '';
   const lanUrl = st.mdns_lan ? `http://${st.mdns_lan}` : '';
   const relayOn = Number(st.relay_state) === 1;
@@ -690,8 +709,7 @@ async function refreshStatus(){
   const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
   const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
  const loraLevel = hasLora ? rssiToLevel(st.lora_last_rssi) : 0;
- const loraHeaderText = hasLora ? `LoRa ${st.lora_last_rssi} dBm` : 'LoRa no link';
- setLoraBadge(loraLevel, loraHeaderText);
+ setLoraBadge(loraLevel, 'LoRa');
  const rb=document.getElementById('relayBadge');
  if(rb){
   rb.className = `relay-badge ${relayOn ? 'on' : 'off'}`;
@@ -701,15 +719,6 @@ async function refreshStatus(){
  if(rh){
   rh.className=`relay-head ${relayOn ? 'on' : 'off'}`;
   rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
- }
- const rr=document.getElementById('relayReasonHeader');
- if(rr){
-   if(relayOn){
-     rr.className='reason-head';
-   }else{
-     rr.className='reason-head show';
-     rr.innerText=`reason: ${reasonLabel(st.relay_reason)}`;
-   }
  }
  const rm=document.getElementById('relayMeta');
  if(rm){ rm.innerText = `Link: ${st.link_state}`; }
@@ -727,7 +736,7 @@ async function refreshStatus(){
  table.className='status-table';
   table.innerHTML=
    `<div class="section">LoRa</div>
-    <div class="k">Role</div><div class="v">${escapeHtml(st.role)}</div>
+    <div class="k">Role</div><div class="v">${escapeHtml(String(st.role||'').toLowerCase()==='tx' ? `Transmitter (${st.local_address}, RX ${st.remote_address})` : `Receiver (${st.local_address}, TX ${st.remote_address})`)}</div>
     <div class="k">Deployment key</div><div class="v">${escapeHtml(deployKey || 'not_set')}</div>
     <div class="k">Firmware</div><div class="v">${escapeHtml(st.fw_display || `${st.fw_version || 'n/a'} (${st.fw_git_sha || 'n/a'}${st.fw_dirty ? ', dirty' : ''})`)}</div>
     <div class="k">Build</div><div class="v">${escapeHtml(st.build_date || 'n/a')} ${escapeHtml(st.build_time || '')}</div>
@@ -1106,9 +1115,10 @@ async function testMqtt(){
 async function refreshDiagnostics(){
  const d=await apiJson('/api/diagnostics',{silent:true});
  const host=document.getElementById('diagGrid');
+ const sys=document.getElementById('diagSystem');
  const txt=document.getElementById('diagText');
- if(!host||!txt) return;
- if(!d){ host.innerHTML='Diagnostics unavailable'; return; }
+ if(!host||!sys||!txt) return;
+ if(!d){ host.innerHTML='Diagnostics unavailable'; sys.innerHTML=''; return; }
  host.innerHTML = `
   <div class="sensor-tile">LoRa TX: ${d.lora_tx_packets}</div>
   <div class="sensor-tile">ACK OK: ${d.ack_ok}</div>
@@ -1118,6 +1128,17 @@ async function refreshDiagnostics(){
   <div class="sensor-tile">STA Connect Failures: ${d.wifi_connect_fail}</div>
   <div class="sensor-tile">STA Disconnects: ${d.wifi_disconnects}</div>
   <div class="sensor-tile">STA State: ${d.sta_status_text} [${d.sta_status_code}]</div>`;
+ sys.innerHTML = `
+  <div class="k">Role</div><div class="v">${escapeHtml(String(d.role||'').toUpperCase())}</div>
+  <div class="k">Addresses</div><div class="v">${escapeHtml(`${d.local_address} -> ${d.remote_address}`)}</div>
+  <div class="k">Firmware</div><div class="v">${escapeHtml(d.fw_display || 'n/a')}</div>
+  <div class="k">Build</div><div class="v">${escapeHtml(`${d.build_date || 'n/a'} ${d.build_time || ''}`)}</div>
+  <div class="k">Uptime</div><div class="v">${escapeHtml(humanAgeMs(Number(d.uptime_ms || 0)))}</div>
+  <div class="k">Free Heap</div><div class="v">${escapeHtml(String(d.free_heap_bytes || 0))} B</div>
+  <div class="k">CPU Freq</div><div class="v">${escapeHtml(String(d.cpu_freq_mhz || 0))} MHz</div>
+  <div class="k">Chip ID</div><div class="v">${escapeHtml(String(d.chip_id || 'n/a'))}</div>
+  <div class="k">Flash (real/ide)</div><div class="v">${escapeHtml(String(d.flash_real_size || 0))} / ${escapeHtml(String(d.flash_ide_size || 0))} B</div>
+  <div class="k">SDK/Core</div><div class="v">${escapeHtml(String(d.sdk_version || 'n/a'))} / ${escapeHtml(String(d.core_version || 'n/a'))}</div>`;
  txt.innerText=`Last save: ${d.audit_last_saved_by} at ${d.audit_last_saved_ms} ms | Last reboot: ${d.audit_last_reboot_reason} at ${d.audit_last_reboot_ms} ms | Boot count: ${d.audit_boot_count}`;
 }
 async function importConfig(file){
@@ -1174,7 +1195,8 @@ function initPage(){
  try{ applyTheme(localStorage.getItem('lrs_theme') === 'light' ? 'light' : 'dark'); }catch(e){ applyTheme('dark'); }
  showPage('status');
   load();
- setInterval(()=>{ refreshStatus(); if(activePage==='logs') refreshLogs(); },3000);
+ setInterval(()=>{ refreshStatus(); },500);
+ setInterval(()=>{ if(activePage==='logs') refreshLogs(); },3000);
  setInterval(async ()=>{ const s=await apiJson('/api/session',{silent:true}); if(s&&s.ok){ setSessionLeft(s.remaining_s); } },1000);
 }
 initPage();
@@ -1433,6 +1455,8 @@ void WebConsole::handleStatus() {
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
   doc["link_state"] = linkStateText(sm_->linkState());
   doc["relay_state"] = sm_->relayState();
   doc["input_state"] = sm_->inputState();
@@ -1662,14 +1686,15 @@ void WebConsole::handlePostSettings() {
   if (cfg.remote_address < 1) cfg.remote_address = 1;
   if (cfg.remote_address > 254) cfg.remote_address = 254;
   cfg.fleet_passphrase.trim();
+  const bool hasFleetPassphraseField = !doc["fleet_passphrase"].isNull();
   const bool allowDefaultDeploymentKey = parseBoolField(doc["allow_default_deployment_key"], false);
-  if (cfg.fleet_passphrase.length() < kMinDeploymentKeyLen) {
+  if (hasFleetPassphraseField && cfg.fleet_passphrase.length() < kMinDeploymentKeyLen) {
     server_.send(400, "text/plain",
                  String("deployment key too short (min ") + String(static_cast<unsigned>(kMinDeploymentKeyLen)) +
                      " chars)");
     return;
   }
-  if (!allowDefaultDeploymentKey && isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+  if (hasFleetPassphraseField && !allowDefaultDeploymentKey && isDefaultDeploymentKey(cfg.fleet_passphrase)) {
     server_.send(400, "text/plain", "deployment key cannot be default; set unique key");
     return;
   }
@@ -1762,6 +1787,20 @@ void WebConsole::handleDiagnostics() {
 
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
+  doc["fw_display"] = String(LRS_FW_VERSION) + " (" + String(LRS_GIT_SHA) + (LRS_GIT_DIRTY == 0 ? "" : ", dirty") + ")";
+  doc["build_date"] = __DATE__;
+  doc["build_time"] = __TIME__;
+  doc["uptime_ms"] = millis();
+  doc["free_heap_bytes"] = ESP.getFreeHeap();
+  doc["cpu_freq_mhz"] = ESP.getCpuFreqMHz();
+  doc["chip_id"] = config_->chipIdHex();
+  doc["flash_real_size"] = ESP.getFlashChipRealSize();
+  doc["flash_ide_size"] = ESP.getFlashChipSize();
+  doc["sdk_version"] = ESP.getSdkVersion();
+  doc["core_version"] = ESP.getCoreVersion();
   doc["lora_tx_packets"] = loraTx;
   doc["ack_ok"] = ackOk;
   doc["ack_timeout"] = ackTimeout;

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## [0.2.1-alpha] - 2026-02-15
+
+### Added
+- Standalone release flasher helper: `tools/flash_release.py` (reads chip ID, flashes binary, prints AP/admin password).
+- No-VSCode flashing guidance in `docs/USER_GUIDE.md`.
+
+### Changed
+- Firmware version updated to `0.2.1-alpha`.
+- Radio/state-machine behavior tightened when default deployment key is active.
+- Web console/mobile UX and diagnostics display improvements.
+
 ## [0.2.0-alpha] - 2026-02-15
 
 ### Added

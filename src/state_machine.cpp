@@ -106,7 +106,13 @@ void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
 void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent) {
   const uint32_t now = millis();
   last_counter_++;
-  radio_->send(type, relayState, inputState, 0, last_counter_, cfg_.local_address, cfg_.remote_address, local_temp_code_);
+  if (!radio_->send(type, relayState, inputState, 0, last_counter_, cfg_.local_address, cfg_.remote_address, local_temp_code_)) {
+    link_state_ = LinkState::Idle;
+    tx_command_pending_ = false;
+    tx_retry_step_ = 0;
+    tx_next_retry_ms_ = 0;
+    return;
+  }
   last_tx_ms_ = now;
   wait_ack_since_ms_ = now;
   link_state_ = LinkState::WaitAck;
@@ -133,7 +139,10 @@ bool NodeStateMachine::mqttSendRemoteRelay(uint8_t dstAddress, uint8_t relayStat
   }
 
   last_counter_++;
-  radio_->send(MessageType::Mqtt, relayState ? 1 : 0, input_state_, 0, last_counter_, cfg_.local_address, dstAddress, local_temp_code_);
+  if (!radio_->send(MessageType::Mqtt, relayState ? 1 : 0, input_state_, 0, last_counter_, cfg_.local_address, dstAddress,
+                    local_temp_code_)) {
+    return false;
+  }
   last_tx_ms_ = millis();
   if (logs_) {
     logs_->add("mqtt_remote_relay_tx", 0, last_counter_, relayState ? 1 : 0);
@@ -179,11 +188,12 @@ void NodeStateMachine::tickTransmitter() {
     last_heartbeat_ms_ = now;
     last_counter_++;
     const uint8_t heartbeatRelay = cfg_.tx_input_lora_control_enabled ? input_state_ : relay_state_;
-    radio_->send(MessageType::Heartbeat, heartbeatRelay, input_state_, 0, last_counter_, cfg_.local_address, cfg_.remote_address,
-                 local_temp_code_);
-    last_tx_ms_ = now;
-    if (logs_) {
-      logs_->add("tx_heartbeat", 0, last_counter_, input_state_);
+    if (radio_->send(MessageType::Heartbeat, heartbeatRelay, input_state_, 0, last_counter_, cfg_.local_address, cfg_.remote_address,
+                     local_temp_code_)) {
+      last_tx_ms_ = now;
+      if (logs_) {
+        logs_->add("tx_heartbeat", 0, last_counter_, input_state_);
+      }
     }
   }
 

@@ -40,8 +40,10 @@ class RadioProtocol {
  private:
   Settings cfg_{};
   LogBuffer *logs_ = nullptr;
+  bool lora_enabled_ = true;
   uint8_t enc_key_[16]{};
   uint8_t mac_key_[32]{};
 
   void deriveKeys();
+  void refreshRadioRuntimeState();
 };

@@ -4,4 +4,6 @@
 .vscode/launch.json
 .vscode/settings.json
 .vscode/ipch
+__pycache__/
+.pycache_tmp/
 .DS_Store

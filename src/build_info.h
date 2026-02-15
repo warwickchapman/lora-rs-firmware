@@ -1,7 +1,7 @@
 #pragma once
 
 #ifndef LRS_FW_VERSION
-#define LRS_FW_VERSION "0.2.0-alpha"
+#define LRS_FW_VERSION "0.2.1-alpha"
 #endif
 
 #ifndef LRS_GIT_SHA
