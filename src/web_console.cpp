@@ -1,0 +1,1964 @@
+#include "web_console.h"
+
+#include <ArduinoJson.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <Updater.h>
+
+#include "build_info.h"
+#include "config_store.h"
+#include "log_buffer.h"
+#include "sensor_manager.h"
+#include "state_machine.h"
+
+namespace {
+constexpr uint32_t kMinHeartbeatMs = 60000;
+constexpr uint32_t kMaxHeartbeatMs = 3600000;
+constexpr uint32_t kMinAckTimeoutMs = 5 * 1000;
+constexpr uint32_t kMaxAckTimeoutMs = 600 * 1000;
+constexpr const char *kDefaultDeploymentKey = "lora-default-passphrase";
+constexpr size_t kMinDeploymentKeyLen = 16;
+constexpr const char *kHardwareVersion = "v1.2";
+constexpr const char *kHardwareBatch = "251101";
+
+#ifdef REGION_US
+constexpr long kMinFrequencyHz = 902000000L;
+constexpr long kMaxFrequencyHz = 928000000L;
+constexpr long kDefaultFrequencyHz = 915000000L;
+#else
+constexpr long kMinFrequencyHz = 433000000L;
+constexpr long kMaxFrequencyHz = 434790000L;
+constexpr long kDefaultFrequencyHz = 433000000L;
+#endif
+
+bool isOwnLrsSoftApLike(const String &ssid) {
+  String s = ssid;
+  s.toLowerCase();
+  if (!s.startsWith("lrs-")) return false;
+  if (s.endsWith("-tx") || s.endsWith("-rx")) return true;
+  // New role-independent AP naming: lrs-<8 hex chars>
+  if (s.length() != 12) return false;
+  for (size_t i = 4; i < 12; ++i) {
+    const char c = s.charAt(i);
+    const bool isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    if (!isHex) return false;
+  }
+  return true;
+}
+
+const char *wifiStatusText(wl_status_t st) {
+  switch (st) {
+    case WL_IDLE_STATUS:
+      return "idle";
+    case WL_NO_SSID_AVAIL:
+      return "ssid_not_found";
+    case WL_SCAN_COMPLETED:
+      return "scan_completed";
+    case WL_CONNECTED:
+      return "connected";
+    case WL_CONNECT_FAILED:
+      return "connect_failed";
+    case WL_CONNECTION_LOST:
+      return "connection_lost";
+    case WL_DISCONNECTED:
+      return "disconnected";
+#ifdef WL_WRONG_PASSWORD
+    case WL_WRONG_PASSWORD:
+      return "wrong_password";
+#endif
+#ifdef WL_NO_SHIELD
+    case WL_NO_SHIELD:
+      return "no_shield";
+#endif
+    default:
+      return "unknown";
+  }
+}
+
+uint8_t parseAddressField(const JsonVariantConst &value, uint8_t fallback) {
+  if (value.isNull()) {
+    return fallback;
+  }
+  if (value.is<uint8_t>() || value.is<int>()) {
+    const int n = value.as<int>();
+    if (n >= 1 && n <= 254) return static_cast<uint8_t>(n);
+    return fallback;
+  }
+  String text = String(static_cast<const char *>(value.as<const char *>()));
+  text.trim();
+  if (text.length() == 0) return fallback;
+
+  long n = -1;
+  if (text.startsWith("0x") || text.startsWith("0X")) {
+    n = strtol(text.c_str(), nullptr, 16);
+  } else {
+    n = strtol(text.c_str(), nullptr, 10);
+  }
+  if (n < 1 || n > 254) {
+    return fallback;
+  }
+  return static_cast<uint8_t>(n);
+}
+
+bool parseBoolField(const JsonVariantConst &value, bool fallback) {
+  if (value.isNull()) return fallback;
+  if (value.is<bool>()) return value.as<bool>();
+  if (value.is<int>()) return value.as<int>() != 0;
+  const char *raw = value.as<const char *>();
+  if (!raw) return fallback;
+  String text(raw);
+  text.trim();
+  text.toLowerCase();
+  if (text == "true" || text == "1" || text == "yes" || text == "on") return true;
+  if (text == "false" || text == "0" || text == "no" || text == "off") return false;
+  return fallback;
+}
+
+bool softApActiveNow() {
+  const IPAddress apIp = WiFi.softAPIP();
+  return apIp[0] != 0;
+}
+
+bool isDefaultDeploymentKey(const String &v) {
+  String k = v;
+  k.trim();
+  return k == kDefaultDeploymentKey;
+}
+
+const char kLoginHtml[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LRS Login</title>
+<style>
+:root{--bg:#0b1220;--card:#111827;--txt:#e5e7eb;--muted:#94a3b8;--border:#334155;--field:#0f172a;--btn:#005f73}
+body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--muted:#4b5563;--border:#d4dbe2;--field:#fff}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--bg),#111827);font-family:ui-sans-serif,system-ui;color:var(--txt)}
+body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
+.card{width:min(92vw,420px);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:0 12px 30px rgba(0,0,0,.22)}
+h1{margin:0 0 10px;font-size:1.4rem}
+p{margin:0 0 10px;color:var(--muted)}
+label{display:block;margin:0 0 6px;color:var(--txt);font-size:14px;font-weight:600}
+input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:16px;background:var(--field);color:var(--txt)}
+button{margin-top:10px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:16px}
+.msg{margin-top:8px;font-size:14px;min-height:1.2em}.err{color:#b42318}.ok{color:#166534}
+.top{display:flex;justify-content:flex-end}
+.theme-btn{width:auto;margin:0;padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--txt)}
+</style></head><body><div class="card">
+<div class="top"><button id="themeBtn" class="theme-btn" type="button" onclick="toggleTheme()">☀</button></div>
+<h1>LRS Device Console Login</h1>
+<p id="hint">Use the device admin password. Username is not required.</p>
+<form id="loginForm" autocomplete="on">
+<input id="uname" name="username" type="text" autocomplete="username" value="admin" aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" />
+<label for="pw">Admin password</label>
+<input id="pw" name="password" type="password" autocomplete="current-password" placeholder="Enter admin password" />
+<button id="btn" type="submit">Login</button>
+</form>
+<div id="msg" class="msg"></div>
+</div>
+<script>
+const q=new URLSearchParams(location.search);
+if(q.get('expired')==='1') document.getElementById('hint').innerText='Session expired. Please login again.';
+if(q.get('logged_out')==='1') document.getElementById('hint').innerText='You have been logged out.';
+const btn=document.getElementById('btn');
+const loginForm=document.getElementById('loginForm');
+const pw=document.getElementById('pw');
+const msg=document.getElementById('msg');
+let currentTheme='dark';
+function applyTheme(theme){
+ currentTheme = (theme === 'light') ? 'light' : 'dark';
+ document.body.classList.toggle('light', currentTheme === 'light');
+ const tb=document.getElementById('themeBtn');
+ if(tb){ tb.innerText = currentTheme === 'dark' ? '☀' : '🌙'; }
+ try{ localStorage.setItem('lrs_theme', currentTheme); }catch(e){}
+}
+function toggleTheme(){ applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+async function login(){
+ btn.disabled=true; msg.className='msg'; msg.innerText='Signing in...';
+ try{
+   const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw.value})});
+   const out=await res.json().catch(()=>({}));
+   if(!res.ok){
+     msg.className='msg err';
+     msg.innerText=out.error || 'Login failed';
+     return;
+   }
+   msg.className='msg ok'; msg.innerText='Login successful';
+   location.href='/';
+ }catch(e){
+   msg.className='msg err'; msg.innerText=`Login failed: ${e.message}`;
+ }finally{ btn.disabled=false; }
+}
+loginForm.addEventListener('submit', (e)=>{ e.preventDefault(); login(); });
+try{ applyTheme(localStorage.getItem('lrs_theme') === 'light' ? 'light' : 'dark'); }catch(e){ applyTheme('dark'); }
+pw.focus();
+</script></body></html>
+)HTML";
+
+const char kIndexHtml[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LRS Console</title>
+<style>
+:root{--bg:#0b1220;--card:#111827;--accent:#005f73;--txt:#e5e7eb;--border:#334155;--field:#0f172a;--muted:#94a3b8;--link:#67e8f9}
+body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--border:#d4dbe2;--field:#fff;--muted:#4b5563;--link:#0b5f75}
+*{box-sizing:border-box}
+body{margin:0;font-family:ui-sans-serif,system-ui;background:linear-gradient(135deg,var(--bg),#111827);color:var(--txt)}
+body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
+header{background:var(--accent);color:#fff;padding:12px 16px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+header .title{font-size:1.1rem}
+header .wifi{font-size:.9rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;white-space:nowrap;display:flex;align-items:center;gap:8px}
+header .relay-head{font-size:.9rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;white-space:nowrap}
+header .relay-head.on{background:rgba(126,211,121,.24);border-color:rgba(126,211,121,.6)}
+header .relay-head.off{background:rgba(255,255,255,.12)}
+header .reason-head{font-size:.85rem;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:6px 10px;white-space:nowrap;display:none}
+header .reason-head.show{display:inline-flex}
+header .right{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+header .theme{margin-top:0;padding:6px 10px;min-width:38px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);border-radius:999px}
+header .logout{margin-top:0;padding:6px 10px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);border-radius:999px}
+main{padding:12px;display:grid;gap:12px;max-width:860px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:0 8px 20px rgba(0,0,0,.12)}
+label{display:block;font-size:12px;margin-top:8px}
+.grid{display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;background:var(--field);color:var(--txt)}
+input[type=checkbox]{width:18px;height:18px;padding:0}
+.check-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.radio-row{display:flex;align-items:center;gap:0;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:max-content;max-width:100%}
+.radio-row label{margin:0;display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none;font-weight:600;min-height:42px}
+.radio-row label + label{border-left:1px solid var(--border)}
+.radio-row input[type=radio]{width:18px;height:18px;accent-color:#4caf50;flex:0 0 auto}
+.lora-field{display:flex;flex-direction:column}
+.lora-field .radio-row{margin-top:6px}
+.freq-wrap{display:flex;flex-direction:column;gap:8px}
+.freq-wrap input[readonly]{opacity:.85}
+.check-row label{margin:0}
+button{margin-top:10px;padding:10px 14px;border:0;border-radius:8px;background:var(--accent);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed;filter:saturate(.35)}
+.small{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.key-strength{margin-top:6px;font-size:12px;font-weight:700}
+.key-strength.weak{color:#fca5a5}
+.key-strength.ok{color:#facc15}
+.key-strength.strong{color:#86efac}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+#status{overflow-wrap:anywhere;line-height:1.4}
+.inline-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hint{font-size:12px;opacity:.85}
+details summary{cursor:pointer;font-weight:700;margin:6px 0}
+.wifi-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:14px}
+.wifi-icon svg{width:18px;height:14px;display:block}
+.wifi-icon .arc,.wifi-icon .dot{stroke:rgba(255,255,255,.35);fill:none;stroke-width:2;stroke-linecap:round}
+.wifi-icon .dot{fill:rgba(255,255,255,.35);stroke:none}
+.wifi-icon .x{stroke:#ff6b6b;stroke-width:2;stroke-linecap:round;display:none}
+.wifi-icon.lv1 .dot,.wifi-icon.lv2 .dot,.wifi-icon.lv3 .dot,.wifi-icon.lv4 .dot{fill:#95d65e}
+.wifi-icon.lv2 .a3,.wifi-icon.lv3 .a3,.wifi-icon.lv4 .a3{stroke:#95d65e}
+.wifi-icon.lv3 .a2,.wifi-icon.lv4 .a2{stroke:#95d65e}
+.wifi-icon.lv4 .a1{stroke:#95d65e}
+.wifi-icon.lv0 .x{display:block}
+.wifi-list{margin-top:8px}
+.wifi-table{width:100%;border-collapse:collapse;font-size:14px}
+.wifi-table th,.wifi-table td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+.wifi-table th:last-child,.wifi-table td:last-child{text-align:right}
+.sig{display:inline-flex;align-items:flex-end;gap:1px;height:10px;margin-right:6px;vertical-align:-1px}
+.sig i{display:block;width:2px;background:#b8c6cf;border-radius:2px}
+.sig i:nth-child(1){height:3px}.sig i:nth-child(2){height:5px}.sig i:nth-child(3){height:7px}.sig i:nth-child(4){height:9px}
+.sig.scan.lv1 i:nth-child(1),
+.sig.scan.lv2 i:nth-child(-n+2),
+.sig.scan.lv3 i:nth-child(-n+3),
+.sig.scan.lv4 i:nth-child(-n+4){background:#2f9e64}
+.sig.lora i{background:#d0d7df}
+.sig.lora.lv1 i:nth-child(1),
+.sig.lora.lv2 i:nth-child(-n+2),
+.sig.lora.lv3 i:nth-child(-n+3),
+.sig.lora.lv4 i:nth-child(-n+4){background:#111827}
+.sec-chip{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:999px;font-size:11px;font-weight:700}
+.sec-chip.y{background:#d9f3e2;color:#166534}
+.sec-chip.n{background:#f3f4f6;color:#4b5563}
+.link{color:var(--link);text-decoration:underline}
+.topnav{display:flex;gap:8px;flex-wrap:wrap}
+.tabbtn{background:#1f2937;color:#e5e7eb;border:1px solid var(--border)}
+body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
+.tabbtn.active{background:var(--accent);color:#fff}
+.page{display:none}
+.page.active{display:block}
+.status-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
+.deploy-note{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.03);margin-bottom:10px}
+.deploy-note.warn{border-color:#f59e0b;background:rgba(245,158,11,.10);color:#fef3c7}
+.status-table{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:15px}
+.status-table .k{color:var(--muted)}
+.status-table .v{font-weight:600;overflow-wrap:anywhere}
+.status-table .section{grid-column:1/-1;font-weight:800;margin-top:4px;padding-top:6px;border-top:1px solid var(--border)}
+.relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:12px}
+.relay-badge{width:90px;height:90px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.relay-badge.on{background:#d9f6df;color:#166534;border:2px solid #3ea86b}
+.relay-badge.off{background:#f3f4f6;color:#4b5563;border:2px solid #c6cdd6}
+.sensor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.sensor-tile{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:8px}
+.sensor-state{display:inline-flex;align-items:center;justify-content:center;min-width:82px;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700}
+.sensor-state.open{background:#f3f4f6;color:#4b5563}
+.sensor-state.closed{background:#d9f6df;color:#166534}
+.toast{position:fixed;right:14px;bottom:14px;background:#0b6a80;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.2);font-size:14px;z-index:9999;display:none}
+.toast.show{display:block}
+.toast.err{background:#b42318}
+.result-line{margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);font-weight:700;display:none}
+.result-line.show{display:block}
+.result-line.ok{background:#d9f6df;color:#166534;border-color:#3ea86b}
+.result-line.err{background:#fee2e2;color:#b42318;border-color:#fca5a5}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:sp 0.8s linear infinite;margin-right:8px;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media(max-width:850px){.status-grid{grid-template-columns:1fr}}
+@media(max-width:650px){.grid{grid-template-columns:1fr}}
+</style></head>
+<body><header><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="relayReasonHeader" class="reason-head">reason: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa: no link</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi: checking...</span></div><button class="logout" onclick="logout()">Logout</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+<section class="card topnav">
+<button class="tabbtn active" id="tab-status" onclick="showPage('status')">Status</button>
+<button class="tabbtn" id="tab-lora" onclick="showPage('lora')">LoRa</button>
+<button class="tabbtn" id="tab-network" onclick="showPage('network')">Network</button>
+<button class="tabbtn" id="tab-mqtt" onclick="showPage('mqtt')">MQTT</button>
+<button class="tabbtn" id="tab-sensors" onclick="showPage('sensors')">Sensors</button>
+<button class="tabbtn" id="tab-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button>
+<button class="tabbtn" id="tab-factory" onclick="showPage('factory')">System</button>
+<button class="tabbtn" id="tab-logs" onclick="showPage('logs')">Logs</button>
+</section>
+<section class="card page active" id="page-status">
+<h3>Status</h3>
+<div id="deploymentKeyNotice" class="deploy-note">Deployment Key (Encryption): checking...</div>
+<div class="status-grid">
+<div>
+<div id="statusTable">Loading status...</div>
+</div>
+<div class="relay-card">
+<div id="relayBadge" class="relay-badge off">RELAY OFF</div>
+<div id="relayMeta" class="small" style="margin-top:8px">Input: -, Link: -</div>
+</div>
+</div>
+<h4 style="margin:10px 0 6px 0">Sensors</h4>
+<div class="sensor-grid">
+<div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div>
+<div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div>
+<div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div>
+<div class="sensor-tile">Tank: n/a</div>
+<div class="sensor-tile">Float: n/a</div>
+<div class="sensor-tile">Flow: n/a</div>
+</div>
+</section>
+<section class="card page" id="page-lora"><h3>LoRa</h3><div class="grid">
+<div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
+<div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
+<div style="grid-column:1/-1"><label>Deployment Key (Encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
+<div><label id="local_address_label">Local address</label><input id="local_address" type="text" /><div class="hint" id="local_address_hex"></div></div>
+<div><label id="remote_address_label">Remote address</label><input id="remote_address" type="text" /><div class="hint" id="remote_address_hex"></div></div>
+</div>
+<details><summary>Advanced</summary><div class="grid">
+<div><label>TX power</label><input id="lora_tx_power" type="number" min="2" max="20" /></div>
+<div><label>Spreading factor</label><input id="lora_spreading_factor" type="number" min="6" max="12" /></div>
+<div><label>Bandwidth (Hz)</label><input id="lora_bandwidth_hz" type="number" /></div>
+<div><label>Coding rate (5-8)</label><input id="lora_coding_rate" type="number" min="5" max="8" /></div>
+<div><label>Heartbeat (seconds)</label><input id="heartbeat_s" type="number" min="60" max="3600" /></div>
+<div><label>ACK timeout (seconds)</label><input id="ack_timeout_s" type="number" min="5" max="600" /></div>
+<div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_input_lora_control_enabled" type="checkbox" /><label for="tx_input_lora_control_enabled">Input drives LoRa relay control</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
+</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details>
+<div class="actions"><button onclick="saveLora()">Save LoRa</button></div>
+</section>
+<section class="card page" id="page-network"><h3>Network</h3><div class="grid">
+<div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
+<div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div>
+<div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
+<div style="grid-column:1/-1"><label>LAN hostname (mDNS)</label><input id="lan_hostname" /><div class="hint">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
+</div>
+<div class="actions"><button onclick="saveNetwork()">Save Network</button><button id="btnTestSta" onclick="testSta()">Test STA connect</button></div>
+<div id="netTestResult" class="result-line"></div>
+</section>
+<section class="card page" id="page-mqtt"><h3>MQTT</h3><div class="grid">
+<div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_enabled" type="checkbox" /><label for="mqtt_enabled">Enable MQTT</label></div></div>
+<div><label>Broker host</label><input id="mqtt_host" /></div>
+<div><label>Broker port</label><input id="mqtt_port" type="number" min="1" max="65535" /></div>
+<div><label>MQTT user</label><input id="mqtt_user" /></div>
+<div><label>MQTT password</label><input id="mqtt_password" /></div>
+<div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
+</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div>
+<div class="actions"><button onclick="saveMqtt()">Save MQTT</button><button onclick="testMqtt()">Test broker connection</button></div>
+<div id="mqttTestResult" class="result-line"></div>
+</section>
+<section class="card page" id="page-sensors"><h3>Sensors</h3>
+<h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
+<div class="check-row" style="margin-bottom:8px"><input id="sensor_temp_enabled" type="checkbox" /><label for="sensor_temp_enabled">Enable DS18B20 (GPIO0)</label></div>
+<div id="sensorDiag" class="sensor-grid" style="margin-bottom:10px">
+<div class="sensor-tile" id="sensorDiagState">DS18B20: checking...</div>
+<div class="sensor-tile" id="sensorDiagTemp">Temperature: n/a</div>
+<div class="sensor-tile" id="sensorDiagAddr">Address: n/a</div>
+<div class="sensor-tile" id="sensorDiagLast">Last read: n/a</div>
+</div>
+<div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions"><button onclick="saveSensors()">Save Sensors</button></div></section>
+<section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><div id="diagText" class="small"></div></section>
+<section class="card page" id="page-factory"><h3>System</h3><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save Password</button></div><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div></div><pre id="factory"></pre></section>
+<section class="card page" id="page-logs"><h3>Logs</h3><div class="actions"><button onclick="refreshLogs()">Refresh</button><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button></div><pre id="logView" style="max-height:320px;overflow:auto"></pre></section>
+</main>
+<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div id="sessionLeft" class="small card">Session: --:-- | HW: v1.2 | Batch: 251101</div></footer>
+<div id="toast" class="toast"></div>
+<script>
+const FREQ_MIN_MHZ = 400.0;
+const FREQ_MAX_MHZ = 1000.0;
+const MIN_DEPLOYMENT_KEY_LEN = 16;
+let statusFailCount = 0;
+let activePage = 'status';
+let currentTheme = 'dark';
+let staIsConnected = false;
+let connectedStaSsid = '';
+let staTestInFlight = false;
+let currentStaIp = '';
+let currentLanMdns = '';
+let currentApIp = '';
+let currentApMdns = '';
+
+function parseAddress(v){
+ const t=String(v||'').trim();
+ if(!t.length) return NaN;
+ if(/^0x[0-9a-f]+$/i.test(t)) return parseInt(t,16);
+ return parseInt(t,10);
+}
+function toHexByte(n){ return '0x'+Number(n).toString(16).toUpperCase().padStart(2,'0'); }
+function refreshAddressHints(){
+ const local=parseAddress(document.getElementById('local_address').value);
+ const remote=parseAddress(document.getElementById('remote_address').value);
+ document.getElementById('local_address_hex').innerText=Number.isInteger(local)?`hex ${toHexByte(local)}`:'enter dec or hex (e.g. 10 or 0x0A)';
+ document.getElementById('remote_address_hex').innerText=Number.isInteger(remote)?`hex ${toHexByte(remote)}`:'enter dec or hex (e.g. 10 or 0x0A)';
+}
+function refreshRoleLabels(){
+ const tx=document.getElementById('role_tx').value==='true';
+ document.getElementById('local_address_label').innerText=tx?'TX local address (source)':'RX local address';
+ document.getElementById('remote_address_label').innerText=tx?'RX remote address (destination)':'TX remote address (source)';
+ const txInputRow=document.getElementById('tx_input_lora_control_row');
+ if(txInputRow){ txInputRow.style.display = tx ? '' : 'none'; }
+}
+function refreshHostnamePreview(){
+ const raw=(document.getElementById('lan_hostname').value||'').trim()||'lrs';
+ document.getElementById('lan_hostname_preview').innerHTML=`<a class="link" href="http://${raw}.local">http://${raw}.local</a>`;
+}
+function isDefaultDeploymentKey(v){
+ return String(v||'').trim() === 'lora-default-passphrase';
+}
+function deploymentKeyStrength(v){
+ const s=String(v||'').trim();
+ if(!s.length){ return {cls:'', text:`Enter deployment key (min ${MIN_DEPLOYMENT_KEY_LEN} chars).`}; }
+ if(isDefaultDeploymentKey(s)){ return {cls:'weak', text:'Weak: default key is blocked.'}; }
+ const hasLower=/[a-z]/.test(s);
+ const hasUpper=/[A-Z]/.test(s);
+ const hasDigit=/\d/.test(s);
+ const hasSymbol=/[^A-Za-z0-9]/.test(s);
+ let score=0;
+ if(s.length >= MIN_DEPLOYMENT_KEY_LEN) score++;
+ if(s.length >= 24) score++;
+ if(hasLower && hasUpper) score++;
+ if(hasDigit) score++;
+ if(hasSymbol) score++;
+ if(s.length < MIN_DEPLOYMENT_KEY_LEN){
+  return {cls:'weak', text:`Weak: too short (${s.length}/${MIN_DEPLOYMENT_KEY_LEN}).`};
+ }
+ if(score >= 4){
+  return {cls:'strong', text:'Strong: good length and character diversity.'};
+ }
+ if(score >= 2){
+  return {cls:'ok', text:'OK: acceptable, but longer/more diverse is better.'};
+ }
+ return {cls:'weak', text:'Weak: increase length and mix characters.'};
+}
+function updateDeploymentKeyStrength(){
+ const input=document.getElementById('fleet_passphrase');
+ const out=document.getElementById('fleet_passphrase_strength');
+ if(!input || !out) return;
+ const s=deploymentKeyStrength(input.value);
+ out.className = `key-strength${s.cls ? ` ${s.cls}` : ''}`;
+ out.innerText = s.text;
+}
+function refreshFreqPreset(){
+ const input=document.getElementById('lora_frequency_mhz');
+ const f433=document.getElementById('freq_433');
+ const f915=document.getElementById('freq_915');
+ const txt=document.getElementById('freq_selected_text');
+ if(!input || !f433 || !f915) return;
+ const mhz=Number(input.value);
+ const near=(a,b)=>Math.abs(a-b)<0.01;
+ if(near(mhz,433.0)){ f433.checked=true; if(txt) txt.innerText='Selected: 433.000 MHz'; return; }
+ if(near(mhz,915.0)){ f915.checked=true; if(txt) txt.innerText='Selected: 915.000 MHz'; return; }
+ f433.checked=true;
+ input.value='433.000';
+ if(txt) txt.innerText='Selected: 433.000 MHz';
+}
+function bindFreqPreset(){
+ const input=document.getElementById('lora_frequency_mhz');
+ const f433=document.getElementById('freq_433');
+ const f915=document.getElementById('freq_915');
+ if(!input || !f433 || !f915) return;
+ const apply=()=>{
+  if(f433.checked){ input.value='433.000'; refreshFreqPreset(); return; }
+  input.value='915.000';
+  refreshFreqPreset();
+ };
+ f433.addEventListener('change',apply);
+ f915.addEventListener('change',apply);
+}
+function escapeHtml(v){
+ return String(v??'').replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function rssiToLevel(rssi){
+ if(rssi >= -67) return 4;
+ if(rssi >= -75) return 3;
+ if(rssi >= -85) return 2;
+ if(rssi > -120) return 1;
+ return 0;
+}
+function sigIconHtml(rssi, mode='scan'){
+ const lv=rssiToLevel(Number(rssi));
+ return `<span class="sig ${mode} lv${lv}"><i></i><i></i><i></i><i></i></span>`;
+}
+function setWifiBadge(level, text){
+ const icon=document.getElementById('wifiIcon');
+ const wt=document.getElementById('wifiText');
+ if(icon){ icon.className=`wifi-icon lv${level}`; }
+ if(wt){ wt.innerText=text; }
+}
+function setLoraBadge(level, text){
+ const icon=document.getElementById('loraIcon');
+ const lt=document.getElementById('loraText');
+ if(icon){ icon.className=`sig lora lv${level}`; }
+ if(lt){ lt.innerText=text; }
+}
+function humanAgeMs(ms){
+ const s=Math.max(0, Math.floor(Number(ms||0)/1000));
+ if(s < 60) return `${s}s ago`;
+ const m=Math.floor(s/60);
+ if(m < 60) return `${m}m ago`;
+ const h=Math.floor(m/60);
+ return `${h}h ago`;
+}
+function humanAgeMsShort(ms){
+ const s=Math.max(0, Math.floor(Number(ms||0)/1000));
+ if(s < 60) return `${s}s`;
+ const m=Math.floor(s/60);
+ if(m < 60) return `${m}m`;
+ const h=Math.floor(m/60);
+ return `${h}h`;
+}
+function reasonLabel(v){
+ const r=String(v||'').toLowerCase();
+ if(r==='ack_timeout') return 'ack_timeout';
+ if(r==='no_lora_link') return 'no_lora_link';
+ if(r==='input_open') return 'input_open';
+ if(r==='boot') return 'boot';
+ if(r==='wait_ack') return 'wait_ack';
+ return r || 'unknown';
+}
+function inputValue(id){
+ const el=document.getElementById(id);
+ return el ? String(el.value||'') : '';
+}
+function normalizedInputValue(id){
+ return inputValue(id).trim();
+}
+function currentStaMatchesConnected(){
+ if(!staIsConnected) return false;
+ const ssid=normalizedInputValue('wifi_sta_ssid');
+ if(!ssid.length) return false;
+ return ssid===connectedStaSsid;
+}
+function updateStaTestButtonState(){
+ const btn=document.getElementById('btnTestSta');
+ if(!btn) return;
+ const hasSsid=normalizedInputValue('wifi_sta_ssid').length>0;
+ const unchanged=currentStaMatchesConnected();
+ const disabled=staTestInFlight || !hasSsid || unchanged;
+ btn.disabled=disabled;
+ if(unchanged){
+  btn.title='Already connected with these STA credentials. Change SSID or password to run a test.';
+ }else if(!hasSsid){
+  btn.title='Enter an SSID to test.';
+ }else{
+  btn.title='';
+ }
+}
+function stripPort(host){
+ return String(host||'').trim().toLowerCase().replace(/:\d+$/,'');
+}
+function normalizeLanHost(raw){
+ let h=String(raw||'').trim().toLowerCase();
+ if(!h.length) return '';
+ h=h.replace(/^https?:\/\//,'');
+ h=h.replace(/\/.*$/,'');
+ if(h.endsWith('.local')) return h;
+ return `${h}.local`;
+}
+function startLanHostnameRedirect(hostname){
+ const targetHost=normalizeLanHost(hostname);
+ if(!targetHost) return;
+ const targetUrl=`http://${targetHost}/`;
+ const el=document.getElementById('netTestResult');
+ const total=8;
+ let left=total;
+ if(window.__lanRedirectTimer){ clearInterval(window.__lanRedirectTimer); }
+ const paint=()=>{
+  if(!el) return;
+  el.className='result-line show ok';
+  el.innerText=`Network saved. Switching to ${targetUrl} in ${left}s...`;
+ };
+ paint();
+ window.__lanRedirectTimer=setInterval(()=>{
+  left--;
+  if(left<=0){
+   clearInterval(window.__lanRedirectTimer);
+   window.__lanRedirectTimer=null;
+   location.href=targetUrl;
+   return;
+  }
+  paint();
+ },1000);
+}
+function isLikelyStaSessionPath(){
+ const host=stripPort(location.hostname);
+ const staIp=stripPort(currentStaIp);
+ const lanMdns=stripPort(currentLanMdns);
+ if(host.length===0) return false;
+ if(staIp && host===staIp) return true;
+ if(lanMdns && host===lanMdns) return true;
+ return false;
+}
+function showPage(page){
+ activePage = page;
+ ['status','lora','network','mqtt','sensors','diagnostics','factory','logs'].forEach(p=>{
+  const sec=document.getElementById(`page-${p}`);
+  const tab=document.getElementById(`tab-${p}`);
+  if(sec) sec.classList.toggle('active', p===page);
+  if(tab) tab.classList.toggle('active', p===page);
+ });
+ if(page==='logs'){ refreshLogs(); }
+ if(page==='diagnostics'){ refreshDiagnostics(); }
+}
+function showToast(msg, isError=false){
+ const t=document.getElementById('toast');
+ if(!t) return;
+ t.className=`toast show${isError?' err':''}`;
+ t.innerText=msg;
+ clearTimeout(window.__toastTimer);
+ window.__toastTimer=setTimeout(()=>{ t.className='toast'; }, 2200);
+}
+function applyTheme(theme){
+ currentTheme = (theme === 'light') ? 'light' : 'dark';
+ document.body.classList.toggle('light', currentTheme === 'light');
+ const btn=document.getElementById('themeBtn');
+ if(btn){ btn.innerText = currentTheme === 'dark' ? '☀' : '🌙'; }
+ try{ localStorage.setItem('lrs_theme', currentTheme); }catch(e){}
+}
+function toggleTheme(){ applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+async function refreshStatus(){
+ const st=await apiJson('/api/status',{silent:true});
+ if(!st){
+  statusFailCount++;
+  if(statusFailCount >= 3){
+   const s=document.getElementById('statusTable');
+   if(s){ s.innerText='API status temporarily unavailable'; }
+  }
+  return;
+ }
+ statusFailCount = 0;
+ staIsConnected = !!st.sta_connected;
+ currentStaIp = String(st.sta_ip || '');
+ currentLanMdns = String(st.mdns_lan || '');
+ currentApIp = String(st.ap_ip || '');
+ currentApMdns = String(st.mdns_ap || '');
+ if(staIsConnected){
+  const connectedSsid=String(st.sta_ssid || '');
+  if(connectedSsid.length){
+   connectedStaSsid = connectedSsid;
+  }
+ }else{
+  connectedStaSsid = '';
+ }
+ updateStaTestButtonState();
+ setSessionLeft(st.session_remaining_s || 0);
+ const roleTag = String(st.role || '').toLowerCase() === 'tx' ? 'TX' : 'RX';
+ const titleEl = document.getElementById('consoleTitle');
+ const pageTitle = `LRS Device Console (${roleTag})`;
+ if(titleEl){ titleEl.innerText = pageTitle; }
+ document.title = pageTitle;
+ const level = st.sta_connected ? rssiToLevel(st.sta_rssi) : 0;
+ const wifiText = st.sta_connected ? 'WiFi connected' : `WiFi ${st.sta_status_text}`;
+ setWifiBadge(level, wifiText);
+  const apUrl = st.mdns_ap ? `http://${st.mdns_ap}` : '';
+  const lanUrl = st.mdns_lan ? `http://${st.mdns_lan}` : '';
+  const relayOn = Number(st.relay_state) === 1;
+  const hasLora = Number(st.lora_last_packet_ms||0) > 0;
+  const hasLoraTx = Number(st.lora_last_tx_ms||0) > 0;
+  const loraAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_packet_ms||0);
+  const loraTxAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_tx_ms||0);
+  const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
+  const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
+  const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
+ const loraLevel = hasLora ? rssiToLevel(st.lora_last_rssi) : 0;
+ const loraHeaderText = hasLora ? `LoRa ${st.lora_last_rssi} dBm` : 'LoRa no link';
+ setLoraBadge(loraLevel, loraHeaderText);
+ const rb=document.getElementById('relayBadge');
+ if(rb){
+  rb.className = `relay-badge ${relayOn ? 'on' : 'off'}`;
+  rb.innerText = relayOn ? 'RELAY ON' : 'RELAY OFF';
+ }
+ const rh=document.getElementById('relayHeader');
+ if(rh){
+  rh.className=`relay-head ${relayOn ? 'on' : 'off'}`;
+  rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
+ }
+ const rr=document.getElementById('relayReasonHeader');
+ if(rr){
+   if(relayOn){
+     rr.className='reason-head';
+   }else{
+     rr.className='reason-head show';
+     rr.innerText=`reason: ${reasonLabel(st.relay_reason)}`;
+   }
+ }
+ const rm=document.getElementById('relayMeta');
+ if(rm){ rm.innerText = `Link: ${st.link_state}`; }
+ const table=document.getElementById('statusTable');
+ const keyNotice=document.getElementById('deploymentKeyNotice');
+ const deployKey=String(st.deployment_key || '');
+ const deployDefault=!!st.deployment_key_default;
+ if(keyNotice){
+   keyNotice.className = `deploy-note${deployDefault ? ' warn' : ''}`;
+   keyNotice.innerHTML = deployDefault
+    ? `Deployment Key (Encryption): <b>${escapeHtml(deployKey)}</b> (default). Change this now to isolate your deployment.`
+    : `Deployment Key (Encryption): <b>${escapeHtml(deployKey || 'not_set')}</b>`;
+ }
+ if(table){
+ table.className='status-table';
+  table.innerHTML=
+   `<div class="section">LoRa</div>
+    <div class="k">Role</div><div class="v">${escapeHtml(st.role)}</div>
+    <div class="k">Deployment key</div><div class="v">${escapeHtml(deployKey || 'not_set')}</div>
+    <div class="k">Firmware</div><div class="v">${escapeHtml(st.fw_display || `${st.fw_version || 'n/a'} (${st.fw_git_sha || 'n/a'}${st.fw_dirty ? ', dirty' : ''})`)}</div>
+    <div class="k">Build</div><div class="v">${escapeHtml(st.build_date || 'n/a')} ${escapeHtml(st.build_time || '')}</div>
+    <div class="k">Link</div><div class="v">${escapeHtml(st.link_state)}</div>
+    <div class="k">LoRa RSSI</div><div class="v">${loraRssiText}</div>
+    <div class="k">Last LoRa TX</div><div class="v">${escapeHtml(loraLastTxText)}</div>
+    <div class="k">Last LoRa packet</div><div class="v">${escapeHtml(loraLastText)}</div>
+    <div class="k">Relay reason</div><div class="v">${escapeHtml(reasonLabel(st.relay_reason))}</div>
+    <div class="section">WiFi Station</div>
+    <div class="k">STA SSID</div><div class="v">${escapeHtml(st.sta_ssid || st.sta_target_ssid || 'not configured')}</div>
+    <div class="k">STA State</div><div class="v">${escapeHtml(st.sta_status_text)} [${escapeHtml(st.sta_status_code)}]</div>
+    <div class="k">Current RSSI</div><div class="v">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'n/a')}</div>
+    <div class="k">STA IP</div><div class="v">${escapeHtml(st.sta_ip || 'n/a')}</div>
+    <div class="k">LAN mDNS</div><div class="v"><a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a></div>
+    <div class="section">Soft AP</div>
+    <div class="k">AP SSID</div><div class="v">${escapeHtml(st.ap_ssid)}</div>
+    <div class="k">AP IP</div><div class="v">${escapeHtml(st.ap_ip || 'n/a')}</div>
+    <div class="k">AP mDNS</div><div class="v"><a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a></div>`;
+ }
+ const t=document.getElementById('sensorTempTile');
+ if(t){
+  if(st.sensor_temp_detected && st.sensor_temp_valid){
+    t.innerText=`Temperature: ${Number(st.sensor_temp_c).toFixed(1)} C`;
+  }else if(st.sensor_temp_enabled){
+    t.innerText=`Temperature: ${st.sensor_temp_error || 'n/a'}`;
+  }else{
+    t.innerText='Temperature: disabled';
+  }
+ }
+ const rt=document.getElementById('sensorRemoteTempTile');
+ if(rt){
+  if(st.lora_remote_temp_valid){
+    rt.innerText=`Remote LoRa temp: ${Number(st.lora_remote_temp_c).toFixed(1)} C`;
+  }else{
+    rt.innerText='Remote LoRa temp: n/a';
+  }
+ }
+ const inTile=document.getElementById('sensorInputTile');
+ if(inTile){
+  const closed = Number(st.local_input_state) === 1;
+  inTile.innerHTML=`Dry contact input: <span class="sensor-state ${closed?'closed':'open'}">${closed?'CLOSED':'OPEN'}</span>`;
+ }
+ const sdState=document.getElementById('sensorDiagState');
+ const sdTemp=document.getElementById('sensorDiagTemp');
+ const sdAddr=document.getElementById('sensorDiagAddr');
+ const sdLast=document.getElementById('sensorDiagLast');
+ if(sdState && sdTemp && sdAddr && sdLast){
+  const enabled = !!st.sensor_temp_enabled;
+  const detected = !!st.sensor_temp_detected;
+  const valid = !!st.sensor_temp_valid;
+  if(!enabled){
+    sdState.innerText='DS18B20: disabled';
+    sdTemp.innerText='Temperature: n/a';
+    sdAddr.innerText='Address: n/a';
+    sdLast.innerText='Last read: n/a';
+  } else {
+    sdState.innerText = detected ? 'DS18B20: detected' : `DS18B20: not detected (${st.sensor_temp_error || 'unknown'})`;
+    sdTemp.innerText = valid ? `Temperature: ${Number(st.sensor_temp_c).toFixed(1)} C` : `Temperature: ${st.sensor_temp_error || 'n/a'}`;
+    sdAddr.innerText = `Address: ${st.sensor_temp_addr || 'n/a'}`;
+    const ageMs = Number(st.uptime_ms || 0) - Number(st.sensor_temp_last_read_ms || 0);
+    sdLast.innerText = Number(st.sensor_temp_last_read_ms || 0) > 0 ? `Last read: ${humanAgeMs(ageMs)}` : 'Last read: n/a';
+  }
+ }
+}
+async function apiJson(url, options){
+ let t=null;
+ try{
+  const merged=Object.assign({cache:'no-store',silent:false,timeoutMs:8000}, options||{});
+  const controller = new AbortController();
+  const timeoutMs = Number(merged.timeoutMs || 8000);
+  t = setTimeout(()=>controller.abort(), timeoutMs);
+  delete merged.timeoutMs;
+  merged.signal = controller.signal;
+  const res=await fetch(url,merged);
+  if(res.status===401){ location.href='/login?expired=1'; return null; }
+  if(!res.ok){ throw new Error(`HTTP ${res.status}`); }
+  return await res.json();
+ }catch(e){
+  if(!options || !options.silent){
+   const st=document.getElementById('statusTable');
+   if(st){ st.innerText=`API error: ${e.message}`; }
+  }
+  return null;
+ }finally{
+  if(t){ clearTimeout(t); }
+ }
+}
+async function logout(){
+ try{ await fetch('/api/logout',{method:'POST'}); }catch(e){}
+ location.href='/login?logged_out=1';
+}
+function setSessionLeft(seconds){
+ const el=document.getElementById('sessionLeft');
+ if(!el) return;
+ const s=Math.max(0,Math.floor(Number(seconds||0)));
+ const m=Math.floor(s/60);
+ const r=s%60;
+ el.innerText=`Session: ${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')} | HW: v1.2 | Batch: 251101`;
+}
+async function load(){
+  await refreshStatus();
+  const s=await apiJson('/api/settings');
+  if(!s) return;
+ Object.keys(s).forEach(k=>{
+  const el=document.getElementById(k);
+  if(!el) return;
+  if(el.type==='checkbox'){ el.checked=!!s[k]; return; }
+  el.value=String(s[k]);
+ });
+ updateDeploymentKeyStrength();
+ updateStaTestButtonState();
+ document.getElementById('role_tx').value = String(!!s.role_tx);
+ document.getElementById('role_tx_true').checked = !!s.role_tx;
+ document.getElementById('role_tx_false').checked = !s.role_tx;
+ document.getElementById('ap_always_on').checked = !!s.ap_always_on;
+ document.getElementById('mqtt_enabled').checked = !!s.mqtt_enabled;
+ document.getElementById('sensor_temp_enabled').checked = !!s.sensor_temp_enabled;
+ document.getElementById('lora_frequency_mhz').value=(Number(s.lora_frequency_hz)/1000000).toFixed(3);
+ refreshFreqPreset();
+ document.getElementById('heartbeat_s').value=Math.max(1,Math.round(Number(s.heartbeat_ms)/1000));
+ document.getElementById('ack_timeout_s').value=Math.max(1,Math.round(Number(s.ack_timeout_ms)/1000));
+ document.getElementById('local_address').value=String(s.local_address);
+ document.getElementById('remote_address').value=String(s.remote_address);
+ refreshRoleLabels();
+ refreshAddressHints();
+ refreshHostnamePreview();
+ await scanWifi();
+ const f=await apiJson('/api/factory');
+ if(!f) return;
+ document.getElementById('factory').innerText=JSON.stringify(f,null,2);
+ await refreshDiagnostics();
+}
+async function refreshLogs(){
+ const lv=document.getElementById('logView');
+ if(!lv) return;
+ try{
+  const res=await fetch('/api/logs.txt',{cache:'no-store'});
+  if(res.status===401){ location.href='/login?expired=1'; return; }
+  if(!res.ok){ throw new Error(`HTTP ${res.status}`); }
+  lv.innerText=await res.text();
+  lv.scrollTop=lv.scrollHeight;
+ }catch(e){
+  lv.innerText=`Log fetch failed: ${e.message}`;
+ }
+}
+async function scanWifi(){
+ const host=document.getElementById('wifi_scan_list');
+ host.innerHTML='Scanning...';
+ try{
+  const out=await apiJson('/api/wifi/scan');
+  if(!out){ host.innerHTML='Scan failed'; return; }
+  if(!out.networks || !out.networks.length){
+    host.innerHTML='No SSIDs found';
+    return;
+  }
+  out.networks.sort((a,b)=>Number(b.rssi)-Number(a.rssi));
+  host.innerHTML='<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th>Secure</th><th></th></tr></thead><tbody></tbody></table>';
+  const tbody=host.querySelector('tbody');
+  out.networks.forEach(n=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi,'scan')}${escapeHtml(n.rssi)} dBm</td><td><span class="sec-chip ${n.secure?'y':'n'}">${n.secure?'Y':'N'}</span></td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
+    tbody.appendChild(tr);
+  });
+  host.querySelectorAll('button[data-ssid]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.getElementById('wifi_sta_ssid').value=btn.getAttribute('data-ssid');
+      updateStaTestButtonState();
+    });
+  });
+ }catch(e){
+  host.innerHTML='Scan failed';
+ }
+}
+async function save(){
+ await saveAll();
+}
+async function postSettings(body, options){
+ const opts=Object.assign({skipReload:false}, options||{});
+ const btns=[...document.querySelectorAll('button')];
+ btns.forEach(b=>b.disabled=true);
+ showToast('Saving...');
+ let t=null;
+ try{
+  const controller = new AbortController();
+  t = setTimeout(()=>controller.abort(), 10000);
+  const res=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
+  if(res.status===401){ location.href='/login?expired=1'; return false; }
+  const text=await res.text();
+  if(!res.ok){
+   showToast(`Save failed: ${text}`, true);
+   return false;
+  }
+  showToast('Saved');
+  if(!opts.skipReload){
+   setTimeout(()=>{ load().catch(()=>{}); }, 150);
+  }
+  return true;
+ }catch(e){
+  showToast(`Save failed: ${e.message}`, true);
+  return false;
+ }finally{
+  if(t){ clearTimeout(t); }
+  btns.forEach(b=>b.disabled=false);
+ }
+}
+function collectLoraBody(){
+ const local=parseAddress(document.getElementById('local_address').value);
+ const remote=parseAddress(document.getElementById('remote_address').value);
+ if(!Number.isInteger(local)||local<1||local>254){alert('Local address must be 1..254 (decimal or 0xHEX).'); return;}
+ if(!Number.isInteger(remote)||remote<1||remote>254){alert('Remote address must be 1..254 (decimal or 0xHEX).'); return;}
+ const mhz=Number(document.getElementById('lora_frequency_mhz').value);
+ if(!Number.isFinite(mhz)||mhz<FREQ_MIN_MHZ||mhz>FREQ_MAX_MHZ){alert(`Frequency must be between ${FREQ_MIN_MHZ} and ${FREQ_MAX_MHZ} MHz.`); return;}
+ const hbSec=Math.floor(Number(document.getElementById('heartbeat_s').value));
+ const ackSec=Math.floor(Number(document.getElementById('ack_timeout_s').value));
+ if(!Number.isFinite(hbSec)||hbSec<60||hbSec>3600){alert('Heartbeat must be between 60 and 3600 seconds.'); return;}
+ if(!Number.isFinite(ackSec)||ackSec<5||ackSec>600){alert('ACK timeout must be between 5 and 600 seconds.'); return;}
+ const ids=['lora_tx_power','lora_spreading_factor','lora_bandwidth_hz','lora_coding_rate','fleet_passphrase'];
+ const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
+ body.fleet_passphrase=String(body.fleet_passphrase||'').trim();
+ if(body.fleet_passphrase.length < MIN_DEPLOYMENT_KEY_LEN){
+   alert(`Deployment Key must be at least ${MIN_DEPLOYMENT_KEY_LEN} characters.`);
+   return;
+ }
+ if(isDefaultDeploymentKey(body.fleet_passphrase)){
+   alert('Deployment Key cannot be the default value. Please set a unique installation key.');
+   return;
+ }
+ body.role_tx=document.getElementById('role_tx_true').checked;
+ body.local_address=local;
+ body.remote_address=remote;
+ body.tx_input_lora_control_enabled=document.getElementById('tx_input_lora_control_enabled').checked;
+ body.lora_frequency_hz=Math.round(mhz*1000000);
+ body.heartbeat_ms=hbSec*1000;
+ body.ack_timeout_ms=ackSec*1000;
+ return body;
+}
+function collectNetworkBody(){
+ const ids=['wifi_sta_ssid','wifi_sta_password','lan_hostname'];
+ const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
+ body.ap_always_on=document.getElementById('ap_always_on').checked;
+ return body;
+}
+function collectSystemBody(){
+ return {admin_password: document.getElementById('admin_password').value};
+}
+function collectMqttBody(){
+ const ids=['mqtt_host','mqtt_user','mqtt_password','mqtt_topic_root'];
+ const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
+ const portRaw=String(document.getElementById('mqtt_port').value||'').trim();
+ const port=Number(portRaw);
+ if(portRaw.length===0 || !Number.isFinite(port) || port<1 || port>65535){
+  alert('MQTT port must be in range 1..65535.');
+  return null;
+ }
+ body.mqtt_port=Math.floor(port);
+ body.mqtt_enabled=document.getElementById('mqtt_enabled').checked;
+ return body;
+}
+function collectSensorsBody(){
+ const ids=[];
+ const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
+ body.sensor_temp_enabled=document.getElementById('sensor_temp_enabled').checked;
+ return body;
+}
+async function saveLora(){
+ const body=collectLoraBody();
+ if(!body) return;
+ await postSettings(body);
+}
+async function saveNetwork(){
+ const body=collectNetworkBody();
+ const oldHost=normalizeLanHost(currentLanMdns);
+ const newHost=normalizeLanHost(body.lan_hostname);
+ const hostChanged=oldHost.length>0 && newHost.length>0 && oldHost!==newHost;
+ const shouldRedirect=hostChanged && isLikelyStaSessionPath();
+ const ok=await postSettings(body,{skipReload:shouldRedirect});
+ if(!ok) return;
+ if(shouldRedirect){
+  startLanHostnameRedirect(newHost);
+ }
+}
+async function saveSystem(){
+ await postSettings(collectSystemBody());
+}
+async function saveMqtt(){
+ const body=collectMqttBody();
+ if(!body) return;
+ await postSettings(body);
+}
+async function saveSensors(){
+ await postSettings(collectSensorsBody());
+}
+async function saveAll(){
+ const lora=collectLoraBody();
+ if(!lora) return;
+ const mqtt=collectMqttBody();
+ if(!mqtt) return;
+ await postSettings(Object.assign({}, lora, collectNetworkBody(), mqtt, collectSensorsBody(), collectSystemBody()));
+}
+async function reboot(){await fetch('/api/reboot',{method:'POST'});}
+async function testSta(){
+ const btn=document.getElementById('btnTestSta');
+ const el=document.getElementById('netTestResult');
+ if(!el) return;
+ if(btn && btn.disabled) return;
+ const requestedSsid=normalizedInputValue('wifi_sta_ssid');
+ if(staIsConnected && requestedSsid.length && requestedSsid!==connectedStaSsid && isLikelyStaSessionPath()){
+  const apHint=currentApIp ? `http://${currentApIp}` : (currentApMdns ? `http://${currentApMdns}` : 'the Soft AP URL');
+  const msg=`Cannot test a different SSID from current LAN session (it drops this connection). Join device Soft AP and retry via ${apHint}.`;
+  el.className='result-line show err';
+  el.innerText=msg;
+  showToast('Use Soft AP for cross-SSID test', true);
+  return;
+ }
+ staTestInFlight = true;
+ updateStaTestButtonState();
+ if(btn){ btn.innerText='Testing...'; }
+ el.className='result-line show';
+ el.innerText='Testing STA connection...';
+ showToast('Testing STA connection...');
+ const out=await apiJson('/api/network/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collectNetworkBody())});
+ staTestInFlight = false;
+ if(btn){ btn.innerText='Test STA connect'; }
+ updateStaTestButtonState();
+ if(!out){
+  const st=await apiJson('/api/status',{silent:true,timeoutMs:5000});
+  if(st && st.sta_connected && String(st.sta_ssid || '').trim()===requestedSsid){
+   const msg=`STA connect OK${st.sta_rssi?` (${st.sta_rssi} dBm)`:''}`;
+   el.className='result-line show ok';
+   el.innerText=msg;
+   showToast(msg);
+   return;
+  }
+  el.className='result-line show err';
+  el.innerText='STA test failed';
+  showToast('STA test failed', true);
+  return;
+ }
+ if(out.ok){
+  const msg=`STA connect OK${out.rssi?` (${out.rssi} dBm)`:''}`;
+  el.className='result-line show ok';
+  el.innerText=msg;
+  showToast(msg);
+ }else{
+  const msg=`STA connect failed: ${out.status_text} [${out.status_code}]`;
+  el.className='result-line show err';
+  el.innerText=msg;
+  showToast(msg, true);
+ }
+}
+async function testMqtt(){
+ const body=collectMqttBody();
+ if(!body) return;
+ const out=await apiJson('/api/mqtt/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const el=document.getElementById('mqttTestResult');
+ if(!el) return;
+ const target=(out && out.host) ? `${out.host}:${out.port}` : `${body.mqtt_host}:${body.mqtt_port}`;
+ if(!out){
+  el.className='result-line show err';
+  el.innerText='Broker test failed';
+  showToast('Broker test failed', true);
+  return;
+ }
+ if(out.ok){
+  const msg=`Broker connection OK (${target})`;
+  el.className='result-line show ok';
+  el.innerText=msg;
+  showToast(msg);
+ }else{
+  const msg=`Broker connection failed (${target}, state ${out.state})`;
+  el.className='result-line show err';
+  el.innerText=msg;
+  showToast(msg, true);
+ }
+}
+async function refreshDiagnostics(){
+ const d=await apiJson('/api/diagnostics',{silent:true});
+ const host=document.getElementById('diagGrid');
+ const txt=document.getElementById('diagText');
+ if(!host||!txt) return;
+ if(!d){ host.innerHTML='Diagnostics unavailable'; return; }
+ host.innerHTML = `
+  <div class="sensor-tile">LoRa TX: ${d.lora_tx_packets}</div>
+  <div class="sensor-tile">ACK OK: ${d.ack_ok}</div>
+  <div class="sensor-tile">ACK Timeout: ${d.ack_timeout}</div>
+  <div class="sensor-tile">Replay Drops: ${d.replay_drop}</div>
+  <div class="sensor-tile">STA Connect Attempts: ${d.wifi_connect_attempts}</div>
+  <div class="sensor-tile">STA Connect Failures: ${d.wifi_connect_fail}</div>
+  <div class="sensor-tile">STA Disconnects: ${d.wifi_disconnects}</div>
+  <div class="sensor-tile">STA State: ${d.sta_status_text} [${d.sta_status_code}]</div>`;
+ txt.innerText=`Last save: ${d.audit_last_saved_by} at ${d.audit_last_saved_ms} ms | Last reboot: ${d.audit_last_reboot_reason} at ${d.audit_last_reboot_ms} ms | Boot count: ${d.audit_boot_count}`;
+}
+async function importConfig(file){
+ if(!file) return;
+ try{
+  const text=await file.text();
+  const body=JSON.parse(text);
+  const out=await fetch('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!out.ok){ showToast(`Import failed: ${await out.text()}`, true); return; }
+  showToast('Import saved');
+  await load();
+ }catch(e){ showToast(`Import failed: ${e.message}`, true); }
+}
+async function uploadOta(){
+ const f=document.getElementById('otaFile').files[0];
+ const el=document.getElementById('otaResult');
+ if(!f){ if(el) el.innerText='Select .bin file'; return; }
+ if(el) el.innerText='Uploading...';
+ const fd=new FormData();
+ fd.append('firmware', f);
+ try{
+  const res=await fetch('/api/ota',{method:'POST',body:fd});
+  const t=await res.text();
+  if(!res.ok){ if(el) el.innerText=`OTA failed: ${t}`; return; }
+  if(el) el.innerText='OTA complete, rebooting...';
+ }catch(e){ if(el) el.innerText=`OTA failed: ${e.message}`; }
+}
+window.addEventListener('error', (e) => {
+ const st=document.getElementById('statusTable');
+ if(st){ st.innerText=`UI error: ${e.message}`; }
+});
+function initPage(){
+ const role=document.getElementById('role_tx');
+  const local=document.getElementById('local_address');
+  const remote=document.getElementById('remote_address');
+ const host=document.getElementById('lan_hostname');
+ const staSsid=document.getElementById('wifi_sta_ssid');
+ const staPass=document.getElementById('wifi_sta_password');
+ const roleTx=document.getElementById('role_tx_true');
+ const roleRx=document.getElementById('role_tx_false');
+ const fleetKey=document.getElementById('fleet_passphrase');
+ const syncRole=()=>{ if(role){ role.value = roleTx.checked ? 'true' : 'false'; refreshRoleLabels(); } };
+ if(roleTx) roleTx.addEventListener('change',syncRole);
+ if(roleRx) roleRx.addEventListener('change',syncRole);
+ if(local) local.addEventListener('input',refreshAddressHints);
+ if(remote) remote.addEventListener('input',refreshAddressHints);
+ if(host) host.addEventListener('input',refreshHostnamePreview);
+ if(fleetKey) fleetKey.addEventListener('input',updateDeploymentKeyStrength);
+ if(staSsid) staSsid.addEventListener('input',updateStaTestButtonState);
+ if(staPass) staPass.addEventListener('input',updateStaTestButtonState);
+ bindFreqPreset();
+ syncRole();
+ updateDeploymentKeyStrength();
+ try{ applyTheme(localStorage.getItem('lrs_theme') === 'light' ? 'light' : 'dark'); }catch(e){ applyTheme('dark'); }
+ showPage('status');
+  load();
+ setInterval(()=>{ refreshStatus(); if(activePage==='logs') refreshLogs(); },3000);
+ setInterval(async ()=>{ const s=await apiJson('/api/session',{silent:true}); if(s&&s.ok){ setSessionLeft(s.remaining_s); } },1000);
+}
+initPage();
+</script></body></html>
+)HTML";
+
+const char *linkStateText(LinkState st) {
+  switch (st) {
+    case LinkState::Boot:
+      return "boot";
+    case LinkState::Idle:
+      return "idle";
+    case LinkState::WaitAck:
+      return "wait_ack";
+    case LinkState::Timeout:
+      return "timeout";
+  }
+  return "unknown";
+}
+}
+
+bool WebConsole::begin(ConfigStore *config,
+                       NodeStateMachine *sm,
+                       SensorManager *sensors,
+                       LogBuffer *logs,
+                       std::function<void(bool, bool)> onApply) {
+  config_ = config;
+  sm_ = sm;
+  sensors_ = sensors;
+  logs_ = logs;
+  on_apply_ = onApply;
+  server_.collectHeaders("Cookie");
+
+  routes();
+  server_.begin();
+  return true;
+}
+
+void WebConsole::tick() { server_.handleClient(); }
+
+bool WebConsole::hasSession() const {
+  if (session_token_.length() == 0) return false;
+  if (session_expires_ms_ == 0) return false;
+  return static_cast<int32_t>(session_expires_ms_ - millis()) > 0;
+}
+
+void WebConsole::clearSession() {
+  session_token_ = "";
+  session_expires_ms_ = 0;
+}
+
+String WebConsole::cookieValue(const String &name) const {
+  const String raw = server_.header("Cookie");
+  if (raw.length() == 0) return "";
+  const String needle = name + "=";
+  int p = raw.indexOf(needle);
+  if (p < 0) return "";
+  p += needle.length();
+  int e = raw.indexOf(';', p);
+  if (e < 0) e = raw.length();
+  String v = raw.substring(p, e);
+  v.trim();
+  return v;
+}
+
+String WebConsole::randomToken() const {
+  char out[33];
+  for (size_t i = 0; i < 16; i++) {
+    const uint8_t b = static_cast<uint8_t>(::random(0, 256));
+    snprintf(out + (i * 2), 3, "%02x", b);
+  }
+  out[32] = '\0';
+  return String(out);
+}
+
+void WebConsole::startSession() {
+  session_token_ = randomToken();
+  session_expires_ms_ = millis() + (30UL * 60UL * 1000UL);
+  server_.sendHeader("Set-Cookie", "lrs_session=" + session_token_ + "; Path=/; HttpOnly; SameSite=Lax");
+}
+
+uint32_t WebConsole::sessionRemainingS() const {
+  if (!hasSession()) return 0;
+  return static_cast<uint32_t>((session_expires_ms_ - millis()) / 1000UL);
+}
+
+bool WebConsole::requireAuth(bool api) {
+  if (locked_until_ms_ != 0 && static_cast<int32_t>(locked_until_ms_ - millis()) > 0) {
+    if (api) {
+      server_.send(429, "application/json", "{\"error\":\"too_many_failed_logins\"}");
+    } else {
+      server_.send(429, "text/plain", "Too many failed logins. Try again shortly.");
+    }
+    return false;
+  }
+
+  if (!hasSession()) {
+    if (api) {
+      server_.send(401, "application/json", "{\"error\":\"auth_required\"}");
+    } else {
+      server_.sendHeader("Location", "/login?expired=1");
+      server_.send(302, "text/plain", "redirect");
+    }
+    return false;
+  }
+
+  const String cookie = cookieValue("lrs_session");
+  if (cookie.length() == 0 || cookie != session_token_) {
+    clearSession();
+    if (api) {
+      server_.send(401, "application/json", "{\"error\":\"auth_required\"}");
+    } else {
+      server_.sendHeader("Location", "/login?expired=1");
+      server_.send(302, "text/plain", "redirect");
+    }
+    return false;
+  }
+  session_expires_ms_ = millis() + (30UL * 60UL * 1000UL);
+  failed_auth_ = 0;
+  return true;
+}
+
+bool WebConsole::isSoftApActive() const { return softApActiveNow(); }
+
+void WebConsole::handleCaptiveProbe() {
+  if (!isSoftApActive()) {
+    server_.send(204, "text/plain", "");
+    return;
+  }
+  server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  server_.sendHeader("Pragma", "no-cache");
+  server_.sendHeader("Location", "http://192.168.4.1/");
+  server_.send(302, "text/plain", "Redirecting to LRS console");
+}
+
+void WebConsole::routes() {
+  server_.on("/", HTTP_GET, [this]() { handleIndex(); });
+  server_.on("/login", HTTP_GET, [this]() { handleLoginPage(); });
+  server_.on("/api/login", HTTP_POST, [this]() { handleLoginApi(); });
+  server_.on("/api/logout", HTTP_POST, [this]() { handleLogoutApi(); });
+  server_.on("/api/session", HTTP_GET, [this]() { handleSessionApi(); });
+  server_.on("/generate_204", HTTP_GET, [this]() { handleCaptiveProbe(); });       // Android
+  server_.on("/gen_204", HTTP_GET, [this]() { handleCaptiveProbe(); });            // Android (variant)
+  server_.on("/hotspot-detect.html", HTTP_GET, [this]() { handleCaptiveProbe(); });  // Apple
+  server_.on("/ncsi.txt", HTTP_GET, [this]() { handleCaptiveProbe(); });           // Windows
+  server_.on("/connecttest.txt", HTTP_GET, [this]() { handleCaptiveProbe(); });    // Windows
+  server_.on("/fwlink", HTTP_GET, [this]() { handleCaptiveProbe(); });             // Windows
+  server_.on("/api/status", HTTP_GET, [this]() {
+    if (!requireAuth(true)) return;
+    handleStatus();
+  });
+  server_.on("/api/factory", HTTP_GET, [this]() {
+    if (!requireAuth(true)) return;
+    handleFactory();
+  });
+  server_.on("/api/diagnostics", HTTP_GET, [this]() {
+    if (!requireAuth(true)) return;
+    handleDiagnostics();
+  });
+  server_.on("/api/wifi/scan", HTTP_GET, [this]() {
+    if (!requireAuth(true)) return;
+    DynamicJsonDocument doc(2048);
+    JsonArray arr = doc.createNestedArray("networks");
+    const int count = WiFi.scanNetworks(false, true);
+    for (int i = 0; i < count; i++) {
+      const String ssid = WiFi.SSID(i);
+      if (ssid.length() == 0) continue;
+      if (isOwnLrsSoftApLike(ssid)) continue;
+      JsonObject n = arr.createNestedObject();
+      n["ssid"] = ssid;
+      n["rssi"] = WiFi.RSSI(i);
+      n["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
+    }
+    WiFi.scanDelete();
+    String out;
+    serializeJson(doc, out);
+    server_.send(200, "application/json", out);
+  });
+  server_.on("/api/network/test", HTTP_POST, [this]() { handleTestSta(); });
+  server_.on("/api/mqtt/test", HTTP_POST, [this]() { handleTestMqtt(); });
+  server_.on("/api/settings", HTTP_GET, [this]() {
+    if (!requireAuth(true)) return;
+    handleGetSettings();
+  });
+  server_.on("/api/settings", HTTP_POST, [this]() { handlePostSettings(); });
+  server_.on("/api/settings/export", HTTP_GET, [this]() { handleExportSettings(); });
+  server_.on("/api/settings/import", HTTP_POST, [this]() { handleImportSettings(); });
+  server_.on(
+      "/api/ota", HTTP_POST, [this]() { handleOtaUpload(); }, [this]() { handleOtaUploadChunk(); });
+  server_.on("/api/logs.csv", HTTP_GET, [this]() { handleLogsCsv(); });
+  server_.on("/api/logs.txt", HTTP_GET, [this]() { handleLogsText(); });
+  server_.on("/api/reboot", HTTP_POST, [this]() { handleReboot(); });
+  server_.onNotFound([this]() {
+    if (isSoftApActive()) {
+      handleCaptiveProbe();
+      return;
+    }
+    server_.send(404, "text/plain", "not found");
+  });
+}
+
+void WebConsole::handleIndex() {
+  if (!requireAuth(false)) return;
+  server_.send_P(200, "text/html", kIndexHtml);
+}
+
+void WebConsole::handleLoginPage() { server_.send_P(200, "text/html", kLoginHtml); }
+
+void WebConsole::handleLoginApi() {
+  if (locked_until_ms_ != 0 && static_cast<int32_t>(locked_until_ms_ - millis()) > 0) {
+    server_.send(429, "application/json", "{\"error\":\"Too many failed logins. Try again shortly.\"}");
+    return;
+  }
+
+  DynamicJsonDocument doc(256);
+  auto err = deserializeJson(doc, server_.arg("plain"));
+  if (err) {
+    server_.send(400, "application/json", "{\"error\":\"invalid json\"}");
+    return;
+  }
+  const String posted = String(static_cast<const char *>(doc["password"] | ""));
+  if (posted != config_->settings().admin_password) {
+    failed_auth_++;
+    if (failed_auth_ >= 5) {
+      locked_until_ms_ = millis() + 60000;
+      failed_auth_ = 0;
+    }
+    server_.send(401, "application/json", "{\"error\":\"Invalid password\"}");
+    return;
+  }
+
+  failed_auth_ = 0;
+  locked_until_ms_ = 0;
+  startSession();
+  server_.send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebConsole::handleLogoutApi() {
+  clearSession();
+  server_.sendHeader("Set-Cookie", "lrs_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+  server_.send(200, "application/json", "{\"ok\":true}");
+}
+
+void WebConsole::handleSessionApi() {
+  DynamicJsonDocument doc(128);
+  const bool ok = hasSession() && cookieValue("lrs_session") == session_token_;
+  doc["ok"] = ok;
+  doc["remaining_s"] = ok ? sessionRemainingS() : 0;
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleStatus() {
+  DynamicJsonDocument doc(512);
+  auto &cfg = config_->settings();
+  const wl_status_t st = WiFi.status();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["link_state"] = linkStateText(sm_->linkState());
+  doc["relay_state"] = sm_->relayState();
+  doc["input_state"] = sm_->inputState();
+  doc["local_input_state"] = sm_->localDryContactState();
+  doc["lora_last_rssi"] = sm_->lastPacketRssi();
+  doc["lora_last_packet_ms"] = sm_->lastPacketMs();
+  doc["lora_last_tx_ms"] = sm_->lastTxMs();
+  doc["lora_remote_temp_valid"] = sm_->remoteTemperatureValid();
+  doc["lora_remote_temp_c"] = sm_->remoteTemperatureC();
+  doc["lora_remote_temp_ms"] = sm_->remoteTemperatureMs();
+  doc["sta_connected"] = WiFi.isConnected();
+  doc["sta_ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
+  doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
+  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
+  doc["sta_status_code"] = static_cast<int>(st);
+  doc["sta_status_text"] = wifiStatusText(st);
+  doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
+
+  doc["sta_target_rssi"] = -127;
+  doc["sta_target_rssi_text"] = "disabled";
+  doc["uptime_ms"] = millis();
+  String relayReason = "boot";
+  if (cfg.role_tx) {
+    if (sm_->relayState() == 0) {
+      if (sm_->inputState() == 0) {
+        relayReason = "input_open";
+      } else if (sm_->linkState() == LinkState::Timeout) {
+        relayReason = "ack_timeout";
+      } else if (sm_->linkState() == LinkState::WaitAck) {
+        relayReason = "wait_ack";
+      } else if (sm_->lastPacketMs() == 0) {
+        relayReason = "no_lora_link";
+      } else {
+        relayReason = "no_lora_link";
+      }
+    } else {
+      relayReason = "ok";
+    }
+  } else {
+    const bool relayOn = sm_->relayState() != 0;
+    switch (sm_->lastRxControlSource()) {
+      case RxControlSource::Mqtt:
+        relayReason = relayOn ? "mqtt_on" : "mqtt_off";
+        break;
+      case RxControlSource::LoRa:
+        relayReason = relayOn ? "lora_on" : "lora_off";
+        break;
+      default:
+        relayReason = "boot";
+        break;
+    }
+  }
+  doc["relay_reason"] = relayReason;
+  doc["deployment_key"] = cfg.fleet_passphrase;
+  doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
+
+  doc["ap_ssid"] = config_->apSsid();
+  doc["ap_ip"] = WiFi.softAPIP().toString();
+  doc["mdns_ap"] = "lrs.local";
+  doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
+  doc["fw_version"] = LRS_FW_VERSION;
+  doc["fw_git_sha"] = LRS_GIT_SHA;
+  doc["fw_git_branch"] = LRS_GIT_BRANCH;
+  doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
+  doc["fw_build_id"] = LRS_BUILD_ID;
+  doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
+  const String fwVersion = String(LRS_FW_VERSION);
+  if (LRS_GIT_DIRTY == 0) {
+    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ")";
+  } else {
+    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ", dirty)";
+  }
+  doc["build_date"] = __DATE__;
+  doc["build_time"] = __TIME__;
+  doc["session_remaining_s"] = sessionRemainingS();
+  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
+  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
+  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
+  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
+  doc["audit_boot_count"] = cfg.audit_boot_count;
+
+  if (sensors_) {
+    const TempSensorStatus ts = sensors_->tempStatus();
+    doc["sensor_temp_enabled"] = ts.enabled;
+    doc["sensor_temp_detected"] = ts.detected;
+    doc["sensor_temp_valid"] = ts.valid;
+    doc["sensor_temp_c"] = ts.celsius;
+    doc["sensor_temp_addr"] = ts.address;
+    doc["sensor_temp_error"] = ts.error;
+    doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
+  }
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleFactory() {
+  DynamicJsonDocument doc(512);
+  auto &cfg = config_->settings();
+  doc["serial"] = cfg.factory_serial;
+  doc["chip_id"] = config_->chipIdHex();
+  doc["mac"] = WiFi.softAPmacAddress();
+  doc["factory_role"] = cfg.role_tx ? "tx" : "rx";
+  doc["factory_local_address"] = cfg.local_address;
+  doc["factory_remote_address"] = cfg.remote_address;
+  doc["factory_ap_ssid"] = config_->apSsid();
+  doc["factory_ap_password"] = config_->apPassword();
+  doc["hardware_version"] = kHardwareVersion;
+  doc["hardware_batch"] = kHardwareBatch;
+  doc["fw_version"] = LRS_FW_VERSION;
+  doc["fw_git_sha"] = LRS_GIT_SHA;
+  doc["fw_git_branch"] = LRS_GIT_BRANCH;
+  doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
+  doc["fw_build_id"] = LRS_BUILD_ID;
+  doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
+  doc["build_date"] = __DATE__;
+  doc["build_time"] = __TIME__;
+  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
+  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
+  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
+  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
+  doc["audit_boot_count"] = cfg.audit_boot_count;
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleGetSettings() {
+  DynamicJsonDocument doc(1024);
+  auto &cfg = config_->settings();
+  doc["role_tx"] = cfg.role_tx;
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
+  doc["lora_frequency_hz"] = cfg.lora_frequency_hz;
+  doc["lora_tx_power"] = cfg.lora_tx_power;
+  doc["lora_spreading_factor"] = cfg.lora_spreading_factor;
+  doc["lora_bandwidth_hz"] = cfg.lora_bandwidth_hz;
+  doc["lora_coding_rate"] = cfg.lora_coding_rate;
+  doc["heartbeat_ms"] = cfg.heartbeat_ms;
+  doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
+  doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
+  doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
+  doc["wifi_sta_password"] = cfg.wifi_sta_password;
+  doc["lan_hostname"] = cfg.lan_hostname;
+  doc["fleet_passphrase"] = cfg.fleet_passphrase;
+  doc["admin_password"] = cfg.admin_password;
+  doc["ap_always_on"] = cfg.ap_always_on;
+  doc["mqtt_enabled"] = cfg.mqtt_enabled;
+  doc["mqtt_host"] = cfg.mqtt_host;
+  doc["mqtt_port"] = cfg.mqtt_port;
+  doc["mqtt_user"] = cfg.mqtt_user;
+  doc["mqtt_password"] = cfg.mqtt_password;
+  doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
+  doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
+  doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
+  doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handlePostSettings() {
+  if (!requireAuth(true)) return;
+
+  DynamicJsonDocument doc(1536);
+  auto err = deserializeJson(doc, server_.arg("plain"));
+  if (err) {
+    server_.send(400, "text/plain", "invalid json");
+    return;
+  }
+
+  auto &cfg = config_->settings();
+  const String prevStaSsid = cfg.wifi_sta_ssid;
+  const String prevStaPassword = cfg.wifi_sta_password;
+  const String prevLanHost = cfg.lan_hostname;
+  const bool prevApAlwaysOn = cfg.ap_always_on;
+  const String prevAdminPassword = cfg.admin_password;
+  const bool oldRoleTx = cfg.role_tx;
+  const String oldDefaultHost = config_->defaultLanHostnameForRole(oldRoleTx);
+  const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
+  const String oldLegacyRoleTxHost = oldLegacyDefaultHost + "-tx";
+  const String oldLegacyRoleRxHost = oldLegacyDefaultHost + "-rx";
+  cfg.role_tx = parseBoolField(doc["role_tx"], cfg.role_tx);
+  cfg.local_address = parseAddressField(doc["local_address"], cfg.local_address);
+  cfg.remote_address = parseAddressField(doc["remote_address"], cfg.remote_address);
+  cfg.lora_frequency_hz = doc["lora_frequency_hz"] | cfg.lora_frequency_hz;
+  cfg.lora_tx_power = static_cast<uint8_t>(doc["lora_tx_power"] | cfg.lora_tx_power);
+  cfg.lora_spreading_factor = static_cast<uint8_t>(doc["lora_spreading_factor"] | cfg.lora_spreading_factor);
+  cfg.lora_bandwidth_hz = doc["lora_bandwidth_hz"] | cfg.lora_bandwidth_hz;
+  cfg.lora_coding_rate = static_cast<uint8_t>(doc["lora_coding_rate"] | cfg.lora_coding_rate);
+  cfg.heartbeat_ms = doc["heartbeat_ms"] | cfg.heartbeat_ms;
+  cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
+  cfg.tx_input_lora_control_enabled = parseBoolField(doc["tx_input_lora_control_enabled"], cfg.tx_input_lora_control_enabled);
+  cfg.wifi_sta_ssid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str()));
+  cfg.wifi_sta_password = String(static_cast<const char *>(doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str()));
+  const String postedLanHost = String(static_cast<const char *>(doc["lan_hostname"] | cfg.lan_hostname.c_str()));
+  const bool wasDefaultHostname = (cfg.lan_hostname == oldDefaultHost) || (cfg.lan_hostname == oldLegacyDefaultHost) ||
+                                  (cfg.lan_hostname == oldLegacyRoleTxHost) || (cfg.lan_hostname == oldLegacyRoleRxHost);
+  if (wasDefaultHostname && (postedLanHost == oldDefaultHost || postedLanHost == oldLegacyDefaultHost ||
+                             postedLanHost == oldLegacyRoleTxHost || postedLanHost == oldLegacyRoleRxHost)) {
+    cfg.lan_hostname = config_->defaultLanHostnameForRole(cfg.role_tx);
+  } else {
+    cfg.lan_hostname = postedLanHost;
+  }
+  cfg.fleet_passphrase = String(static_cast<const char *>(doc["fleet_passphrase"] | cfg.fleet_passphrase.c_str()));
+  cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
+  cfg.mqtt_enabled = parseBoolField(doc["mqtt_enabled"], cfg.mqtt_enabled);
+  cfg.mqtt_host = String(static_cast<const char *>(doc["mqtt_host"] | cfg.mqtt_host.c_str()));
+  cfg.mqtt_port = static_cast<uint16_t>(doc["mqtt_port"] | cfg.mqtt_port);
+  cfg.mqtt_user = String(static_cast<const char *>(doc["mqtt_user"] | cfg.mqtt_user.c_str()));
+  cfg.mqtt_password = String(static_cast<const char *>(doc["mqtt_password"] | cfg.mqtt_password.c_str()));
+  cfg.mqtt_topic_root = String(static_cast<const char *>(doc["mqtt_topic_root"] | cfg.mqtt_topic_root.c_str()));
+  cfg.sensor_temp_enabled = parseBoolField(doc["sensor_temp_enabled"], cfg.sensor_temp_enabled);
+  cfg.sensor_temp_pin = 0;
+  cfg.sensor_temp_interval_s = static_cast<uint16_t>(doc["sensor_temp_interval_s"] | cfg.sensor_temp_interval_s);
+
+  String newAdmin = String(static_cast<const char *>(doc["admin_password"] | cfg.admin_password.c_str()));
+  if (newAdmin.length() >= 8) {
+    cfg.admin_password = newAdmin;
+  }
+
+  if (cfg.local_address < 1) cfg.local_address = 1;
+  if (cfg.local_address > 254) cfg.local_address = 254;
+  if (cfg.remote_address < 1) cfg.remote_address = 1;
+  if (cfg.remote_address > 254) cfg.remote_address = 254;
+  cfg.fleet_passphrase.trim();
+  const bool allowDefaultDeploymentKey = parseBoolField(doc["allow_default_deployment_key"], false);
+  if (cfg.fleet_passphrase.length() < kMinDeploymentKeyLen) {
+    server_.send(400, "text/plain",
+                 String("deployment key too short (min ") + String(static_cast<unsigned>(kMinDeploymentKeyLen)) +
+                     " chars)");
+    return;
+  }
+  if (!allowDefaultDeploymentKey && isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+    server_.send(400, "text/plain", "deployment key cannot be default; set unique key");
+    return;
+  }
+  if (cfg.lora_frequency_hz < kMinFrequencyHz || cfg.lora_frequency_hz > kMaxFrequencyHz) {
+    cfg.lora_frequency_hz = kDefaultFrequencyHz;
+  }
+  if (cfg.heartbeat_ms < kMinHeartbeatMs) cfg.heartbeat_ms = kMinHeartbeatMs;
+  if (cfg.heartbeat_ms > kMaxHeartbeatMs) cfg.heartbeat_ms = kMaxHeartbeatMs;
+  if (cfg.ack_timeout_ms < kMinAckTimeoutMs) cfg.ack_timeout_ms = kMinAckTimeoutMs;
+  if (cfg.ack_timeout_ms > kMaxAckTimeoutMs) cfg.ack_timeout_ms = kMaxAckTimeoutMs;
+  if (cfg.mqtt_port == 0) cfg.mqtt_port = 1883;
+  if (cfg.mqtt_topic_root.length() == 0) cfg.mqtt_topic_root = "lora";
+  cfg.sensor_temp_pin = 0;
+  if (cfg.sensor_temp_interval_s < 2) cfg.sensor_temp_interval_s = 2;
+  if (cfg.sensor_temp_interval_s > 300) cfg.sensor_temp_interval_s = 300;
+  cfg.audit_last_saved_by = "admin";
+  cfg.audit_last_saved_ms = millis();
+
+  if (!config_->save()) {
+    server_.send(500, "text/plain", "save failed");
+    return;
+  }
+
+  const bool networkChanged = (cfg.wifi_sta_ssid != prevStaSsid) ||
+                              (cfg.wifi_sta_password != prevStaPassword) ||
+                              (cfg.lan_hostname != prevLanHost) ||
+                              (cfg.ap_always_on != prevApAlwaysOn);
+  const bool otaAuthChanged = (cfg.admin_password != prevAdminPassword);
+  if (on_apply_) on_apply_(networkChanged, otaAuthChanged);
+  server_.send(200, "text/plain", "saved");
+}
+
+void WebConsole::handleExportSettings() {
+  if (!requireAuth(true)) return;
+  server_.sendHeader("Content-Disposition", "attachment; filename=lrs-config.json");
+  DynamicJsonDocument doc(2048);
+  auto &cfg = config_->settings();
+  doc["role_tx"] = cfg.role_tx;
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
+  doc["lora_frequency_hz"] = cfg.lora_frequency_hz;
+  doc["lora_tx_power"] = cfg.lora_tx_power;
+  doc["lora_spreading_factor"] = cfg.lora_spreading_factor;
+  doc["lora_bandwidth_hz"] = cfg.lora_bandwidth_hz;
+  doc["lora_coding_rate"] = cfg.lora_coding_rate;
+  doc["heartbeat_ms"] = cfg.heartbeat_ms;
+  doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
+  doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
+  doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
+  doc["wifi_sta_password"] = cfg.wifi_sta_password;
+  doc["lan_hostname"] = cfg.lan_hostname;
+  doc["fleet_passphrase"] = cfg.fleet_passphrase;
+  doc["admin_password"] = cfg.admin_password;
+  doc["ap_always_on"] = cfg.ap_always_on;
+  doc["mqtt_enabled"] = cfg.mqtt_enabled;
+  doc["mqtt_host"] = cfg.mqtt_host;
+  doc["mqtt_port"] = cfg.mqtt_port;
+  doc["mqtt_user"] = cfg.mqtt_user;
+  doc["mqtt_password"] = cfg.mqtt_password;
+  doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
+  doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
+  doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
+  doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
+  String out;
+  serializeJsonPretty(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleImportSettings() { handlePostSettings(); }
+
+void WebConsole::handleDiagnostics() {
+  DynamicJsonDocument doc(1024);
+  uint32_t loraTx = 0;
+  uint32_t ackOk = 0;
+  uint32_t ackTimeout = 0;
+  uint32_t replayDrop = 0;
+  uint32_t wifiConnectAttempts = 0;
+  uint32_t wifiConnectFail = 0;
+  uint32_t wifiDisconnects = 0;
+
+  for (const auto &e : logs_->entries()) {
+    if (e.event == "tx_packet") loraTx++;
+    if (e.event == "tx_ack") ackOk++;
+    if (e.event == "tx_ack_timeout") ackTimeout++;
+    if (e.event == "rx_replay_drop") replayDrop++;
+    if (e.event == "sta_connect_start") wifiConnectAttempts++;
+    if (e.event == "sta_connect_failed_fallback_ap") wifiConnectFail++;
+    if (e.event == "sta_disconnected") wifiDisconnects++;
+  }
+
+  auto &cfg = config_->settings();
+  const wl_status_t st = WiFi.status();
+  doc["lora_tx_packets"] = loraTx;
+  doc["ack_ok"] = ackOk;
+  doc["ack_timeout"] = ackTimeout;
+  doc["replay_drop"] = replayDrop;
+  doc["wifi_connect_attempts"] = wifiConnectAttempts;
+  doc["wifi_connect_fail"] = wifiConnectFail;
+  doc["wifi_disconnects"] = wifiDisconnects;
+  doc["sta_status_code"] = static_cast<int>(st);
+  doc["sta_status_text"] = wifiStatusText(st);
+  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
+  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
+  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
+  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
+  doc["audit_boot_count"] = cfg.audit_boot_count;
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleTestSta() {
+  if (!requireAuth(true)) return;
+  DynamicJsonDocument body(512);
+  auto err = deserializeJson(body, server_.arg("plain"));
+  if (err) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid json\"}");
+    return;
+  }
+
+  const String ssid = String(static_cast<const char *>(body["wifi_sta_ssid"] | config_->settings().wifi_sta_ssid.c_str()));
+  const String pass = String(static_cast<const char *>(body["wifi_sta_password"] | config_->settings().wifi_sta_password.c_str()));
+  if (ssid.length() == 0) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"ssid required\"}");
+    return;
+  }
+
+  const auto &cfg = config_->settings();
+  const bool alreadyConnectedSameSsid = WiFi.isConnected() && WiFi.SSID() == ssid;
+  const bool sameAsConfigured = (ssid == cfg.wifi_sta_ssid) && (pass == cfg.wifi_sta_password);
+  if (alreadyConnectedSameSsid && sameAsConfigured) {
+    DynamicJsonDocument doc(256);
+    doc["ok"] = true;
+    doc["status_code"] = static_cast<int>(WL_CONNECTED);
+    doc["status_text"] = wifiStatusText(WL_CONNECTED);
+    doc["ip"] = WiFi.localIP().toString();
+    doc["rssi"] = WiFi.RSSI();
+    String out;
+    serializeJson(doc, out);
+    server_.send(200, "application/json", out);
+    return;
+  }
+
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  wl_status_t st = WL_IDLE_STATUS;
+  for (int i = 0; i < 120; i++) {
+    delay(100);
+    yield();
+    st = WiFi.status();
+    if (st == WL_CONNECTED) break;
+    if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) break;
+  }
+
+  DynamicJsonDocument doc(256);
+  const bool ok = (st == WL_CONNECTED);
+  doc["ok"] = ok;
+  doc["status_code"] = static_cast<int>(st);
+  doc["status_text"] = wifiStatusText(st);
+  if (ok) {
+    doc["ip"] = WiFi.localIP().toString();
+    doc["rssi"] = WiFi.RSSI();
+  }
+
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+
+  // If test credentials differ from persisted settings, restore configured STA
+  // after replying so the HTTP response has a chance to reach the browser.
+  if (!sameAsConfigured) {
+    delay(80);
+    WiFi.disconnect();
+    delay(20);
+    if (cfg.wifi_sta_ssid.length() > 0) {
+      WiFi.begin(cfg.wifi_sta_ssid.c_str(), cfg.wifi_sta_password.c_str());
+    }
+  }
+}
+
+void WebConsole::handleTestMqtt() {
+  if (!requireAuth(true)) return;
+  DynamicJsonDocument body(512);
+  auto err = deserializeJson(body, server_.arg("plain"));
+  if (err) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid json\"}");
+    return;
+  }
+  const String host = String(static_cast<const char *>(body["mqtt_host"] | config_->settings().mqtt_host.c_str()));
+  uint16_t port = config_->settings().mqtt_port;
+  if (!body["mqtt_port"].isNull()) {
+    long parsed = -1;
+    if (body["mqtt_port"].is<uint16_t>()) {
+      parsed = static_cast<long>(body["mqtt_port"].as<uint16_t>());
+    } else {
+      const String raw = String(static_cast<const char *>(body["mqtt_port"] | ""));
+      if (raw.length() > 0) parsed = raw.toInt();
+    }
+    if (parsed < 1 || parsed > 65535) {
+      server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid mqtt_port\"}");
+      return;
+    }
+    port = static_cast<uint16_t>(parsed);
+  }
+  const String user = String(static_cast<const char *>(body["mqtt_user"] | config_->settings().mqtt_user.c_str()));
+  const String pass = String(static_cast<const char *>(body["mqtt_password"] | config_->settings().mqtt_password.c_str()));
+  if (!WiFi.isConnected()) {
+    server_.send(200, "application/json", "{\"ok\":false,\"state\":-2}");
+    return;
+  }
+  WiFiClient client;
+  PubSubClient mqtt(client);
+  mqtt.setServer(host.c_str(), port);
+  mqtt.setSocketTimeout(2);
+  const String clientId = "lrs-test-" + config_->chipIdHex();
+  bool ok = false;
+  if (user.length() > 0) {
+    ok = mqtt.connect(clientId.c_str(), user.c_str(), pass.c_str());
+  } else {
+    ok = mqtt.connect(clientId.c_str());
+  }
+  DynamicJsonDocument doc(256);
+  doc["ok"] = ok;
+  doc["state"] = mqtt.state();
+  doc["host"] = host;
+  doc["port"] = port;
+  if (ok) mqtt.disconnect();
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleOtaUpload() {
+  if (!requireAuth(true)) return;
+  if (!ota_upload_ok_) {
+    server_.send(500, "text/plain", ota_upload_error_.length() ? ota_upload_error_ : "OTA failed");
+    return;
+  }
+  server_.send(200, "text/plain", "ok");
+  delay(150);
+  ESP.restart();
+}
+
+void WebConsole::handleOtaUploadChunk() {
+  if (!requireAuth(true)) return;
+  HTTPUpload &upload = server_.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    ota_upload_ok_ = false;
+    ota_upload_error_ = "";
+    const uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+    if (!Update.begin(maxSketchSpace)) {
+      ota_upload_error_ = "Cannot start OTA";
+      return;
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      ota_upload_error_ = "Write failed";
+      return;
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (!Update.end(true)) {
+      ota_upload_error_ = "Finalize failed";
+      ota_upload_ok_ = false;
+      return;
+    }
+    ota_upload_ok_ = true;
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    ota_upload_error_ = "Upload aborted";
+    ota_upload_ok_ = false;
+  }
+}
+
+void WebConsole::handleLogsCsv() {
+  if (!requireAuth()) return;
+  server_.sendHeader("Content-Disposition", "attachment; filename=lrs-logs.csv");
+  server_.send(200, "text/csv", logs_->asCsv());
+}
+
+void WebConsole::handleLogsText() {
+  if (!requireAuth()) return;
+  server_.send(200, "text/plain", logs_->asText());
+}
+
+void WebConsole::handleReboot() {
+  if (!requireAuth(true)) return;
+  auto &cfg = config_->settings();
+  cfg.audit_last_reboot_reason = "web_reboot";
+  cfg.audit_last_reboot_ms = millis();
+  config_->save();
+  server_.send(200, "text/plain", "rebooting");
+  delay(150);
+  ESP.restart();
+}
