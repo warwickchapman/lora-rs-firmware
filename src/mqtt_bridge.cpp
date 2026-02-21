@@ -10,6 +10,99 @@ namespace {
 constexpr uint32_t kReconnectIntervalMs = 30000;
 constexpr uint32_t kPublishIntervalMs = 10000;
 constexpr uint32_t kDiscoveryPublishIntervalMs = 60000;
+
+const char *remoteAckStateText(RemoteAckState s) {
+  switch (s) {
+    case RemoteAckState::Pending:
+      return "pending";
+    case RemoteAckState::Ok:
+      return "ok";
+    case RemoteAckState::Timeout:
+      return "timeout";
+    default:
+      return "unknown";
+  }
+}
+
+bool parseHexAddressSegment(const String &segment, uint8_t &out) {
+  if (segment.length() == 0) return false;
+  char *end = nullptr;
+  long parsed = strtol(segment.c_str(), &end, 16);
+  if (end == nullptr || *end != '\0') return false;
+  if (parsed < 1 || parsed > 254) return false;
+  out = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+bool parseDecAddressSegment(const String &segment, uint8_t &out) {
+  if (segment.length() == 0) return false;
+  char *end = nullptr;
+  long parsed = strtol(segment.c_str(), &end, 10);
+  if (end == nullptr || *end != '\0') return false;
+  if (parsed < 1 || parsed > 254) return false;
+  out = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+bool knownRemoteAddress(NodeStateMachine *sm, uint8_t addr) {
+  if (sm == nullptr) return false;
+  const size_t n = sm->remoteNodeCount();
+  for (size_t i = 0; i < n; ++i) {
+    RemoteNodeStatusSnapshot node{};
+    if (sm->remoteNodeByIndex(i, node) && node.address == addr) return true;
+  }
+  return false;
+}
+
+bool parseRemoteAddressSegment(const String &segment, NodeStateMachine *sm, uint8_t &out) {
+  // Explicit hex forms stay hex for backward compatibility.
+  if (segment.startsWith("0x") || segment.startsWith("0X")) {
+    return parseHexAddressSegment(segment.substring(2), out);
+  }
+
+  bool hasHexAlpha = false;
+  for (size_t i = 0; i < segment.length(); ++i) {
+    const char c = segment.charAt(i);
+    if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+      hasHexAlpha = true;
+      break;
+    }
+  }
+  if (hasHexAlpha) {
+    return parseHexAddressSegment(segment, out);
+  }
+
+  uint8_t decAddr = 0;
+  uint8_t hexAddr = 0;
+  const bool decOk = parseDecAddressSegment(segment, decAddr);
+  const bool hexOk = parseHexAddressSegment(segment, hexAddr);
+  if (!decOk && !hexOk) return false;
+
+  if (decOk && hexOk && decAddr != hexAddr) {
+    const bool decKnown = knownRemoteAddress(sm, decAddr);
+    const bool hexKnown = knownRemoteAddress(sm, hexAddr);
+    if (decKnown && !hexKnown) {
+      out = decAddr;
+      return true;
+    }
+    if (hexKnown && !decKnown) {
+      out = hexAddr;
+      return true;
+    }
+    // Ambiguous and unknown: keep old behavior for short IDs (hex).
+    if (segment.length() <= 2) {
+      out = hexAddr;
+      return true;
+    }
+  }
+
+  if (decOk) {
+    out = decAddr;
+    return true;
+  }
+  out = hexAddr;
+  return true;
+}
 }
 
 MqttBridge *MqttBridge::instance_ = nullptr;
@@ -27,6 +120,11 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   mqtt_client_.setSocketTimeout(1);
   mqtt_client_.setBufferSize(768);
   mqtt_client_.setCallback(MqttBridge::staticCallback);
+  memset(remote_last_seen_published_, 0, sizeof(remote_last_seen_published_));
+  memset(remote_last_cmd_published_, 0, sizeof(remote_last_cmd_published_));
+  memset(remote_published_once_, 0, sizeof(remote_published_once_));
+  memset(remote_input_published_, 0, sizeof(remote_input_published_));
+  memset(remote_input_value_, 0, sizeof(remote_input_value_));
   return true;
 }
 
@@ -38,6 +136,11 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
   if (mqtt_client_.connected()) {
     mqtt_client_.disconnect();
   }
+  memset(remote_last_seen_published_, 0, sizeof(remote_last_seen_published_));
+  memset(remote_last_cmd_published_, 0, sizeof(remote_last_cmd_published_));
+  memset(remote_published_once_, 0, sizeof(remote_published_once_));
+  memset(remote_input_published_, 0, sizeof(remote_input_published_));
+  memset(remote_input_value_, 0, sizeof(remote_input_value_));
 }
 
 void MqttBridge::tick(bool wifiConnected) {
@@ -133,6 +236,95 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     if (logs_) {
       logs_->add("mqtt_control_topic", 0, 0, relay ? 1 : 0);
     }
+    return;
+  }
+
+  if (cfg_.role_tx && sm_ != nullptr) {
+    const String remotePrefix = topic_base_ + "/remote/";
+    if (!topicStr.startsWith(remotePrefix)) {
+      return;
+    }
+
+    const String suffix = topicStr.substring(remotePrefix.length());
+    const int slash = suffix.indexOf('/');
+    if (slash <= 0) {
+      return;
+    }
+
+    uint8_t addr = 0;
+    if (!parseRemoteAddressSegment(suffix.substring(0, slash), sm_, addr)) {
+      return;
+    }
+
+    const String leaf = suffix.substring(slash + 1);
+    if (leaf == "poll_interval_s") {
+      String value;
+      for (unsigned int i = 0; i < length; ++i) value += static_cast<char>(payload[i]);
+      value.trim();
+      long sec = value.toInt();
+      if (sec < 0) sec = 0;
+      if (sec > 0 && sec < 60) sec = 60;
+      if (sec > 3600) sec = 3600;
+      sm_->mqttSetRemotePollIntervalMs(addr, static_cast<uint32_t>(sec) * 1000U);
+      if (logs_) {
+        logs_->add("mqtt_remote_poll_interval", 0, static_cast<uint32_t>(sec), addr);
+      }
+      return;
+    }
+
+    if (leaf == "poll_now") {
+      sm_->mqttPollRemoteNow(addr);
+      if (logs_) {
+        logs_->add("mqtt_remote_poll_now", 0, 0, addr);
+      }
+      return;
+    }
+
+    if (leaf == "forget") {
+      const bool forget = (length > 0 && payload[0] != '0');
+      if (!forget) return;
+      const bool removed = sm_->mqttForgetRemote(addr);
+      clearRemoteRetainedTopics(addr);
+      if (logs_) {
+        logs_->add(removed ? "mqtt_remote_forget_ok" : "mqtt_remote_forget_missing", 0, 0, addr);
+      }
+      return;
+    }
+  }
+}
+
+void MqttBridge::clearRemoteRetainedTopics(uint8_t addr) {
+  if (!mqtt_client_.connected()) return;
+  remote_last_seen_published_[addr] = 0;
+  remote_last_cmd_published_[addr] = 0;
+  remote_published_once_[addr] = false;
+  remote_input_published_[addr] = false;
+  remote_input_value_[addr] = 0;
+
+  char addrHex[3];
+  snprintf(addrHex, sizeof(addrHex), "%02X", addr);
+  char addrHexPrefixed[5];
+  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
+  char addrDec[4];
+  snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(addr));
+
+  const String bases[] = {
+      topic_base_ + "/remote/" + String(addrHexPrefixed),
+      topic_base_ + "/remote/" + String(addrHex),
+      topic_base_ + "/remote/" + String(addrDec),
+  };
+
+  const char *leaves[] = {
+      "relay",           "input",          "ack_state",        "addr_hex",         "addr_dec",
+      "uplink_rssi_dbm", "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter", "poll_interval_s",
+      "last_poll_tx_ms", "poll_state",     "temp_c",           "forget",           "poll_now",
+  };
+
+  for (const String &base : bases) {
+    for (const char *leaf : leaves) {
+      const String topic = base + "/" + leaf;
+      mqtt_client_.publish(topic.c_str(), "", true);
+    }
   }
 }
 
@@ -164,6 +356,9 @@ bool MqttBridge::connectIfNeeded() {
 
   mqtt_client_.subscribe(relay_topic_.c_str());
   mqtt_client_.subscribe(control_topic_.c_str());
+  mqtt_client_.subscribe((topic_base_ + "/remote/+/poll_interval_s").c_str());
+  mqtt_client_.subscribe((topic_base_ + "/remote/+/poll_now").c_str());
+  mqtt_client_.subscribe((topic_base_ + "/remote/+/forget").c_str());
 
   if (logs_) {
     logs_->add("mqtt_connected", 0, 0, 0);
@@ -183,28 +378,100 @@ void MqttBridge::publishStatus() {
   mqtt_client_.publish(relay_topic_.c_str(), sm_->relayState() ? "1" : "0", true);
   mqtt_client_.publish(node_topic_.c_str(), cfg_.role_tx ? "tx" : "rx", true);
 
-  char addrHex[5];
+  char addrHex[3];
   snprintf(addrHex, sizeof(addrHex), "%02X", cfg_.local_address);
-  mqtt_client_.publish(addr_topic_.c_str(), addrHex, true);
+  char addrHexPrefixed[5];
+  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
+  mqtt_client_.publish(addr_topic_.c_str(), addrHexPrefixed, true);
 
   char tempBuf[16];
   if (sm_->localTemperatureValid()) {
     dtostrf(sm_->localTemperatureC(), 0, 1, tempBuf);
     mqtt_client_.publish(temp_topic_.c_str(), tempBuf, true);
   } else {
-    mqtt_client_.publish(temp_topic_.c_str(), "n/a", true);
+    mqtt_client_.publish(temp_topic_.c_str(), "", true);
   }
 
   if (sm_->remoteTemperatureValid()) {
     dtostrf(sm_->remoteTemperatureC(), 0, 1, tempBuf);
     mqtt_client_.publish(remote_temp_topic_.c_str(), tempBuf, true);
   } else {
-    mqtt_client_.publish(remote_temp_topic_.c_str(), "n/a", true);
+    mqtt_client_.publish(remote_temp_topic_.c_str(), "", true);
   }
 
   char updatedMs[16];
   snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));
   mqtt_client_.publish(last_updated_topic_.c_str(), updatedMs, true);
+
+  if (cfg_.role_tx) {
+    const size_t nodeCount = sm_->remoteNodeCount();
+    for (size_t i = 0; i < nodeCount; ++i) {
+      RemoteNodeStatusSnapshot node{};
+      if (!sm_->remoteNodeByIndex(i, node)) {
+        continue;
+      }
+      const uint8_t addr = node.address;
+      if (!cfg_.tx_mqtt_remote_polling_enabled) {
+        const bool changed = !remote_published_once_[addr] || remote_last_seen_published_[addr] != node.last_seen_ms ||
+                             remote_last_cmd_published_[addr] != node.last_cmd_counter;
+        if (!changed) {
+          continue;
+        }
+      }
+
+      char addrHex[3];
+      snprintf(addrHex, sizeof(addrHex), "%02X", node.address);
+      char addrHexPrefixed[5];
+      snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
+      char addrDec[4];
+      snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(node.address));
+
+      const String baseHex = topic_base_ + "/remote/" + String(addrHexPrefixed);
+
+      auto publishRemote = [&](const String &base) {
+        mqtt_client_.publish((base + "/relay").c_str(), node.relay_state ? "1" : "0", true);
+        const uint8_t inputValue = node.input_state ? 1 : 0;
+        if (!remote_input_published_[addr] || remote_input_value_[addr] != inputValue) {
+          mqtt_client_.publish((base + "/input").c_str(), inputValue ? "1" : "0", true);
+          remote_input_published_[addr] = true;
+          remote_input_value_[addr] = inputValue;
+        }
+        mqtt_client_.publish((base + "/ack_state").c_str(), remoteAckStateText(node.ack_state), true);
+        mqtt_client_.publish((base + "/addr_hex").c_str(), addrHex, true);
+        mqtt_client_.publish((base + "/addr_dec").c_str(), addrDec, true);
+
+        char numBuf[24];
+        snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
+        mqtt_client_.publish((base + "/uplink_rssi_dbm").c_str(), numBuf, true);
+        if (node.downlink_rssi_valid) {
+          snprintf(numBuf, sizeof(numBuf), "%d", node.downlink_rssi);
+          mqtt_client_.publish((base + "/downlink_rssi_dbm").c_str(), numBuf, true);
+        } else {
+          mqtt_client_.publish((base + "/downlink_rssi_dbm").c_str(), "", true);
+        }
+        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
+        mqtt_client_.publish((base + "/last_seen_ms").c_str(), numBuf, true);
+        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
+        mqtt_client_.publish((base + "/last_cmd_counter").c_str(), numBuf, true);
+        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
+        mqtt_client_.publish((base + "/poll_interval_s").c_str(), numBuf, true);
+        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
+        mqtt_client_.publish((base + "/last_poll_tx_ms").c_str(), numBuf, true);
+        mqtt_client_.publish((base + "/poll_state").c_str(), node.poll_pending ? "pending" : "idle", true);
+        if (node.temp_valid) {
+          dtostrf(static_cast<float>(node.temp_c), 0, 1, numBuf);
+          mqtt_client_.publish((base + "/temp_c").c_str(), numBuf, true);
+        } else {
+          mqtt_client_.publish((base + "/temp_c").c_str(), "", true);
+        }
+      };
+
+      publishRemote(baseHex);
+      remote_last_seen_published_[addr] = node.last_seen_ms;
+      remote_last_cmd_published_[addr] = node.last_cmd_counter;
+      remote_published_once_[addr] = true;
+    }
+  }
 
   const uint32_t now = millis();
   if ((now - last_discovery_publish_ms_) >= kDiscoveryPublishIntervalMs) {

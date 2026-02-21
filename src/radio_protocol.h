@@ -11,6 +11,9 @@ enum class MessageType : uint8_t {
   Change = 'C',
   Heartbeat = 'H',
   Mqtt = 'M',
+  MqttStatus = 'S',
+  PollRequest = 'P',
+  PollResponse = 'R',
 };
 
 struct ProtocolMessage {

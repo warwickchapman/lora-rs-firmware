@@ -19,6 +19,9 @@ Packed fields:
 - `Change` (`'C'`)
 - `Heartbeat` (`'H'`)
 - `Mqtt` (`'M'`)
+- `MqttStatus` (`'S'`)
+- `PollRequest` (`'P'`)
+- `PollResponse` (`'R'`)
 
 ## Encrypted Payload Layout (8 bytes)
 - `b0`: `relay_state`
@@ -62,7 +65,11 @@ Otherwise packet is dropped and logged.
 - TX sends `Change` on debounced input transition.
 - TX sends periodic `Heartbeat`.
 - RX applies `Change`/`Heartbeat`/`Mqtt` relay state.
-- RX sends `Ack` for `Change` and `Heartbeat` (not for `Mqtt`).
+- RX sends `Ack` for `Change` and `Heartbeat`.
+- RX sends `MqttStatus` for `Mqtt` with applied relay/input/temp state.
+- TX may send `PollRequest` to RX.
+- RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
+- RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
 
 ## MQTT-to-LoRa Semantics
@@ -71,13 +78,21 @@ Otherwise packet is dropped and logged.
 - `control` payload: JSON with `addr` and `relay` (`0`/`1`).
 - `addr` as JSON number is decimal (example: `40`).
 - `addr` as JSON string is parsed as hex (example: `"0x28"` or `"28"`).
+- TX publishes local `addr` topic value as `0xNN`.
+- TX publishes remote node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/remote/0xNN/...`.
+- TX accepts remote control leaves:
+  - `poll_interval_s`
+  - `poll_now`
+  - `forget` (payload `1` removes node from TX runtime and clears retained remote subtree topics)
 - TX rejects destination `0x00` and `0xFF`.
 - On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
-- `Mqtt` LoRa messages are not ACKed by RX.
+- RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
+- TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
 
 ## Timing Defaults
 - `heartbeat_ms`: 60000 (60 s)
 - `ack_timeout_ms`: 5000 (5 s)
+- `mqtt_remote_retry_timeout_ms`: 300000 (300 s)
 
 ## Compatibility
 The current 8-byte payload format is not wire-compatible with older 4-byte payload firmware.

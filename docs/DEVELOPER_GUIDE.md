@@ -92,17 +92,37 @@ Published status topics (retained, every 10 s):
 - `type`
 - `addr`
 - `last_updated`
+  - `addr` is published as `0xNN` (for example `0x9D`).
 
 Subscribed control topics:
 - `relay`: sets local relay directly on that node.
 - `control`: TX-only JSON control for remote LoRa relay send.
 - `control.addr` parsing: JSON number = decimal address, JSON string = hex address.
+- TX publishes per-remote child state under `<root>/lrs-<tx_chipid>/remote/0xNN/...` (canonical path).
+- TX can be commanded to poll remotes via:
+  - `<root>/lrs-<tx_chipid>/remote/0xNN/poll_interval_s`
+  - `<root>/lrs-<tx_chipid>/remote/0xNN/poll_now`
+  - `<root>/lrs-<tx_chipid>/remote/0xNN/forget` (payload `1` removes runtime node and clears retained remote subtree topics)
 
 TX input-to-LoRa control gate:
 - Setting: `tx_input_lora_control_enabled` (LoRa tab).
 - `true` (default): TX input transitions send `Change`; heartbeat relay field follows TX input state.
-- `false`: TX still reports local input status, but does not send input-driven `Change`; heartbeat relay field follows TX relay state instead of input state.
+- `false`: TX still reports local input status, but does not send paired input-driven `Change`/`Heartbeat`; MQTT remote control remains active.
 - MQTT deployments should avoid targeting RX nodes at the TX-paired `remote_address` unless this gate is `false`.
+
+MQTT remote retry control:
+- Setting: `mqtt_remote_retry_timeout_ms` (default 300000 ms / 300 s).
+- TX retries `Mqtt` command sends with bounded Fibonacci-like backoff until timeout.
+- RX replies with `MqttStatus` (`'S'`) including applied state and telemetry.
+- TX polling uses `PollRequest` (`'P'`) / `PollResponse` (`'R'`) with the same retry-timeout window.
+- TX scheduled polling controls:
+  - `tx_mqtt_remote_polling_enabled` (default `false`)
+  - `tx_mqtt_remote_default_poll_interval_ms` (default `60000`, enforced range `60000..3600000`)
+  - `poll_interval_s` MQTT command is clamped to `0` (disable) or `60..3600` seconds.
+- RX push-on-change controls:
+  - `rx_push_on_change_enabled` (default `false`)
+  - `rx_push_min_interval_ms` (default `60000`, enforced range `60000..3600000`)
+  - when enabled, RX sends unsolicited `PollResponse` on debounced local input change, rate-limited by `rx_push_min_interval_ms`.
 
 Discovery:
 - Topic: `<root>/discovery/lrs-<chipid>`

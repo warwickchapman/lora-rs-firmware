@@ -1,0 +1,778 @@
+{
+  "spec_metadata": {
+    "title": "LRS Firmware Complete Reverse Specification",
+    "spec_id": "lrs-firmware-complete-spec",
+    "spec_version": "1.1.0",
+    "generated_date": "2026-02-16",
+    "source_repo": "/Users/warwick/Code/LoRa/lora_rs",
+    "source_commit": "01680be",
+    "source_branch": "main",
+    "target_consumer": "AI coding agents (Codex-class) for clean-room reimplementation",
+    "format": "normative JSON contract",
+    "notes": [
+      "This specification is derived from current code and repository docs.",
+      "Hardware assumptions are strict for LRS board version v1.2.",
+      "When this spec marks an item as inferred, it is a best-fit interpretation and should be surfaced during implementation review."
+    ]
+  },
+  "product_context": {
+    "product_name": "LoRa Remote Switch (LRS)",
+    "firmware_version": "0.2.1-alpha",
+    "hardware_version": "v1.2",
+    "hardware_batch": "251101",
+    "deployment_status": {
+      "fielded_units_total": "several_hundred",
+      "units_on_current_firmware": 4
+    },
+    "high_level_purpose": "Extend a dry-contact control signal over LoRa between paired ESP8266 nodes with secure packet exchange, web configuration, optional MQTT bridge, and OTA support.",
+    "node_roles": {
+      "tx": "Reads local dry-contact input, sends LoRa state, waits for ACK, mirrors ACK-confirmed remote relay state with delay.",
+      "rx": "Receives LoRa state packets, drives relay output, sends ACK for Change/Heartbeat packets, applies MQTT LoRa commands without ACK."
+    },
+    "critical_priorities_ranked": [
+      {
+        "priority": 1,
+        "name": "Uninterrupted LoRa relay control",
+        "requirement": "LoRa relay control path shall remain responsive and deterministic even during WiFi reconnects, MQTT outages/reconnect attempts, web requests, OTA handling, and sensor reads."
+      },
+      {
+        "priority": 2,
+        "name": "Safe fail behavior",
+        "requirement": "On ACK timeout or invalid control conditions, fail to known safe relay state according to TX/RX semantics."
+      },
+      {
+        "priority": 3,
+        "name": "Remote manageability",
+        "requirement": "WiFi, web UI, MQTT, and OTA are secondary services and must never degrade Priority #1 behavior."
+      }
+    ]
+  },
+  "hardware_contract": {
+    "board": {
+      "mcu": "ESP8266 (NodeMCU v2 / ESP-12F class)",
+      "strict_version": "LRS hardware v1.2",
+      "radio_module": {
+        "za": "Ra-01 (433 MHz)",
+        "us": "Ra-01H (915 MHz)"
+      }
+    },
+    "pin_map": {
+      "strict": true,
+      "lora": {
+        "nss": 15,
+        "rst": 16,
+        "dio0": 0
+      },
+      "relay_output_pin": 5,
+      "dry_contact_input_pin": 4,
+      "status_led_pin": 2,
+      "ds18b20_data_pin": 0,
+      "notes": [
+        "GPIO0 and GPIO2 are boot-sensitive strap-linked pins.",
+        "Status LED is active-low.",
+        "DS18B20 pin is forced to GPIO0 in runtime settings handling."
+      ]
+    },
+    "cn1_header": {
+      "pin1": "+3V3",
+      "pin2": "GND",
+      "pin3": "GPIO0/PROG",
+      "pin4": "GPIO2/LED",
+      "pin5": "GND",
+      "pin6": "AIN"
+    }
+  },
+  "build_and_release_contract": {
+    "platformio": {
+      "platform": "espressif8266@^4",
+      "framework": "arduino",
+      "board": "nodemcuv2",
+      "monitor_speed": 115200,
+      "upload_speed": 460800,
+      "environments": [
+        {
+          "name": "lrs_za",
+          "macro": "REGION_ZA",
+          "frequency_default_hz": 433000000
+        },
+        {
+          "name": "lrs_us",
+          "macro": "REGION_US",
+          "frequency_default_hz": 915000000
+        }
+      ],
+      "libraries": [
+        "sandeepmistry/LoRa@^0.8.0",
+        "bblanchon/ArduinoJson@^7.0.4",
+        "rweather/Crypto@^0.4.0",
+        "knolleary/PubSubClient@^2.8",
+        "paulstoffregen/OneWire@^2.3.8",
+        "milesburton/DallasTemperature@^4.0.5"
+      ]
+    },
+    "build_metadata_injection": {
+      "script": "tools/build_metadata.py",
+      "defines": [
+        "LRS_FW_VERSION",
+        "LRS_GIT_SHA",
+        "LRS_GIT_BRANCH",
+        "LRS_GIT_DIRTY",
+        "LRS_BUILD_ID",
+        "LRS_BUILD_DATE_SHORT"
+      ],
+      "dirty_tree_rule": "If git tree is dirty, build_id becomes deterministic fingerprint of patch set and untracked blob hashes."
+    },
+    "release_flash": {
+      "script": "tools/flash_release.py",
+      "flash_address": "0x00000",
+      "password_derivation": "Must match firmware deriveShortPassword logic for AP/admin credential recovery."
+    }
+  },
+  "security_contract": {
+    "product_secret": "LRS-v1-rotate-this-secret",
+    "admin_auth": {
+      "mechanism": "session cookie + password login",
+      "password_min_len_for_update": 8,
+      "factory_default": "Derived deterministic short password from chip id",
+      "session": {
+        "cookie_name": "lrs_session",
+        "ttl_minutes": 30,
+        "cookie_flags": ["HttpOnly", "SameSite=Lax", "Path=/"]
+      },
+      "rate_limit": {
+        "failed_attempts_before_lock": 5,
+        "lock_duration_seconds": 60
+      }
+    },
+    "radio_security": {
+      "fleet_passphrase_default": "lora-default-passphrase",
+      "fleet_passphrase_min_len_when_user_posts_field": 16,
+      "default_passphrase_policy": "POST /api/settings rejects default passphrase unless allow_default_deployment_key=true",
+      "runtime_guardrail": "LoRa TX/RX disabled when fleet_passphrase equals default",
+      "encryption": "AES-CTR-128",
+      "authentication": "keyed SHA-256 truncated MAC (8 bytes)",
+      "key_derivation": {
+        "enc_key": "SHA256(fleet_passphrase + ':enc')[0..15]",
+        "mac_key": "SHA256(fleet_passphrase + ':mac')[0..31]"
+      }
+    }
+  },
+  "persistent_configuration": {
+    "storage": {
+      "filesystem": "LittleFS",
+      "path": "/config.json",
+      "schema_version": 1
+    },
+    "settings_fields": [
+      {"name": "version", "type": "uint16", "default": 1},
+      {"name": "provisioned", "type": "bool", "default": false},
+      {"name": "role_tx", "type": "bool", "default": true},
+      {"name": "local_address", "type": "uint8", "range": "1..254", "default": 1},
+      {"name": "remote_address", "type": "uint8", "range": "1..254", "default": 2, "constraint": "must differ from local_address"},
+      {"name": "lora_frequency_hz", "type": "long", "default": 433000000},
+      {"name": "lora_tx_power", "type": "uint8", "default": 17},
+      {"name": "lora_spreading_factor", "type": "uint8", "default": 7},
+      {"name": "lora_bandwidth_hz", "type": "long", "default": 125000},
+      {"name": "lora_coding_rate", "type": "uint8", "default": 5},
+      {"name": "heartbeat_ms", "type": "uint32", "default": 60000, "constraints": "60000..3600000"},
+      {"name": "ack_timeout_ms", "type": "uint32", "default": 5000, "constraints": "5000..600000"},
+      {"name": "tx_input_lora_control_enabled", "type": "bool", "default": true},
+      {"name": "wifi_sta_ssid", "type": "string", "default": ""},
+      {"name": "wifi_sta_password", "type": "string", "default": ""},
+      {"name": "lan_hostname", "type": "string", "default": "lrs-<chipid>"},
+      {"name": "ap_always_on", "type": "bool", "default": true},
+      {"name": "mqtt_enabled", "type": "bool", "default": false},
+      {"name": "mqtt_host", "type": "string", "default": "venus.local"},
+      {"name": "mqtt_port", "type": "uint16", "default": 1883, "constraints": "1..65535"},
+      {"name": "mqtt_user", "type": "string", "default": ""},
+      {"name": "mqtt_password", "type": "string", "default": ""},
+      {"name": "mqtt_topic_root", "type": "string", "default": "lora"},
+      {"name": "sensor_temp_enabled", "type": "bool", "default": true},
+      {"name": "sensor_temp_pin", "type": "uint8", "default": 0, "enforced": 0},
+      {"name": "sensor_temp_interval_s", "type": "uint16", "default": 10, "constraints": "2..300", "effective_runtime_behavior": "Derived from heartbeat/2 on apply"},
+      {"name": "fleet_passphrase", "type": "string", "default": "lora-default-passphrase"},
+      {"name": "admin_password", "type": "string", "default": "derived_short_password"},
+      {"name": "factory_serial", "type": "string", "default": "lrs<YY><WW>-<chipid>"},
+      {"name": "audit_last_saved_by", "type": "string", "default": "factory"},
+      {"name": "audit_last_saved_ms", "type": "uint32", "default": 0},
+      {"name": "audit_last_reboot_reason", "type": "string", "default": "power_on"},
+      {"name": "audit_last_reboot_ms", "type": "uint32", "default": 0},
+      {"name": "audit_boot_count", "type": "uint32", "default": 0}
+    ],
+    "provisioning_defaults": {
+      "local_address_rule": "((chip_id & 0xFF) % 254) + 1",
+      "remote_address_rule": "(((chip_id >> 8) & 0xFF) % 254) + 1; if equal to local then (local % 254)+1",
+      "ap_ssid_rule": "lrs-<8hexchipid>",
+      "ap_password_rule": "sha256(product_secret + ':' + chipid_hex_lower)[0:8]",
+      "admin_password_rule": "same as AP password",
+      "factory_serial_rule": "lrs<YY><WW>-<chipid_hex_lower>"
+    }
+  },
+  "runtime_architecture": {
+    "entrypoint": "src/main.cpp",
+    "boot_sequence": [
+      "Serial begin (115200)",
+      "ConfigStore.begin()",
+      "Start networking (AP+STA)",
+      "RadioProtocol.begin()",
+      "SensorManager.begin()",
+      "NodeStateMachine.begin()",
+      "MqttBridge.begin()",
+      "WebConsole.begin()",
+      "Start ArduinoOTA",
+      "Log event: boot"
+    ],
+    "main_tick_order": [
+      "App.updateNetworking()",
+      "App.refreshCaptiveDns() + dns.processNextRequest if running",
+      "App.refreshMdns()",
+      "Inject local temp into state machine",
+      "NodeStateMachine.tick()",
+      "MqttBridge.tick(wifiConnected)",
+      "SensorManager.tick()",
+      "WebConsole.tick()",
+      "MDNS.update()",
+      "ArduinoOTA.handle()"
+    ],
+    "control_loop_priority_rule": "LoRa state machine tick must execute before MQTT tick to prevent broker latency from degrading relay control path.",
+    "rtos_style_scheduling_requirements": [
+      "Treat LoRa receive/transmit + state transitions as highest-priority task class.",
+      "All non-control tasks (WiFi management, MQTT, web server, OTA, sensor polling) must run cooperatively and be bounded-time.",
+      "No blocking wait >50ms is permitted in normal loop execution outside explicit maintenance/test endpoints.",
+      "If long operations are unavoidable, they must be chunked with yields and must not postpone control tick execution beyond one loop period budget."
+    ]
+  },
+  "networking_contract": {
+    "wifi_mode": "WIFI_AP_STA",
+    "wifi_settings": {
+      "sleep_mode": "WIFI_NONE_SLEEP",
+      "tx_power_dbm": 20.5
+    },
+    "sta_logic": {
+      "connect_timeout_ms": 20000,
+      "reconnect_interval_ms": 10000,
+      "state_transitions": [
+        "If STA credentials exist, begin connect.",
+        "On success: mark connected, log sta_connected, maybe disable AP.",
+        "On connect timeout: disconnect STA, keep AP fallback, log sta_connect_failed_fallback_ap.",
+        "On disconnect after prior connect: log sta_disconnected, re-enable AP, schedule reconnect."
+      ]
+    },
+    "ap_logic": {
+      "always_start": true,
+      "ssid": "lrs-<chipid>",
+      "password": "derived short password",
+      "optional_disable_condition": "ap_always_on=false and STA connected stable >= 60000ms",
+      "disable_behavior": "WiFi.softAPdisconnect(true), stop captive DNS"
+    },
+    "captive_dns": {
+      "port": 53,
+      "wildcard": "*",
+      "target_ip": "softAP IP",
+      "active_only_when_ap_enabled": true
+    },
+    "mdns": {
+      "service": "http.tcp:80",
+      "hostname_selection": [
+        "If AP enabled and AP has clients: lrs",
+        "Else if STA connected: normalized lan_hostname or lrs-<chipid>",
+        "Else: lrs"
+      ],
+      "normalization": "lowercase; allow [a-z0-9-]; convert space/_/. to '-'; trim leading/trailing '-'; max length 31; fallback lrs"
+    },
+    "ota": {
+      "library": "ArduinoOTA",
+      "hostname": "same normalized hostname logic as LAN",
+      "password": "admin_password",
+      "restart_on_web_upload_success": true
+    }
+  },
+  "lora_protocol_contract": {
+    "packet_layout": {
+      "packed": true,
+      "fields": [
+        {"name": "dst", "size_bytes": 1},
+        {"name": "src", "size_bytes": 1},
+        {"name": "type", "size_bytes": 1},
+        {"name": "counter", "size_bytes": 4},
+        {"name": "nonce", "size_bytes": 8},
+        {"name": "encrypted", "size_bytes": 8},
+        {"name": "mac", "size_bytes": 8}
+      ],
+      "total_bytes": 31
+    },
+    "message_types": {
+      "A": "Ack",
+      "C": "Change",
+      "H": "Heartbeat",
+      "M": "Mqtt"
+    },
+    "payload_8b": {
+      "b0": "relay_state",
+      "b1": "input_state",
+      "b2": "flags",
+      "b3": "temp_code (0xFF=not present, else int8 Celsius)",
+      "b4": "sensor_mask (bit0 digital present, bit1 temperature present)",
+      "b5": "sensor_digital0 (defaults to input if not provided)",
+      "b6": "sensor_analog0_lsb",
+      "b7": "sensor_analog0_msb"
+    },
+    "nonce_and_iv": {
+      "nonce_generation": "8 random bytes",
+      "iv": "nonce[8] + counter[4] + zero[4]"
+    },
+    "mac_verification": {
+      "input": "mac_key(32) prepended + packet bytes excluding mac field",
+      "algorithm": "SHA256",
+      "transmitted_mac": "first 8 bytes",
+      "drop_on_mismatch": true
+    },
+    "radio_runtime_behavior": {
+      "enable_rule": "disabled when passphrase is default; LoRa.sleep()",
+      "enabled_mode": "LoRa.receive() after send and after configuration",
+      "drop_conditions": [
+        "invalid packet size",
+        "short read",
+        "bad MAC",
+        "destination mismatch",
+        "source mismatch for configured peer relationship",
+        "counter replay (non-increasing per src)"
+      ]
+    },
+    "wire_compatibility": {
+      "compatible_with_legacy_4b_payload": false,
+      "upgrade_requirement": "paired nodes must run the new 8-byte payload firmware"
+    }
+  },
+  "state_machine_contract": {
+    "states": ["boot", "idle", "wait_ack", "timeout"],
+    "role_specific_logic": {
+      "tx": {
+        "debounce_ms": 50,
+        "ack_echo_delay_ms": 500,
+        "ack_retry_schedule_ms": [3000, 5000, 8000, 13000, 21000, 34000, 55000],
+        "input_transition_behavior": "On debounced input change and tx_input_lora_control_enabled=true, send Change with relay=input and input=input.",
+        "startup_sync_behavior": "On boot/applyConfig when tx_input_lora_control_enabled=true, send one Change sync if no command pending.",
+        "retry_behavior": "If command pending and retry deadline reached, resend Change with last pending states.",
+        "heartbeat_behavior": "Every heartbeat_ms send Heartbeat. heartbeat relay field = input_state if tx_input_lora_control_enabled else relay_state.",
+        "ack_timeout_behavior": "If in wait_ack and elapsed >= ack_timeout_ms, force local relay OFF and enter timeout.",
+        "ack_receive_behavior": "On Ack from remote peer: schedule local relay apply after 500ms, clear pending retries, enter idle."
+      },
+      "rx": {
+        "apply_on_types": ["Change", "Heartbeat", "Mqtt"],
+        "relay_apply": "Set relay_state and physical relay pin to received relay_state",
+        "input_tracking": "Store msg.input_state",
+        "control_source_tracking": "LoRa for Change/Heartbeat, Mqtt for Mqtt",
+        "ack_behavior": "Send Ack for Change and Heartbeat only; do not Ack Mqtt packets"
+      }
+    },
+    "replay_protection": {
+      "table": "last_seen_counter_by_src[256]",
+      "accept_rule": "counter must be strictly greater than last seen for that source"
+    },
+    "temperature_handling": {
+      "local_encoding": "round to nearest int Celsius, clamp [-127,126], encode int8; invalid -> 0xFF",
+      "remote_capture": "If temp_code != 0xFF then store int8 celsius and millis timestamp"
+    },
+    "led_behavior": {
+      "active_low": true,
+      "no_link_interval_ms": 150,
+      "linked_intervals_by_rssi": [
+        {"rssi_gte": -80, "interval_ms": 5000},
+        {"rssi_gte": -100, "interval_ms": 3000},
+        {"rssi_lt": -100, "interval_ms": 1000}
+      ],
+      "link_validity_window": "last packet age <= heartbeat_ms * 2"
+    }
+  },
+  "mqtt_contract": {
+    "activation_conditions": [
+      "mqtt_enabled == true",
+      "mqtt_host not empty",
+      "WiFi STA connected"
+    ],
+    "connection_policy": {
+      "reconnect_interval_ms": 30000,
+      "socket_timeout_seconds": 1,
+      "buffer_size_bytes": 768,
+      "client_id": "LRS-<chipid_hex>"
+    },
+    "topic_model": {
+      "host_name": "lrs-<chipid_hex>",
+      "base": "<mqtt_topic_root>/<host_name>",
+      "published_retained_every_10s": [
+        "<base>/input",
+        "<base>/dry_contact",
+        "<base>/relay",
+        "<base>/temp_c",
+        "<base>/remote_temp_c",
+        "<base>/type",
+        "<base>/addr",
+        "<base>/last_updated"
+      ],
+      "subscribed": [
+        "<base>/relay",
+        "<base>/control"
+      ],
+      "discovery": {
+        "topic": "<mqtt_topic_root>/discovery/<host_name>",
+        "retained": true,
+        "publish_on": ["connect", "every 60000ms"],
+        "fields": [
+          "serial", "chip_id", "role", "addr", "remote_addr", "mac",
+          "sta_ip", "ap_ip", "sta_ssid", "lan_mdns", "uptime_ms",
+          "fw", "fw_version", "fw_git_sha", "fw_git_branch", "fw_dirty",
+          "build_date", "build_time"
+        ]
+      }
+    },
+    "control_semantics": {
+      "relay_topic": {
+        "payload": "first byte '1' => ON else OFF",
+        "behavior": "Immediately set local relay via state machine mqttSetLocalRelay()"
+      },
+      "control_topic": {
+        "role_requirement": "TX only",
+        "payload_json": {
+          "addr": "number (decimal) OR string (parsed as hex via strtoul base16)",
+          "relay": "truthy => ON"
+        },
+        "validation": [
+          "reject invalid JSON",
+          "reject addr 0 or 255"
+        ],
+        "result": "Send LoRa MessageType::Mqtt to provided addr"
+      },
+      "important_edge_case": "If addr is string '40', it is interpreted as hex 0x40 (decimal 64)."
+    }
+  },
+  "sensor_contract": {
+    "local_ds18b20": {
+      "enabled_by_setting": "sensor_temp_enabled",
+      "pin": 0,
+      "detection": "first OneWire address found; if none => not_detected",
+      "resolution": 12,
+      "read_interval_seconds": "derived as clamp(heartbeat_ms/2000, 2, 300)",
+      "invalid_read_conditions": ["DEVICE_DISCONNECTED_C", "<= -127.0C"],
+      "log_events": ["temp_not_detected", "temp_detected", "temp_read_failed", "temp_read_ok"]
+    },
+    "remote_temperature": {
+      "transport": "LoRa payload temp_code",
+      "display/state": "stored in NodeStateMachine remote temp fields"
+    }
+  },
+  "web_console_contract": {
+    "transport": "ESP8266WebServer on port 80",
+    "ui_assets": "embedded HTML/JS/CSS in src/web_console.cpp",
+    "auth_required_routes": {
+      "web": ["/"],
+      "api": [
+        "/api/status",
+        "/api/factory",
+        "/api/diagnostics",
+        "/api/wifi/scan",
+        "/api/settings (GET)",
+        "/api/settings (POST)",
+        "/api/settings/export",
+        "/api/settings/import",
+        "/api/ota",
+        "/api/logs.csv",
+        "/api/logs.txt",
+        "/api/reboot",
+        "/api/network/test",
+        "/api/mqtt/test"
+      ]
+    },
+    "public_routes": ["/login", "/api/login", "/api/logout", "/api/session"],
+    "captive_probe_routes": [
+      "/generate_204",
+      "/gen_204",
+      "/hotspot-detect.html",
+      "/ncsi.txt",
+      "/connecttest.txt",
+      "/fwlink"
+    ],
+    "api_contracts": {
+      "POST /api/login": {
+        "request": {"password": "string"},
+        "responses": {
+          "200": {"ok": true},
+          "400": {"error": "invalid json"},
+          "401": {"error": "Invalid password"},
+          "429": {"error": "Too many failed logins. Try again shortly."}
+        }
+      },
+      "GET /api/session": {
+        "response": {"ok": "bool", "remaining_s": "uint32"}
+      },
+      "GET /api/status": {
+        "response_keys": [
+          "role", "local_address", "remote_address", "link_state", "relay_state", "input_state", "local_input_state",
+          "lora_last_rssi", "lora_last_packet_ms", "lora_last_tx_ms", "lora_remote_temp_valid", "lora_remote_temp_c", "lora_remote_temp_ms",
+          "sta_connected", "sta_ip", "sta_ssid", "sta_rssi", "sta_status_code", "sta_status_text", "sta_target_ssid",
+          "sta_target_rssi", "sta_target_rssi_text", "uptime_ms", "relay_reason", "deployment_key", "deployment_key_default",
+          "ap_ssid", "ap_ip", "mdns_ap", "mdns_lan",
+          "fw_version", "fw_git_sha", "fw_git_branch", "fw_dirty", "fw_build_id", "fw_build_date_short", "fw_display", "build_date", "build_time",
+          "session_remaining_s", "audit_last_saved_by", "audit_last_saved_ms", "audit_last_reboot_reason", "audit_last_reboot_ms", "audit_boot_count",
+          "sensor_temp_enabled", "sensor_temp_detected", "sensor_temp_valid", "sensor_temp_c", "sensor_temp_addr", "sensor_temp_error", "sensor_temp_last_read_ms"
+        ]
+      },
+      "GET /api/factory": {
+        "response_keys": [
+          "serial", "chip_id", "mac", "factory_role", "factory_local_address", "factory_remote_address",
+          "factory_ap_ssid", "factory_ap_password", "hardware_version", "hardware_batch",
+          "fw_version", "fw_git_sha", "fw_git_branch", "fw_dirty", "fw_build_id", "fw_build_date_short", "build_date", "build_time",
+          "audit_last_saved_by", "audit_last_saved_ms", "audit_last_reboot_reason", "audit_last_reboot_ms", "audit_boot_count"
+        ]
+      },
+      "GET /api/settings": {
+        "response": "Current editable config fields including credentials and MQTT settings"
+      },
+      "POST /api/settings": {
+        "behavior": [
+          "Parse and normalize bool/address fields",
+          "Clamp ranges and apply guardrails",
+          "Enforce fleet key policy if posted",
+          "Force sensor_temp_pin = 0",
+          "Persist config",
+          "Trigger on_apply callback with networkChanged and otaAuthChanged flags"
+        ],
+        "success": "200 text/plain 'saved'",
+        "errors": [
+          "400 invalid json",
+          "400 deployment key too short",
+          "400 deployment key cannot be default",
+          "500 save failed"
+        ]
+      },
+      "GET /api/settings/export": {
+        "content_disposition": "attachment; filename=lrs-config.json",
+        "body": "pretty JSON of editable settings"
+      },
+      "POST /api/settings/import": {
+        "behavior": "same as POST /api/settings"
+      },
+      "GET /api/wifi/scan": {
+        "response": {"networks": "[{ssid,rssi,secure}]"},
+        "filter": "exclude own/legacy LRS AP-like SSIDs"
+      },
+      "POST /api/network/test": {
+        "request": {"wifi_sta_ssid": "string optional", "wifi_sta_password": "string optional"},
+        "behavior": [
+          "Attempt STA connect up to 12s",
+          "Return status_code/status_text and optional ip/rssi",
+          "Restore configured STA credentials after test when test differs from persisted config"
+        ]
+      },
+      "POST /api/mqtt/test": {
+        "request": {"mqtt_host": "string optional", "mqtt_port": "int/string optional", "mqtt_user": "string optional", "mqtt_password": "string optional"},
+        "behavior": "Attempt short MQTT connect and return ok/state"
+      },
+      "POST /api/ota": {
+        "behavior": "multipart OTA upload via Update API, restart on success"
+      },
+      "GET /api/logs.csv": {
+        "content_type": "text/csv",
+        "columns": ["millis", "event", "rssi", "counter", "state"]
+      },
+      "GET /api/logs.txt": {
+        "content_type": "text/plain",
+        "body": "line-based formatted log entries"
+      },
+      "POST /api/reboot": {
+        "behavior": "set audit reboot reason to web_reboot, save config, restart"
+      }
+    }
+  },
+  "logging_and_diagnostics_contract": {
+    "buffer": {
+      "type": "FIFO deque",
+      "max_entries": 200,
+      "item_fields": ["ms", "event", "rssi", "counter", "state"]
+    },
+    "serial_mirror": "Each log event is printed to Serial with structured fields.",
+    "readability_requirements_for_field_incidents": [
+      "Logs must be easy to correlate chronologically for \"command missed / delayed relay\" incidents.",
+      "Every control-path event should include event class, role, source/destination address, counter, and relay/input state snapshot.",
+      "Every potential blocker event should be explicit (WiFi reconnect attempt, MQTT reconnect attempt, web request burst, OTA in progress).",
+      "A single-line summary view must allow operators to identify whether control loop starvation occurred."
+    ],
+    "minimum_additional_events_for_next_implementation": [
+      "control_tick_start/control_tick_end with loop delta",
+      "control_tick_overrun when loop delta exceeds configured budget",
+      "wifi_op_start/wifi_op_end",
+      "mqtt_op_start/mqtt_op_end",
+      "web_op_start/web_op_end",
+      "ota_op_start/ota_op_end"
+    ],
+    "diagnostics_aggregates": {
+      "computed_from_logs": [
+        "lora_tx_packets",
+        "ack_ok",
+        "ack_timeout",
+        "replay_drop",
+        "wifi_connect_attempts",
+        "wifi_connect_fail",
+        "wifi_disconnects"
+      ]
+    },
+    "notable_event_names": [
+      "boot", "radio_start_failed", "ota_ready", "config_reloaded", "mdns_failed",
+      "sta_connect_start", "sta_connected", "sta_disconnected", "sta_connect_failed_fallback_ap",
+      "tx_packet", "rx_packet", "rx_invalid_size", "rx_bad_mac", "rx_wrong_address", "rx_wrong_source", "rx_filtered_source", "rx_replay_drop",
+      "tx_change", "tx_start_sync", "tx_retry", "tx_heartbeat", "tx_ack", "tx_ack_timeout",
+      "rx_apply_and_ack", "rx_apply_mqtt",
+      "mqtt_connected", "mqtt_connect_failed", "mqtt_relay_topic", "mqtt_control_topic", "mqtt_control_json_err", "mqtt_local_relay", "mqtt_remote_relay_tx",
+      "temp_not_detected", "temp_detected", "temp_read_ok", "temp_read_failed"
+    ]
+  },
+  "non_functional_requirements": {
+    "timing": {
+      "control_loop": "Must not block on MQTT/network operations in control-critical path",
+      "mqtt_socket_timeout_seconds": 1,
+      "mqtt_reconnect_throttle_ms": 30000,
+      "hard_real_time_intent": "RTOS-like cooperative determinism for LoRa control path on bare-metal loop architecture",
+      "control_loop_budget_ms_target": 20,
+      "control_loop_budget_ms_max": 50
+    },
+    "reliability": {
+      "replay_protection": true,
+      "ack_timeout_fail_safe": "TX local relay forced OFF on ack timeout",
+      "starvation_protection_requirement": "System shall detect and surface when control loop cadence degrades beyond budget.",
+      "watchdog_requirement_for_next_implementation": "Enable and feed watchdog from control loop heartbeat so scheduler lockups trigger safe recovery."
+    },
+    "resource_limits": {
+      "ota_max_sketch_space_rule": "(ESP.getFreeSketchSpace()-0x1000) & 0xFFFFF000",
+      "log_buffer_max": 200
+    }
+  },
+  "clean_room_reimplementation_plan": {
+    "recommended_order": [
+      "Implement immutable config schema + persistence + deterministic derivations",
+      "Implement radio packet codec/crypto and deterministic vectors",
+      "Implement state machine with simulation tests",
+      "Implement app networking orchestration and OTA/mDNS",
+      "Implement sensor manager",
+      "Implement MQTT bridge",
+      "Implement web API contracts",
+      "Implement web UI parity"
+    ],
+    "must_match_behavior_exactly": [
+      "Pin assignments",
+      "Address derivation",
+      "Password derivation",
+      "LoRa packet layout and crypto",
+      "TX/RX ACK semantics and timeouts",
+      "Default passphrase disabling of radio",
+      "API field names and key response semantics"
+    ],
+    "allowed_internal_variance": [
+      "Code organization and module boundaries",
+      "UI implementation details if API and behavior remain equivalent",
+      "Internal logging implementation as long as exports and key event semantics are preserved"
+    ]
+  },
+  "acceptance_test_suite": {
+    "unit_tests": [
+      "Given fixed passphrase, derived enc/mac keys are deterministic and correct.",
+      "Given packet fixture, MAC verification passes/fails correctly.",
+      "Counter replay protection drops duplicate or lower counters per source.",
+      "Address parser accepts decimal ints and hex strings and clamps invalid values.",
+      "Hostname normalization enforces allowed charset and max length.",
+      "Config guardrails clamp heartbeat/ack timeout/frequency and force sensor pin 0."
+    ],
+    "integration_tests": [
+      "TX input change causes Change packet, RX relay update, RX Ack, TX relay update after ~500ms.",
+      "ACK timeout path forces TX relay OFF and sets timeout state.",
+      "Heartbeat emits at configured interval and RX Ack behavior matches spec.",
+      "Default deployment key disables radio send/receive.",
+      "MQTT relay topic toggles local relay only.",
+      "MQTT control topic on TX sends LoRa Mqtt packet and RX applies without Ack.",
+      "STA fallback keeps AP active when STA credentials fail.",
+      "AP can disable after stable STA when ap_always_on=false.",
+      "DS18B20 detect/read updates local temp and transmits remote temp metadata.",
+      "Under induced WiFi reconnect storms, LoRa control latency remains within control loop budget and no missed relay transitions occur.",
+      "Under MQTT broker outage and reconnect attempts, LoRa ACK/timeout behavior remains unchanged.",
+      "Under concurrent web polling at high rate, LoRa relay control remains deterministic."
+    ],
+    "api_contract_tests": [
+      "Auth-required endpoints return 401 without valid session.",
+      "Login lockout triggers after 5 failed attempts and returns 429 during lock window.",
+      "POST /api/settings rejects short deployment key and default key unless explicit override.",
+      "GET /api/status includes expected keys and valid types.",
+      "OTA upload returns ok and device restarts on valid image."
+    ],
+    "field_validation_tests": [
+      "Flash release script prints AP/admin credentials matching firmware-generated values.",
+      "ZA build uses 433 MHz default; US build uses 915 MHz default.",
+      "Factory endpoint reports hardware version v1.2 and batch 251101.",
+      "Incident replay test: reproduce temporary gate non-response scenario and confirm logs conclusively show whether control starvation, RF loss, or ACK timeout occurred."
+    ]
+  },
+  "traceability": {
+    "core_runtime": [
+      "src/main.cpp",
+      "src/app.h",
+      "src/app.cpp"
+    ],
+    "configuration": [
+      "src/config_store.h",
+      "src/config_store.cpp"
+    ],
+    "radio_protocol": [
+      "src/radio_protocol.h",
+      "src/radio_protocol.cpp",
+      "docs/PROTOCOL.md"
+    ],
+    "state_machine": [
+      "src/state_machine.h",
+      "src/state_machine.cpp"
+    ],
+    "mqtt": [
+      "src/mqtt_bridge.h",
+      "src/mqtt_bridge.cpp"
+    ],
+    "sensors": [
+      "src/sensor_manager.h",
+      "src/sensor_manager.cpp"
+    ],
+    "web_console": [
+      "src/web_console.h",
+      "src/web_console.cpp"
+    ],
+    "logs": [
+      "src/log_buffer.h",
+      "src/log_buffer.cpp"
+    ],
+    "build_and_factory_tooling": [
+      "platformio.ini",
+      "tools/build_metadata.py",
+      "tools/post_upload_sticker.py",
+      "tools/flash_release.py",
+      "tools/factory_provision.py",
+      "tools/force_ota_port.py"
+    ],
+    "supplementary_docs": [
+      "README.md",
+      "docs/DEVELOPER_GUIDE.md",
+      "docs/USER_GUIDE.md",
+      "docs/PROVISIONING.md",
+      "docs/PRODUCT_MANUAL.md",
+      "docs/FEATURE_PARITY.md",
+      "docs/DELTA_2026-02-14.md",
+      "docs/TODO.md"
+    ]
+  },
+  "known_gaps_and_inferences": {
+    "inferred_items": [
+      "Some UI text and tab labels are treated as non-normative except where tied to workflow constraints.",
+      "Factory 'role defaults to TX' is taken from tooling/docs and current behavior, not a hard firmware lock.",
+      "No formal protocol version field currently exists; versioning guidance is procedural."
+    ],
+    "out_of_scope_for_v1_2_rebuild": [
+      "Advanced analog/tank/flow sensor integration",
+      "ESP32 migration path",
+      "Backward compatibility with legacy 4-byte payload firmware"
+    ]
+  }
+}

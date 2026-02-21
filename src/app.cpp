@@ -180,17 +180,21 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
   mqtt_.applyConfig(config_.settings(), config_.chipIdHex());
   sensors_.applyConfig(config_.settings());
 
+  if (restartOtaAuth) {
+    // ESP8266 ArduinoOTA cannot replace password once initialized in-process.
+    // Reboot is required to apply new OTA credentials reliably.
+    logs_.add("ota_auth_changed_reboot", 0, 0, 0);
+    delay(100);
+    ESP.restart();
+    return;
+  }
+
   if (restartNetwork) {
     WiFi.disconnect();
     delay(50);
     startNetworking();
-    refreshMdns();
-    startOta();
-  } else if (restartOtaAuth) {
-    startOta();
-  } else {
-    refreshMdns();
   }
+  refreshMdns();
 
   logs_.add("config_reloaded", 0, 0, 0);
 }

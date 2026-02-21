@@ -40,12 +40,18 @@ class MqttBridge {
   uint32_t last_reconnect_attempt_ms_ = 0;
   uint32_t last_publish_ms_ = 0;
   uint32_t last_discovery_publish_ms_ = 0;
+  uint32_t remote_last_seen_published_[256]{};
+  uint32_t remote_last_cmd_published_[256]{};
+  bool remote_published_once_[256]{};
+  bool remote_input_published_[256]{};
+  uint8_t remote_input_value_[256]{};
 
   static MqttBridge *instance_;
   static void staticCallback(char *topic, uint8_t *payload, unsigned int length);
 
   void rebuildTopics();
   void mqttCallback(char *topic, uint8_t *payload, unsigned int length);
+  void clearRemoteRetainedTopics(uint8_t addr);
   bool connectIfNeeded();
   void publishStatus();
   void publishDiscovery();

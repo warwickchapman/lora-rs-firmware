@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## [0.2.2-alpha] - 2026-02-21
+
+### Added
+- Complete implementation spec document: `docs/LRS_COMPLETE_IMPLEMENTATION_SPEC.json`.
+
+### Changed
+- Firmware version updated to `0.2.2-alpha`.
+- Documentation updates across developer guide, protocol, and user guide.
+- Runtime behavior updates in app/config/MQTT/state machine/radio/web console modules.
+
 ## [0.2.1-alpha] - 2026-02-15
 
 ### Added

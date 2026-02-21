@@ -66,6 +66,34 @@ String deriveShortPassword(const String &chip) {
   return String(hexbuf).substring(0, 8);
 }
 
+String extractJsonStringField(const String &json, const char *key) {
+  if (key == nullptr || key[0] == '\0') return "";
+  const String needle = String("\"") + key + "\":\"";
+  const int start = json.indexOf(needle);
+  if (start < 0) return "";
+  const int valueStart = start + needle.length();
+  int i = valueStart;
+  bool escape = false;
+  String out;
+  while (i < json.length()) {
+    const char c = json.charAt(i++);
+    if (escape) {
+      out += c;
+      escape = false;
+      continue;
+    }
+    if (c == '\\') {
+      escape = true;
+      continue;
+    }
+    if (c == '"') {
+      return out;
+    }
+    out += c;
+  }
+  return "";
+}
+
 }  // namespace
 
 bool ConfigStore::begin() {
@@ -86,12 +114,28 @@ bool ConfigStore::begin() {
     return save();
   }
 
-  DynamicJsonDocument doc(2048);
-  auto err = deserializeJson(doc, f);
+  const size_t fileSize = static_cast<size_t>(f.size());
+  String raw;
+  raw.reserve(fileSize + 1);
+  while (f.available()) {
+    raw += static_cast<char>(f.read());
+  }
   f.close();
+
+  size_t docCapacity = fileSize + 512;
+  if (docCapacity < 4096) {
+    docCapacity = 4096;
+  }
+  DynamicJsonDocument doc(docCapacity);
+  auto err = deserializeJson(doc, raw);
   if (err) {
+    // Keep config file intact on parse failure to avoid destructive resets.
     ensureProvisionedDefaults();
-    return save();
+    const String recoveredAdmin = extractJsonStringField(raw, "admin_password");
+    if (recoveredAdmin.length() >= 8) {
+      cfg_.admin_password = recoveredAdmin;
+    }
+    return false;
   }
 
   cfg_.version = doc["version"] | kConfigVersion;
@@ -109,6 +153,11 @@ bool ConfigStore::begin() {
 
   cfg_.heartbeat_ms = doc["heartbeat_ms"] | 60000;
   cfg_.ack_timeout_ms = doc["ack_timeout_ms"] | 5000;
+  cfg_.mqtt_remote_retry_timeout_ms = doc["mqtt_remote_retry_timeout_ms"] | 300000;
+  cfg_.tx_mqtt_remote_polling_enabled = doc["tx_mqtt_remote_polling_enabled"] | false;
+  cfg_.tx_mqtt_remote_default_poll_interval_ms = doc["tx_mqtt_remote_default_poll_interval_ms"] | 60000;
+  cfg_.rx_push_on_change_enabled = doc["rx_push_on_change_enabled"] | false;
+  cfg_.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | 60000;
   cfg_.tx_input_lora_control_enabled = doc["tx_input_lora_control_enabled"] | true;
 
   cfg_.wifi_sta_ssid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | ""));
@@ -184,6 +233,22 @@ bool ConfigStore::begin() {
     cfg_.fleet_passphrase = "lora-default-passphrase";
     changed = true;
   }
+  if (cfg_.tx_mqtt_remote_default_poll_interval_ms < 60000) {
+    cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
+    changed = true;
+  }
+  if (cfg_.tx_mqtt_remote_default_poll_interval_ms > 3600000) {
+    cfg_.tx_mqtt_remote_default_poll_interval_ms = 3600000;
+    changed = true;
+  }
+  if (cfg_.rx_push_min_interval_ms < 60000) {
+    cfg_.rx_push_min_interval_ms = 60000;
+    changed = true;
+  }
+  if (cfg_.rx_push_min_interval_ms > 3600000) {
+    cfg_.rx_push_min_interval_ms = 3600000;
+    changed = true;
+  }
 
   cfg_.audit_boot_count += 1;
   changed = true;
@@ -196,7 +261,7 @@ bool ConfigStore::begin() {
 Settings &ConfigStore::settings() { return cfg_; }
 
 bool ConfigStore::save() {
-  DynamicJsonDocument doc(2048);
+  DynamicJsonDocument doc(4096);
   doc["version"] = cfg_.version;
   doc["provisioned"] = cfg_.provisioned;
 
@@ -212,6 +277,11 @@ bool ConfigStore::save() {
 
   doc["heartbeat_ms"] = cfg_.heartbeat_ms;
   doc["ack_timeout_ms"] = cfg_.ack_timeout_ms;
+  doc["mqtt_remote_retry_timeout_ms"] = cfg_.mqtt_remote_retry_timeout_ms;
+  doc["tx_mqtt_remote_polling_enabled"] = cfg_.tx_mqtt_remote_polling_enabled;
+  doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg_.tx_mqtt_remote_default_poll_interval_ms;
+  doc["rx_push_on_change_enabled"] = cfg_.rx_push_on_change_enabled;
+  doc["rx_push_min_interval_ms"] = cfg_.rx_push_min_interval_ms;
   doc["tx_input_lora_control_enabled"] = cfg_.tx_input_lora_control_enabled;
 
   doc["wifi_sta_ssid"] = cfg_.wifi_sta_ssid;
@@ -281,6 +351,11 @@ void ConfigStore::setDefaults() {
 
   cfg_.heartbeat_ms = 60000;
   cfg_.ack_timeout_ms = 5000;
+  cfg_.mqtt_remote_retry_timeout_ms = 300000;
+  cfg_.tx_mqtt_remote_polling_enabled = false;
+  cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
+  cfg_.rx_push_on_change_enabled = false;
+  cfg_.rx_push_min_interval_ms = 60000;
   cfg_.tx_input_lora_control_enabled = true;
 
   cfg_.wifi_sta_ssid = "";

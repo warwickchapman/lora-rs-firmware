@@ -16,6 +16,12 @@ constexpr uint32_t kMinHeartbeatMs = 60000;
 constexpr uint32_t kMaxHeartbeatMs = 3600000;
 constexpr uint32_t kMinAckTimeoutMs = 5 * 1000;
 constexpr uint32_t kMaxAckTimeoutMs = 600 * 1000;
+constexpr uint32_t kMinMqttRemoteRetryTimeoutMs = 5 * 1000;
+constexpr uint32_t kMaxMqttRemoteRetryTimeoutMs = 3600 * 1000;
+constexpr uint32_t kMinTxPollDefaultIntervalMs = 60 * 1000;
+constexpr uint32_t kMaxTxPollDefaultIntervalMs = 3600 * 1000;
+constexpr uint32_t kMinRxPushIntervalMs = 60 * 1000;
+constexpr uint32_t kMaxRxPushIntervalMs = 3600 * 1000;
 constexpr const char *kDefaultDeploymentKey = "lora-default-passphrase";
 constexpr size_t kMinDeploymentKeyLen = 16;
 constexpr const char *kHardwareVersion = "v1.2";
@@ -70,6 +76,20 @@ const char *wifiStatusText(wl_status_t st) {
     case WL_NO_SHIELD:
       return "no_shield";
 #endif
+    default:
+      return "unknown";
+  }
+}
+
+const char *remoteAckStateText(RemoteAckState s) {
+  switch (s) {
+    case RemoteAckState::Pending:
+      return "pending";
+    case RemoteAckState::Ok:
+      return "ok";
+    case RemoteAckState::Timeout:
+      return "timeout";
+    case RemoteAckState::Unknown:
     default:
       return "unknown";
   }
@@ -290,13 +310,33 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 .tabbtn.active{background:var(--accent);color:#fff}
 .page{display:none}
 .page.active{display:block}
+.remotes-table{width:100%;border-collapse:collapse;font-size:14px}
+.remotes-table th,.remotes-table td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+.remotes-table th{color:var(--muted);font-weight:700}
+.remotes-table tr.selected{background:rgba(0,95,115,.18)}
+.remotes-row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.remotes-row-actions button{margin-top:0;padding:6px 8px;font-size:12px}
+.remote-detail{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:rgba(255,255,255,.02)}
+.remote-detail-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.remote-detail-tabs .tabbtn{margin-top:0;padding:6px 10px}
+.remote-detail-grid{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:14px}
+.remote-detail-grid .k{color:var(--muted)}
+.remote-detail-grid .v{font-weight:600;overflow-wrap:anywhere}
+.chip{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid transparent}
+.chip.ok{background:#d9f6df;color:#166534;border-color:#3ea86b}
+.chip.warn{background:#fef3c7;color:#92400e;border-color:#f59e0b}
+.chip.err{background:#fee2e2;color:#b42318;border-color:#fca5a5}
+.chip.neutral{background:#e5e7eb;color:#374151;border-color:#cfd4db}
 .status-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
 .deploy-note{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.03);margin-bottom:10px}
 .deploy-note.warn{border-color:#f59e0b;background:rgba(245,158,11,.10);color:#fef3c7}
 .status-table{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:15px}
 .status-table .k{color:var(--muted)}
 .status-table .v{font-weight:600;overflow-wrap:anywhere}
+.status-table .v.copyable{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .status-table .section{grid-column:1/-1;font-weight:800;margin-top:4px;padding-top:6px;border-top:1px solid var(--border)}
+.copy-btn{margin:0;padding:4px 8px;font-size:12px;border-radius:6px;background:#2f9e64;color:#fff}
+.copy-btn:hover{filter:brightness(1.05)}
 .relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:12px}
 .relay-badge{width:90px;height:90px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
 .relay-badge.on{background:#d9f6df;color:#166534;border:2px solid #3ea86b}
@@ -321,6 +361,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <body><header><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card topnav">
 <button class="tabbtn active" id="tab-status" onclick="showPage('status')">Status</button>
+<button class="tabbtn" id="tab-remotes" onclick="showPage('remotes')">Remotes</button>
 <button class="tabbtn" id="tab-lora" onclick="showPage('lora')">LoRa</button>
 <button class="tabbtn" id="tab-network" onclick="showPage('network')">Network</button>
 <button class="tabbtn" id="tab-mqtt" onclick="showPage('mqtt')">MQTT</button>
@@ -332,6 +373,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="deploymentKeyNotice" class="deploy-note">Deployment Key (Encryption): checking...</div>
+<div id="statusRemotesShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('remotes');return false;">View remotes</a></div>
 <div class="status-grid">
 <div>
 <div id="statusTable">Loading status...</div>
@@ -351,6 +393,12 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div class="sensor-tile">Flow: n/a</div>
 </div>
 </section>
+<section class="card page" id="page-remotes">
+<h3>Remotes</h3>
+<div class="small" id="remotesSummary">Loading...</div>
+<div id="remotesTableHost" style="margin-top:8px">Loading remote list...</div>
+<div id="remoteDetailHost" class="remote-detail">Select a remote to view details.</div>
+</section>
 <section class="card page" id="page-lora"><h3>LoRa</h3><div class="grid">
 <div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
@@ -365,6 +413,11 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div><label>Coding rate (5-8)</label><input id="lora_coding_rate" type="number" min="5" max="8" /></div>
 <div><label>Heartbeat (seconds)</label><input id="heartbeat_s" type="number" min="60" max="3600" /></div>
 <div><label>ACK timeout (seconds)</label><input id="ack_timeout_s" type="number" min="5" max="600" /></div>
+<div id="tx_mqtt_remote_retry_row"><label>MQTT remote retry timeout (seconds)</label><input id="mqtt_remote_retry_timeout_s" type="number" min="5" max="3600" /><div class="small">TX only. Retry remote MQTT LoRa commands until this timeout is reached.</div></div>
+<div id="tx_polling_enabled_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_mqtt_remote_polling_enabled" type="checkbox" /><label for="tx_mqtt_remote_polling_enabled">Enable scheduled remote polling</label></div><div class="small">TX only. When disabled, `poll_interval_s` schedules are ignored but `poll_now` still works.</div></div>
+<div id="tx_polling_default_row"><label>Default remote poll interval (seconds)</label><input id="tx_mqtt_remote_default_poll_interval_s" type="number" min="60" max="3600" /><div class="small">TX only. Applied to newly discovered remote nodes. Minimum 60s to reduce LoRa duty-cycle risk.</div></div>
+<div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
+<div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
 <div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_input_lora_control_enabled" type="checkbox" /><label for="tx_input_lora_control_enabled">Input drives LoRa relay control</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
 </div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details>
 <div class="actions"><button onclick="saveLora()">Save LoRa</button></div>
@@ -419,6 +472,10 @@ let currentStaIp = '';
 let currentLanMdns = '';
 let currentApIp = '';
 let currentApMdns = '';
+let lastRoleIsTx = false;
+let remotesCache = [];
+let selectedRemoteAddr = 0;
+let remoteDetailTab = 'state';
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -439,6 +496,16 @@ function refreshRoleLabels(){
  document.getElementById('remote_address_label').innerText=tx?'RX remote address (destination)':'TX remote address (source)';
  const txInputRow=document.getElementById('tx_input_lora_control_row');
  if(txInputRow){ txInputRow.style.display = tx ? '' : 'none'; }
+ const txMqttRetryRow=document.getElementById('tx_mqtt_remote_retry_row');
+ if(txMqttRetryRow){ txMqttRetryRow.style.display = tx ? '' : 'none'; }
+ const txPollingEnabledRow=document.getElementById('tx_polling_enabled_row');
+ if(txPollingEnabledRow){ txPollingEnabledRow.style.display = tx ? '' : 'none'; }
+ const txPollingDefaultRow=document.getElementById('tx_polling_default_row');
+ if(txPollingDefaultRow){ txPollingDefaultRow.style.display = tx ? '' : 'none'; }
+ const rxPushOnChangeRow=document.getElementById('rx_push_on_change_row');
+ if(rxPushOnChangeRow){ rxPushOnChangeRow.style.display = tx ? 'none' : ''; }
+ const rxPushIntervalRow=document.getElementById('rx_push_interval_row');
+ if(rxPushIntervalRow){ rxPushIntervalRow.style.display = tx ? 'none' : ''; }
 }
 function refreshHostnamePreview(){
  const raw=(document.getElementById('lan_hostname').value||'').trim()||'lrs';
@@ -510,6 +577,43 @@ function bindFreqPreset(){
 function escapeHtml(v){
  return String(v??'').replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
+function copyButtonHtml(value, label='Value'){
+ const txt=String(value??'').trim();
+ const low=txt.toLowerCase();
+ if(!txt || low==='n/a' || low==='not_set') return '';
+ return `<button type="button" class="copy-btn" data-copy="${escapeHtml(txt)}" data-label="${escapeHtml(label)}" onclick="copyFromButton(this)">Copy</button>`;
+}
+function copyableValueHtml(contentHtml, copyValue, label='Value'){
+ return `<span>${contentHtml}</span>${copyButtonHtml(copyValue, label)}`;
+}
+async function writeClipboard(text){
+ if(navigator.clipboard && navigator.clipboard.writeText){
+  await navigator.clipboard.writeText(text);
+  return;
+ }
+ const ta=document.createElement('textarea');
+ ta.value=text;
+ ta.setAttribute('readonly','readonly');
+ ta.style.position='fixed';
+ ta.style.opacity='0';
+ document.body.appendChild(ta);
+ ta.focus();
+ ta.select();
+ document.execCommand('copy');
+ document.body.removeChild(ta);
+}
+async function copyFromButton(btn){
+ if(!btn) return;
+ const text=String(btn.dataset.copy||'').trim();
+ if(!text){ showToast('Nothing to copy', true); return; }
+ const label=String(btn.dataset.label||'Value');
+ try{
+  await writeClipboard(text);
+  showToast(`${label} copied`);
+ }catch(e){
+  showToast(`Copy failed: ${e.message}`, true);
+ }
+}
 function rssiToLevel(rssi){
  if(rssi >= -67) return 4;
  if(rssi >= -75) return 3;
@@ -548,6 +652,46 @@ function humanAgeMsShort(ms){
  if(m < 60) return `${m}m`;
  const h=Math.floor(m/60);
  return `${h}h`;
+}
+function remoteStaleThresholdMs(r){
+ const intervalMs=Math.max(0, Number(r.poll_interval_ms||0));
+ const base=intervalMs>0 ? intervalMs*3 : 300000;
+ return Math.max(180000, base);
+}
+function remoteIsStale(r){
+ const seen=Number(r.last_seen_ms||0);
+ if(seen<=0) return true;
+ return Number(r.last_seen_age_ms||0) > remoteStaleThresholdMs(r);
+}
+function ackChipClass(state){
+ const s=String(state||'unknown').toLowerCase();
+ if(s==='ok') return 'ok';
+ if(s==='pending') return 'warn';
+ if(s==='timeout') return 'err';
+ return 'neutral';
+}
+function freshnessChip(r){
+ if(remoteIsStale(r)) return `<span class="chip err">stale</span>`;
+ if(Number(r.last_seen_ms||0)===0) return `<span class="chip neutral">unknown</span>`;
+ return `<span class="chip ok">fresh</span>`;
+}
+function remoteAddrHex(r){
+ if(r && r.addr_hex) return String(r.addr_hex);
+ const n=Number(r.address||0);
+ if(!Number.isFinite(n) || n<=0) return '0x00';
+ return toHexByte(n);
+}
+function relayChip(v){
+ const on=Number(v||0)===1;
+ return `<span class="chip ${on?'ok':'neutral'}">${on?'relay on':'relay off'}</span>`;
+}
+function inputChip(v){
+ const closed=Number(v||0)===1;
+ return `<span class="chip ${closed?'ok':'neutral'}">${closed?'input closed':'input open'}</span>`;
+}
+function remoteTempText(r){
+ if(!r || !r.temp_valid) return 'n/a';
+ return `${Number(r.temp_c||0).toFixed(1)} C`;
 }
 function reasonLabel(v){
  const r=String(v||'').toLowerCase();
@@ -633,7 +777,7 @@ function isLikelyStaSessionPath(){
 }
 function showPage(page){
  activePage = page;
- ['status','lora','network','mqtt','sensors','diagnostics','factory','logs'].forEach(p=>{
+ ['status','remotes','lora','network','mqtt','sensors','diagnostics','factory','logs'].forEach(p=>{
   const sec=document.getElementById(`page-${p}`);
   const tab=document.getElementById(`tab-${p}`);
   if(sec) sec.classList.toggle('active', p===page);
@@ -641,6 +785,7 @@ function showPage(page){
  });
  if(page==='logs'){ refreshLogs(); }
  if(page==='diagnostics'){ refreshDiagnostics(); }
+ if(page==='remotes'){ refreshRemotes(); }
 }
 function showToast(msg, isError=false){
  const t=document.getElementById('toast');
@@ -700,11 +845,23 @@ async function refreshStatus(){
  setWifiBadge(level, 'WiFi');
   const apUrl = st.mdns_ap ? `http://${st.mdns_ap}` : '';
   const lanUrl = st.mdns_lan ? `http://${st.mdns_lan}` : '';
+  const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a>` : escapeHtml(st.mdns_lan || 'n/a');
+  const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a>` : escapeHtml(st.mdns_ap || 'n/a');
   const relayOn = Number(st.relay_state) === 1;
   const hasLora = Number(st.lora_last_packet_ms||0) > 0;
-  const hasLoraTx = Number(st.lora_last_tx_ms||0) > 0;
+ const hasLoraTx = Number(st.lora_last_tx_ms||0) > 0;
   const loraAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_packet_ms||0);
   const loraTxAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_tx_ms||0);
+  const roleIsTx = String(st.role||'').toLowerCase()==='tx';
+  lastRoleIsTx = roleIsTx;
+  const remotesTab=document.getElementById('tab-remotes');
+  if(remotesTab){ remotesTab.style.display = roleIsTx ? '' : 'none'; }
+  const remotesShortcut=document.getElementById('statusRemotesShortcut');
+  if(remotesShortcut){ remotesShortcut.style.display = roleIsTx ? '' : 'none'; }
+  if(!roleIsTx && activePage==='remotes'){ showPage('status'); }
+  const txAddress = roleIsTx ? st.local_address : st.remote_address;
+  const rxAddress = roleIsTx ? st.remote_address : st.local_address;
+  const roleDisplay = `${roleIsTx ? 'Transmitter' : 'Receiver'} (tx ${txAddress}, rx ${rxAddress})`;
   const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
   const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
   const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
@@ -725,19 +882,20 @@ async function refreshStatus(){
  const table=document.getElementById('statusTable');
  const keyNotice=document.getElementById('deploymentKeyNotice');
  const deployKey=String(st.deployment_key || '');
+ const deployKeyCopyBtn = copyButtonHtml(deployKey, 'Fleet key');
  const deployDefault=!!st.deployment_key_default;
  if(keyNotice){
    keyNotice.className = `deploy-note${deployDefault ? ' warn' : ''}`;
    keyNotice.innerHTML = deployDefault
-    ? `Deployment Key (Encryption): <b>${escapeHtml(deployKey)}</b> (default). Change this now to isolate your deployment.`
-    : `Deployment Key (Encryption): <b>${escapeHtml(deployKey || 'not_set')}</b>`;
+    ? `Deployment Key (Encryption): <b>${escapeHtml(deployKey)}</b> ${deployKeyCopyBtn} (default). Change this now to isolate your deployment.`
+    : `Deployment Key (Encryption): <b>${escapeHtml(deployKey || 'not_set')}</b> ${deployKeyCopyBtn}`;
  }
  if(table){
  table.className='status-table';
   table.innerHTML=
    `<div class="section">LoRa</div>
-    <div class="k">Role</div><div class="v">${escapeHtml(String(st.role||'').toLowerCase()==='tx' ? `Transmitter (${st.local_address}, RX ${st.remote_address})` : `Receiver (${st.local_address}, TX ${st.remote_address})`)}</div>
-    <div class="k">Deployment key</div><div class="v">${escapeHtml(deployKey || 'not_set')}</div>
+    <div class="k">Role</div><div class="v copyable">${copyableValueHtml(escapeHtml(roleDisplay), roleDisplay, 'Role')}</div>
+    <div class="k">Fleet key</div><div class="v copyable">${copyableValueHtml(escapeHtml(deployKey || 'not_set'), deployKey, 'Fleet key')}</div>
     <div class="k">Firmware</div><div class="v">${escapeHtml(st.fw_display || `${st.fw_version || 'n/a'} (${st.fw_git_sha || 'n/a'}${st.fw_dirty ? ', dirty' : ''})`)}</div>
     <div class="k">Build</div><div class="v">${escapeHtml(st.build_date || 'n/a')} ${escapeHtml(st.build_time || '')}</div>
     <div class="k">Link</div><div class="v">${escapeHtml(st.link_state)}</div>
@@ -749,12 +907,12 @@ async function refreshStatus(){
     <div class="k">STA SSID</div><div class="v">${escapeHtml(st.sta_ssid || st.sta_target_ssid || 'not configured')}</div>
     <div class="k">STA State</div><div class="v">${escapeHtml(st.sta_status_text)} [${escapeHtml(st.sta_status_code)}]</div>
     <div class="k">Current RSSI</div><div class="v">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'n/a')}</div>
-    <div class="k">STA IP</div><div class="v">${escapeHtml(st.sta_ip || 'n/a')}</div>
-    <div class="k">LAN mDNS</div><div class="v"><a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a></div>
+    <div class="k">STA IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.sta_ip || 'n/a'), st.sta_ip, 'STA IP')}</div>
+    <div class="k">LAN mDNS</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, st.mdns_lan, 'LAN mDNS')}</div>
     <div class="section">Soft AP</div>
     <div class="k">AP SSID</div><div class="v">${escapeHtml(st.ap_ssid)}</div>
-    <div class="k">AP IP</div><div class="v">${escapeHtml(st.ap_ip || 'n/a')}</div>
-    <div class="k">AP mDNS</div><div class="v"><a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a></div>`;
+    <div class="k">AP IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.ap_ip || 'n/a'), st.ap_ip, 'AP IP')}</div>
+    <div class="k">AP mDNS</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, st.mdns_ap, 'AP mDNS')}</div>`;
  }
  const t=document.getElementById('sensorTempTile');
  if(t){
@@ -858,6 +1016,11 @@ async function load(){
  refreshFreqPreset();
  document.getElementById('heartbeat_s').value=Math.max(1,Math.round(Number(s.heartbeat_ms)/1000));
  document.getElementById('ack_timeout_s').value=Math.max(1,Math.round(Number(s.ack_timeout_ms)/1000));
+ document.getElementById('mqtt_remote_retry_timeout_s').value=Math.max(1,Math.round(Number(s.mqtt_remote_retry_timeout_ms||300000)/1000));
+ document.getElementById('tx_mqtt_remote_polling_enabled').checked = !!s.tx_mqtt_remote_polling_enabled;
+ document.getElementById('tx_mqtt_remote_default_poll_interval_s').value=Math.max(60,Math.round(Number(s.tx_mqtt_remote_default_poll_interval_ms||60000)/1000));
+ document.getElementById('rx_push_on_change_enabled').checked = !!s.rx_push_on_change_enabled;
+ document.getElementById('rx_push_min_interval_s').value=Math.max(60,Math.round(Number(s.rx_push_min_interval_ms||60000)/1000));
  document.getElementById('local_address').value=String(s.local_address);
  document.getElementById('remote_address').value=String(s.remote_address);
  refreshRoleLabels();
@@ -951,8 +1114,14 @@ function collectLoraBody(){
  if(!Number.isFinite(mhz)||mhz<FREQ_MIN_MHZ||mhz>FREQ_MAX_MHZ){alert(`Frequency must be between ${FREQ_MIN_MHZ} and ${FREQ_MAX_MHZ} MHz.`); return;}
  const hbSec=Math.floor(Number(document.getElementById('heartbeat_s').value));
  const ackSec=Math.floor(Number(document.getElementById('ack_timeout_s').value));
+ const mqttRetrySec=Math.floor(Number(document.getElementById('mqtt_remote_retry_timeout_s').value));
+ const txPollDefaultSec=Math.floor(Number(document.getElementById('tx_mqtt_remote_default_poll_interval_s').value));
+ const rxPushMinSec=Math.floor(Number(document.getElementById('rx_push_min_interval_s').value));
  if(!Number.isFinite(hbSec)||hbSec<60||hbSec>3600){alert('Heartbeat must be between 60 and 3600 seconds.'); return;}
  if(!Number.isFinite(ackSec)||ackSec<5||ackSec>600){alert('ACK timeout must be between 5 and 600 seconds.'); return;}
+ if(!Number.isFinite(mqttRetrySec)||mqttRetrySec<5||mqttRetrySec>3600){alert('MQTT remote retry timeout must be between 5 and 3600 seconds.'); return;}
+ if(!Number.isFinite(txPollDefaultSec)||txPollDefaultSec<60||txPollDefaultSec>3600){alert('Default poll interval must be between 60 and 3600 seconds.'); return;}
+ if(!Number.isFinite(rxPushMinSec)||rxPushMinSec<60||rxPushMinSec>3600){alert('RX push minimum interval must be between 60 and 3600 seconds.'); return;}
  const ids=['lora_tx_power','lora_spreading_factor','lora_bandwidth_hz','lora_coding_rate','fleet_passphrase'];
  const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
  body.fleet_passphrase=String(body.fleet_passphrase||'').trim();
@@ -968,9 +1137,14 @@ function collectLoraBody(){
  body.local_address=local;
  body.remote_address=remote;
  body.tx_input_lora_control_enabled=document.getElementById('tx_input_lora_control_enabled').checked;
+ body.tx_mqtt_remote_polling_enabled=document.getElementById('tx_mqtt_remote_polling_enabled').checked;
+ body.rx_push_on_change_enabled=document.getElementById('rx_push_on_change_enabled').checked;
  body.lora_frequency_hz=Math.round(mhz*1000000);
  body.heartbeat_ms=hbSec*1000;
  body.ack_timeout_ms=ackSec*1000;
+ body.mqtt_remote_retry_timeout_ms=mqttRetrySec*1000;
+ body.tx_mqtt_remote_default_poll_interval_ms=txPollDefaultSec*1000;
+ body.rx_push_min_interval_ms=rxPushMinSec*1000;
  return body;
 }
 function collectNetworkBody(){
@@ -1109,8 +1283,161 @@ async function testMqtt(){
   const msg=`Broker connection failed (${target}, state ${out.state})`;
   el.className='result-line show err';
   el.innerText=msg;
-  showToast(msg, true);
+ showToast(msg, true);
  }
+}
+async function remoteAction(action, addr, intervalS, enabled){
+ const body={action, addr};
+ if(intervalS!==undefined && intervalS!==null){ body.interval_s = intervalS; }
+ if(enabled!==undefined){ body.enabled = !!enabled; }
+ const out=await apiJson('/api/remotes/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),silent:true});
+ if(!out || !out.ok){
+  const err=(out && out.error) ? out.error : 'request_failed';
+  showToast(`Remote action failed: ${err}`, true);
+  return false;
+ }
+ return true;
+}
+async function remotePollNow(addr){
+ const ok=await remoteAction('poll_now', addr);
+ if(!ok) return;
+ showToast(`Poll requested for ${toHexByte(addr)}`);
+ await refreshRemotes();
+}
+async function remoteForget(addr){
+ if(!confirm(`Forget ${toHexByte(addr)}?`)) return;
+ const ok=await remoteAction('forget', addr);
+ if(!ok) return;
+ showToast(`Forgot ${toHexByte(addr)}`);
+ await refreshRemotes();
+}
+function remoteIntervalFromInput(){
+ const el=document.getElementById('remote-detail-interval');
+ const sec=Math.floor(Number(el ? el.value : NaN));
+ if(!Number.isFinite(sec) || sec<60 || sec>3600){
+  showToast('Interval must be 60..3600 seconds', true);
+  return null;
+ }
+ return sec;
+}
+async function remoteSetInterval(addr){
+ const sec=remoteIntervalFromInput();
+ if(sec===null) return;
+ const ok=await remoteAction('set_interval', addr, sec);
+ if(!ok) return;
+ showToast(`Interval updated for ${toHexByte(addr)}`);
+ await refreshRemotes();
+}
+async function remoteSetSchedule(addr, enabled){
+ let sec=undefined;
+ if(enabled){
+  const s=remoteIntervalFromInput();
+  if(s===null) return;
+  sec=s;
+ }
+ const ok=await remoteAction('set_schedule', addr, sec, enabled);
+ if(!ok) return;
+ showToast(`${enabled ? 'Enabled' : 'Disabled'} schedule for ${toHexByte(addr)}`);
+ await refreshRemotes();
+}
+function setRemoteDetailTab(tab){
+ remoteDetailTab = (tab==='manage') ? 'manage' : 'state';
+ renderRemoteDetail();
+}
+function selectRemote(addr){
+ selectedRemoteAddr = Number(addr||0);
+ renderRemoteDetail();
+}
+function renderRemoteDetail(){
+ const host=document.getElementById('remoteDetailHost');
+ if(!host) return;
+ const selected=remotesCache.find((r)=>Number(r.address||0)===Number(selectedRemoteAddr||0));
+ if(!selected){
+  host.innerHTML='Select a remote to view details.';
+  return;
+ }
+ const addr=Number(selected.address||0);
+ const addrHex=remoteAddrHex(selected);
+ const seenAge=(Number(selected.last_seen_ms||0)>0) ? humanAgeMsShort(selected.last_seen_age_ms||0) : 'never';
+ const pollAge=(Number(selected.last_poll_tx_ms||0)>0) ? humanAgeMsShort(selected.last_poll_age_ms||0) : 'never';
+ const intervalS=Math.max(0, Math.round(Number(selected.poll_interval_ms||0)/1000));
+ const stateView=`
+ <div class="remote-detail-grid">
+   <div class="k">Remote</div><div class="v">${escapeHtml(addrHex)}</div>
+   <div class="k">Freshness</div><div class="v">${freshnessChip(selected)} ${escapeHtml(seenAge)}</div>
+   <div class="k">Relay</div><div class="v">${relayChip(selected.relay_state)}</div>
+   <div class="k">Input</div><div class="v">${inputChip(selected.input_state)}</div>
+   <div class="k">Temperature</div><div class="v">${escapeHtml(remoteTempText(selected))}</div>
+   <div class="k">Uplink RSSI</div><div class="v">${escapeHtml(String(selected.uplink_rssi||-127))} dBm</div>
+   <div class="k">Downlink RSSI</div><div class="v">${selected.downlink_rssi_valid ? `${escapeHtml(String(selected.downlink_rssi))} dBm` : 'n/a'}</div>
+   <div class="k">Poll state</div><div class="v"><span class="chip ${selected.poll_pending?'warn':'neutral'}">${selected.poll_pending?'pending':'idle'}</span> (last tx ${escapeHtml(pollAge)})</div>
+   <div class="k">Ack</div><div class="v"><span class="chip ${ackChipClass(selected.ack_state)}">${escapeHtml(String(selected.ack_state||'unknown'))}</span></div>
+ </div>`;
+ const manageView=`
+ <div class="remote-detail-grid">
+   <div class="k">Interval</div><div class="v"><div class="inline-row"><input id="remote-detail-interval" type="number" min="60" max="3600" value="${intervalS>0?intervalS:60}" style="max-width:120px" /><span class="small">${intervalS>0?`${intervalS}s active`:'disabled'}</span></div></div>
+ </div>
+ <div class="remotes-row-actions" style="margin-top:10px">
+   <button type="button" onclick="remotePollNow(${addr})">Poll now</button>
+   <button type="button" onclick="remoteSetInterval(${addr})">Set interval</button>
+   <button type="button" onclick="remoteSetSchedule(${addr},${intervalS===0?'true':'false'})">${intervalS===0?'Enable schedule':'Disable schedule'}</button>
+   <button type="button" onclick="remoteForget(${addr})">Forget</button>
+ </div>`;
+ host.innerHTML=`
+  <div class="remote-detail-tabs">
+    <button class="tabbtn ${remoteDetailTab==='state'?'active':''}" type="button" onclick="setRemoteDetailTab('state')">State</button>
+    <button class="tabbtn ${remoteDetailTab==='manage'?'active':''}" type="button" onclick="setRemoteDetailTab('manage')">Manage</button>
+  </div>
+  ${remoteDetailTab==='state' ? stateView : manageView}`;
+}
+async function refreshRemotes(){
+ const host=document.getElementById('remotesTableHost');
+ const summary=document.getElementById('remotesSummary');
+ const detail=document.getElementById('remoteDetailHost');
+ if(!host || !summary) return;
+ const out=await apiJson('/api/remotes',{silent:true});
+ if(!out){
+  summary.innerText='Remote list unavailable.';
+  host.innerHTML='Remote list unavailable.';
+  if(detail) detail.innerHTML='Remote details unavailable.';
+  return;
+ }
+ const role=String(out.role||'').toLowerCase();
+ if(role!=='tx'){
+  summary.innerText='Remotes view is TX-only in this firmware.';
+  host.innerHTML='Switch role to TX to manage discovered remotes.';
+  if(detail) detail.innerHTML='Switch role to TX to view remote details.';
+  return;
+ }
+ const remotes=Array.isArray(out.remotes) ? out.remotes : [];
+ remotesCache = remotes;
+ summary.innerText=`Discovered remotes: ${remotes.length} | Global schedule default: ${Math.max(60, Math.round(Number(out.tx_default_poll_interval_ms||60000)/1000))}s | Global polling: ${out.tx_polling_enabled ? 'enabled' : 'disabled'}`;
+ if(remotes.length===0){
+  host.innerHTML='No remotes discovered yet.';
+  if(detail) detail.innerHTML='No remote selected.';
+  selectedRemoteAddr = 0;
+  return;
+ }
+ if(!remotes.some((r)=>Number(r.address||0)===Number(selectedRemoteAddr||0))){
+  selectedRemoteAddr = Number(remotes[0].address||0);
+ }
+ const rows=remotes.map((r)=>{
+  const addrHex=remoteAddrHex(r);
+  const addr=Number(r.address||0);
+  const seenAge=(Number(r.last_seen_ms||0)>0) ? humanAgeMsShort(r.last_seen_age_ms||0) : 'never';
+  const freshness=freshnessChip(r);
+  const selectedCls=addr===Number(selectedRemoteAddr||0) ? 'selected' : '';
+  return `<tr class="${selectedCls}">
+   <td><b>${escapeHtml(addrHex)}</b></td>
+   <td>${relayChip(r.relay_state)}</td>
+   <td>${inputChip(r.input_state)}</td>
+   <td>${escapeHtml(remoteTempText(r))}</td>
+   <td>${freshness} ${escapeHtml(seenAge)}</td>
+   <td><button type="button" onclick="selectRemote(${addr})">View</button></td>
+  </tr>`;
+ }).join('');
+ host.innerHTML=`<table class="remotes-table"><thead><tr><th>Remote</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Device</th></tr></thead><tbody>${rows}</tbody></table>`;
+ renderRemoteDetail();
 }
 async function refreshDiagnostics(){
  const d=await apiJson('/api/diagnostics',{silent:true});
@@ -1194,8 +1521,9 @@ function initPage(){
  updateDeploymentKeyStrength();
  try{ applyTheme(localStorage.getItem('lrs_theme') === 'light' ? 'light' : 'dark'); }catch(e){ applyTheme('dark'); }
  showPage('status');
-  load();
+ load();
  setInterval(()=>{ refreshStatus(); },500);
+ setInterval(()=>{ if(activePage==='remotes' && lastRoleIsTx){ refreshRemotes(); } },1500);
  setInterval(()=>{ if(activePage==='logs') refreshLogs(); },3000);
  setInterval(async ()=>{ const s=await apiJson('/api/session',{silent:true}); if(s&&s.ok){ setSessionLeft(s.remaining_s); } },1000);
 }
@@ -1348,6 +1676,11 @@ void WebConsole::routes() {
     if (!requireAuth(true)) return;
     handleStatus();
   });
+  server_.on("/api/remotes", HTTP_GET, [this]() {
+    if (!requireAuth(true)) return;
+    handleRemotes();
+  });
+  server_.on("/api/remotes/action", HTTP_POST, [this]() { handleRemoteAction(); });
   server_.on("/api/factory", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
     handleFactory();
@@ -1554,6 +1887,112 @@ void WebConsole::handleStatus() {
   server_.send(200, "application/json", out);
 }
 
+void WebConsole::handleRemotes() {
+  DynamicJsonDocument doc(4096);
+  auto &cfg = config_->settings();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["tx_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
+  doc["tx_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
+  const uint32_t now = millis();
+  doc["uptime_ms"] = now;
+  JsonArray arr = doc.createNestedArray("remotes");
+  if (cfg.role_tx && sm_ != nullptr) {
+    const size_t n = sm_->remoteNodeCount();
+    for (size_t i = 0; i < n; ++i) {
+      RemoteNodeStatusSnapshot node{};
+      if (!sm_->remoteNodeByIndex(i, node)) continue;
+      JsonObject r = arr.createNestedObject();
+      r["address"] = node.address;
+      char addrHex[5];
+      snprintf(addrHex, sizeof(addrHex), "0x%02X", node.address);
+      r["addr_hex"] = addrHex;
+      r["relay_state"] = node.relay_state;
+      r["input_state"] = node.input_state;
+      r["temp_valid"] = node.temp_valid;
+      r["temp_c"] = node.temp_c;
+      r["uplink_rssi"] = node.uplink_rssi;
+      r["downlink_rssi_valid"] = node.downlink_rssi_valid;
+      r["downlink_rssi"] = node.downlink_rssi;
+      r["last_seen_ms"] = node.last_seen_ms;
+      const uint32_t seenAgeMs = (node.last_seen_ms > 0 && now >= node.last_seen_ms) ? (now - node.last_seen_ms) : 0;
+      r["last_seen_age_ms"] = seenAgeMs;
+      r["last_cmd_counter"] = node.last_cmd_counter;
+      r["ack_state"] = remoteAckStateText(node.ack_state);
+      r["poll_interval_ms"] = node.poll_interval_ms;
+      r["poll_interval_s"] = node.poll_interval_ms / 1000U;
+      r["last_poll_tx_ms"] = node.last_poll_tx_ms;
+      const uint32_t pollAgeMs = (node.last_poll_tx_ms > 0 && now >= node.last_poll_tx_ms) ? (now - node.last_poll_tx_ms) : 0;
+      r["last_poll_age_ms"] = pollAgeMs;
+      r["poll_pending"] = node.poll_pending;
+      r["poll_state"] = node.poll_pending ? "pending" : "idle";
+      uint32_t staleThresholdMs = (node.poll_interval_ms > 0) ? (node.poll_interval_ms * 3U) : 300000U;
+      if (staleThresholdMs < 180000U) staleThresholdMs = 180000U;
+      r["stale_threshold_ms"] = staleThresholdMs;
+      r["stale"] = (node.last_seen_ms == 0) || (seenAgeMs > staleThresholdMs);
+    }
+  }
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleRemoteAction() {
+  if (!requireAuth(true)) return;
+  DynamicJsonDocument doc(512);
+  auto err = deserializeJson(doc, server_.arg("plain"));
+  if (err) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    return;
+  }
+  auto &cfg = config_->settings();
+  if (!cfg.role_tx) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"tx_only\"}");
+    return;
+  }
+
+  uint8_t addr = parseAddressField(doc["addr"], 0);
+  if (addr == 0) addr = parseAddressField(doc["address"], 0);
+  if (addr == 0 || addr == 255) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_address\"}");
+    return;
+  }
+  String action = String(static_cast<const char *>(doc["action"] | ""));
+  action.trim();
+  action.toLowerCase();
+  if (action.length() == 0) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"missing_action\"}");
+    return;
+  }
+
+  bool ok = false;
+  if (action == "poll_now") {
+    ok = sm_ != nullptr && sm_->mqttPollRemoteNow(addr);
+  } else if (action == "forget") {
+    ok = sm_ != nullptr && sm_->mqttForgetRemote(addr);
+  } else if (action == "set_interval") {
+    uint32_t sec = doc["interval_s"] | 0;
+    if (sec > 0 && sec < 60U) sec = 60U;
+    if (sec > 3600U) sec = 3600U;
+    ok = sm_ != nullptr && sm_->mqttSetRemotePollIntervalMs(addr, sec * 1000U);
+  } else if (action == "set_schedule") {
+    const bool enabled = parseBoolField(doc["enabled"], true);
+    uint32_t sec = doc["interval_s"] | (cfg.tx_mqtt_remote_default_poll_interval_ms / 1000U);
+    if (sec > 0 && sec < 60U) sec = 60U;
+    if (sec > 3600U) sec = 3600U;
+    const uint32_t intervalMs = enabled ? (sec * 1000U) : 0U;
+    ok = sm_ != nullptr && sm_->mqttSetRemotePollIntervalMs(addr, intervalMs);
+  } else {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"unknown_action\"}");
+    return;
+  }
+
+  if (!ok) {
+    server_.send(409, "application/json", "{\"ok\":false,\"error\":\"action_failed\"}");
+    return;
+  }
+  server_.send(200, "application/json", "{\"ok\":true}");
+}
+
 void WebConsole::handleFactory() {
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
@@ -1599,6 +2038,11 @@ void WebConsole::handleGetSettings() {
   doc["lora_coding_rate"] = cfg.lora_coding_rate;
   doc["heartbeat_ms"] = cfg.heartbeat_ms;
   doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
+  doc["mqtt_remote_retry_timeout_ms"] = cfg.mqtt_remote_retry_timeout_ms;
+  doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
+  doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
+  doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
+  doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg.wifi_sta_password;
@@ -1652,6 +2096,12 @@ void WebConsole::handlePostSettings() {
   cfg.lora_coding_rate = static_cast<uint8_t>(doc["lora_coding_rate"] | cfg.lora_coding_rate);
   cfg.heartbeat_ms = doc["heartbeat_ms"] | cfg.heartbeat_ms;
   cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
+  cfg.mqtt_remote_retry_timeout_ms = doc["mqtt_remote_retry_timeout_ms"] | cfg.mqtt_remote_retry_timeout_ms;
+  cfg.tx_mqtt_remote_polling_enabled = parseBoolField(doc["tx_mqtt_remote_polling_enabled"], cfg.tx_mqtt_remote_polling_enabled);
+  cfg.tx_mqtt_remote_default_poll_interval_ms =
+      doc["tx_mqtt_remote_default_poll_interval_ms"] | cfg.tx_mqtt_remote_default_poll_interval_ms;
+  cfg.rx_push_on_change_enabled = parseBoolField(doc["rx_push_on_change_enabled"], cfg.rx_push_on_change_enabled);
+  cfg.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | cfg.rx_push_min_interval_ms;
   cfg.tx_input_lora_control_enabled = parseBoolField(doc["tx_input_lora_control_enabled"], cfg.tx_input_lora_control_enabled);
   cfg.wifi_sta_ssid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str()));
   cfg.wifi_sta_password = String(static_cast<const char *>(doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str()));
@@ -1705,6 +2155,16 @@ void WebConsole::handlePostSettings() {
   if (cfg.heartbeat_ms > kMaxHeartbeatMs) cfg.heartbeat_ms = kMaxHeartbeatMs;
   if (cfg.ack_timeout_ms < kMinAckTimeoutMs) cfg.ack_timeout_ms = kMinAckTimeoutMs;
   if (cfg.ack_timeout_ms > kMaxAckTimeoutMs) cfg.ack_timeout_ms = kMaxAckTimeoutMs;
+  if (cfg.mqtt_remote_retry_timeout_ms < kMinMqttRemoteRetryTimeoutMs) cfg.mqtt_remote_retry_timeout_ms = kMinMqttRemoteRetryTimeoutMs;
+  if (cfg.mqtt_remote_retry_timeout_ms > kMaxMqttRemoteRetryTimeoutMs) cfg.mqtt_remote_retry_timeout_ms = kMaxMqttRemoteRetryTimeoutMs;
+  if (cfg.tx_mqtt_remote_default_poll_interval_ms < kMinTxPollDefaultIntervalMs) {
+    cfg.tx_mqtt_remote_default_poll_interval_ms = kMinTxPollDefaultIntervalMs;
+  }
+  if (cfg.tx_mqtt_remote_default_poll_interval_ms > kMaxTxPollDefaultIntervalMs) {
+    cfg.tx_mqtt_remote_default_poll_interval_ms = kMaxTxPollDefaultIntervalMs;
+  }
+  if (cfg.rx_push_min_interval_ms < kMinRxPushIntervalMs) cfg.rx_push_min_interval_ms = kMinRxPushIntervalMs;
+  if (cfg.rx_push_min_interval_ms > kMaxRxPushIntervalMs) cfg.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
   if (cfg.mqtt_port == 0) cfg.mqtt_port = 1883;
   if (cfg.mqtt_topic_root.length() == 0) cfg.mqtt_topic_root = "lora";
   cfg.sensor_temp_pin = 0;
@@ -1723,8 +2183,8 @@ void WebConsole::handlePostSettings() {
                               (cfg.lan_hostname != prevLanHost) ||
                               (cfg.ap_always_on != prevApAlwaysOn);
   const bool otaAuthChanged = (cfg.admin_password != prevAdminPassword);
-  if (on_apply_) on_apply_(networkChanged, otaAuthChanged);
   server_.send(200, "text/plain", "saved");
+  if (on_apply_) on_apply_(networkChanged, otaAuthChanged);
 }
 
 void WebConsole::handleExportSettings() {
@@ -1742,6 +2202,11 @@ void WebConsole::handleExportSettings() {
   doc["lora_coding_rate"] = cfg.lora_coding_rate;
   doc["heartbeat_ms"] = cfg.heartbeat_ms;
   doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
+  doc["mqtt_remote_retry_timeout_ms"] = cfg.mqtt_remote_retry_timeout_ms;
+  doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
+  doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
+  doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
+  doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg.wifi_sta_password;

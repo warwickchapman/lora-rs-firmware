@@ -55,6 +55,8 @@ class WebConsole {
   void handlePostSettings();
   void handleExportSettings();
   void handleImportSettings();
+  void handleRemotes();
+  void handleRemoteAction();
   void handleDiagnostics();
   void handleTestSta();
   void handleTestMqtt();

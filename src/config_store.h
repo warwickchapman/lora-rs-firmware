@@ -18,6 +18,11 @@ struct Settings {
 
   uint32_t heartbeat_ms;
   uint32_t ack_timeout_ms;
+  uint32_t mqtt_remote_retry_timeout_ms;
+  bool tx_mqtt_remote_polling_enabled;
+  uint32_t tx_mqtt_remote_default_poll_interval_ms;
+  bool rx_push_on_change_enabled;
+  uint32_t rx_push_min_interval_ms;
   bool tx_input_lora_control_enabled;
 
   String wifi_sta_ssid;

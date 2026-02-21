@@ -33,6 +33,10 @@ Examples:
 Recommended defaults:
 - Heartbeat: 60 s
 - ACK timeout: 5 s
+- MQTT remote retry timeout (TX): 300 s
+- Scheduled remote polling (TX): disabled
+- Default remote poll interval (TX): 60 s minimum
+- RX push-on-change: optional, with minimum interval 60 s
 - `Input drives LoRa relay control`: enabled for classic paired dry-contact mode
 
 ## Network Setup
@@ -51,9 +55,9 @@ Prerequisites:
 
 Use helper tool (recommended):
 - Windows:
-  - `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.2.1-alpha.bin`
+  - `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.2.2-alpha.bin`
 - macOS:
-  - `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.2.1-alpha.bin`
+  - `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.2.2-alpha.bin`
 
 What it prints:
 - `chip_id`
@@ -65,8 +69,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash image at `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.1-alpha.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.1-alpha.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.2-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.2-alpha.bin`
 
 ## OTA Update Test
 Prerequisites:
@@ -119,6 +123,30 @@ Per-device topics:
 - `<root>/lrs-<chipid>/addr`
 - `<root>/lrs-<chipid>/control`
 - `<root>/lrs-<chipid>/last_updated`
+
+TX remote child topics (per RX address seen/controlled):
+- `<root>/lrs-<tx_chipid>/remote/0xNN/relay`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/input`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/temp_c`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/uplink_rssi_dbm`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/downlink_rssi_dbm`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/ack_state` (`pending`/`ok`/`timeout`/`unknown`)
+- `<root>/lrs-<tx_chipid>/remote/0xNN/last_seen_ms`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/last_cmd_counter`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_interval_s`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/last_poll_tx_ms`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_state`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/addr_hex`
+- `<root>/lrs-<tx_chipid>/remote/0xNN/addr_dec`
+
+Address format:
+- Canonical remote topic path is `0xNN` (for example `0x51`, `0x9D`).
+- Local `addr` topic is also published as `0xNN`.
+
+TX remote control topics (subscribe on TX):
+- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_interval_s` payload seconds (`0` disables polling)
+- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_now` payload any value (trigger immediate poll)
+- `<root>/lrs-<tx_chipid>/remote/0xNN/forget` payload `1` (remove remote node from TX runtime + clear retained remote topics for that node)
 
 Discovery topic (retained JSON):
 - `<root>/discovery/lrs-<chipid>`
@@ -182,6 +210,10 @@ MQTT control vs paired LoRa address:
 - In that mode, avoid using MQTT `control` for RX nodes that share the TX-paired `remote_address`, or heartbeat can overwrite MQTT state.
 - If you need MQTT control on the TX-paired address, disable `Input drives LoRa relay control` on TX.
 
+When `Input drives LoRa relay control` is disabled on TX:
+- TX no longer sends paired heartbeat/change traffic.
+- TX still processes MQTT `control` commands and publishes remote RX status tree.
+
 ## MQTT Control Test Matrix (Copy/Paste)
 Prerequisites:
 - TX and RX are online and paired over LoRa.
@@ -195,7 +227,7 @@ export MQTT_PORT="1883"
 export ROOT="lora"
 export CHIP_TX="004a9c27"
 export CHIP_RX="00bb12ef"
-export RX_ADDR_HEX="02"
+export RX_ADDR_HEX="0x02"
 ```
 
 Watch MQTT traffic in one terminal:

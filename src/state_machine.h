@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <stddef.h>
 
 #include "config_store.h"
 #include "radio_protocol.h"
@@ -18,6 +19,30 @@ enum class RxControlSource : uint8_t {
   None,
   LoRa,
   Mqtt,
+};
+
+enum class RemoteAckState : uint8_t {
+  Unknown,
+  Pending,
+  Ok,
+  Timeout,
+};
+
+struct RemoteNodeStatusSnapshot {
+  uint8_t address = 0;
+  uint8_t relay_state = 0;
+  uint8_t input_state = 0;
+  bool temp_valid = false;
+  int8_t temp_c = 0;
+  int uplink_rssi = -127;
+  bool downlink_rssi_valid = false;
+  int downlink_rssi = -127;
+  uint32_t last_seen_ms = 0;
+  uint32_t last_cmd_counter = 0;
+  RemoteAckState ack_state = RemoteAckState::Unknown;
+  uint32_t poll_interval_ms = 0;
+  uint32_t last_poll_tx_ms = 0;
+  bool poll_pending = false;
 };
 
 class NodeStateMachine {
@@ -40,8 +65,13 @@ class NodeStateMachine {
   float remoteTemperatureC() const;
   uint32_t remoteTemperatureMs() const;
   RxControlSource lastRxControlSource() const;
+  size_t remoteNodeCount() const;
+  bool remoteNodeByIndex(size_t index, RemoteNodeStatusSnapshot &out) const;
   void mqttSetLocalRelay(uint8_t relayState);
   bool mqttSendRemoteRelay(uint8_t dstAddress, uint8_t relayState);
+  bool mqttSetRemotePollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
+  bool mqttPollRemoteNow(uint8_t dstAddress);
+  bool mqttForgetRemote(uint8_t dstAddress);
 
  private:
   Settings cfg_{};
@@ -79,6 +109,40 @@ class NodeStateMachine {
   uint8_t tx_pending_input_state_ = 0;
   uint8_t tx_retry_step_ = 0;
   uint32_t tx_next_retry_ms_ = 0;
+  bool rx_push_pending_ = false;
+  uint32_t rx_last_push_ms_ = 0;
+
+  struct RemoteNodeRuntime {
+    bool in_use = false;
+    uint8_t address = 0;
+    uint8_t relay_state = 0;
+    uint8_t input_state = 0;
+    bool temp_valid = false;
+    int8_t temp_c = 0;
+    int uplink_rssi = -127;
+    bool downlink_rssi_valid = false;
+    int downlink_rssi = -127;
+    uint32_t last_seen_ms = 0;
+    uint32_t last_cmd_counter = 0;
+    RemoteAckState ack_state = RemoteAckState::Unknown;
+    bool pending = false;
+    uint8_t pending_relay = 0;
+    uint8_t retry_step = 0;
+    uint32_t next_retry_ms = 0;
+    uint32_t pending_counter = 0;
+    uint32_t pending_deadline_ms = 0;
+    uint32_t poll_interval_ms = 0;
+    uint32_t next_poll_ms = 0;
+    bool poll_pending = false;
+    uint8_t poll_retry_step = 0;
+    uint32_t poll_next_retry_ms = 0;
+    uint32_t poll_counter = 0;
+    uint32_t poll_deadline_ms = 0;
+    uint32_t last_poll_tx_ms = 0;
+  };
+  static constexpr size_t kMaxRemoteNodes = 16;
+  RemoteNodeRuntime remote_nodes_[kMaxRemoteNodes]{};
+  size_t remote_node_count_ = 0;
 
   void tickTransmitter();
   void tickReceiver();
@@ -86,4 +150,9 @@ class NodeStateMachine {
   void tickLed();
   void captureRemoteTemp(uint8_t tempCode);
   void sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent);
+  void tickRemoteMqttCommands(uint32_t now);
+  void tickRemotePolling(uint32_t now);
+  bool sendRemoteMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
+  bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
+  RemoteNodeRuntime *findOrCreateRemoteNode(uint8_t address);
 };
