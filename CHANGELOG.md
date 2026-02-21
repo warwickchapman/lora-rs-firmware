@@ -7,23 +7,39 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [0.2.2-alpha] - 2026-02-21
 
 ### Added
+- TX remote-node telemetry model with per-node runtime state (relay/input/temp, RSSI, last-seen, poll state, ACK state).
+- New LoRa message types for remote command confirmation and polling: `MqttStatus` (`S`), `PollRequest` (`P`), and `PollResponse` (`R`).
+- MQTT remote subtree publishing on TX under canonical paths: `<root>/lrs-<tx_chipid>/remote/0xNN/...`.
+- MQTT remote control leaves on TX: `poll_interval_s`, `poll_now`, and `forget` (with retained-topic cleanup).
+- New web console `Remotes` page for TX with live remote list, per-node details, and remote actions.
+- New LoRa advanced controls in UI/config: MQTT remote retry timeout, TX scheduled polling, TX default poll interval, RX push-on-change, and RX push minimum interval.
 - Complete implementation spec document: `docs/LRS_COMPLETE_IMPLEMENTATION_SPEC.json`.
+- Time sharing: STA-connected nodes now fetch UTC from NTP and include `unix_time_s` in LoRa payloads for peers to sync local time.
 
 ### Changed
 - Firmware version updated to `0.2.2-alpha`.
-- Documentation updates across developer guide, protocol, and user guide.
-- Runtime behavior updates in app/config/MQTT/state machine/radio/web console modules.
+- TX now retries remote MQTT LoRa commands with bounded backoff until a configurable timeout instead of single-shot fire-and-forget.
+- RX now returns explicit status for MQTT-triggered relay actions, allowing TX to report `pending`/`ok`/`timeout` per remote node.
+- TX can run periodic remote polling; RX can optionally push unsolicited status on local input change with interval guardrails.
+- Topic/address formatting is now normalized around `0xNN` representation for local and remote address topics.
+- Config loading was hardened to preserve existing config files on JSON parse failure and recover admin password when possible.
+- OTA admin-password changes now trigger a controlled reboot path so new OTA credentials are reliably applied.
+- Documentation was expanded for protocol semantics, MQTT remote trees, polling, push-on-change, and operational defaults.
+- Encrypted LoRa payload length increased from 8 to 12 bytes to carry shared UTC timestamp data (`unix_time_s`).
 
 ## [0.2.1-alpha] - 2026-02-15
 
 ### Added
 - Standalone release flasher helper: `tools/flash_release.py` (reads chip ID, flashes binary, prints AP/admin password).
-- No-VSCode flashing guidance in `docs/USER_GUIDE.md`.
+- Front-and-center no-VSCode/no-PlatformIO flashing guidance in `README.md` and `docs/USER_GUIDE.md`.
 
 ### Changed
 - Firmware version updated to `0.2.1-alpha`.
-- Radio/state-machine behavior tightened when default deployment key is active.
-- Web console/mobile UX and diagnostics display improvements.
+- LoRa runtime is now disabled when using the default deployment key (`lora-default-passphrase`) to reduce accidental insecure operation.
+- TX state machine now handles failed LoRa sends more safely (prevents stale pending/ACK wait states on failed transmit).
+- Web console mobile UX was improved (better viewport behavior, larger form controls, password show/hide controls).
+- Diagnostics and status presentation were improved for clearer field troubleshooting.
+- Release tooling/sticker output alignment was improved for field flashing and credential recovery workflows.
 
 ## [0.2.0-alpha] - 2026-02-15
 
