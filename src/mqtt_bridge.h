@@ -45,6 +45,9 @@ class MqttBridge {
   bool peer_published_once_[256]{};
   bool peer_input_published_[256]{};
   uint8_t peer_input_value_[256]{};
+  bool status_publish_in_progress_ = false;
+  bool status_publish_locals_done_ = false;
+  size_t status_publish_peer_index_ = 0;
 
   static MqttBridge *instance_;
   static void staticCallback(char *topic, uint8_t *payload, unsigned int length);
