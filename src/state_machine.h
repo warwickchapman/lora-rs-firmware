@@ -131,6 +131,7 @@ class NodeStateMachine {
   bool mqttPollPeerNow(uint8_t dstAddress);
   bool mqttForgetPeer(uint8_t dstAddress);
   bool sendFleetWifiProvision(const String &ssid, const String &password);
+  bool hasPendingWifiProvision() const;
   bool consumePendingWifiProvision(String &ssid, String &password, uint8_t &src);
   uint32_t fleetWifiProvisionCooldownRemainingMs() const;
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey);
@@ -141,6 +142,7 @@ class NodeStateMachine {
   bool provisioningSession(ProvisioningSessionSnapshot &out) const;
   size_t provisioningDeviceCount() const;
   bool provisioningDeviceByIndex(size_t index, ProvisioningDeviceSnapshot &out) const;
+  bool hasPendingFleetProvisionApply() const;
   bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, String &fleetKey);
   bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
 

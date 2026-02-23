@@ -184,23 +184,25 @@ void App::tick() {
   sm_.tick();
   phaseSlowWarn("sm_tick", phaseStartMs);
   {
-    String provSsid;
-    String provPassword;
-    uint8_t provSrc = 0;
-    if (sm_.consumePendingWifiProvision(provSsid, provPassword, provSrc)) {
-      auto &cfg = config_.settings();
-      const bool changed = (cfg.wifi_sta_ssid != provSsid) || (cfg.wifi_sta_password != provPassword);
-      cfg.wifi_sta_ssid = provSsid;
-      cfg.wifi_sta_password = provPassword;
-      cfg.audit_last_saved_by = "lora_wifi_provision";
-      cfg.audit_last_saved_ms = millis();
-      if (config_.save()) {
-        logs_.add("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
-        if (changed) {
-          applyUpdatedConfig(true, false);
+    if (sm_.hasPendingWifiProvision()) {
+      String provSsid;
+      String provPassword;
+      uint8_t provSrc = 0;
+      if (sm_.consumePendingWifiProvision(provSsid, provPassword, provSrc)) {
+        auto &cfg = config_.settings();
+        const bool changed = (cfg.wifi_sta_ssid != provSsid) || (cfg.wifi_sta_password != provPassword);
+        cfg.wifi_sta_ssid = provSsid;
+        cfg.wifi_sta_password = provPassword;
+        cfg.audit_last_saved_by = "lora_wifi_provision";
+        cfg.audit_last_saved_ms = millis();
+        if (config_.save()) {
+          logs_.add("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
+          if (changed) {
+            applyUpdatedConfig(true, false);
+          }
+        } else {
+          logs_.add("wifi_prov_save_fail", 0, provSrc, 0);
         }
-      } else {
-        logs_.add("wifi_prov_save_fail", 0, provSrc, 0);
       }
     }
   }
@@ -218,27 +220,29 @@ void App::tick() {
     }
   }
   {
-    uint16_t provSession = 0;
-    uint8_t provAddr = 0;
-    bool provRoleTx = false;
-    String provFleetKey;
-    if (sm_.consumePendingFleetProvisionApply(provSession, provAddr, provRoleTx, provFleetKey)) {
-      auto &cfg = config_.settings();
-      const bool changed = (cfg.local_address != provAddr) || (cfg.role_tx != provRoleTx) || (cfg.fleet_passphrase != provFleetKey);
-      cfg.local_address = provAddr;
-      cfg.role_tx = provRoleTx;
-      cfg.fleet_passphrase = provFleetKey;
-      cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
-      cfg.audit_last_saved_by = "lora_fleet_provision";
-      cfg.audit_last_saved_ms = millis();
-      if (config_.save()) {
-        logs_.add("fleet_prov_applied", 0, provSession, provAddr);
-        if (changed) {
-          applyUpdatedConfig(false, false);
+    if (sm_.hasPendingFleetProvisionApply()) {
+      uint16_t provSession = 0;
+      uint8_t provAddr = 0;
+      bool provRoleTx = false;
+      String provFleetKey;
+      if (sm_.consumePendingFleetProvisionApply(provSession, provAddr, provRoleTx, provFleetKey)) {
+        auto &cfg = config_.settings();
+        const bool changed = (cfg.local_address != provAddr) || (cfg.role_tx != provRoleTx) || (cfg.fleet_passphrase != provFleetKey);
+        cfg.local_address = provAddr;
+        cfg.role_tx = provRoleTx;
+        cfg.fleet_passphrase = provFleetKey;
+        cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
+        cfg.audit_last_saved_by = "lora_fleet_provision";
+        cfg.audit_last_saved_ms = millis();
+        if (config_.save()) {
+          logs_.add("fleet_prov_applied", 0, provSession, provAddr);
+          if (changed) {
+            applyUpdatedConfig(false, false);
+          }
+          sm_.sendProvisioningVerify(provSession, provAddr);
+        } else {
+          logs_.add("fleet_prov_save_fail", 0, provSession, provAddr);
         }
-        sm_.sendProvisioningVerify(provSession, provAddr);
-      } else {
-        logs_.add("fleet_prov_save_fail", 0, provSession, provAddr);
       }
     }
   }
@@ -285,6 +289,7 @@ void App::tick() {
 }
 
 void App::startNetworking() {
+  refreshCachedStaHostname();
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.setOutputPower(20.5f);
@@ -379,6 +384,7 @@ void App::updateNetworking() {
 }
 
 void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
+  refreshCachedStaHostname();
   radio_.applyConfig(config_.settings());
   sm_.applyConfig(config_.settings());
   mqtt_.applyConfig(config_.settings(), config_.chipIdHex());
@@ -505,7 +511,10 @@ void App::refreshCaptiveDns() {
 void App::beginStaConnect() {
   auto &cfg = config_.settings();
   if (cfg.wifi_sta_ssid.length() == 0) return;
-  const String host = normalizeHostname(cfg.lan_hostname.length() ? cfg.lan_hostname : String("lrs-") + config_.chipIdHex());
+  if (cached_sta_hostname_.length() == 0) {
+    refreshCachedStaHostname();
+  }
+  const String &host = cached_sta_hostname_;
   WiFi.hostname(host);
   WiFi.begin(cfg.wifi_sta_ssid.c_str(), cfg.wifi_sta_password.c_str());
   wifi_sta_connecting_ = true;
@@ -517,7 +526,10 @@ void App::beginStaConnect() {
 
 void App::startOta() {
   const auto &cfg = config_.settings();
-  const String host = normalizeHostname(cfg.lan_hostname.length() ? cfg.lan_hostname : String("lrs-") + config_.chipIdHex());
+  if (cached_sta_hostname_.length() == 0) {
+    refreshCachedStaHostname();
+  }
+  const String &host = cached_sta_hostname_;
   ArduinoOTA.setHostname(host.c_str());
   ArduinoOTA.setPassword(cfg.admin_password.c_str());
   ArduinoOTA.begin();
@@ -574,31 +586,47 @@ void App::refreshMdns() {
     }
   }
 
-  String desired;
-  if (ap_enabled_ && WiFi.softAPgetStationNum() > 0) {
-    desired = "lrs";
-  } else if (sta_connected_) {
-    desired = normalizeHostname(config_.settings().lan_hostname.length()
-                                    ? config_.settings().lan_hostname
-                                    : (String("lrs-") + config_.chipIdHex()));
+  const bool forceApHost = ap_enabled_ && WiFi.softAPgetStationNum() > 0;
+  const char *desiredLiteral = nullptr;
+  const String *desiredRef = nullptr;
+  if (forceApHost || !sta_connected_) {
+    desiredLiteral = "lrs";
   } else {
-    desired = "lrs";
+    if (cached_sta_hostname_.length() == 0) {
+      refreshCachedStaHostname();
+    }
+    desiredRef = &cached_sta_hostname_;
   }
 
-  if (desired == active_mdns_hostname_) {
+  const bool unchanged = (desiredLiteral != nullptr) ? (active_mdns_hostname_ == desiredLiteral)
+                                                     : (desiredRef != nullptr && active_mdns_hostname_ == *desiredRef);
+  if (unchanged) {
     return;
   }
 
+  const char *desiredName = (desiredLiteral != nullptr) ? desiredLiteral : desiredRef->c_str();
+
   MDNS.close();
-  if (!MDNS.begin(desired.c_str())) {
+  if (!MDNS.begin(desiredName)) {
     logs_.add("mdns_failed", 0, 0, 0);
-    LRS_LOGW(MDNS, "event=mdns_start_failed host=%s", desired.c_str());
+    LRS_LOGW(MDNS, "event=mdns_start_failed host=%s", desiredName);
     return;
   }
   MDNS.addService("http", "tcp", 80);
-  active_mdns_hostname_ = desired;
-  logs_.add(String("mdns_ready_") + desired, 0, 0, 0);
-  LRS_LOGI(MDNS, "event=mdns_ready host=%s", desired.c_str());
+  active_mdns_hostname_ = desiredName;
+  logs_.add(String("mdns_ready_") + active_mdns_hostname_, 0, 0, 0);
+  LRS_LOGI(MDNS, "event=mdns_ready host=%s", desiredName);
+}
+
+void App::refreshCachedStaHostname() {
+  const auto &cfg = config_.settings();
+  if (cfg.lan_hostname.length() > 0) {
+    cached_sta_hostname_ = normalizeHostname(cfg.lan_hostname);
+    return;
+  }
+  String fallback = "lrs-";
+  fallback += config_.chipIdHex();
+  cached_sta_hostname_ = normalizeHostname(fallback);
 }
 
 String App::normalizeHostname(const String &input) const {

@@ -567,6 +567,8 @@ bool NodeStateMachine::consumePendingWifiProvision(String &ssid, String &passwor
   return true;
 }
 
+bool NodeStateMachine::hasPendingWifiProvision() const { return wifi_prov_pending_; }
+
 uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
   if (last_wifi_prov_tx_ms_ == 0) return 0;
   const uint32_t now = millis();
@@ -744,6 +746,8 @@ bool NodeStateMachine::consumePendingFleetProvisionApply(uint16_t &sessionNonce,
   fleet_prov_apply_key_ = "";
   return true;
 }
+
+bool NodeStateMachine::hasPendingFleetProvisionApply() const { return fleet_prov_apply_pending_; }
 
 bool NodeStateMachine::sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress) {
   return sendProvisioningVerifyPacket(sessionNonce, assignedAddress);
