@@ -24,6 +24,9 @@ constexpr uint32_t kStartupTraceWindowMs = 15000;
 constexpr uint32_t kStartupTraceBreadcrumbMs = 1000;
 constexpr uint32_t kStartupSlowTickWarnMs = 25;
 constexpr uint32_t kStartupNonEssentialDeferralMs = 10000;
+constexpr uint32_t kSteadySlowPhaseWarnMs = 50;
+constexpr uint32_t kSteadySlowPhaseWarnRateLimitMs = 5000;
+constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
 
 const char *wifiStatusText(wl_status_t st) {
   switch (st) {
@@ -94,6 +97,8 @@ void App::begin() {
   startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
   startup_trace_next_breadcrumb_ms_ = 0;
   startup_defer_logged_ = false;
+  slow_phase_last_log_ms_ = 0;
+  slow_phase_suppressed_count_ = 0;
 
   logs_.add("boot", 0, 0, 0);
 }
@@ -102,13 +107,50 @@ void App::tick() {
   const uint32_t tickStartMs = millis();
   const bool startupTrace = static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
   bool emitStartupBreadcrumb = false;
-  auto startupSlowWarn = [&](const char *phase, uint32_t phaseStartMs) {
-    if (!startupTrace) return;
-    const uint32_t durMs = millis() - phaseStartMs;
-    if (durMs < kStartupSlowTickWarnMs) return;
-    LRS_LOGW(SYS, "event=startup_tick_slow phase=%s dur_ms=%lu heap_free=%lu max_free_block=%lu", phase,
-             static_cast<unsigned long>(durMs), static_cast<unsigned long>(lrslog::heapFree()),
-             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  auto phaseSlowWarn = [&](const char *phase, uint32_t phaseStartMs) {
+    const uint32_t endMs = millis();
+    const uint32_t durMs = endMs - phaseStartMs;
+    if (startupTrace) {
+      if (durMs < kStartupSlowTickWarnMs) return;
+      const uint32_t freeHeap = lrslog::heapFree();
+      const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+      const uint32_t ratioPct = (freeHeap != 0U) ? ((maxBlock * 100UL) / freeHeap) : 0U;
+      LRS_LOGW(SYS,
+               "event=startup_tick_slow phase=%s dur_ms=%lu heap_free=%lu max_free_block=%lu max_block_ratio_pct=%lu",
+               phase,
+               static_cast<unsigned long>(durMs),
+               static_cast<unsigned long>(freeHeap),
+               static_cast<unsigned long>(maxBlock),
+               static_cast<unsigned long>(ratioPct));
+      return;
+    }
+
+    if (durMs < kSteadySlowPhaseWarnMs) return;
+
+    const bool severe = durMs >= kSteadySlowPhaseWarnImmediateMs;
+    const bool rateLimitActive =
+        (slow_phase_last_log_ms_ != 0U) &&
+        (static_cast<uint32_t>(endMs - slow_phase_last_log_ms_) < kSteadySlowPhaseWarnRateLimitMs);
+    if (!severe && rateLimitActive) {
+      if (slow_phase_suppressed_count_ != 0xFFFFU) {
+        ++slow_phase_suppressed_count_;
+      }
+      return;
+    }
+
+    const uint32_t freeHeap = lrslog::heapFree();
+    const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+    const uint32_t ratioPct = (freeHeap != 0U) ? ((maxBlock * 100UL) / freeHeap) : 0U;
+    LRS_LOGW(SYS,
+             "event=slow_phase phase=%s dur_ms=%lu heap_free=%lu max_free_block=%lu max_block_ratio_pct=%lu suppressed=%u",
+             phase,
+             static_cast<unsigned long>(durMs),
+             static_cast<unsigned long>(freeHeap),
+             static_cast<unsigned long>(maxBlock),
+             static_cast<unsigned long>(ratioPct),
+             static_cast<unsigned>(slow_phase_suppressed_count_));
+    slow_phase_last_log_ms_ = endMs;
+    slow_phase_suppressed_count_ = 0;
   };
   if (startupTrace && (startup_trace_next_breadcrumb_ms_ == 0 || static_cast<int32_t>(tickStartMs - startup_trace_next_breadcrumb_ms_) >= 0)) {
     startup_trace_next_breadcrumb_ms_ = tickStartMs + kStartupTraceBreadcrumbMs;
@@ -120,19 +162,19 @@ void App::tick() {
 
   uint32_t phaseStartMs = millis();
   updateNetworking();
-  startupSlowWarn("update_networking", phaseStartMs);
+  phaseSlowWarn("update_networking", phaseStartMs);
   phaseStartMs = millis();
   tickTimeSync();
-  startupSlowWarn("tick_time_sync", phaseStartMs);
+  phaseSlowWarn("tick_time_sync", phaseStartMs);
   phaseStartMs = millis();
   refreshCaptiveDns();
   if (dns_running_) {
     dns_.processNextRequest();
   }
-  startupSlowWarn("dns", phaseStartMs);
+  phaseSlowWarn("dns", phaseStartMs);
   phaseStartMs = millis();
   refreshMdns();
-  startupSlowWarn("refresh_mdns_pre", phaseStartMs);
+  phaseSlowWarn("refresh_mdns_pre", phaseStartMs);
   const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   if (emitStartupBreadcrumb) {
@@ -140,7 +182,7 @@ void App::tick() {
   }
   phaseStartMs = millis();
   sm_.tick();
-  startupSlowWarn("sm_tick", phaseStartMs);
+  phaseSlowWarn("sm_tick", phaseStartMs);
   {
     String provSsid;
     String provPassword;
@@ -211,34 +253,34 @@ void App::tick() {
     startup_defer_logged_ = false;
     phaseStartMs = millis();
     mqtt_.tick(WiFi.isConnected());
-    startupSlowWarn("mqtt_tick", phaseStartMs);
+    phaseSlowWarn("mqtt_tick", phaseStartMs);
   }
   phaseStartMs = millis();
   sensors_.tick();
-  startupSlowWarn("sensors_tick", phaseStartMs);
+  phaseSlowWarn("sensors_tick", phaseStartMs);
   if (emitStartupBreadcrumb) {
     LRS_LOGD(SYS, "event=startup_tick phase=web_enter ms=%lu", static_cast<unsigned long>(millis()));
   }
   phaseStartMs = millis();
   web_.tick();
-  startupSlowWarn("web_tick", phaseStartMs);
+  phaseSlowWarn("web_tick", phaseStartMs);
   // Re-check mDNS after web handlers because API requests can drop heap quickly.
   phaseStartMs = millis();
   refreshMdns();
-  startupSlowWarn("refresh_mdns_post", phaseStartMs);
+  phaseSlowWarn("refresh_mdns_post", phaseStartMs);
   {
     ProvisioningSessionSnapshot prov{};
     const bool provActive = sm_.provisioningSession(prov) && prov.active;
     if (!provActive && !mdns_suspended_for_low_heap_) {
       phaseStartMs = millis();
       MDNS.update();
-      startupSlowWarn("mdns_update", phaseStartMs);
+      phaseSlowWarn("mdns_update", phaseStartMs);
     }
   }
   if (!startupDeferNonEssential) {
     phaseStartMs = millis();
     ArduinoOTA.handle();
-    startupSlowWarn("ota_handle", phaseStartMs);
+    phaseSlowWarn("ota_handle", phaseStartMs);
   }
 }
 

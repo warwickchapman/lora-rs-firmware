@@ -42,6 +42,8 @@ class App {
   uint32_t startup_trace_until_ms_ = 0;
   uint32_t startup_trace_next_breadcrumb_ms_ = 0;
   bool startup_defer_logged_ = false;
+  uint32_t slow_phase_last_log_ms_ = 0;
+  uint16_t slow_phase_suppressed_count_ = 0;
   DNSServer dns_;
 
   void startNetworking();
