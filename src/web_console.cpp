@@ -498,7 +498,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head>
-<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="deploymentKeyNotice" class="deploy-note">Deployment Key (Encryption): checking...</div>
@@ -601,6 +601,8 @@ let activeFleetManageTab = 'lora';
 let statusRefreshInFlight = false;
 let headerStatusRefreshInFlight = false;
 let sessionRefreshInFlight = false;
+let fleetRefreshInFlight = false;
+let fleetRefreshDebounceTimer = 0;
 let provStatusInFlight = false;
 let provLastStatusRefreshMs = 0;
 let provUiSessionActive = false;
@@ -949,7 +951,10 @@ function showFleetTab(tab){
  if(pane) pane.classList.toggle('active', p===target);
  if(btn) btn.classList.toggle('active', p===target);
  });
- if(activePage==='fleet' && target==='devices'){ refreshFleet(); }
+ if(activePage==='fleet' && target==='devices'){
+  if(fleetRefreshDebounceTimer){ clearTimeout(fleetRefreshDebounceTimer); fleetRefreshDebounceTimer=0; }
+  fleetRefreshDebounceTimer=setTimeout(()=>{ fleetRefreshDebounceTimer=0; refreshFleet(); }, 250);
+ }
  if(activePage==='fleet' && target==='manage'){ showFleetManageTab(activeFleetManageTab); }
  syncPagePolling();
 }
@@ -1157,6 +1162,7 @@ async function refreshStatus(){
 }
 function applyHeaderStatus(st){
  if(!st) return;
+ const heapEl=document.getElementById('heapHeader');
  const roleTag = String(st.role || '').toLowerCase() === 'tx' ? 'TX' : 'RX';
  const titleEl = document.getElementById('consoleTitle');
  const pageTitle = `LRS Device Console (${roleTag})`;
@@ -1176,6 +1182,22 @@ function applyHeaderStatus(st){
   rh.className=`relay-head ${relayOn ? 'on' : 'off'}`;
   rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
  }
+ if(heapEl){
+  const heapBytes=Number(st.heap_free_bytes||0);
+  const maxBlockBytes=Number(st.max_free_block_bytes||0);
+  const heapFrag=Number(st.heap_frag_percent||0);
+  const heapK = heapBytes>0 ? (heapBytes/1024) : 0;
+  const maxK = maxBlockBytes>0 ? (maxBlockBytes/1024) : 0;
+  const heapTxt = heapBytes>0 ? (heapK>=10 ? String(Math.round(heapK)) : heapK.toFixed(1)) : '-';
+  const maxTxt = maxBlockBytes>0 ? (maxK>=10 ? String(Math.round(maxK)) : maxK.toFixed(1)) : '-';
+  heapEl.innerText = (heapBytes>0 && maxBlockBytes>0) ? `Mem ${heapTxt}/${maxTxt}` : 'Mem -/-';
+  heapEl.className = 'relay-head off';
+  if(heapBytes>0 || maxBlockBytes>0){
+   heapEl.title = `Free heap: ${heapBytes} B | Max block: ${maxBlockBytes} B | Frag: ${heapFrag}%`;
+  }else{
+   heapEl.title = 'Memory metrics unavailable';
+  }
+ }
 }
 async function refreshHeaderStatus(){
  if(location.pathname !== '/') return;
@@ -1187,6 +1209,16 @@ async function refreshHeaderStatus(){
  if(st && st.ok!==false){ applyHeaderStatus(st); }
  headerStatusRefreshInFlight = false;
 }
+function stopAllUiPollingForAuthExpiry(){
+ suspendGlobalPollsUntilMs = Date.now() + 60000;
+ try{ stopProvisioningPolling(); }catch(e){}
+ try{ stopPagePolling(); }catch(e){}
+ try{ stopHeaderPolling(); }catch(e){}
+ try{ provStatusInFlight = false; }catch(e){}
+ try{ statusRefreshInFlight = false; }catch(e){}
+ try{ headerStatusRefreshInFlight = false; }catch(e){}
+ try{ fleetRefreshInFlight = false; }catch(e){}
+}
 async function apiJson(url, options){
  let t=null;
  try{
@@ -1197,7 +1229,11 @@ async function apiJson(url, options){
   delete merged.timeoutMs;
   merged.signal = controller.signal;
   const res=await fetch(url,merged);
-  if(res.status===401){ location.href='/login?expired=1'; return null; }
+  if(res.status===401){
+   stopAllUiPollingForAuthExpiry();
+   location.href='/login?expired=1';
+   return null;
+  }
   if(!res.ok){ throw new Error(`HTTP ${res.status}`); }
   return await res.json();
  }catch(e){
@@ -1987,15 +2023,18 @@ function renderFleetDeviceDetail(){
 }
 async function refreshFleet(){
  if(!(activePage==='fleet' && activeFleetTab==='devices')) return;
+ if(fleetRefreshInFlight) return;
  const host=document.getElementById('fleetTableHost');
  const summary=document.getElementById('fleetSummary');
  const detail=document.getElementById('fleetDetailHost');
  if(!host || !summary) return;
+ fleetRefreshInFlight = true;
  const out=await apiJson('/api/fleet',{silent:true});
  if(!out){
   summary.innerText='Fleet device list unavailable.';
   host.innerHTML='Fleet device list unavailable.';
   if(detail) detail.innerHTML='Device details unavailable.';
+  fleetRefreshInFlight = false;
   return;
  }
  const role=String(out.role||'').toLowerCase();
@@ -2003,6 +2042,7 @@ async function refreshFleet(){
   summary.innerText='Fleet view is TX-only in this firmware.';
   host.innerHTML='Switch role to TX to manage discovered devices.';
   if(detail) detail.innerHTML='Switch role to TX to view device details.';
+  fleetRefreshInFlight = false;
   return;
  }
  const devices=Array.isArray(out.devices) ? out.devices : [];
@@ -2012,6 +2052,7 @@ async function refreshFleet(){
   host.innerHTML='No devices discovered yet.';
   if(detail) detail.innerHTML='No device selected.';
   selectedFleetDeviceAddr = 0;
+  fleetRefreshInFlight = false;
   return;
  }
  if(!devices.some((r)=>Number(r.address||0)===Number(selectedFleetDeviceAddr||0))){
@@ -2034,6 +2075,7 @@ async function refreshFleet(){
  }).join('');
  host.innerHTML=`<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
  renderFleetDeviceDetail();
+ fleetRefreshInFlight = false;
 }
 async function refreshDiagnostics(){
  const d=await apiJson('/api/diagnostics',{silent:true});
@@ -2803,6 +2845,9 @@ void WebConsole::handleStatusLite() {
   doc["lora_last_tx_ms"] = sm_ ? sm_->lastTxMs() : 0;
   doc["sta_connected"] = WiFi.isConnected();
   doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
+  doc["heap_free_bytes"] = ESP.getFreeHeap();
+  doc["heap_frag_percent"] = lrslog::heapFragPercent();
+  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
   doc["uptime_ms"] = millis();
   const size_t len = measureJson(doc);
   server_.setContentLength(len);

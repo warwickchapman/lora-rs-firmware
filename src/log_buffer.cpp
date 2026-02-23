@@ -8,6 +8,16 @@
 namespace {
 bool startsWith(const char *event, const char *prefix);
 
+void copyEventName(char *dst, size_t dstLen, const char *src) {
+  if (dstLen == 0) return;
+  if (src == nullptr) {
+    dst[0] = '\0';
+    return;
+  }
+  strncpy(dst, src, dstLen - 1);
+  dst[dstLen - 1] = '\0';
+}
+
 lrslog::Category classifyCategory(const char *event) {
   if (event == nullptr) return lrslog::Category::SYS;
   if (startsWith(event, "sta_") || startsWith(event, "wifi_")) return lrslog::Category::WIFI;
@@ -59,7 +69,7 @@ lrslog::Level classifyLevel(const char *event) {
 
 void LogBuffer::setTimeProvider(TimeProvider provider) { time_provider_ = provider; }
 
-void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t state) {
+void LogBuffer::add(const char *event, int rssi, uint32_t counter, uint8_t state) {
   uint32_t unixTimeS = 0;
   if (time_provider_) {
     uint32_t candidate = 0;
@@ -70,7 +80,7 @@ void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t sta
   LogItem item{};
   item.ms = millis();
   item.unix_time_s = unixTimeS;
-  event.substring(0, LogItem::kEventBytes - 1).toCharArray(item.event, LogItem::kEventBytes);
+  copyEventName(item.event, LogItem::kEventBytes, event);
   item.rssi = rssi;
   item.counter = counter;
   item.state = state;
@@ -119,6 +129,10 @@ void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t sta
                  item.rssi,
                  static_cast<unsigned long>(item.counter),
                  static_cast<unsigned>(item.state));
+}
+
+void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t state) {
+  add(event.c_str(), rssi, counter, state);
 }
 
 String LogBuffer::asCsv() const {

@@ -19,6 +19,7 @@ class LogBuffer {
   using TimeProvider = std::function<bool(uint32_t &)>;
 
   void setTimeProvider(TimeProvider provider);
+  void add(const char *event, int rssi, uint32_t counter, uint8_t state);
   void add(const String &event, int rssi, uint32_t counter, uint8_t state);
   String asCsv() const;
   String asText() const;

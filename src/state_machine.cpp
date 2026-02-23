@@ -4,6 +4,7 @@
 
 #include "build_info.h"
 #include "log_buffer.h"
+#include "logger.h"
 
 namespace {
 constexpr uint8_t kInputPin = 4;
@@ -47,6 +48,26 @@ constexpr uint8_t kProvMaxRetriesPerNode = 1;
 constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
 constexpr size_t kProvChunkBitmapMax = 31;
+constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
+
+inline void startupTxPhaseTrace(const char *phase) {
+  const uint32_t now = millis();
+  if (now > kStartupPhaseTraceWindowMs) return;
+  static const char *lastPhase = nullptr;
+  static uint32_t lastPhaseLogMs = 0;
+  // Startup DEBUG traces are diagnostic-only; suppress repeated phase spam.
+  if (lastPhase == phase && static_cast<uint32_t>(now - lastPhaseLogMs) < 250U) return;
+  lastPhase = phase;
+  lastPhaseLogMs = now;
+  LRS_LOGD(LORA, "event=startup_tx_phase phase=%s ms=%lu", phase, static_cast<unsigned long>(now));
+}
+
+inline void startupTxSendTimingTrace(const char *phase, uint32_t startMs) {
+  if (startMs > kStartupPhaseTraceWindowMs) return;
+  const uint32_t endMs = millis();
+  LRS_LOGD(LORA, "event=startup_tx_phase phase=%s ms=%lu dur_ms=%lu", phase, static_cast<unsigned long>(endMs),
+           static_cast<unsigned long>(endMs - startMs));
+}
 
 bool isDefaultDeploymentKey(const String &v) {
   String key = v;
@@ -971,6 +992,7 @@ void NodeStateMachine::tickTransmitter() {
   const uint32_t now = millis();
 
   if (prov_.active) {
+    startupTxPhaseTrace("prov_coord_before");
     tickProvisioningCoordinator(now);
     return;
   }
@@ -993,17 +1015,26 @@ void NodeStateMachine::tickTransmitter() {
       tx_state_sync_pending_ = false;
       tx_retry_step_ = 0;
       sendTxState(MessageType::Change, input_state_, input_state_, "tx_change");
+      return;
     }
   }
 
   if (cfg_.tx_input_lora_control_enabled && tx_state_sync_pending_ && !tx_command_pending_) {
     tx_state_sync_pending_ = false;
     tx_retry_step_ = 0;
+    startupTxPhaseTrace("tx_start_sync_before_send");
+    const uint32_t sendStartMs = millis();
     sendTxState(MessageType::Change, input_state_, input_state_, "tx_start_sync");
+    startupTxSendTimingTrace("tx_start_sync_after_send", sendStartMs);
+    return;
   }
 
   if (cfg_.tx_input_lora_control_enabled && tx_command_pending_ && static_cast<int32_t>(now - tx_next_retry_ms_) >= 0) {
+    startupTxPhaseTrace("tx_retry_before_send");
+    const uint32_t sendStartMs = millis();
     sendTxState(MessageType::Change, tx_pending_relay_state_, tx_pending_input_state_, "tx_retry");
+    startupTxSendTimingTrace("tx_retry_after_send", sendStartMs);
+    return;
   }
 
   if (cfg_.tx_input_lora_control_enabled && (now - last_heartbeat_ms_) >= cfg_.heartbeat_ms) {
@@ -1017,11 +1048,13 @@ void NodeStateMachine::tickTransmitter() {
       if (logs_) {
         logs_->add("tx_heartbeat", 0, last_counter_, input_state_);
       }
+      return;
     }
   }
 
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
+  startupTxPhaseTrace("after_peer_polling");
 
   if (link_state_ == LinkState::WaitAck && (now - wait_ack_since_ms_) >= cfg_.ack_timeout_ms) {
     relay_state_ = 0;

@@ -67,7 +67,7 @@ void SensorManager::tick() {
   if (logs_) logs_->add("temp_read_ok", 0, 0, static_cast<uint8_t>(c));
 }
 
-TempSensorStatus SensorManager::tempStatus() const { return temp_; }
+const TempSensorStatus &SensorManager::tempStatus() const { return temp_; }
 
 void SensorManager::teardownBus() {
   if (ds_) {

@@ -22,7 +22,7 @@ class SensorManager {
   bool begin(const Settings &cfg, LogBuffer *logs);
   void applyConfig(const Settings &cfg);
   void tick();
-  TempSensorStatus tempStatus() const;
+  const TempSensorStatus &tempStatus() const;
 
  private:
   Settings cfg_{};
@@ -39,4 +39,3 @@ class SensorManager {
   void setupBus();
   String formatAddress() const;
 };
-

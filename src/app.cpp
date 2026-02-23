@@ -133,7 +133,7 @@ void App::tick() {
   phaseStartMs = millis();
   refreshMdns();
   startupSlowWarn("refresh_mdns_pre", phaseStartMs);
-  const TempSensorStatus ts = sensors_.tempStatus();
+  const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   if (emitStartupBreadcrumb) {
     LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu", static_cast<unsigned long>(millis()));

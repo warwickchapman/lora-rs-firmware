@@ -23,6 +23,9 @@
 - Unify `deployment_key` and `fleet_passphrase` terminology under user-facing `Shared Fleet Key` (short form: `Fleet Key` where space is tight); place helper text directly under the key input explaining it is the shared passphrase used to derive LoRa encryption/authentication keys; choose one canonical API field name and treat old names as temporary input aliases only.
 
 ## Logging / Observability
+- Build-time log level override (`LRS_LOG_LEVEL_DEFAULT`): set in `platformio.ini` via `build_flags` (e.g. `-DLRS_LOG_LEVEL_DEFAULT=3`) to change the default runtime verbosity for a build.
+- Log level numeric values for `LRS_LOG_LEVEL_DEFAULT`: `0=ERROR`, `1=WARN`, `2=INFO` (normal default), `3=DEBUG`.
+- Use `DEBUG` temporarily for diagnostics (startup watchdog investigation, provisioning flow tracing, API polling behavior); revert to `INFO` after testing to reduce log volume/serial overhead.
 - Phase 1 (minimal patch, ESP8266-safe): keep structured logging focused on diagnosability with low overhead: levels (`ERROR/WARN/INFO/DEBUG`), categories (`SYS/WIFI/NTP/MDNS/LORA/SENSOR/WEB/API/FS`), redaction helpers, web/API request summaries (status + duration), and heap diagnostics on high-risk endpoints (`/api/status`, `/api/fleet`, `/api/provisioning/status`); keep default level at `INFO`; keep polling endpoints (`/api/status`, `/api/session`) at `DEBUG`.
 - Phase 2 (later mass refactor): convert remaining ad-hoc prints across modules to the shared logging API; standardize event names/fields; add state-change/rate-limited logging patterns; review LoRa/web/API logs for spam/noise; expand structured coverage for provisioning/fleet workflows; document log taxonomy and operational/debug logging policy.
 - Phase 2 guardrails: no secret leakage (fleet keys, passwords, tokens), avoid heap-heavy log string construction in hot paths, and preserve current runtime timing priorities (LoRa control path before MQTT).
