@@ -33,6 +33,9 @@ class SensorManager {
   uint8_t addr_[8]{};
   bool has_addr_ = false;
   uint32_t last_read_ms_ = 0;
+  bool temp_conversion_pending_ = false;
+  uint32_t temp_conversion_started_ms_ = 0;
+  uint16_t temp_conversion_wait_ms_ = 750;
   TempSensorStatus temp_;
 
   void teardownBus();

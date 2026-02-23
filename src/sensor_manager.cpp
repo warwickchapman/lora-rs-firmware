@@ -34,6 +34,9 @@ void SensorManager::applyConfig(const Settings &cfg) {
   temp_.error = "";
   temp_.last_read_ms = 0;
   last_read_ms_ = 0;
+  temp_conversion_pending_ = false;
+  temp_conversion_started_ms_ = 0;
+  temp_conversion_wait_ms_ = 750;
   has_addr_ = false;
   setupBus();
 }
@@ -44,16 +47,38 @@ void SensorManager::tick() {
   }
 
   const uint32_t now = millis();
+  if (temp_conversion_pending_) {
+    if (now - temp_conversion_started_ms_ < temp_conversion_wait_ms_) {
+      return;
+    }
+    temp_conversion_pending_ = false;
+
+    const float c = ds_->getTempC(addr_);
+    temp_.last_read_ms = now;
+
+    if (c == DEVICE_DISCONNECTED_C || c <= kInvalidTemp) {
+      temp_.valid = false;
+      temp_.error = "read_failed";
+      if (logs_) logs_->add("temp_read_failed", 0, 0, 0);
+      LRS_LOGW(SENSOR, "event=temp_read_failed pin=%u", static_cast<unsigned>(temp_.pin));
+      return;
+    }
+
+    temp_.valid = true;
+    temp_.celsius = c;
+    temp_.error = "";
+    if (logs_) logs_->add("temp_read_ok", 0, 0, static_cast<uint8_t>(c));
+    return;
+  }
+
   if (now - last_read_ms_ < static_cast<uint32_t>(temp_.interval_s) * 1000UL) {
     return;
   }
   last_read_ms_ = now;
 
-  ds_->requestTemperaturesByAddress(addr_);
-  const float c = ds_->getTempC(addr_);
-  temp_.last_read_ms = now;
-
-  if (c == DEVICE_DISCONNECTED_C || c <= kInvalidTemp) {
+  const auto req = ds_->requestTemperaturesByAddress(addr_);
+  if (!req.result) {
+    temp_.last_read_ms = now;
     temp_.valid = false;
     temp_.error = "read_failed";
     if (logs_) logs_->add("temp_read_failed", 0, 0, 0);
@@ -61,15 +86,15 @@ void SensorManager::tick() {
     return;
   }
 
-  temp_.valid = true;
-  temp_.celsius = c;
-  temp_.error = "";
-  if (logs_) logs_->add("temp_read_ok", 0, 0, static_cast<uint8_t>(c));
+  temp_conversion_pending_ = true;
+  temp_conversion_started_ms_ = req.timestamp;
 }
 
 const TempSensorStatus &SensorManager::tempStatus() const { return temp_; }
 
 void SensorManager::teardownBus() {
+  temp_conversion_pending_ = false;
+  temp_conversion_started_ms_ = 0;
   if (ds_) {
     delete ds_;
     ds_ = nullptr;
@@ -90,6 +115,8 @@ void SensorManager::setupBus() {
   ow_ = new OneWire(temp_.pin);
   ds_ = new DallasTemperature(ow_);
   ds_->begin();
+  ds_->setWaitForConversion(false);
+  ds_->setCheckForConversion(false);
 
   uint8_t found[8];
   if (!ow_->search(found)) {
@@ -108,6 +135,7 @@ void SensorManager::setupBus() {
   temp_.address = formatAddress();
   temp_.error = "";
   ds_->setResolution(addr_, 12);
+  temp_conversion_wait_ms_ = DallasTemperature::millisToWaitForConversion(12);
   if (logs_) logs_->add("temp_detected", 0, 0, temp_.pin);
   LRS_LOGI(SENSOR, "event=temp_detected pin=%u addr=%s", static_cast<unsigned>(temp_.pin), temp_.address.c_str());
 }
