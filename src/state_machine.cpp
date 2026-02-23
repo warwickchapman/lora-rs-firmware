@@ -268,6 +268,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
 }
 
 void NodeStateMachine::tick() {
+  resetRadioTxBudgetForTick();
   tickReceive();
 
   if (cfg_.role_tx) {
@@ -278,6 +279,7 @@ void NodeStateMachine::tick() {
   tickProvisioningTarget(millis());
 
   tickLed();
+  finishRadioTxBudgetForTick();
 }
 
 LinkState NodeStateMachine::linkState() const { return link_state_; }
@@ -350,6 +352,7 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
     return;
   }
   last_tx_ms_ = now;
+  markRadioTxSentThisTick();
   wait_ack_since_ms_ = now;
   link_state_ = LinkState::WaitAck;
 
@@ -371,6 +374,7 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
 }
 
 bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter) {
+  if (!radioTxBudgetAvailable()) return false;
   const uint8_t targetRelay = relayState ? 1 : 0;
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(millis());
@@ -380,6 +384,7 @@ bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayStat
     return false;
   }
   last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
   if (sentCounter != nullptr) {
     *sentCounter = last_counter_;
   }
@@ -487,6 +492,7 @@ bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
 }
 
 bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &password) {
+  if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
   if (fleetWifiProvisionCooldownRemainingMs() > 0) return false;
   if (ssid.length() == 0 || ssid.length() > 32) return false;
@@ -550,6 +556,7 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
 
   const uint32_t sentAt = millis();
   last_tx_ms_ = sentAt;
+  markRadioTxSentThisTick();
   last_wifi_prov_tx_ms_ = sentAt;
   if (logs_) logs_->add("wifi_prov_tx", 0, last_counter_, totalChunks);
   return true;
@@ -578,6 +585,7 @@ uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
 }
 
 bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey) {
+  if (!radioTxBudgetAvailable()) return false;
   if (!cfg_.role_tx) return false;
   if (radio_ == nullptr) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
@@ -593,6 +601,7 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
     return false;
   }
   last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
   if (logs_) logs_->add(keepSharedFleetKey ? "factory_reset_peer_tx_keep" : "factory_reset_peer_tx_full", 0, last_counter_, dstAddress);
   return true;
 }
@@ -818,20 +827,33 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
 }
 
 bool NodeStateMachine::sendProvisioningCoordinatorPacketFactory(const uint8_t payload[12], uint8_t dst) {
+  if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
   last_counter_++;
-  last_tx_ms_ = millis();
-  return radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, dst, payload, true);
+  const uint32_t now = millis();
+  if (!radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, dst, payload, true)) {
+    return false;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  return true;
 }
 
 bool NodeStateMachine::sendProvisioningCoordinatorPacketProd(const uint8_t payload[12], uint8_t dst) {
+  if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
   last_counter_++;
-  last_tx_ms_ = millis();
-  return radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, dst, payload, false);
+  const uint32_t now = millis();
+  if (!radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, dst, payload, false)) {
+    return false;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  return true;
 }
 
 bool NodeStateMachine::sendProvisioningAnnounce(uint16_t sessionNonce) {
+  if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
   uint8_t payload[12]{};
   payload[0] = kProvOpAnnounce;
@@ -845,11 +867,17 @@ bool NodeStateMachine::sendProvisioningAnnounce(uint16_t sessionNonce) {
   payload[10] = static_cast<uint8_t>(((maj & 0x0F) << 4) | (min & 0x0F));
   payload[11] = patch;
   last_counter_++;
-  last_tx_ms_ = millis();
-  return radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, kProvBroadcastAddress, payload, true);
+  const uint32_t now = millis();
+  if (!radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, kProvBroadcastAddress, payload, true)) {
+    return false;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  return true;
 }
 
 bool NodeStateMachine::sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8_t assignedAddress) {
+  if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
   if (isDefaultFleetKey()) return false;
   uint8_t payload[12]{};
@@ -864,8 +892,13 @@ bool NodeStateMachine::sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8
   payload[10] = static_cast<uint8_t>(((maj & 0x0F) << 4) | (min & 0x0F));
   payload[11] = patch;
   last_counter_++;
-  last_tx_ms_ = millis();
-  return radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, kProvBroadcastAddress, payload, false);
+  const uint32_t now = millis();
+  if (!radio_->sendProvisioningRaw(last_counter_, cfg_.local_address, kProvBroadcastAddress, payload, false)) {
+    return false;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  return true;
 }
 
 NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t address) {
@@ -893,6 +926,7 @@ NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t addres
 }
 
 bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter) {
+  if (!radioTxBudgetAvailable()) return false;
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(millis());
   if (!radio_->send(MessageType::PollRequest, 0, input_state_, txFlags(), last_counter_, cfg_.local_address, dstAddress,
@@ -901,6 +935,7 @@ bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter
     return false;
   }
   last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
   if (sentCounter != nullptr) {
     *sentCounter = last_counter_;
   }
@@ -927,6 +962,9 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
 
     if (static_cast<int32_t>(now - node.next_retry_ms) < 0) {
       continue;
+    }
+    if (!radioTxBudgetAvailable()) {
+      return;
     }
 
     uint32_t sentCounter = 0;
@@ -977,6 +1015,9 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
     if (static_cast<int32_t>(now - node.next_poll_ms) < 0) {
       continue;
     }
+    if (!radioTxBudgetAvailable()) {
+      return;
+    }
 
     uint32_t sentCounter = 0;
     if (sendPollRequest(node.address, &sentCounter)) {
@@ -1016,6 +1057,10 @@ void NodeStateMachine::tickTransmitter() {
   if ((now - last_debounce_ms_) > kDebounceMs && inputLogical != input_state_) {
     input_state_ = static_cast<uint8_t>(inputLogical);
     if (cfg_.tx_input_lora_control_enabled) {
+      if (!radioTxBudgetAvailable()) {
+        tx_state_sync_pending_ = true;  // Defer change sync to next tick when a radio TX budget slot is available.
+        return;
+      }
       tx_state_sync_pending_ = false;
       tx_retry_step_ = 0;
       sendTxState(MessageType::Change, input_state_, input_state_, "tx_change");
@@ -1024,6 +1069,9 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   if (cfg_.tx_input_lora_control_enabled && tx_state_sync_pending_ && !tx_command_pending_) {
+    if (!radioTxBudgetAvailable()) {
+      return;
+    }
     tx_state_sync_pending_ = false;
     tx_retry_step_ = 0;
     startupTxPhaseTrace("tx_start_sync_before_send");
@@ -1034,6 +1082,9 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   if (cfg_.tx_input_lora_control_enabled && tx_command_pending_ && static_cast<int32_t>(now - tx_next_retry_ms_) >= 0) {
+    if (!radioTxBudgetAvailable()) {
+      return;
+    }
     startupTxPhaseTrace("tx_retry_before_send");
     const uint32_t sendStartMs = millis();
     sendTxState(MessageType::Change, tx_pending_relay_state_, tx_pending_input_state_, "tx_retry");
@@ -1042,6 +1093,9 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   if (cfg_.tx_input_lora_control_enabled && (now - last_heartbeat_ms_) >= cfg_.heartbeat_ms) {
+    if (!radioTxBudgetAvailable()) {
+      return;
+    }
     last_heartbeat_ms_ = now;
     last_counter_++;
     const uint32_t unixTimeS = currentUnixTimeS(now);
@@ -1049,6 +1103,7 @@ void NodeStateMachine::tickTransmitter() {
                      cfg_.remote_address,
                      local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
       last_tx_ms_ = now;
+      markRadioTxSentThisTick();
       if (logs_) {
         logs_->add("tx_heartbeat", 0, last_counter_, input_state_);
       }
@@ -1095,12 +1150,16 @@ void NodeStateMachine::tickReceiver() {
   if (!firstPush && (now - rx_last_push_ms_) < minIntervalMs) {
     return;
   }
+  if (!radioTxBudgetAvailable()) {
+    return;
+  }
 
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
   if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), txFlags(), last_counter_, cfg_.local_address,
                    cfg_.remote_address, local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
     last_tx_ms_ = now;
+    markRadioTxSentThisTick();
     rx_last_push_ms_ = now;
     rx_push_pending_ = false;
     if (logs_) logs_->add("rx_push_on_change", 0, last_counter_, input_state_);
@@ -1220,16 +1279,21 @@ void NodeStateMachine::tickReceive() {
   }
 
   if (msg.type == MessageType::PollRequest) {
+    if (!radioTxBudgetAvailable()) {
+      return;
+    }
     const uint8_t sensorMask = 0x04;  // includes downlink RSSI in sensor_analog0
     const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(msg.rssi));
     const uint32_t unixTimeS = currentUnixTimeS(millis());
     last_counter_++;
-    radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), txFlags(), last_counter_, cfg_.local_address,
-                 msg.src,
-                 local_temp_code_, sensorMask, 0xFF, downlinkRssiEnc, unixTimeS);
-    last_tx_ms_ = millis();
-    if (logs_) {
-      logs_->add("rx_poll_response_tx", msg.rssi, last_counter_, relay_state_);
+    if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), txFlags(), last_counter_, cfg_.local_address,
+                     msg.src,
+                     local_temp_code_, sensorMask, 0xFF, downlinkRssiEnc, unixTimeS)) {
+      last_tx_ms_ = millis();
+      markRadioTxSentThisTick();
+      if (logs_) {
+        logs_->add("rx_poll_response_tx", msg.rssi, last_counter_, relay_state_);
+      }
     }
     return;
   }
@@ -1240,20 +1304,32 @@ void NodeStateMachine::tickReceive() {
     last_rx_control_source_ = (msg.type == MessageType::Mqtt) ? RxControlSource::Mqtt : RxControlSource::LoRa;
     digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
     if (msg.type != MessageType::Mqtt) {
+      if (!radioTxBudgetAvailable()) {
+        if (logs_) logs_->add("rx_apply_no_ack_budget", msg.rssi, msg.counter, msg.relay_state);
+        return;
+      }
       const uint32_t unixTimeS = currentUnixTimeS(millis());
       last_counter_++;
-      radio_->send(MessageType::Ack, relay_state_, input_state_, txFlags(), last_counter_, cfg_.local_address, msg.src,
-                   local_temp_code_,
-                   0, 0xFF, 0xFFFF, unixTimeS);
-      last_tx_ms_ = millis();
+      if (radio_->send(MessageType::Ack, relay_state_, input_state_, txFlags(), last_counter_, cfg_.local_address, msg.src,
+                       local_temp_code_,
+                       0, 0xFF, 0xFFFF, unixTimeS)) {
+        last_tx_ms_ = millis();
+        markRadioTxSentThisTick();
+      }
     } else {
+      if (!radioTxBudgetAvailable()) {
+        if (logs_) logs_->add("rx_apply_no_status_budget", msg.rssi, msg.counter, msg.relay_state);
+        return;
+      }
       const uint8_t sensorMask = 0x04;  // includes downlink RSSI in sensor_analog0
       const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(msg.rssi));
       const uint32_t unixTimeS = currentUnixTimeS(millis());
       last_counter_++;
-      radio_->send(MessageType::MqttStatus, relay_state_, localDryContactState(), txFlags(), last_counter_, cfg_.local_address,
-                   msg.src, local_temp_code_, sensorMask, 0xFF, downlinkRssiEnc, unixTimeS);
-      last_tx_ms_ = millis();
+      if (radio_->send(MessageType::MqttStatus, relay_state_, localDryContactState(), txFlags(), last_counter_, cfg_.local_address,
+                       msg.src, local_temp_code_, sensorMask, 0xFF, downlinkRssiEnc, unixTimeS)) {
+        last_tx_ms_ = millis();
+        markRadioTxSentThisTick();
+      }
     }
 
     if (logs_) {
@@ -1365,6 +1441,7 @@ bool NodeStateMachine::handleFactoryResetFrame(const ProtocolMessage &msg) {
 }
 
 void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
+  if (!radioTxBudgetAvailable()) return;
   if (!isDefaultFleetKey()) return;
   if (!prov_rx_.discover_pending) return;
   if (static_cast<int32_t>(now - prov_rx_.announce_at_ms) < 0) return;
@@ -1377,6 +1454,7 @@ void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
 }
 
 void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
+  if (!radioTxBudgetAvailable()) return;
   if (!prov_.active) return;
 
   if ((prov_.state == ProvisioningSessionState::Discovering || prov_.state == ProvisioningSessionState::DiscoveryRetry) &&
@@ -1391,8 +1469,9 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       encodeU16LE(payload + 1, prov_.session_nonce);
       encodeU16LE(payload + 3, static_cast<uint16_t>(retryWindowMs / 100U));
       payload[5] = 0;
-      sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress);
-      if (logs_) logs_->add("prov_discover_retry", 0, prov_.session_nonce, 0);
+      if (sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) {
+        if (logs_) logs_->add("prov_discover_retry", 0, prov_.session_nonce, 0);
+      }
       return;
     }
     recomputeProvisioningConflictsAndAssignments();
@@ -1533,6 +1612,24 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
   prov_.state = ProvisioningSessionState::Complete;
   prov_.active = false;
   prov_.pause_normal_tx = false;
+}
+
+bool NodeStateMachine::radioTxBudgetAvailable() const {
+  return !radio_tx_budget_active_ || !radio_tx_used_this_tick_;
+}
+
+void NodeStateMachine::resetRadioTxBudgetForTick() {
+  // One expensive outbound LoRa action per state-machine tick keeps loop-time predictable on ESP8266.
+  radio_tx_budget_active_ = true;
+  radio_tx_used_this_tick_ = false;
+}
+
+void NodeStateMachine::finishRadioTxBudgetForTick() { radio_tx_budget_active_ = false; }
+
+void NodeStateMachine::markRadioTxSentThisTick() {
+  if (radio_tx_budget_active_) {
+    radio_tx_used_this_tick_ = true;
+  }
 }
 
 bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {

@@ -181,6 +181,8 @@ class NodeStateMachine {
   bool tx_ack_pending_ = false;
   uint32_t tx_ack_apply_ms_ = 0;
   uint8_t tx_ack_relay_state_ = 0;
+  bool radio_tx_budget_active_ = false;
+  bool radio_tx_used_this_tick_ = false;
   bool tx_state_sync_pending_ = false;
   bool tx_command_pending_ = false;
   uint8_t tx_pending_relay_state_ = 0;
@@ -320,6 +322,10 @@ class NodeStateMachine {
   uint8_t txFlags() const;
   void updateSharedTimeFromPeer(uint32_t unixTimeS, bool authoritative);
   uint32_t currentUnixTimeS(uint32_t nowMs) const;
+  bool radioTxBudgetAvailable() const;
+  void resetRadioTxBudgetForTick();
+  void finishRadioTxBudgetForTick();
+  void markRadioTxSentThisTick();
   void sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent);
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
