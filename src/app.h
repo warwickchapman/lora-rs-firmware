@@ -2,6 +2,7 @@
 
 #include <DNSServer.h>
 
+#include "automation_rules.h"
 #include "config_store.h"
 #include "log_buffer.h"
 #include "mqtt_bridge.h"
@@ -22,6 +23,7 @@ class App {
   RadioProtocol radio_;
   SensorManager sensors_;
   NodeStateMachine sm_;
+  AutomationRulesEngine automation_;
   WebConsole web_;
 
   bool wifi_sta_connecting_ = false;
@@ -31,6 +33,11 @@ class App {
   uint32_t sta_connected_since_ms_ = 0;
   bool ap_enabled_ = false;
   bool dns_running_ = false;
+  bool ntp_started_ = false;
+  bool ntp_time_valid_ = false;
+  uint32_t ntp_last_check_ms_ = 0;
+  uint32_t ntp_last_sync_ms_ = 0;
+  uint32_t ntp_last_epoch_s_ = 0;
   String active_mdns_hostname_;
   DNSServer dns_;
 
@@ -40,6 +47,8 @@ class App {
   void maybeDisableAp();
   void refreshCaptiveDns();
   void beginStaConnect();
+  void startNtpClient();
+  void tickTimeSync();
   void applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth);
   void startOta();
   void refreshMdns();

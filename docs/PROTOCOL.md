@@ -11,7 +11,7 @@ Packed fields:
 - `type` (1)
 - `counter` (4)
 - `nonce` (8)
-- `encrypted payload` (8)
+- `encrypted payload` (12)
 - `mac` (8, truncated SHA-256 output)
 
 ## Message Types
@@ -22,11 +22,14 @@ Packed fields:
 - `MqttStatus` (`'S'`)
 - `PollRequest` (`'P'`)
 - `PollResponse` (`'R'`)
+- `WifiProvision` (`'W'`)
+- `FactoryReset` (`'X'`)
 
-## Encrypted Payload Layout (8 bytes)
+## Encrypted Payload Layout (12 bytes)
 - `b0`: `relay_state`
 - `b1`: `input_state`
 - `b2`: `flags`
+  - bit0: `time_authoritative` (`1` when sender time is NTP-authoritative)
 - `b3`: `temp_code`
   - `0xFF` = not present
   - otherwise signed int8 Celsius (`int8_t`)
@@ -37,10 +40,15 @@ Packed fields:
 - `b5`: `sensor_digital0` (currently dry-contact state mirror)
 - `b6`: `sensor_analog0_lsb` (reserved)
 - `b7`: `sensor_analog0_msb` (reserved)
+- `b8..b11`: `unix_time_s` (little-endian UTC epoch seconds; `0` means unavailable)
 
 Notes:
 - `sensor_analog0` is reserved for future analog sensor transport.
 - Current firmware sets digital input and optional temperature fields.
+- Internet-connected nodes fetch NTP time and include `unix_time_s` in outbound frames.
+- Peers accept `unix_time_s` for local sync only when `flags.bit0` (`time_authoritative`) is set.
+- Some message types (`WifiProvision`, `FactoryReset`) reuse the same encrypted 12-byte payload slot with custom byte layouts.
+- Firmware implements this via a raw-payload send path (`sendRaw`) that preserves the same frame size, crypto, MAC, and replay protection.
 
 ## Crypto
 - Encryption: AES-CTR (128-bit key)
@@ -72,6 +80,14 @@ Otherwise packet is dropped and logged.
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
 
+## Provisioning and Reset LoRa Extensions
+- `WifiProvision` (`'W'`) carries segmented WiFi credentials (SSID + password) using custom payload bytes.
+- Transfer format is `start`, `data`, `commit` messages over multiple packets.
+- WiFi provisioning is broadcast to `0xFF` and accepted only by devices in the same fleet (same fleet key / valid MAC).
+- Receiver validates transfer completeness and hash before applying credentials.
+- `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
+- `FactoryReset` supports an option to preserve the current shared fleet key during reset.
+
 ## MQTT-to-LoRa Semantics
 - MQTT `relay` topic sets only the local node relay state immediately.
 - MQTT `control` topic is handled only when node role is TX.
@@ -79,11 +95,11 @@ Otherwise packet is dropped and logged.
 - `addr` as JSON number is decimal (example: `40`).
 - `addr` as JSON string is parsed as hex (example: `"0x28"` or `"28"`).
 - TX publishes local `addr` topic value as `0xNN`.
-- TX publishes remote node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/remote/0xNN/...`.
-- TX accepts remote control leaves:
+- TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peer/0xNN/...`.
+- TX accepts peer control leaves:
   - `poll_interval_s`
   - `poll_now`
-  - `forget` (payload `1` removes node from TX runtime and clears retained remote subtree topics)
+  - `forget` (payload `1` removes node from TX runtime and clears retained peer subtree topics)
 - TX rejects destination `0x00` and `0xFF`.
 - On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
@@ -95,5 +111,7 @@ Otherwise packet is dropped and logged.
 - `mqtt_remote_retry_timeout_ms`: 300000 (300 s)
 
 ## Compatibility
-The current 8-byte payload format is not wire-compatible with older 4-byte payload firmware.
+The current 12-byte payload format is not wire-compatible with older 8-byte payload firmware.
 Upgrade paired nodes together.
+
+Within the current 12-byte protocol generation, `WifiProvision`/`FactoryReset` do not change frame size; they only define additional message types and alternate payload semantics.

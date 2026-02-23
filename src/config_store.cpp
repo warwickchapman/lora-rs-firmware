@@ -5,10 +5,13 @@
 #include <LittleFS.h>
 #include <SHA256.h>
 
+#include "logger.h"
+
 namespace {
 constexpr char kConfigPath[] = "/config.json";
 constexpr uint16_t kConfigVersion = 1;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
+constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
 
 int monthFromShort(const String &m) {
   if (m == "Jan") return 1;
@@ -98,18 +101,21 @@ String extractJsonStringField(const String &json, const char *key) {
 
 bool ConfigStore::begin() {
   if (!LittleFS.begin()) {
+    LRS_LOGE(FS, "event=fs_mount_failed path=%s", kConfigPath);
     return false;
   }
 
   setDefaults();
 
   if (!LittleFS.exists(kConfigPath)) {
+    LRS_LOGW(FS, "event=config_missing path=%s action=write_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
   }
 
   File f = LittleFS.open(kConfigPath, "r");
   if (!f) {
+    LRS_LOGE(FS, "event=config_open_failed path=%s mode=r action=write_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
   }
@@ -130,6 +136,7 @@ bool ConfigStore::begin() {
   auto err = deserializeJson(doc, raw);
   if (err) {
     // Keep config file intact on parse failure to avoid destructive resets.
+    LRS_LOGW(FS, "event=config_parse_failed path=%s err=%s bytes=%lu", kConfigPath, err.c_str(), static_cast<unsigned long>(fileSize));
     ensureProvisionedDefaults();
     const String recoveredAdmin = extractJsonStringField(raw, "admin_password");
     if (recoveredAdmin.length() >= 8) {
@@ -175,6 +182,7 @@ bool ConfigStore::begin() {
   cfg_.sensor_temp_interval_s = doc["sensor_temp_interval_s"] | 10;
 
   cfg_.fleet_passphrase = String(static_cast<const char *>(doc["fleet_passphrase"] | "lora-default-passphrase"));
+  cfg_.fleet_setup_prompt_dismissed = doc["fleet_setup_prompt_dismissed"] | false;
   cfg_.admin_password = String(static_cast<const char *>(doc["admin_password"] | ""));
   cfg_.factory_serial = String(static_cast<const char *>(doc["factory_serial"] | ""));
   cfg_.audit_last_saved_by = String(static_cast<const char *>(doc["audit_last_saved_by"] | "factory"));
@@ -253,8 +261,19 @@ bool ConfigStore::begin() {
   cfg_.audit_boot_count += 1;
   changed = true;
   if (changed) {
+    LRS_LOGI(FS, "event=config_migrated path=%s write_back=1", kConfigPath);
     return save();
   }
+  LRS_LOGI(FS,
+           "event=config_loaded path=%s version=%u provisioned=%u role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
+           kConfigPath,
+           static_cast<unsigned>(cfg_.version),
+           cfg_.provisioned ? 1U : 0U,
+           cfg_.role_tx ? "tx" : "rx",
+           static_cast<unsigned>(cfg_.local_address),
+           static_cast<unsigned>(cfg_.remote_address),
+           cfg_.wifi_sta_ssid.c_str(),
+           lrslog::maskSecret(cfg_.fleet_passphrase).c_str());
   return true;
 }
 
@@ -299,6 +318,7 @@ bool ConfigStore::save() {
   doc["sensor_temp_interval_s"] = cfg_.sensor_temp_interval_s;
 
   doc["fleet_passphrase"] = cfg_.fleet_passphrase;
+  doc["fleet_setup_prompt_dismissed"] = cfg_.fleet_setup_prompt_dismissed;
   doc["admin_password"] = cfg_.admin_password;
   doc["factory_serial"] = cfg_.factory_serial;
   doc["audit_last_saved_by"] = cfg_.audit_last_saved_by;
@@ -311,9 +331,46 @@ bool ConfigStore::save() {
   if (!f) {
     return false;
   }
-  bool ok = serializeJson(doc, f) > 0;
+  const size_t bytes = serializeJson(doc, f);
+  bool ok = bytes > 0;
   f.close();
+  if (!ok) {
+    LRS_LOGE(FS, "event=config_save_failed path=%s", kConfigPath);
+    return false;
+  }
+  LRS_LOGI(FS,
+           "event=config_saved path=%s bytes=%lu role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
+           kConfigPath,
+           static_cast<unsigned long>(bytes),
+           cfg_.role_tx ? "tx" : "rx",
+           static_cast<unsigned>(cfg_.local_address),
+           static_cast<unsigned>(cfg_.remote_address),
+           cfg_.wifi_sta_ssid.c_str(),
+           lrslog::maskSecret(cfg_.fleet_passphrase).c_str());
   return ok;
+}
+
+bool ConfigStore::factoryReset(bool keepSharedFleetKey) {
+  const String preservedFleetKey = cfg_.fleet_passphrase;
+  const bool preservedFleetPromptDismissed = cfg_.fleet_setup_prompt_dismissed;
+
+  setDefaults();
+  ensureProvisionedDefaults();
+
+  if (keepSharedFleetKey && preservedFleetKey.length() > 0) {
+    cfg_.fleet_passphrase = preservedFleetKey;
+    cfg_.fleet_setup_prompt_dismissed = preservedFleetPromptDismissed || (cfg_.fleet_passphrase != kDefaultDeploymentKey);
+  }
+
+  cfg_.audit_last_saved_by = keepSharedFleetKey ? "factory_reset_keep_fleet" : "factory_reset_full";
+  cfg_.audit_last_saved_ms = 0;
+  cfg_.audit_last_reboot_reason = keepSharedFleetKey ? "factory_reset_keep_fleet" : "factory_reset_full";
+  cfg_.audit_last_reboot_ms = 0;
+  LRS_LOGW(SYS,
+           "event=factory_reset_apply keep_fleet_key=%u fleet_key=%s",
+           keepSharedFleetKey ? 1U : 0U,
+           lrslog::maskSecret(cfg_.fleet_passphrase).c_str());
+  return save();
 }
 
 String ConfigStore::chipIdHex() const {
@@ -373,6 +430,7 @@ void ConfigStore::setDefaults() {
   cfg_.sensor_temp_interval_s = 10;
 
   cfg_.fleet_passphrase = "lora-default-passphrase";
+  cfg_.fleet_setup_prompt_dismissed = false;
   cfg_.admin_password = "";
   cfg_.factory_serial = "";
   cfg_.audit_last_saved_by = "factory";

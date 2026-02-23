@@ -42,6 +42,7 @@ struct Settings {
   uint16_t sensor_temp_interval_s;
 
   String fleet_passphrase;
+  bool fleet_setup_prompt_dismissed;
   String admin_password;
 
   String factory_serial;
@@ -57,6 +58,7 @@ class ConfigStore {
   bool begin();
   Settings &settings();
   bool save();
+  bool factoryReset(bool keepSharedFleetKey);
 
   String chipIdHex() const;
   String defaultLanHostnameForRole(bool roleTx) const;

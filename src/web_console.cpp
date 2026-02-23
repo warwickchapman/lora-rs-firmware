@@ -5,8 +5,10 @@
 #include <PubSubClient.h>
 #include <Updater.h>
 
+#include "automation_rules.h"
 #include "build_info.h"
 #include "config_store.h"
+#include "logger.h"
 #include "log_buffer.h"
 #include "sensor_manager.h"
 #include "state_machine.h"
@@ -26,6 +28,12 @@ constexpr const char *kDefaultDeploymentKey = "lora-default-passphrase";
 constexpr size_t kMinDeploymentKeyLen = 16;
 constexpr const char *kHardwareVersion = "v1.2";
 constexpr const char *kHardwareBatch = "251101";
+constexpr uint32_t kLowHeapWarnThresholdBytes = 14000;
+constexpr uint32_t kLowHeapWarnMinIntervalMs = 5000;
+constexpr uint32_t kApiLowHeapRejectFreeBytes = 6500;
+constexpr uint32_t kApiLowHeapRejectMaxBlockBytes = 2500;
+constexpr uint32_t kIndexLowHeapRejectFreeBytes = 3800;
+constexpr uint32_t kIndexLowHeapRejectMaxBlockBytes = 2400;
 
 #ifdef REGION_US
 constexpr long kMinFrequencyHz = 902000000L;
@@ -81,17 +89,68 @@ const char *wifiStatusText(wl_status_t st) {
   }
 }
 
-const char *remoteAckStateText(RemoteAckState s) {
+const char *httpMethodText(HTTPMethod method) {
+  switch (method) {
+    case HTTP_GET:
+      return "GET";
+    case HTTP_POST:
+      return "POST";
+    default:
+      return "OTHER";
+  }
+}
+
+const char *remoteAckStateText(PeerAckState s) {
   switch (s) {
-    case RemoteAckState::Pending:
+    case PeerAckState::Pending:
       return "pending";
-    case RemoteAckState::Ok:
+    case PeerAckState::Ok:
       return "ok";
-    case RemoteAckState::Timeout:
+    case PeerAckState::Timeout:
       return "timeout";
-    case RemoteAckState::Unknown:
+    case PeerAckState::Unknown:
     default:
       return "unknown";
+  }
+}
+
+const char *provisioningSessionStateText(ProvisioningSessionState s) {
+  switch (s) {
+    case ProvisioningSessionState::Discovering:
+      return "discovering";
+    case ProvisioningSessionState::DiscoveryRetry:
+      return "discovery_retry";
+    case ProvisioningSessionState::Ready:
+      return "ready";
+    case ProvisioningSessionState::Provisioning:
+      return "provisioning";
+    case ProvisioningSessionState::Complete:
+      return "complete";
+    case ProvisioningSessionState::Error:
+      return "error";
+    case ProvisioningSessionState::Idle:
+    default:
+      return "idle";
+  }
+}
+
+const char *provisioningDeviceStateText(ProvisioningDeviceState s) {
+  switch (s) {
+    case ProvisioningDeviceState::Assigned:
+      return "assigned";
+    case ProvisioningDeviceState::Keying:
+      return "keying";
+    case ProvisioningDeviceState::AwaitVerify:
+      return "await_verify";
+    case ProvisioningDeviceState::Verified:
+      return "verified";
+    case ProvisioningDeviceState::Failed:
+      return "failed";
+    case ProvisioningDeviceState::Skipped:
+      return "skipped";
+    case ProvisioningDeviceState::Discovered:
+    default:
+      return "discovered";
   }
 }
 
@@ -117,6 +176,20 @@ uint8_t parseAddressField(const JsonVariantConst &value, uint8_t fallback) {
   if (n < 1 || n > 254) {
     return fallback;
   }
+  return static_cast<uint8_t>(n);
+}
+
+uint8_t parseAddressText(const String &text, uint8_t fallback) {
+  String t = text;
+  t.trim();
+  if (t.length() == 0) return fallback;
+  long n = -1;
+  if (t.startsWith("0x") || t.startsWith("0X")) {
+    n = strtol(t.c_str(), nullptr, 16);
+  } else {
+    n = strtol(t.c_str(), nullptr, 10);
+  }
+  if (n < 1 || n > 254) return fallback;
   return static_cast<uint8_t>(n);
 }
 
@@ -212,7 +285,7 @@ async function login(){
      return;
    }
    msg.className='msg ok'; msg.innerText='Login successful';
-   location.href='/';
+   location.href = out.setup_required ? '/setup' : '/';
  }catch(e){
    msg.className='msg err'; msg.innerText=`Login failed: ${e.message}`;
  }finally{ btn.disabled=false; }
@@ -220,6 +293,49 @@ async function login(){
 loginForm.addEventListener('submit', (e)=>{ e.preventDefault(); login(); });
 try{ applyTheme(localStorage.getItem('lrs_theme') === 'light' ? 'light' : 'dark'); }catch(e){ applyTheme('dark'); }
 pw.focus();
+</script></body></html>
+)HTML";
+
+const char kFleetSetupHtml[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+<title>LRS Fleet Key Setup</title>
+<style>
+:root{--bg:#0b1220;--card:#111827;--txt:#e5e7eb;--muted:#94a3b8;--border:#334155;--field:#0f172a;--btn:#005f73;--btn2:#334155}
+body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--muted:#4b5563;--border:#d4dbe2;--field:#fff;--btn2:#e5e7eb}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--bg),#111827);font-family:ui-sans-serif,system-ui;color:var(--txt);-webkit-text-size-adjust:100%}
+body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
+.card{width:min(92vw,460px);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:0 12px 30px rgba(0,0,0,.22)}
+h1{margin:0 0 8px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)} label{display:block;margin:0 0 6px;font-size:14px;font-weight:600}
+input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:16px;background:var(--field);color:var(--txt)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1 1 0}
+button{margin-top:10px;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:15px}
+button.secondary{background:var(--btn2);color:var(--txt);border:1px solid var(--border)}
+.msg{margin-top:8px;font-size:14px;min-height:1.2em}.err{color:#b42318}.ok{color:#166534}.small{font-size:12px;color:var(--muted)}
+</style></head><body><div class="card">
+<h1>Set Fleet Key (Optional)</h1>
+<p>This is shown once on first login. Set a shared Fleet key now to enable LoRa communication and fleet provisioning, or skip and configure later.</p>
+<label for="fleet">Fleet key</label>
+<input id="fleet" type="text" placeholder="Enter unique fleet key (min 16 chars)" />
+<div class="small">Default key is blocked here. Use a unique key for this installation.</div>
+<div class="row"><button id="saveBtn" type="button" onclick="saveKey()">Save Fleet Key</button><button id="skipBtn" class="secondary" type="button" onclick="skipKey()">Skip for Now</button></div>
+<div id="msg" class="msg"></div>
+</div><script>
+const msg=document.getElementById('msg'); const fleet=document.getElementById('fleet'); const saveBtn=document.getElementById('saveBtn'); const skipBtn=document.getElementById('skipBtn');
+function setBusy(b){ saveBtn.disabled=b; skipBtn.disabled=b; }
+async function submit(body){
+ setBusy(true); msg.className='msg'; msg.innerText='Saving...';
+ try{
+  const res=await fetch('/api/setup/fleet-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const out=await res.json().catch(()=>({}));
+  if(!res.ok){ msg.className='msg err'; msg.innerText=out.error||'Failed'; return; }
+  msg.className='msg ok'; msg.innerText='Saved';
+  location.href='/';
+ }catch(e){ msg.className='msg err'; msg.innerText=`Failed: ${e.message}`; }
+ finally{ setBusy(false); }
+}
+function saveKey(){ submit({fleet_passphrase:fleet.value||''}); }
+function skipKey(){ submit({skip:true}); }
+fleet.focus();
 </script></body></html>
 )HTML";
 
@@ -304,24 +420,42 @@ details summary{cursor:pointer;font-weight:700;margin:6px 0}
 .sec-chip.y{background:#d9f3e2;color:#166534}
 .sec-chip.n{background:#f3f4f6;color:#4b5563}
 .link{color:var(--link);text-decoration:underline}
-.topnav{display:flex;gap:8px;flex-wrap:wrap}
+.menu-btn{margin-top:0;padding:6px 10px;min-width:38px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);border-radius:999px}
+.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:20}
+.drawer{position:fixed;left:0;top:0;bottom:0;width:min(82vw,290px);padding:16px 12px;background:var(--card);border-right:1px solid var(--border);transform:translateX(-100%);transition:transform .2s ease;z-index:21;overflow:auto}
+.drawer h4{margin:4px 8px 10px 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.navbtn{display:flex;align-items:center;gap:10px;width:100%;margin-top:0;padding:10px 12px;border:1px solid transparent;background:transparent;color:var(--txt);text-align:left;font-weight:600}
+.navbtn.active{background:rgba(0,95,115,.22);border-color:var(--accent);color:#fff}
+.navbtn.cog::before{content:'⚙';font-size:14px}
+body.light .navbtn.active{color:#083344}
+body.nav-open .drawer{transform:translateX(0)}
+body.nav-open .drawer-backdrop{opacity:1;pointer-events:auto}
+body.nav-open{overflow:hidden}
 .tabbtn{background:#1f2937;color:#e5e7eb;border:1px solid var(--border)}
 body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 .tabbtn.active{background:var(--accent);color:#fff}
 .page{display:none}
 .page.active{display:block}
-.remotes-table{width:100%;border-collapse:collapse;font-size:14px}
-.remotes-table th,.remotes-table td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
-.remotes-table th{color:var(--muted);font-weight:700}
-.remotes-table tr.selected{background:rgba(0,95,115,.18)}
-.remotes-row-actions{display:flex;gap:6px;flex-wrap:wrap}
-.remotes-row-actions button{margin-top:0;padding:6px 8px;font-size:12px}
-.remote-detail{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:rgba(255,255,255,.02)}
-.remote-detail-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.remote-detail-tabs .tabbtn{margin-top:0;padding:6px 10px}
-.remote-detail-grid{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:14px}
-.remote-detail-grid .k{color:var(--muted)}
-.remote-detail-grid .v{font-weight:600;overflow-wrap:anywhere}
+.settings-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.settings-pane{display:none}
+.settings-pane.active{display:block}
+.fleet-pane{display:none}
+.fleet-pane.active{display:block}
+.system-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px 0}
+.system-pane{display:none}
+.system-pane.active{display:block}
+.fleet-table{width:100%;border-collapse:collapse;font-size:14px}
+.fleet-table th,.fleet-table td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+.fleet-table th{color:var(--muted);font-weight:700}
+.fleet-table tr.selected{background:rgba(0,95,115,.18)}
+.fleet-row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.fleet-row-actions button{margin-top:0;padding:6px 8px;font-size:12px}
+.fleet-detail{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:rgba(255,255,255,.02)}
+.fleet-detail-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.fleet-detail-tabs .tabbtn{margin-top:0;padding:6px 10px}
+.fleet-detail-grid{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:14px}
+.fleet-detail-grid .k{color:var(--muted)}
+.fleet-detail-grid .v{font-weight:600;overflow-wrap:anywhere}
 .chip{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid transparent}
 .chip.ok{background:#d9f6df;color:#166534;border-color:#3ea86b}
 .chip.warn{background:#fef3c7;color:#92400e;border-color:#f59e0b}
@@ -358,22 +492,11 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head>
-<body><header><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
-<section class="card topnav">
-<button class="tabbtn active" id="tab-status" onclick="showPage('status')">Status</button>
-<button class="tabbtn" id="tab-remotes" onclick="showPage('remotes')">Remotes</button>
-<button class="tabbtn" id="tab-lora" onclick="showPage('lora')">LoRa</button>
-<button class="tabbtn" id="tab-network" onclick="showPage('network')">Network</button>
-<button class="tabbtn" id="tab-mqtt" onclick="showPage('mqtt')">MQTT</button>
-<button class="tabbtn" id="tab-sensors" onclick="showPage('sensors')">Sensors</button>
-<button class="tabbtn" id="tab-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button>
-<button class="tabbtn" id="tab-factory" onclick="showPage('factory')">System</button>
-<button class="tabbtn" id="tab-logs" onclick="showPage('logs')">Logs</button>
-</section>
+<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-automation" onclick="showPage('automation')">Automations</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="deploymentKeyNotice" class="deploy-note">Deployment Key (Encryption): checking...</div>
-<div id="statusRemotesShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('remotes');return false;">View remotes</a></div>
+<div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
 <div class="status-grid">
 <div>
 <div id="statusTable">Loading status...</div>
@@ -393,13 +516,34 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div class="sensor-tile">Flow: n/a</div>
 </div>
 </section>
-<section class="card page" id="page-remotes">
-<h3>Remotes</h3>
-<div class="small" id="remotesSummary">Loading...</div>
-<div id="remotesTableHost" style="margin-top:8px">Loading remote list...</div>
-<div id="remoteDetailHost" class="remote-detail">Select a remote to view details.</div>
+<section class="card page" id="page-fleet">
+<h3>Fleet</h3>
+<div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-tools" onclick="showFleetTab('tools')">Fleet Tools</button></div>
+<div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div>
+<div class="fleet-pane" id="fleet-pane-tools"><div class="grid"><div style="grid-column:1/-1"><label>Fleet WiFi Provisioning (LoRa)</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div><div style="grid-column:1/-1"><label>Fleet Provisioning Wizard (LoRa)</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet. Live updates stream over SSE.</div><div class="grid"><div><label>Estimated devices</label><input id="prov_estimated_count" type="number" min="1" max="250" value="10" /></div><div><label>&nbsp;</label><div class="check-row"><input id="prov_retry_once" type="checkbox" checked /><label for="prov_retry_once">Retry discovery once</label></div></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn">Provision All</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div></div></div></div>
 </section>
-<section class="card page" id="page-lora"><h3>LoRa</h3><div class="grid">
+<section class="card page" id="page-automation">
+<h3>Automation Rules</h3>
+<div class="small" id="automationRulesMeta">Loading automation engine...</div>
+<div class="check-row" style="margin:8px 0"><input id="autoRulesEnabled" type="checkbox" onchange="updateAutomationJsonPreview()" /><label for="autoRulesEnabled">Enable automations on this device</label></div>
+<div class="grid">
+<div><label>Execution mode (v1)</label><input id="autoExecutionMode" type="text" value="standalone" readonly /></div>
+<div><label>Peer display</label><select id="automationPeerDisplayMode" onchange="onAutomationPeerDisplayModeChange()"><option value="addresses" selected>Addresses</option><option value="names">Names</option></select></div>
+<div><label>Action target (v1)</label><input id="autoActionTargetSummary" type="text" value="self" readonly /></div>
+</div>
+<div class="small" style="margin-top:6px">Builder is address-centric. Runtime execution in v1 is gated to standalone mode and local relay actions only.</div>
+<div class="actions"><button type="button" onclick="addAutomationRule()">Add Rule</button><button type="button" onclick="saveAutomationRules()">Save Rules</button><button type="button" onclick="loadAutomationRules(true)">Reload</button></div>
+<div id="automationRulesHost" style="margin-top:8px">Loading rules...</div>
+<details id="automationJsonDetails" style="margin-top:10px">
+<summary>JSON Preview</summary>
+<div class="small" style="margin:6px 0">Use this for copy/paste transport. Builder validates and saves the same JSON shape.</div>
+<div class="actions"><button type="button" onclick="copyAutomationJson()">Copy JSON</button><button type="button" onclick="applyAutomationJsonFromPaste()">Load JSON Into Builder</button></div>
+<textarea id="automationJsonPaste" rows="6" placeholder="Paste automation JSON here"></textarea>
+<pre id="automationJsonPreview" style="max-height:320px;overflow:auto"></pre>
+</details>
+<div id="automationSaveResult" class="result-line"></div>
+</section>
+<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane active" id="settings-pane-lora"><div class="grid">
 <div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
 <div style="grid-column:1/-1"><label>Deployment Key (Encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
@@ -419,29 +563,19 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
 <div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_input_lora_control_enabled" type="checkbox" /><label for="tx_input_lora_control_enabled">Input drives LoRa relay control</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
-</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details>
-<div class="actions"><button onclick="saveLora()">Save LoRa</button></div>
-</section>
-<section class="card page" id="page-network"><h3>Network</h3><div class="grid">
+</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)">Show</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label>LAN hostname (mDNS)</label><input id="lan_hostname" /><div class="hint">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
-</div>
-<div class="actions"><button onclick="saveNetwork()">Save Network</button><button id="btnTestSta" onclick="testSta()">Test STA connect</button></div>
-<div id="netTestResult" class="result-line"></div>
-</section>
-<section class="card page" id="page-mqtt"><h3>MQTT</h3><div class="grid">
+</div><div class="actions"><button onclick="saveNetwork()">Save</button><button id="btnTestSta" onclick="testSta()">Test</button></div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_enabled" type="checkbox" /><label for="mqtt_enabled">Enable MQTT</label></div></div>
 <div><label>Broker host</label><input id="mqtt_host" /></div>
 <div><label>Broker port</label><input id="mqtt_port" type="number" min="1" max="65535" /></div>
 <div><label>MQTT user</label><input id="mqtt_user" /></div>
 <div><label>MQTT password</label><input id="mqtt_password" /></div>
 <div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
-</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div>
-<div class="actions"><button onclick="saveMqtt()">Save MQTT</button><button onclick="testMqtt()">Test broker connection</button></div>
-<div id="mqttTestResult" class="result-line"></div>
-</section>
+</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><div class="check-row"><input id="factory_reset_keep_fleet_local" type="checkbox" checked /><label for="factory_reset_keep_fleet_local">Keep shared fleet key</label></div><div class="small">Untick to remove this device from the LoRa fleet and require manual provisioning again.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
 <section class="card page" id="page-sensors"><h3>Sensors</h3>
 <h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
 <div class="check-row" style="margin-bottom:8px"><input id="sensor_temp_enabled" type="checkbox" /><label for="sensor_temp_enabled">Enable DS18B20 (GPIO0)</label></div>
@@ -451,9 +585,8 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div class="sensor-tile" id="sensorDiagAddr">Address: n/a</div>
 <div class="sensor-tile" id="sensorDiagLast">Last read: n/a</div>
 </div>
-<div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions"><button onclick="saveSensors()">Save Sensors</button></div></section>
+<div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions"><button onclick="saveSensors()">Save</button></div></section>
 <section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><h4 style="margin:10px 0 6px 0">System Information</h4><div id="diagSystem" class="status-table"></div><div id="diagText" class="small"></div></section>
-<section class="card page" id="page-factory"><h3>System</h3><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save Password</button></div><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div></div><pre id="factory"></pre></section>
 <section class="card page" id="page-logs"><h3>Logs</h3><div class="actions"><button onclick="refreshLogs()">Refresh</button><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button></div><pre id="logView" style="max-height:320px;overflow:auto"></pre></section>
 </main>
 <footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div id="sessionLeft" class="small card">Session: --:-- | HW: v1.2 | Batch: 251101</div></footer>
@@ -464,6 +597,8 @@ const FREQ_MAX_MHZ = 1000.0;
 const MIN_DEPLOYMENT_KEY_LEN = 16;
 let statusFailCount = 0;
 let activePage = 'status';
+let activeSettingsTab = 'lora';
+let activeSystemTab = 'security';
 let currentTheme = 'dark';
 let staIsConnected = false;
 let connectedStaSsid = '';
@@ -473,9 +608,20 @@ let currentLanMdns = '';
 let currentApIp = '';
 let currentApMdns = '';
 let lastRoleIsTx = false;
-let remotesCache = [];
-let selectedRemoteAddr = 0;
-let remoteDetailTab = 'state';
+let fleetDevicesCache = [];
+let selectedFleetDeviceAddr = 0;
+let fleetDeviceDetailTab = 'state';
+let activeFleetTab = 'devices';
+let fleetEventSource = null;
+let fleetEventRetryTimer = null;
+let statusRefreshInFlight = false;
+let provStatusInFlight = false;
+let provLastStatusRefreshMs = 0;
+let settingsPageLoaded = false;
+let settingsPageLoadInFlight = false;
+let automationRulesConfig = null;
+let automationRulesMeta = null;
+let automationPeerDisplayMode = 'addresses';
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -484,11 +630,61 @@ function parseAddress(v){
  return parseInt(t,10);
 }
 function toHexByte(n){ return '0x'+Number(n).toString(16).toUpperCase().padStart(2,'0'); }
+function automationSelfLabel(){
+ const localEl=document.getElementById('local_address');
+ const n=parseAddress(localEl ? localEl.value : '');
+ if(Number.isInteger(n) && n >= 1 && n <= 254){
+  return `self (${toHexByte(n)})`;
+ }
+ return 'self';
+}
+function formatPeerAddressDisplay(n){
+ if(!Number.isInteger(n) || n < 1 || n > 254) return 'invalid address';
+ return `${n} (${toHexByte(n)})`;
+}
+function formatPeerTokenDisplay(token){
+ const t=String(token||'').trim();
+ if(!t) return '';
+ const low=t.toLowerCase();
+ if(low==='self'){
+  const localEl=document.getElementById('local_address');
+  const n=parseAddress(localEl ? localEl.value : '');
+  if(automationPeerDisplayMode==='names'){
+   return Number.isInteger(n) ? `Self (${formatPeerAddressDisplay(n)})` : 'Self';
+  }
+  return Number.isInteger(n) ? formatPeerAddressDisplay(n) : 'self (local address not set)';
+ }
+ const n=parseAddress(t);
+ if(automationPeerDisplayMode==='names'){
+  return Number.isInteger(n) ? `Peer ${formatPeerAddressDisplay(n)}` : 'Peer (unparsed)';
+ }
+ return Number.isInteger(n) ? formatPeerAddressDisplay(n) : 'unparsed';
+}
+function refreshAutomationPeerDisplayHints(){
+ const autoTarget=document.getElementById('autoActionTargetSummary');
+ if(autoTarget){
+  autoTarget.value = formatPeerTokenDisplay('self') || automationSelfLabel();
+ }
+ document.querySelectorAll('[data-auto-peer-hint]').forEach((el)=>{
+  const rule=el.getAttribute('data-arule');
+  const pred=el.getAttribute('data-apred');
+  const input=document.querySelector(`[data-arule="${rule}"][data-apred="${pred}"][data-af="peer"]`);
+  if(!input) return;
+  const txt=formatPeerTokenDisplay(input.value);
+  el.innerText = txt ? `Display: ${txt}` : 'Enter self or peer address';
+ });
+}
+function onAutomationPeerDisplayModeChange(){
+ const el=document.getElementById('automationPeerDisplayMode');
+ automationPeerDisplayMode = (el && el.value==='names') ? 'names' : 'addresses';
+ renderAutomationRules();
+}
 function refreshAddressHints(){
  const local=parseAddress(document.getElementById('local_address').value);
  const remote=parseAddress(document.getElementById('remote_address').value);
  document.getElementById('local_address_hex').innerText=Number.isInteger(local)?`hex ${toHexByte(local)}`:'enter dec or hex (e.g. 10 or 0x0A)';
  document.getElementById('remote_address_hex').innerText=Number.isInteger(remote)?`hex ${toHexByte(remote)}`:'enter dec or hex (e.g. 10 or 0x0A)';
+ refreshAutomationPeerDisplayHints();
 }
 function refreshRoleLabels(){
  const tx=document.getElementById('role_tx').value==='true';
@@ -653,15 +849,17 @@ function humanAgeMsShort(ms){
  const h=Math.floor(m/60);
  return `${h}h`;
 }
-function remoteStaleThresholdMs(r){
- const intervalMs=Math.max(0, Number(r.poll_interval_ms||0));
+function fleetDeviceStaleThresholdMs(r){
+ const staleAfterMs=Math.max(0, Number(r.stale_after_ms||0));
+ if(staleAfterMs>0) return staleAfterMs;
+ const intervalMs=Math.max(0, Number(r.expected_interval_ms||r.poll_interval_ms||0));
  const base=intervalMs>0 ? intervalMs*3 : 300000;
  return Math.max(180000, base);
 }
-function remoteIsStale(r){
+function fleetDeviceIsStale(r){
  const seen=Number(r.last_seen_ms||0);
  if(seen<=0) return true;
- return Number(r.last_seen_age_ms||0) > remoteStaleThresholdMs(r);
+ return Number(r.last_seen_age_ms||0) > fleetDeviceStaleThresholdMs(r);
 }
 function ackChipClass(state){
  const s=String(state||'unknown').toLowerCase();
@@ -671,11 +869,11 @@ function ackChipClass(state){
  return 'neutral';
 }
 function freshnessChip(r){
- if(remoteIsStale(r)) return `<span class="chip err">stale</span>`;
+ if(fleetDeviceIsStale(r)) return `<span class="chip err">stale</span>`;
  if(Number(r.last_seen_ms||0)===0) return `<span class="chip neutral">unknown</span>`;
  return `<span class="chip ok">fresh</span>`;
 }
-function remoteAddrHex(r){
+function fleetDeviceAddrHex(r){
  if(r && r.addr_hex) return String(r.addr_hex);
  const n=Number(r.address||0);
  if(!Number.isFinite(n) || n<=0) return '0x00';
@@ -689,7 +887,7 @@ function inputChip(v){
  const closed=Number(v||0)===1;
  return `<span class="chip ${closed?'ok':'neutral'}">${closed?'input closed':'input open'}</span>`;
 }
-function remoteTempText(r){
+function fleetDeviceTempText(r){
  if(!r || !r.temp_valid) return 'n/a';
  return `${Number(r.temp_c||0).toFixed(1)} C`;
 }
@@ -775,17 +973,71 @@ function isLikelyStaSessionPath(){
  if(lanMdns && host===lanMdns) return true;
  return false;
 }
-function showPage(page){
- activePage = page;
- ['status','remotes','lora','network','mqtt','sensors','diagnostics','factory','logs'].forEach(p=>{
-  const sec=document.getElementById(`page-${p}`);
-  const tab=document.getElementById(`tab-${p}`);
-  if(sec) sec.classList.toggle('active', p===page);
-  if(tab) tab.classList.toggle('active', p===page);
+function toggleDrawer(force){
+ const open = (typeof force === 'boolean') ? force : !document.body.classList.contains('nav-open');
+ document.body.classList.toggle('nav-open', open);
+ const btn=document.getElementById('menuBtn');
+ if(btn){
+  btn.innerText = open ? '✕' : '☰';
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+ }
+}
+function showSettingsTab(tab){
+ const target = ['lora','network','mqtt','system'].includes(tab) ? tab : 'lora';
+ activeSettingsTab = target;
+ ['lora','network','mqtt','system'].forEach(p=>{
+  const pane=document.getElementById(`settings-pane-${p}`);
+  const btn=document.getElementById(`settings-tab-${p}`);
+  if(pane) pane.classList.toggle('active', p===target);
+  if(btn) btn.classList.toggle('active', p===target);
  });
- if(page==='logs'){ refreshLogs(); }
- if(page==='diagnostics'){ refreshDiagnostics(); }
- if(page==='remotes'){ refreshRemotes(); }
+ if(target==='system'){ showSystemTab(activeSystemTab); }
+}
+function showSystemTab(tab){
+ const target = ['security','configuration','maintenance'].includes(tab) ? tab : 'security';
+ activeSystemTab = target;
+ ['security','configuration','maintenance'].forEach(p=>{
+  const pane=document.getElementById(`system-pane-${p}`);
+  const btn=document.getElementById(`system-tab-${p}`);
+  if(pane) pane.classList.toggle('active', p===target);
+  if(btn) btn.classList.toggle('active', p===target);
+ });
+}
+function showFleetTab(tab){
+ const target = (tab==='tools') ? 'tools' : 'devices';
+ activeFleetTab = target;
+ ['devices','tools'].forEach(p=>{
+  const pane=document.getElementById(`fleet-pane-${p}`);
+  const btn=document.getElementById(`fleet-tab-${p}`);
+  if(pane) pane.classList.toggle('active', p===target);
+  if(btn) btn.classList.toggle('active', p===target);
+ });
+ syncFleetDevicesLive();
+ if(activePage==='fleet' && target==='devices'){ refreshFleet(); }
+}
+function showPage(page){
+ const allowed=['status','fleet','automation','sensors','diagnostics','logs','settings'];
+ activePage = allowed.includes(page) ? page : 'status';
+ allowed.forEach(p=>{
+  const sec=document.getElementById(`page-${p}`);
+  const nav=document.getElementById(`nav-${p}`);
+  if(sec) sec.classList.toggle('active', p===activePage);
+  if(nav) nav.classList.toggle('active', p===activePage);
+ });
+ if(activePage==='settings'){ showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(()=>{}); }
+ if(activePage==='logs'){ refreshLogs(); }
+ if(activePage==='diagnostics'){ refreshDiagnostics(); }
+ if(activePage==='fleet'){ showFleetTab(activeFleetTab); }
+ if(activePage==='automation'){ loadAutomationRules(); }
+ syncFleetDevicesLive();
+ toggleDrawer(false);
+}
+function applyFleetTabVisibility(){
+ const fleetTabBtn=document.getElementById('nav-fleet');
+ if(fleetTabBtn){ fleetTabBtn.style.display = lastRoleIsTx ? '' : 'none'; }
+ const fleetShortcut=document.getElementById('statusFleetShortcut');
+ if(fleetShortcut){ fleetShortcut.style.display = lastRoleIsTx ? '' : 'none'; }
+ if(!lastRoleIsTx && activePage==='fleet'){ showPage('status'); }
 }
 function showToast(msg, isError=false){
  const t=document.getElementById('toast');
@@ -811,6 +1063,8 @@ function togglePasswordField(id,btn){
  if(btn){ btn.innerText=show?'Hide':'Show'; }
 }
 async function refreshStatus(){
+ if(statusRefreshInFlight) return;
+ statusRefreshInFlight = true;
  const st=await apiJson('/api/status',{silent:true});
  if(!st){
   statusFailCount++;
@@ -818,6 +1072,7 @@ async function refreshStatus(){
    const s=document.getElementById('statusTable');
    if(s){ s.innerText='API status temporarily unavailable'; }
   }
+  statusRefreshInFlight = false;
   return;
  }
  statusFailCount = 0;
@@ -852,13 +1107,12 @@ async function refreshStatus(){
  const hasLoraTx = Number(st.lora_last_tx_ms||0) > 0;
   const loraAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_packet_ms||0);
   const loraTxAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_tx_ms||0);
-  const roleIsTx = String(st.role||'').toLowerCase()==='tx';
-  lastRoleIsTx = roleIsTx;
-  const remotesTab=document.getElementById('tab-remotes');
-  if(remotesTab){ remotesTab.style.display = roleIsTx ? '' : 'none'; }
-  const remotesShortcut=document.getElementById('statusRemotesShortcut');
-  if(remotesShortcut){ remotesShortcut.style.display = roleIsTx ? '' : 'none'; }
-  if(!roleIsTx && activePage==='remotes'){ showPage('status'); }
+  const roleText=String(st.role||'').toLowerCase();
+  if(roleText==='tx' || roleText==='rx'){
+   lastRoleIsTx = roleText==='tx';
+  }
+  applyFleetTabVisibility();
+  const roleIsTx = lastRoleIsTx;
   const txAddress = roleIsTx ? st.local_address : st.remote_address;
   const rxAddress = roleIsTx ? st.remote_address : st.local_address;
   const roleDisplay = `${roleIsTx ? 'Transmitter' : 'Receiver'} (tx ${txAddress}, rx ${rxAddress})`;
@@ -958,6 +1212,7 @@ async function refreshStatus(){
     sdLast.innerText = Number(st.sensor_temp_last_read_ms || 0) > 0 ? `Last read: ${humanAgeMs(ageMs)}` : 'Last read: n/a';
   }
  }
+ statusRefreshInFlight = false;
 }
 async function apiJson(url, options){
  let t=null;
@@ -996,41 +1251,50 @@ function setSessionLeft(seconds){
 }
 async function load(){
   await refreshStatus();
-  const s=await apiJson('/api/settings');
+}
+async function loadSettingsPageData(force){
+ if(settingsPageLoadInFlight) return;
+ if(settingsPageLoaded && !force) return;
+ settingsPageLoadInFlight = true;
+ try{
+  const s=await apiJson('/api/settings',{silent:true,timeoutMs:6000});
   if(!s) return;
- Object.keys(s).forEach(k=>{
-  const el=document.getElementById(k);
-  if(!el) return;
-  if(el.type==='checkbox'){ el.checked=!!s[k]; return; }
-  el.value=String(s[k]);
- });
- updateDeploymentKeyStrength();
- updateStaTestButtonState();
- document.getElementById('role_tx').value = String(!!s.role_tx);
- document.getElementById('role_tx_true').checked = !!s.role_tx;
- document.getElementById('role_tx_false').checked = !s.role_tx;
- document.getElementById('ap_always_on').checked = !!s.ap_always_on;
- document.getElementById('mqtt_enabled').checked = !!s.mqtt_enabled;
- document.getElementById('sensor_temp_enabled').checked = !!s.sensor_temp_enabled;
- document.getElementById('lora_frequency_mhz').value=(Number(s.lora_frequency_hz)/1000000).toFixed(3);
- refreshFreqPreset();
- document.getElementById('heartbeat_s').value=Math.max(1,Math.round(Number(s.heartbeat_ms)/1000));
- document.getElementById('ack_timeout_s').value=Math.max(1,Math.round(Number(s.ack_timeout_ms)/1000));
- document.getElementById('mqtt_remote_retry_timeout_s').value=Math.max(1,Math.round(Number(s.mqtt_remote_retry_timeout_ms||300000)/1000));
- document.getElementById('tx_mqtt_remote_polling_enabled').checked = !!s.tx_mqtt_remote_polling_enabled;
- document.getElementById('tx_mqtt_remote_default_poll_interval_s').value=Math.max(60,Math.round(Number(s.tx_mqtt_remote_default_poll_interval_ms||60000)/1000));
- document.getElementById('rx_push_on_change_enabled').checked = !!s.rx_push_on_change_enabled;
- document.getElementById('rx_push_min_interval_s').value=Math.max(60,Math.round(Number(s.rx_push_min_interval_ms||60000)/1000));
- document.getElementById('local_address').value=String(s.local_address);
- document.getElementById('remote_address').value=String(s.remote_address);
- refreshRoleLabels();
- refreshAddressHints();
- refreshHostnamePreview();
- await scanWifi();
- const f=await apiJson('/api/factory');
- if(!f) return;
- document.getElementById('factory').innerText=JSON.stringify(f,null,2);
- await refreshDiagnostics();
+  lastRoleIsTx = !!s.role_tx;
+  applyFleetTabVisibility();
+  Object.keys(s).forEach(k=>{
+   const el=document.getElementById(k);
+   if(!el) return;
+   if(el.type==='checkbox'){ el.checked=!!s[k]; return; }
+   el.value=String(s[k]);
+  });
+  updateDeploymentKeyStrength();
+  updateStaTestButtonState();
+  document.getElementById('role_tx').value = String(!!s.role_tx);
+  document.getElementById('role_tx_true').checked = !!s.role_tx;
+  document.getElementById('role_tx_false').checked = !s.role_tx;
+  document.getElementById('ap_always_on').checked = !!s.ap_always_on;
+  document.getElementById('mqtt_enabled').checked = !!s.mqtt_enabled;
+  document.getElementById('sensor_temp_enabled').checked = !!s.sensor_temp_enabled;
+  document.getElementById('lora_frequency_mhz').value=(Number(s.lora_frequency_hz)/1000000).toFixed(3);
+  refreshFreqPreset();
+  document.getElementById('heartbeat_s').value=Math.max(1,Math.round(Number(s.heartbeat_ms)/1000));
+  document.getElementById('ack_timeout_s').value=Math.max(1,Math.round(Number(s.ack_timeout_ms)/1000));
+  document.getElementById('mqtt_remote_retry_timeout_s').value=Math.max(1,Math.round(Number(s.mqtt_remote_retry_timeout_ms||300000)/1000));
+  document.getElementById('tx_mqtt_remote_polling_enabled').checked = !!s.tx_mqtt_remote_polling_enabled;
+  document.getElementById('tx_mqtt_remote_default_poll_interval_s').value=Math.max(60,Math.round(Number(s.tx_mqtt_remote_default_poll_interval_ms||60000)/1000));
+  document.getElementById('rx_push_on_change_enabled').checked = !!s.rx_push_on_change_enabled;
+  document.getElementById('rx_push_min_interval_s').value=Math.max(60,Math.round(Number(s.rx_push_min_interval_ms||60000)/1000));
+  document.getElementById('local_address').value=String(s.local_address);
+  document.getElementById('remote_address').value=String(s.remote_address);
+  refreshRoleLabels();
+  refreshAddressHints();
+  refreshHostnamePreview();
+  const f=await apiJson('/api/factory',{silent:true,timeoutMs:6000});
+  if(f){ document.getElementById('factory').innerText=JSON.stringify(f,null,2); }
+  settingsPageLoaded = true;
+ } finally {
+  settingsPageLoadInFlight = false;
+ }
 }
 async function refreshLogs(){
  const lv=document.getElementById('logView');
@@ -1211,6 +1475,43 @@ async function saveAll(){
  await postSettings(Object.assign({}, lora, collectNetworkBody(), mqtt, collectSensorsBody(), collectSystemBody()));
 }
 async function reboot(){await fetch('/api/reboot',{method:'POST'});}
+async function factoryResetLocal(){
+ const el=document.getElementById('factoryResetResult');
+ const pwEl=document.getElementById('factory_reset_password');
+ const keepEl=document.getElementById('factory_reset_keep_fleet_local');
+ if(!el || !pwEl || !keepEl) return;
+ const password=String(pwEl.value||'');
+ const keepFleet=!!keepEl.checked;
+ if(!password.length){
+  el.className='result-line show err';
+  el.innerText='Enter admin password to factory reset.';
+  return;
+ }
+ if(!keepFleet){
+  alert('Warning: this will remove the device from the current LoRa fleet and require manual provisioning again.');
+  const confirmWord=prompt("Type REMOVE to confirm removing the shared fleet key:");
+  if(String(confirmWord||'').trim()!=='REMOVE'){
+   el.className='result-line show err';
+   el.innerText='Factory reset cancelled (confirmation word not entered).';
+   return;
+  }
+ }
+ if(!confirm(`Factory reset this device${keepFleet ? ' (keep shared fleet key)' : ''}? It will reboot.`)){
+  return;
+ }
+ el.className='result-line show';
+ el.innerText='Factory reset requested...';
+ const out=await apiJson('/api/system/factory-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_password:password,keep_shared_fleet_key:keepFleet}),silent:true});
+ if(out && out.ok){
+  el.className='result-line show ok';
+  el.innerText='Factory reset started. Device is rebooting...';
+  pwEl.value='';
+  return;
+ }
+ const err=(out && out.error) ? out.error : 'request_failed';
+ el.className='result-line show err';
+ el.innerText=`Factory reset failed: ${err}`;
+}
 async function testSta(){
  const btn=document.getElementById('btnTestSta');
  const el=document.getElementById('netTestResult');
@@ -1233,7 +1534,7 @@ async function testSta(){
  showToast('Testing STA connection...');
  const out=await apiJson('/api/network/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collectNetworkBody())});
  staTestInFlight = false;
- if(btn){ btn.innerText='Test STA connect'; }
+ if(btn){ btn.innerText='Test'; }
  updateStaTestButtonState();
  if(!out){
   const st=await apiJson('/api/status',{silent:true,timeoutMs:5000});
@@ -1261,6 +1562,148 @@ async function testSta(){
   showToast(msg, true);
  }
 }
+let provEventSource=null;
+let provStatusPollTimer=0;
+function closeProvisioningEventSource(){
+ if(provEventSource){ try{ provEventSource.close(); }catch(e){} provEventSource=null; }
+ if(provStatusPollTimer){ clearTimeout(provStatusPollTimer); provStatusPollTimer=0; }
+}
+function provisioningSessionStateLabel(s){
+ return String(s||'idle').split('_').join(' ');
+}
+function renderProvisioningStatus(out){
+ const result=document.getElementById('provWizardResult');
+ const summary=document.getElementById('provWizardSummary');
+ const rows=document.getElementById('provWizardRows');
+ const provisionBtn=document.getElementById('provProvisionAllBtn');
+ if(!summary || !rows) return;
+ const sess=(out&&out.session)||{};
+ const devices=Array.isArray(out&&out.devices)?out.devices:[];
+ if(provisionBtn){
+  const st=String(sess.state||'idle');
+  provisionBtn.disabled = !(st==='ready' || st==='complete' || st==='error');
+ }
+ const now=Number(sess.now_ms||0);
+ let countdownTxt='';
+ if(sess.active && Number(sess.phase_deadline_ms||0)>0 && now>0){
+  const rem=Math.max(0, Math.ceil((Number(sess.phase_deadline_ms)-now)/1000));
+  if(rem>0 && (sess.state==='discovering' || sess.state==='discovery_retry' || sess.state==='provisioning')) countdownTxt=` · next phase in ~${rem}s`;
+ }
+ summary.innerText = sess.active
+  ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${Number(sess.discovered_count||0)} · conflicts ${Number(sess.conflict_count||0)} · verified ${Number(sess.verified_count||0)} · failed ${Number(sess.failed_count||0)}${countdownTxt}`
+  : 'No provisioning session active.';
+ if(result && sess.active){
+  result.className='result-line show';
+  if(sess.state==='complete') result.className='result-line show ok';
+  if(sess.state==='error') result.className='result-line show err';
+  result.innerText=`Provisioning ${provisioningSessionStateLabel(sess.state)}`;
+ }
+ if(!devices.length){
+  rows.innerHTML='<tr><td colspan="6" class="small">No devices discovered yet.</td></tr>';
+  return;
+ }
+ rows.innerHTML = devices.map((d)=>{
+  const cur = Number(d.current_address||0);
+  const nxt = Number(d.assigned_address||0);
+  const fw = d.fw_version || `${d.fw_major||0}.${d.fw_minor||0}.${d.fw_patch||0}`;
+  const conflict = d.address_conflict ? ' conflict' : '';
+  return `<tr><td>${escapeHtml(String(d.chip_id_hex||d.chip_id||''))}</td><td>${cur||'-'}</td><td>${nxt||'-'}</td><td>${escapeHtml(String(fw))}</td><td>${Number(d.rssi||0)}</td><td>${escapeHtml(String(d.state||'unknown'))}${conflict}</td></tr>`;
+ }).join('');
+}
+async function refreshProvisioningStatus(silent=true){
+ if(provStatusInFlight) return null;
+ provStatusInFlight = true;
+ provLastStatusRefreshMs = Date.now();
+ const out=await apiJson('/api/provisioning/status',{silent});
+ if(out && out.ok){ renderProvisioningStatus(out); provStatusInFlight = false; return out; }
+ provStatusInFlight = false;
+ return null;
+}
+function connectProvisioningEvents(){
+ closeProvisioningEventSource();
+ try{
+  provEventSource = new EventSource('/api/provisioning/events');
+  provEventSource.addEventListener('provisioning', async ()=>{
+   const now=Date.now();
+   if(now - provLastStatusRefreshMs < 300) return;
+   await refreshProvisioningStatus(true);
+  });
+  provEventSource.onerror = ()=>{};
+ }catch(e){
+  if(!provStatusPollTimer){
+   const loop=async()=>{ await refreshProvisioningStatus(true); provStatusPollTimer=setTimeout(loop, 1500); };
+   loop();
+  }
+ }
+}
+async function startFleetProvisioningDiscovery(){
+ const result=document.getElementById('provWizardResult');
+ const estEl=document.getElementById('prov_estimated_count');
+ const retryEl=document.getElementById('prov_retry_once');
+ const est=Math.max(1, Math.min(250, Number(estEl && estEl.value || 10) || 10));
+ const retry=!!(retryEl && retryEl.checked);
+ if(result){ result.className='result-line show'; result.innerText='Starting discovery...'; }
+ connectProvisioningEvents();
+ const out=await apiJson('/api/provisioning/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estimated_count:est,retry_once:retry}),silent:true});
+ if(out && out.ok){
+  renderProvisioningStatus(out);
+  if(result){ result.className='result-line show ok'; result.innerText='Discovery started. Watching live updates...'; }
+  return;
+ }
+ if(result){ result.className='result-line show err'; result.innerText=`Discovery start failed: ${(out&&out.error)||'request_failed'}`; }
+}
+async function provisionFleetAll(){
+ const result=document.getElementById('provWizardResult');
+ if(result){ result.className='result-line show'; result.innerText='Provisioning discovered devices...'; }
+ const out=await apiJson('/api/provisioning/provision-all',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true});
+ if(out && out.ok){
+  renderProvisioningStatus(out);
+  connectProvisioningEvents();
+  if(result){ result.className='result-line show ok'; result.innerText='Provisioning started. Waiting for verify replies...'; }
+  return;
+ }
+ if(result){ result.className='result-line show err'; result.innerText=`Provisioning failed to start: ${(out&&out.error)||'request_failed'}`; }
+}
+async function cancelFleetProvisioning(){
+ closeProvisioningEventSource();
+ await apiJson('/api/provisioning/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true});
+ const out=await refreshProvisioningStatus(true);
+ const result=document.getElementById('provWizardResult');
+ if(result){ result.className='result-line show'; result.innerText = out && out.session && out.session.active ? 'Provisioning session updated.' : 'Provisioning session cancelled.'; }
+}
+async function provisionFleetWifi(){
+ const el=document.getElementById('wifiProvisionResult');
+ if(!el) return;
+ const body=collectNetworkBody();
+ if(!String(body.wifi_sta_ssid||'').trim().length){
+  el.className='result-line show err';
+  el.innerText='Enter STA SSID before sending WiFi to fleet.';
+  return;
+ }
+ el.className='result-line show';
+ el.innerText='Sending WiFi credentials over LoRa...';
+ const out=await apiJson('/api/network/provision-fleet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),silent:true});
+ if(out && out.ok){
+  const msg=`LoRa WiFi provisioning sent (${out.packets||'?'} packets broadcast)`;
+  el.className='result-line show ok';
+  el.innerText=msg;
+  showToast(msg);
+  return;
+ }
+ if(out && out.error==='cooldown_active'){
+  const sec=Math.max(1, Number(out.retry_after_s||Math.ceil(Number(out.retry_after_ms||0)/1000)||1));
+  const msg=`Wait ${sec}s before sending WiFi provisioning again.`;
+  el.className='result-line show err';
+  el.innerText=msg;
+  showToast(msg, true);
+  return;
+ }
+ const err=(out && out.error) ? out.error : 'request_failed';
+ const msg=`Fleet WiFi provisioning failed: ${err}`;
+ el.className='result-line show err';
+ el.innerText=msg;
+ showToast(msg, true);
+}
 async function testMqtt(){
  const body=collectMqttBody();
  if(!body) return;
@@ -1286,33 +1729,104 @@ async function testMqtt(){
  showToast(msg, true);
  }
 }
-async function remoteAction(action, addr, intervalS, enabled){
- const body={action, addr};
+async function fleetDeviceAction(action, addr, intervalS, enabled, extraBody){
+ const pathByAction={
+  poll_now:`/api/fleet/${addr}/actions/poll-now`,
+  forget:`/api/fleet/${addr}/actions/forget`,
+  set_interval:`/api/fleet/${addr}/actions/poll-interval`,
+  set_schedule:`/api/fleet/${addr}/actions/schedule`,
+  factory_reset:`/api/fleet/${addr}/actions/factory-reset`,
+ };
+ const path=pathByAction[action];
+ if(!path){
+  showToast(`Fleet device action failed: unknown_action`, true);
+  return false;
+ }
+ const body={};
  if(intervalS!==undefined && intervalS!==null){ body.interval_s = intervalS; }
  if(enabled!==undefined){ body.enabled = !!enabled; }
- const out=await apiJson('/api/remotes/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),silent:true});
+ if(extraBody && typeof extraBody==='object'){ Object.assign(body, extraBody); }
+ const out=await apiJson(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),silent:true});
  if(!out || !out.ok){
   const err=(out && out.error) ? out.error : 'request_failed';
-  showToast(`Remote action failed: ${err}`, true);
+  showToast(`Fleet device action failed: ${err}`, true);
   return false;
  }
  return true;
 }
-async function remotePollNow(addr){
- const ok=await remoteAction('poll_now', addr);
+async function fleetDeviceFactoryReset(addr){
+ const keepEl=document.getElementById('fleet-detail-keep-fleet');
+ const keepFleet=keepEl ? !!keepEl.checked : true;
+ if(!keepFleet){
+  alert('Warning: this will remove the device from the control of this LoRa fleet and it will require manual provisioning again.');
+  const confirmWord=prompt("Type REMOVE to confirm fleet device reset without shared fleet key:");
+  if(String(confirmWord||'').trim()!=='REMOVE'){
+   showToast('Fleet device factory reset cancelled', true);
+   return;
+  }
+ }
+ if(!confirm(`Factory reset fleet device ${toHexByte(addr)}${keepFleet ? ' (keep shared fleet key)' : ''}?`)) return;
+ const ok=await fleetDeviceAction('factory_reset', addr, undefined, undefined, {keep_shared_fleet_key:keepFleet});
+ if(!ok) return;
+ showToast(`Factory reset sent to ${toHexByte(addr)}`);
+ await refreshFleet();
+}
+
+function stopFleetEvents(){
+ if(fleetEventRetryTimer){
+  clearTimeout(fleetEventRetryTimer);
+  fleetEventRetryTimer = null;
+ }
+ if(fleetEventSource){
+  fleetEventSource.close();
+  fleetEventSource = null;
+ }
+}
+
+function shouldRunFleetDevicesLive(){
+ return activePage==='fleet' && lastRoleIsTx && activeFleetTab==='devices';
+}
+
+function startFleetEvents(){
+ stopFleetEvents();
+ if(!window.EventSource) return;
+ fleetEventSource = new EventSource('/api/fleet/events');
+ const onFleetEvent = async ()=>{
+  try{
+   if(shouldRunFleetDevicesLive()){
+    await refreshFleet();
+   }
+  }catch(e){}
+ };
+  fleetEventSource.addEventListener('fleet', onFleetEvent);
+ fleetEventSource.onerror = ()=>{
+  stopFleetEvents();
+  fleetEventRetryTimer = setTimeout(()=>{ startFleetEvents(); }, 2000);
+ };
+}
+
+function syncFleetDevicesLive(){
+ if(shouldRunFleetDevicesLive()){
+  if(!fleetEventSource) startFleetEvents();
+ }else{
+  stopFleetEvents();
+ }
+}
+async function fleetDevicePollNow(addr){
+ const ok=await fleetDeviceAction('poll_now', addr);
  if(!ok) return;
  showToast(`Poll requested for ${toHexByte(addr)}`);
- await refreshRemotes();
+ await refreshFleet();
 }
-async function remoteForget(addr){
+async function fleetDeviceForget(addr){
  if(!confirm(`Forget ${toHexByte(addr)}?`)) return;
- const ok=await remoteAction('forget', addr);
+ const ok=await fleetDeviceAction('forget', addr);
  if(!ok) return;
  showToast(`Forgot ${toHexByte(addr)}`);
- await refreshRemotes();
+ await refreshFleet();
 }
-function remoteIntervalFromInput(){
- const el=document.getElementById('remote-detail-interval');
+function fleetDeviceIntervalFromInput(){
+ const el=document.getElementById('fleet-detail-interval');
  const sec=Math.floor(Number(el ? el.value : NaN));
  if(!Number.isFinite(sec) || sec<60 || sec>3600){
   showToast('Interval must be 60..3600 seconds', true);
@@ -1320,124 +1834,126 @@ function remoteIntervalFromInput(){
  }
  return sec;
 }
-async function remoteSetInterval(addr){
- const sec=remoteIntervalFromInput();
+async function fleetDeviceSetInterval(addr){
+ const sec=fleetDeviceIntervalFromInput();
  if(sec===null) return;
- const ok=await remoteAction('set_interval', addr, sec);
+ const ok=await fleetDeviceAction('set_interval', addr, sec);
  if(!ok) return;
  showToast(`Interval updated for ${toHexByte(addr)}`);
- await refreshRemotes();
+ await refreshFleet();
 }
-async function remoteSetSchedule(addr, enabled){
+async function fleetDeviceSetSchedule(addr, enabled){
  let sec=undefined;
  if(enabled){
-  const s=remoteIntervalFromInput();
+  const s=fleetDeviceIntervalFromInput();
   if(s===null) return;
   sec=s;
  }
- const ok=await remoteAction('set_schedule', addr, sec, enabled);
+ const ok=await fleetDeviceAction('set_schedule', addr, sec, enabled);
  if(!ok) return;
  showToast(`${enabled ? 'Enabled' : 'Disabled'} schedule for ${toHexByte(addr)}`);
- await refreshRemotes();
+ await refreshFleet();
 }
-function setRemoteDetailTab(tab){
- remoteDetailTab = (tab==='manage') ? 'manage' : 'state';
- renderRemoteDetail();
+function setFleetDeviceDetailTab(tab){
+ fleetDeviceDetailTab = (tab==='manage') ? 'manage' : 'state';
+ renderFleetDeviceDetail();
 }
-function selectRemote(addr){
- selectedRemoteAddr = Number(addr||0);
- renderRemoteDetail();
+function selectFleetDevice(addr){
+ selectedFleetDeviceAddr = Number(addr||0);
+ renderFleetDeviceDetail();
 }
-function renderRemoteDetail(){
- const host=document.getElementById('remoteDetailHost');
+function renderFleetDeviceDetail(){
+ const host=document.getElementById('fleetDetailHost');
  if(!host) return;
- const selected=remotesCache.find((r)=>Number(r.address||0)===Number(selectedRemoteAddr||0));
+ const selected=fleetDevicesCache.find((r)=>Number(r.address||0)===Number(selectedFleetDeviceAddr||0));
  if(!selected){
-  host.innerHTML='Select a remote to view details.';
+  host.innerHTML='Select a device to view details.';
   return;
  }
  const addr=Number(selected.address||0);
- const addrHex=remoteAddrHex(selected);
+ const addrHex=fleetDeviceAddrHex(selected);
  const seenAge=(Number(selected.last_seen_ms||0)>0) ? humanAgeMsShort(selected.last_seen_age_ms||0) : 'never';
  const pollAge=(Number(selected.last_poll_tx_ms||0)>0) ? humanAgeMsShort(selected.last_poll_age_ms||0) : 'never';
  const intervalS=Math.max(0, Math.round(Number(selected.poll_interval_ms||0)/1000));
  const stateView=`
- <div class="remote-detail-grid">
-   <div class="k">Remote</div><div class="v">${escapeHtml(addrHex)}</div>
+ <div class="fleet-detail-grid">
+   <div class="k">Device</div><div class="v">${escapeHtml(addrHex)}</div>
    <div class="k">Freshness</div><div class="v">${freshnessChip(selected)} ${escapeHtml(seenAge)}</div>
    <div class="k">Relay</div><div class="v">${relayChip(selected.relay_state)}</div>
    <div class="k">Input</div><div class="v">${inputChip(selected.input_state)}</div>
-   <div class="k">Temperature</div><div class="v">${escapeHtml(remoteTempText(selected))}</div>
+   <div class="k">Temperature</div><div class="v">${escapeHtml(fleetDeviceTempText(selected))}</div>
    <div class="k">Uplink RSSI</div><div class="v">${escapeHtml(String(selected.uplink_rssi||-127))} dBm</div>
    <div class="k">Downlink RSSI</div><div class="v">${selected.downlink_rssi_valid ? `${escapeHtml(String(selected.downlink_rssi))} dBm` : 'n/a'}</div>
    <div class="k">Poll state</div><div class="v"><span class="chip ${selected.poll_pending?'warn':'neutral'}">${selected.poll_pending?'pending':'idle'}</span> (last tx ${escapeHtml(pollAge)})</div>
    <div class="k">Ack</div><div class="v"><span class="chip ${ackChipClass(selected.ack_state)}">${escapeHtml(String(selected.ack_state||'unknown'))}</span></div>
  </div>`;
  const manageView=`
- <div class="remote-detail-grid">
-   <div class="k">Interval</div><div class="v"><div class="inline-row"><input id="remote-detail-interval" type="number" min="60" max="3600" value="${intervalS>0?intervalS:60}" style="max-width:120px" /><span class="small">${intervalS>0?`${intervalS}s active`:'disabled'}</span></div></div>
+ <div class="fleet-detail-grid">
+   <div class="k">Interval</div><div class="v"><div class="inline-row"><input id="fleet-detail-interval" type="number" min="60" max="3600" value="${intervalS>0?intervalS:60}" style="max-width:120px" /><span class="small">${intervalS>0?`${intervalS}s active`:'disabled'}</span></div></div>
+   <div class="k">Factory reset</div><div class="v"><div class="check-row" style="margin-top:0"><input id="fleet-detail-keep-fleet" type="checkbox" checked /><label for="fleet-detail-keep-fleet">Keep shared fleet key</label></div><div class="small">Untick only if you want to remove this device from this LoRa fleet.</div></div>
  </div>
- <div class="remotes-row-actions" style="margin-top:10px">
-   <button type="button" onclick="remotePollNow(${addr})">Poll now</button>
-   <button type="button" onclick="remoteSetInterval(${addr})">Set interval</button>
-   <button type="button" onclick="remoteSetSchedule(${addr},${intervalS===0?'true':'false'})">${intervalS===0?'Enable schedule':'Disable schedule'}</button>
-   <button type="button" onclick="remoteForget(${addr})">Forget</button>
+ <div class="fleet-row-actions" style="margin-top:10px">
+   <button type="button" onclick="fleetDevicePollNow(${addr})">Poll now</button>
+   <button type="button" onclick="fleetDeviceSetInterval(${addr})">Set interval</button>
+   <button type="button" onclick="fleetDeviceSetSchedule(${addr},${intervalS===0?'true':'false'})">${intervalS===0?'Enable schedule':'Disable schedule'}</button>
+   <button type="button" onclick="fleetDeviceFactoryReset(${addr})">Factory reset</button>
+   <button type="button" onclick="fleetDeviceForget(${addr})">Forget</button>
  </div>`;
  host.innerHTML=`
-  <div class="remote-detail-tabs">
-    <button class="tabbtn ${remoteDetailTab==='state'?'active':''}" type="button" onclick="setRemoteDetailTab('state')">State</button>
-    <button class="tabbtn ${remoteDetailTab==='manage'?'active':''}" type="button" onclick="setRemoteDetailTab('manage')">Manage</button>
+  <div class="fleet-detail-tabs">
+    <button class="tabbtn ${fleetDeviceDetailTab==='state'?'active':''}" type="button" onclick="setFleetDeviceDetailTab('state')">State</button>
+    <button class="tabbtn ${fleetDeviceDetailTab==='manage'?'active':''}" type="button" onclick="setFleetDeviceDetailTab('manage')">Manage</button>
   </div>
-  ${remoteDetailTab==='state' ? stateView : manageView}`;
+  ${fleetDeviceDetailTab==='state' ? stateView : manageView}`;
 }
-async function refreshRemotes(){
- const host=document.getElementById('remotesTableHost');
- const summary=document.getElementById('remotesSummary');
- const detail=document.getElementById('remoteDetailHost');
+async function refreshFleet(){
+ const host=document.getElementById('fleetTableHost');
+ const summary=document.getElementById('fleetSummary');
+ const detail=document.getElementById('fleetDetailHost');
  if(!host || !summary) return;
- const out=await apiJson('/api/remotes',{silent:true});
+ const out=await apiJson('/api/fleet',{silent:true});
  if(!out){
-  summary.innerText='Remote list unavailable.';
-  host.innerHTML='Remote list unavailable.';
-  if(detail) detail.innerHTML='Remote details unavailable.';
+  summary.innerText='Fleet device list unavailable.';
+  host.innerHTML='Fleet device list unavailable.';
+  if(detail) detail.innerHTML='Device details unavailable.';
   return;
  }
  const role=String(out.role||'').toLowerCase();
  if(role!=='tx'){
-  summary.innerText='Remotes view is TX-only in this firmware.';
-  host.innerHTML='Switch role to TX to manage discovered remotes.';
-  if(detail) detail.innerHTML='Switch role to TX to view remote details.';
+  summary.innerText='Fleet view is TX-only in this firmware.';
+  host.innerHTML='Switch role to TX to manage discovered devices.';
+  if(detail) detail.innerHTML='Switch role to TX to view device details.';
   return;
  }
- const remotes=Array.isArray(out.remotes) ? out.remotes : [];
- remotesCache = remotes;
- summary.innerText=`Discovered remotes: ${remotes.length} | Global schedule default: ${Math.max(60, Math.round(Number(out.tx_default_poll_interval_ms||60000)/1000))}s | Global polling: ${out.tx_polling_enabled ? 'enabled' : 'disabled'}`;
- if(remotes.length===0){
-  host.innerHTML='No remotes discovered yet.';
-  if(detail) detail.innerHTML='No remote selected.';
-  selectedRemoteAddr = 0;
+ const devices=Array.isArray(out.devices) ? out.devices : [];
+ fleetDevicesCache = devices;
+ summary.innerText=`Discovered devices: ${devices.length} | Global schedule default: ${Math.max(60, Math.round(Number(out.tx_default_poll_interval_ms||60000)/1000))}s | Global polling: ${out.tx_polling_enabled ? 'enabled' : 'disabled'}`;
+ if(devices.length===0){
+  host.innerHTML='No devices discovered yet.';
+  if(detail) detail.innerHTML='No device selected.';
+  selectedFleetDeviceAddr = 0;
   return;
  }
- if(!remotes.some((r)=>Number(r.address||0)===Number(selectedRemoteAddr||0))){
-  selectedRemoteAddr = Number(remotes[0].address||0);
+ if(!devices.some((r)=>Number(r.address||0)===Number(selectedFleetDeviceAddr||0))){
+  selectedFleetDeviceAddr = Number(devices[0].address||0);
  }
- const rows=remotes.map((r)=>{
-  const addrHex=remoteAddrHex(r);
+ const rows=devices.map((r)=>{
+  const addrHex=fleetDeviceAddrHex(r);
   const addr=Number(r.address||0);
   const seenAge=(Number(r.last_seen_ms||0)>0) ? humanAgeMsShort(r.last_seen_age_ms||0) : 'never';
   const freshness=freshnessChip(r);
-  const selectedCls=addr===Number(selectedRemoteAddr||0) ? 'selected' : '';
+  const selectedCls=addr===Number(selectedFleetDeviceAddr||0) ? 'selected' : '';
   return `<tr class="${selectedCls}">
    <td><b>${escapeHtml(addrHex)}</b></td>
    <td>${relayChip(r.relay_state)}</td>
    <td>${inputChip(r.input_state)}</td>
-   <td>${escapeHtml(remoteTempText(r))}</td>
+   <td>${escapeHtml(fleetDeviceTempText(r))}</td>
    <td>${freshness} ${escapeHtml(seenAge)}</td>
-   <td><button type="button" onclick="selectRemote(${addr})">View</button></td>
+   <td><button type="button" onclick="selectFleetDevice(${addr})">View</button></td>
   </tr>`;
  }).join('');
- host.innerHTML=`<table class="remotes-table"><thead><tr><th>Remote</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Device</th></tr></thead><tbody>${rows}</tbody></table>`;
- renderRemoteDetail();
+ host.innerHTML=`<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
+ renderFleetDeviceDetail();
 }
 async function refreshDiagnostics(){
  const d=await apiJson('/api/diagnostics',{silent:true});
@@ -1467,6 +1983,289 @@ async function refreshDiagnostics(){
   <div class="k">Flash (real/ide)</div><div class="v">${escapeHtml(String(d.flash_real_size || 0))} / ${escapeHtml(String(d.flash_ide_size || 0))} B</div>
   <div class="k">SDK/Core</div><div class="v">${escapeHtml(String(d.sdk_version || 'n/a'))} / ${escapeHtml(String(d.core_version || 'n/a'))}</div>`;
  txt.innerText=`Last save: ${d.audit_last_saved_by} at ${d.audit_last_saved_ms} ms | Last reboot: ${d.audit_last_reboot_reason} at ${d.audit_last_reboot_ms} ms | Boot count: ${d.audit_boot_count}`;
+}
+function defaultAutomationRule(idx){
+ return {
+  id:`rule_${idx}`,
+  name:`Rule ${idx}`,
+  enabled:false,
+  when:{all:[{peer:'self',field:'input',op:'==',value:1}]},
+  for_ms:0,
+  cooldown_ms:60000,
+  then:[{action:'set_relay',peer:'self',value:1}]
+ };
+}
+function defaultAutomationConfig(){
+ return {schema_version:1, enabled:false, execution_mode:'standalone', rules:[defaultAutomationRule(1)]};
+}
+function cloneJson(v){ return JSON.parse(JSON.stringify(v)); }
+function normalizeAutomationConfig(raw){
+ const cfg=(raw && typeof raw==='object') ? cloneJson(raw) : defaultAutomationConfig();
+ cfg.schema_version = 1;
+ cfg.enabled = !!cfg.enabled;
+ cfg.execution_mode = String(cfg.execution_mode||'standalone') === 'paired+rules' ? 'paired+rules' : 'standalone';
+ if(!Array.isArray(cfg.rules)) cfg.rules = [];
+ cfg.rules = cfg.rules.slice(0, 8).map((r, idx)=>{
+  const rule=(r && typeof r==='object') ? r : {};
+  const out=defaultAutomationRule(idx+1);
+  out.id = String(rule.id || out.id).trim() || out.id;
+  out.name = String(rule.name || out.name).trim() || out.name;
+  out.enabled = !!rule.enabled;
+  out.for_ms = Math.max(0, Number(rule.for_ms||0)|0);
+  out.cooldown_ms = Math.max(0, Number((rule.cooldown_ms!=null)?rule.cooldown_ms:60000)|0);
+  out.when = {all:[]};
+  const all = rule.when && Array.isArray(rule.when.all) ? rule.when.all : [];
+  out.when.all = all.slice(0,4).map((p)=>({
+   peer:String((p&&p.peer)!=null?p.peer:'self').trim() || 'self',
+   field:String((p&&p.field)||'input').trim() || 'input',
+   op:String((p&&p.op)||'==').trim() || '==',
+   value: (p&&Object.prototype.hasOwnProperty.call(p,'value')) ? p.value : 1
+  }));
+  if(!out.when.all.length) out.when.all=[{peer:'self',field:'input',op:'==',value:1}];
+  const firstAction = Array.isArray(rule.then) && rule.then[0] ? rule.then[0] : {};
+  out.then = [{action:'set_relay', peer:'self', value:Number(firstAction.value)===0?0:1}];
+  return out;
+ });
+ return cfg;
+}
+function automationFieldOptions(selected){
+ const opts=['reachable','input','relay','temp_c','is_stale'];
+ return opts.map(v=>`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
+}
+function automationOpOptions(selected){
+ const opts=['==','!=','>','>=','<','<='];
+ return opts.map(v=>`<option value="${escapeHtml(v)}" ${v===selected?'selected':''}>${escapeHtml(v)}</option>`).join('');
+}
+function valueInputHint(field){
+ if(field==='reachable' || field==='is_stale') return 'true / false';
+ if(field==='temp_c') return 'e.g. 35';
+ return '0=open, 1=closed';
+}
+function renderAutomationRules(){
+ const host=document.getElementById('automationRulesHost');
+ if(!host) return;
+ automationRulesConfig = normalizeAutomationConfig(automationRulesConfig);
+ const rules = automationRulesConfig.rules || [];
+ if(!rules.length){
+  host.innerHTML='<div class="small">No rules yet. Add a rule to start.</div>';
+  updateAutomationJsonPreview();
+  return;
+ }
+ const html = rules.map((rule, i)=>{
+  const conds = (rule.when && Array.isArray(rule.when.all) ? rule.when.all : []).map((c,j)=>{
+   return `<div class="sensor-tile" style="margin-bottom:8px">
+    <div class="grid">
+     <div><label>Peer</label><input data-arule="${i}" data-apred="${j}" data-af="peer" value="${escapeHtml(c.peer)}" placeholder="self or 82 / 0x52" /><div class="small" data-auto-peer-hint="1" data-arule="${i}" data-apred="${j}">Display: ${escapeHtml(formatPeerTokenDisplay(c.peer))}</div></div>
+     <div><label>Field</label><select data-arule="${i}" data-apred="${j}" data-af="field">${automationFieldOptions(String(c.field||'input'))}</select></div>
+     <div><label>Op</label><select data-arule="${i}" data-apred="${j}" data-af="op">${automationOpOptions(String(c.op||'=='))}</select></div>
+     <div><label>Value</label><input data-arule="${i}" data-apred="${j}" data-af="value" value="${escapeHtml(String(c.value))}" placeholder="${escapeHtml(valueInputHint(String(c.field||'input')))}" /></div>
+    </div>
+    <div class="actions"><button type="button" onclick="removeAutomationCondition(${i},${j})">Remove Condition</button></div>
+   </div>`;
+  }).join('');
+  const actionValue = Number(rule.then && rule.then[0] && rule.then[0].value)===0 ? 0 : 1;
+  return `<div class="card" style="margin:8px 0;padding:12px">
+   <div class="grid">
+    <div><label>Rule name</label><input data-arule="${i}" data-rf="name" value="${escapeHtml(rule.name||'')}" /></div>
+    <div><label>Rule id</label><input data-arule="${i}" data-rf="id" value="${escapeHtml(rule.id||'')}" /></div>
+    <div><div class="check-row"><input type="checkbox" id="auto_rule_enabled_${i}" data-arule="${i}" data-rf="enabled" ${rule.enabled?'checked':''} /><label for="auto_rule_enabled_${i}">Enabled</label></div></div>
+    <div></div>
+    <div><label>Start after condition is true for (seconds)</label><input type="number" min="0" step="1" data-arule="${i}" data-rf="for_s" value="${Math.max(0, Math.round(Number(rule.for_ms||0)/1000))}" /><div class="small">0 = trigger immediately</div></div>
+    <div><label>Do not trigger again for (seconds)</label><input type="number" min="0" step="1" data-arule="${i}" data-rf="cooldown_s" value="${Math.max(0, Math.round(Number((rule.cooldown_ms!=null?rule.cooldown_ms:60000))/1000))}" /><div class="small">Recommended default: 60s</div></div>
+    <div><label>Action target</label><input value="${escapeHtml(formatPeerTokenDisplay('self') || automationSelfLabel())}" readonly /></div>
+    <div><label>Action</label><select data-arule="${i}" data-rf="action_value"><option value="1" ${actionValue===1?'selected':''}>Close relay (1)</option><option value="0" ${actionValue===0?'selected':''}>Open relay (0)</option></select></div>
+   </div>
+   <div style="margin-top:8px"><label>WHEN (ALL conditions)</label><div class="small">Top-down priority: first matching rule wins and processing stops.</div></div>
+   <div style="margin-top:6px">${conds}</div>
+   <div class="actions"><button type="button" onclick="addAutomationCondition(${i})">Add Condition (AND)</button><button type="button" onclick="removeAutomationRule(${i})">Delete Rule</button></div>
+  </div>`;
+ }).join('');
+ host.innerHTML = html;
+ refreshAutomationPeerDisplayHints();
+ updateAutomationJsonPreview();
+}
+function collectAutomationRulesFromUi(){
+ const cfg = normalizeAutomationConfig(automationRulesConfig);
+ const enabledEl=document.getElementById('autoRulesEnabled');
+ const modeEl=document.getElementById('autoExecutionMode');
+ cfg.enabled = !!(enabledEl && enabledEl.checked);
+ cfg.execution_mode = String(modeEl && modeEl.value || 'standalone');
+ const host=document.getElementById('automationRulesHost');
+ if(!host) return cfg;
+ const rules = [];
+ const ruleCount = host.querySelectorAll('[data-rf="name"]').length;
+ for(let i=0;i<ruleCount;i++){
+  const getRule=(field)=>host.querySelector(`[data-arule="${i}"][data-rf="${field}"]`);
+  const rule = defaultAutomationRule(i+1);
+  const nameEl=getRule('name');
+  const idEl=getRule('id');
+  const enabledRuleEl=getRule('enabled');
+  const forEl=getRule('for_s');
+  const cdEl=getRule('cooldown_s');
+  const actionEl=getRule('action_value');
+  rule.name = String(nameEl && nameEl.value || rule.name).trim() || rule.name;
+  rule.id = String(idEl && idEl.value || rule.id).trim() || rule.id;
+  rule.enabled = !!(enabledRuleEl && enabledRuleEl.checked);
+  rule.for_ms = Math.max(0, Math.floor(Number(forEl && forEl.value || 0) || 0) * 1000);
+  rule.cooldown_ms = Math.max(0, Math.floor(Number(cdEl && cdEl.value || 60) || 0) * 1000);
+  rule.then = [{action:'set_relay', peer:'self', value:(Number(actionEl && actionEl.value)===0?0:1)}];
+  const condEls = [...host.querySelectorAll(`[data-arule="${i}"][data-apred]`)];
+  const condMap = new Map();
+  condEls.forEach(el=>{
+   const idx = Number(el.dataset.apred);
+   if(!condMap.has(idx)) condMap.set(idx, {peer:'self',field:'input',op:'==',value:1});
+   const c = condMap.get(idx);
+   const f = el.dataset.af;
+   c[f] = (el.type === 'checkbox') ? !!el.checked : el.value;
+  });
+  const conds = [...condMap.keys()].sort((a,b)=>a-b).map((k)=>condMap.get(k)).slice(0,4).map((c)=>{
+   const field = String(c.field||'input');
+   let value = c.value;
+   if(field==='reachable' || field==='is_stale'){
+    const t=String(value).trim().toLowerCase();
+    value = (t==='true' || t==='1' || t==='yes' || t==='on');
+   } else if(field==='temp_c'){
+    value = Number(value);
+    if(!Number.isFinite(value)) value = 0;
+   } else {
+    value = Number(value)===0 ? 0 : 1;
+   }
+   return {
+    peer:String(c.peer||'self').trim() || 'self',
+    field,
+    op:String(c.op||'==').trim() || '==',
+    value
+   };
+  });
+  rule.when = {all: conds.length ? conds : [{peer:'self',field:'input',op:'==',value:1}]};
+  rules.push(rule);
+ }
+ cfg.rules = rules;
+ return cfg;
+}
+function updateAutomationJsonPreview(){
+ if(!document.getElementById('automationRulesHost')) return;
+ automationRulesConfig = collectAutomationRulesFromUi();
+ refreshAutomationPeerDisplayHints();
+ const pre=document.getElementById('automationJsonPreview');
+ if(pre){ pre.innerText = JSON.stringify(automationRulesConfig, null, 2); }
+}
+function setAutomationMetaText(){
+ const el=document.getElementById('automationRulesMeta');
+ if(!el) return;
+ if(!automationRulesMeta){ el.innerText='Automation engine metadata unavailable'; return; }
+ const m=automationRulesMeta;
+ const rt=m.runtime||{};
+ el.innerText = `v1: standalone execution only, self relay action only | Runtime gate: ${rt.gate_reason || 'unknown'} | Max rules: ${m.max_rules || 'n/a'}`;
+}
+async function loadAutomationRules(force=false){
+ if(!force && automationRulesConfig && automationRulesMeta) {
+  setAutomationMetaText();
+  return;
+ }
+ const out=await apiJson('/api/automation-rules',{silent:true});
+ const host=document.getElementById('automationRulesHost');
+ if(!out || !out.ok){
+  automationRulesMeta = (out && out.meta) ? out.meta : null;
+  if(host){ host.innerHTML='Automation rules unavailable'; }
+  setAutomationMetaText();
+  return;
+ }
+ automationRulesMeta = out.meta || null;
+ automationRulesConfig = normalizeAutomationConfig(out.config);
+ const enabledEl=document.getElementById('autoRulesEnabled');
+ const modeEl=document.getElementById('autoExecutionMode');
+ const peerDisplayEl=document.getElementById('automationPeerDisplayMode');
+ if(enabledEl) enabledEl.checked = !!automationRulesConfig.enabled;
+ if(modeEl) modeEl.value = String(automationRulesConfig.execution_mode || 'standalone');
+ if(peerDisplayEl) peerDisplayEl.value = automationPeerDisplayMode;
+  setAutomationMetaText();
+  renderAutomationRules();
+}
+function addAutomationRule(){
+ automationRulesConfig = collectAutomationRulesFromUi();
+ const nextIdx = (automationRulesConfig.rules || []).length + 1;
+ automationRulesConfig.rules = automationRulesConfig.rules || [];
+ automationRulesConfig.rules.push(defaultAutomationRule(nextIdx));
+ renderAutomationRules();
+}
+function removeAutomationRule(idx){
+ automationRulesConfig = collectAutomationRulesFromUi();
+ if(!automationRulesConfig.rules || idx < 0 || idx >= automationRulesConfig.rules.length) return;
+ automationRulesConfig.rules.splice(idx,1);
+ if(!automationRulesConfig.rules.length){
+  automationRulesConfig.rules.push(defaultAutomationRule(1));
+ }
+ renderAutomationRules();
+}
+function addAutomationCondition(ruleIdx){
+ automationRulesConfig = collectAutomationRulesFromUi();
+ const rule = automationRulesConfig.rules && automationRulesConfig.rules[ruleIdx];
+ if(!rule) return;
+ rule.when = rule.when || {all:[]};
+ rule.when.all = Array.isArray(rule.when.all) ? rule.when.all : [];
+ if(rule.when.all.length >= 4){ showToast('Max 4 conditions per rule in v1', true); return; }
+ rule.when.all.push({peer:'self',field:'input',op:'==',value:1});
+ renderAutomationRules();
+}
+function removeAutomationCondition(ruleIdx, condIdx){
+ automationRulesConfig = collectAutomationRulesFromUi();
+ const rule = automationRulesConfig.rules && automationRulesConfig.rules[ruleIdx];
+ if(!rule || !rule.when || !Array.isArray(rule.when.all)) return;
+ rule.when.all.splice(condIdx,1);
+ if(!rule.when.all.length) rule.when.all.push({peer:'self',field:'input',op:'==',value:1});
+ renderAutomationRules();
+}
+async function saveAutomationRules(){
+ const el=document.getElementById('automationSaveResult');
+ automationRulesConfig = collectAutomationRulesFromUi();
+ if(el){ el.className='result-line show'; el.innerText='Saving automation rules...'; }
+ try{
+  const res=await fetch('/api/automation-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(automationRulesConfig)});
+  const out=await res.json().catch(()=>({ok:false,error:`HTTP ${res.status}`}));
+  if(!res.ok || !out.ok){
+   if(el){ el.className='result-line show err'; el.innerText=`Save failed: ${out.error || `HTTP ${res.status}`}`; }
+   showToast('Automation rules save failed', true);
+   return;
+  }
+  if(el){ el.className='result-line show ok'; el.innerText='Automation rules saved'; }
+  showToast('Automation rules saved');
+  await loadAutomationRules(true);
+ }catch(e){
+  if(el){ el.className='result-line show err'; el.innerText=`Save failed: ${e.message}`; }
+  showToast('Automation rules save failed', true);
+ }
+}
+async function copyAutomationJson(){
+ updateAutomationJsonPreview();
+ try{
+  await writeClipboard(JSON.stringify(automationRulesConfig, null, 2));
+  showToast('Automation JSON copied');
+ }catch(e){
+  showToast(`Copy failed: ${e.message}`, true);
+ }
+}
+function applyAutomationJsonFromPaste(){
+ const ta=document.getElementById('automationJsonPaste');
+ const el=document.getElementById('automationSaveResult');
+ if(!ta) return;
+ const text=String(ta.value||'').trim();
+ if(!text){ showToast('Paste JSON first', true); return; }
+ try{
+  automationRulesConfig = normalizeAutomationConfig(JSON.parse(text));
+  const enabledEl=document.getElementById('autoRulesEnabled');
+  const modeEl=document.getElementById('autoExecutionMode');
+  const peerDisplayEl=document.getElementById('automationPeerDisplayMode');
+  if(enabledEl) enabledEl.checked = !!automationRulesConfig.enabled;
+  if(modeEl) modeEl.value = String(automationRulesConfig.execution_mode || 'standalone');
+  if(peerDisplayEl) peerDisplayEl.value = automationPeerDisplayMode;
+  renderAutomationRules();
+  if(el){ el.className='result-line show ok'; el.innerText='JSON loaded into builder (not saved yet)'; }
+  showToast('Automation JSON loaded');
+ }catch(e){
+  if(el){ el.className='result-line show err'; el.innerText=`JSON parse failed: ${e.message}`; }
+  showToast('Automation JSON parse failed', true);
+ }
 }
 async function importConfig(file){
  if(!file) return;
@@ -1516,14 +2315,24 @@ function initPage(){
  if(fleetKey) fleetKey.addEventListener('input',updateDeploymentKeyStrength);
  if(staSsid) staSsid.addEventListener('input',updateStaTestButtonState);
  if(staPass) staPass.addEventListener('input',updateStaTestButtonState);
+ const autoHost=document.getElementById('automationRulesHost');
+ if(autoHost){
+  autoHost.addEventListener('input', ()=>{ updateAutomationJsonPreview(); });
+  autoHost.addEventListener('change', ()=>{ updateAutomationJsonPreview(); });
+ }
  bindFreqPreset();
  syncRole();
+ showFleetTab(activeFleetTab);
  updateDeploymentKeyStrength();
  try{ applyTheme(localStorage.getItem('lrs_theme') === 'light' ? 'light' : 'dark'); }catch(e){ applyTheme('dark'); }
+ const menuBtn=document.getElementById('menuBtn');
+ if(menuBtn){ menuBtn.setAttribute('aria-expanded','false'); }
+ document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ toggleDrawer(false); } });
  showPage('status');
+ window.addEventListener('beforeunload', ()=>{ stopFleetEvents(); closeProvisioningEventSource(); });
  load();
- setInterval(()=>{ refreshStatus(); },500);
- setInterval(()=>{ if(activePage==='remotes' && lastRoleIsTx){ refreshRemotes(); } },1500);
+ setInterval(()=>{ refreshStatus(); },1000);
+ setInterval(()=>{ if(shouldRunFleetDevicesLive()){ refreshFleet(); } },1500);
  setInterval(()=>{ if(activePage==='logs') refreshLogs(); },3000);
  setInterval(async ()=>{ const s=await apiJson('/api/session',{silent:true}); if(s&&s.ok){ setSessionLeft(s.remaining_s); } },1000);
 }
@@ -1550,11 +2359,13 @@ bool WebConsole::begin(ConfigStore *config,
                        NodeStateMachine *sm,
                        SensorManager *sensors,
                        LogBuffer *logs,
+                       AutomationRulesEngine *automation,
                        std::function<void(bool, bool)> onApply) {
   config_ = config;
   sm_ = sm;
   sensors_ = sensors;
   logs_ = logs;
+  automation_ = automation;
   on_apply_ = onApply;
   server_.collectHeaders("Cookie");
 
@@ -1564,6 +2375,108 @@ bool WebConsole::begin(ConfigStore *config,
 }
 
 void WebConsole::tick() { server_.handleClient(); }
+
+void WebConsole::beginRequestLog(const char *path, bool api, bool poll, bool heapDiag) {
+  request_log_.active = true;
+  request_log_.api = api;
+  request_log_.poll = poll;
+  request_log_.heap_diag = heapDiag;
+  request_log_.started_ms = millis();
+  request_log_.status = 0;
+  request_log_.path = path ? String(path) : server_.uri();
+  request_log_.client_ip = server_.client().remoteIP().toString();
+}
+
+void WebConsole::finishRequestLog() {
+  if (!request_log_.active) return;
+
+  const uint32_t endMs = millis();
+  const uint32_t durMs = endMs - request_log_.started_ms;
+  const int status = request_log_.status;
+  const String path = request_log_.path.length() ? request_log_.path : server_.uri();
+  const String ip = request_log_.client_ip;
+  const uint32_t freeHeap = lrslog::heapFree();
+  const uint8_t heapFrag = lrslog::heapFragPercent();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  const lrslog::Category cat = request_log_.api ? lrslog::Category::API : lrslog::Category::WEB;
+  const lrslog::Level level = request_log_.poll ? lrslog::Level::DEBUG : lrslog::Level::INFO;
+
+  if (request_log_.heap_diag) {
+    lrslog::logf(level,
+                 cat,
+                 "event=request method=%s path=%s status=%d dur_ms=%lu ip=%s heap_free=%lu heap_frag=%u max_free_block=%lu",
+                 httpMethodText(server_.method()),
+                 path.c_str(),
+                 status,
+                 static_cast<unsigned long>(durMs),
+                 ip.c_str(),
+                 static_cast<unsigned long>(freeHeap),
+                 static_cast<unsigned>(heapFrag),
+                 static_cast<unsigned long>(maxBlock));
+    if (freeHeap < kLowHeapWarnThresholdBytes &&
+        (last_low_heap_warn_ms_ == 0 || (endMs - last_low_heap_warn_ms_) >= kLowHeapWarnMinIntervalMs)) {
+      last_low_heap_warn_ms_ = endMs;
+      LRS_LOGW(API,
+               "event=low_heap path=%s heap_free=%lu heap_frag=%u max_free_block=%lu dur_ms=%lu",
+               path.c_str(),
+               static_cast<unsigned long>(freeHeap),
+               static_cast<unsigned>(heapFrag),
+               static_cast<unsigned long>(maxBlock),
+               static_cast<unsigned long>(durMs));
+    }
+  } else {
+    lrslog::logf(level,
+                 cat,
+                 "event=request method=%s path=%s status=%d dur_ms=%lu ip=%s",
+                 httpMethodText(server_.method()),
+                 path.c_str(),
+                 status,
+                 static_cast<unsigned long>(durMs),
+                 ip.c_str());
+  }
+
+  request_log_ = RequestLogState{};
+}
+
+void WebConsole::markResponseStatus(int status) {
+  if (request_log_.active) request_log_.status = status;
+}
+
+void WebConsole::sendTracked(int code, const char *contentType, const char *body) {
+  markResponseStatus(code);
+  server_.send(code, contentType, body);
+}
+
+void WebConsole::sendTracked(int code, const char *contentType, const String &body) {
+  markResponseStatus(code);
+  server_.send(code, contentType, body);
+}
+
+bool WebConsole::rejectApiIfLowHeap(const char *path, uint32_t minFreeBytes, uint32_t minMaxBlockBytes) {
+  const uint32_t freeHeap = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  if (freeHeap >= minFreeBytes && (minMaxBlockBytes == 0 || maxBlock >= minMaxBlockBytes)) {
+    return false;
+  }
+  LRS_LOGW(API,
+           "event=api_low_heap_reject path=%s heap_free=%lu heap_frag=%u max_free_block=%lu need_free=%lu need_block=%lu",
+           path ? path : server_.uri().c_str(),
+           static_cast<unsigned long>(freeHeap),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(maxBlock),
+           static_cast<unsigned long>(minFreeBytes),
+           static_cast<unsigned long>(minMaxBlockBytes));
+  DynamicJsonDocument doc(192);
+  doc["ok"] = false;
+  doc["error"] = "low_heap";
+  doc["heap_free"] = freeHeap;
+  doc["heap_frag"] = lrslog::heapFragPercent();
+  doc["max_free_block"] = maxBlock;
+  String out;
+  serializeJson(doc, out);
+  sendTracked(503, "application/json", out);
+  return true;
+}
 
 bool WebConsole::hasSession() const {
   if (session_token_.length() == 0) return false;
@@ -1614,19 +2527,20 @@ uint32_t WebConsole::sessionRemainingS() const {
 bool WebConsole::requireAuth(bool api) {
   if (locked_until_ms_ != 0 && static_cast<int32_t>(locked_until_ms_ - millis()) > 0) {
     if (api) {
-      server_.send(429, "application/json", "{\"error\":\"too_many_failed_logins\"}");
+      sendTracked(429, "application/json", "{\"error\":\"too_many_failed_logins\"}");
     } else {
-      server_.send(429, "text/plain", "Too many failed logins. Try again shortly.");
+      sendTracked(429, "text/plain", "Too many failed logins. Try again shortly.");
     }
+    LRS_LOGW(API, "event=auth_locked ip=%s", server_.client().remoteIP().toString().c_str());
     return false;
   }
 
   if (!hasSession()) {
     if (api) {
-      server_.send(401, "application/json", "{\"error\":\"auth_required\"}");
+      sendTracked(401, "application/json", "{\"error\":\"auth_required\"}");
     } else {
       server_.sendHeader("Location", "/login?expired=1");
-      server_.send(302, "text/plain", "redirect");
+      sendTracked(302, "text/plain", "redirect");
     }
     return false;
   }
@@ -1635,11 +2549,12 @@ bool WebConsole::requireAuth(bool api) {
   if (cookie.length() == 0 || cookie != session_token_) {
     clearSession();
     if (api) {
-      server_.send(401, "application/json", "{\"error\":\"auth_required\"}");
+      sendTracked(401, "application/json", "{\"error\":\"auth_required\"}");
     } else {
       server_.sendHeader("Location", "/login?expired=1");
-      server_.send(302, "text/plain", "redirect");
+      sendTracked(302, "text/plain", "redirect");
     }
+    LRS_LOGW(API, "event=auth_cookie_invalid ip=%s", server_.client().remoteIP().toString().c_str());
     return false;
   }
   session_expires_ms_ = millis() + (30UL * 60UL * 1000UL);
@@ -1649,23 +2564,59 @@ bool WebConsole::requireAuth(bool api) {
 
 bool WebConsole::isSoftApActive() const { return softApActiveNow(); }
 
+bool WebConsole::needsFleetSetupPrompt() const {
+  if (config_ == nullptr) return false;
+  const auto &cfg = config_->settings();
+  return isDefaultDeploymentKey(cfg.fleet_passphrase) && !cfg.fleet_setup_prompt_dismissed;
+}
+
 void WebConsole::handleCaptiveProbe() {
   if (!isSoftApActive()) {
-    server_.send(204, "text/plain", "");
+    sendTracked(204, "text/plain", "");
     return;
   }
   server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   server_.sendHeader("Pragma", "no-cache");
   server_.sendHeader("Location", "http://192.168.4.1/");
-  server_.send(302, "text/plain", "Redirecting to LRS console");
+  sendTracked(302, "text/plain", "Redirecting to LRS console");
 }
 
 void WebConsole::routes() {
-  server_.on("/", HTTP_GET, [this]() { handleIndex(); });
-  server_.on("/login", HTTP_GET, [this]() { handleLoginPage(); });
-  server_.on("/api/login", HTTP_POST, [this]() { handleLoginApi(); });
-  server_.on("/api/logout", HTTP_POST, [this]() { handleLogoutApi(); });
-  server_.on("/api/session", HTTP_GET, [this]() { handleSessionApi(); });
+  server_.on("/", HTTP_GET, [this]() {
+    beginRequestLog("/", false, false, true);
+    handleIndex();
+    finishRequestLog();
+  });
+  server_.on("/login", HTTP_GET, [this]() {
+    beginRequestLog("/login", false, false, true);
+    handleLoginPage();
+    finishRequestLog();
+  });
+  server_.on("/setup", HTTP_GET, [this]() {
+    beginRequestLog("/setup", false, false, true);
+    handleFleetSetupPage();
+    finishRequestLog();
+  });
+  server_.on("/api/login", HTTP_POST, [this]() {
+    beginRequestLog("/api/login", true, false, true);
+    handleLoginApi();
+    finishRequestLog();
+  });
+  server_.on("/api/setup/fleet-key", HTTP_POST, [this]() {
+    beginRequestLog("/api/setup/fleet-key", true, false, true);
+    handleFleetSetupApi();
+    finishRequestLog();
+  });
+  server_.on("/api/logout", HTTP_POST, [this]() {
+    beginRequestLog("/api/logout", true, false, false);
+    handleLogoutApi();
+    finishRequestLog();
+  });
+  server_.on("/api/session", HTTP_GET, [this]() {
+    beginRequestLog("/api/session", true, true, true);
+    handleSessionApi();
+    finishRequestLog();
+  });
   server_.on("/generate_204", HTTP_GET, [this]() { handleCaptiveProbe(); });       // Android
   server_.on("/gen_204", HTTP_GET, [this]() { handleCaptiveProbe(); });            // Android (variant)
   server_.on("/hotspot-detect.html", HTTP_GET, [this]() { handleCaptiveProbe(); });  // Apple
@@ -1673,14 +2624,36 @@ void WebConsole::routes() {
   server_.on("/connecttest.txt", HTTP_GET, [this]() { handleCaptiveProbe(); });    // Windows
   server_.on("/fwlink", HTTP_GET, [this]() { handleCaptiveProbe(); });             // Windows
   server_.on("/api/status", HTTP_GET, [this]() {
-    if (!requireAuth(true)) return;
+    beginRequestLog("/api/status", true, true, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
     handleStatus();
+    finishRequestLog();
   });
-  server_.on("/api/remotes", HTTP_GET, [this]() {
+  server_.on("/api/fleet", HTTP_GET, [this]() {
+    beginRequestLog("/api/fleet", true, false, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handleFleet();
+    finishRequestLog();
+  });
+  server_.on("/api/fleet/events", HTTP_GET, [this]() {
+    beginRequestLog("/api/fleet/events", true, false, false);
+    handleFleetEvents();
+    finishRequestLog();
+  });
+  server_.on("/api/automation-rules", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
-    handleRemotes();
+    handleGetAutomationRules();
   });
-  server_.on("/api/remotes/action", HTTP_POST, [this]() { handleRemoteAction(); });
+  server_.on("/api/automation-rules", HTTP_POST, [this]() {
+    if (!requireAuth(true)) return;
+    handlePostAutomationRules();
+  });
   server_.on("/api/factory", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
     handleFactory();
@@ -1709,6 +2682,36 @@ void WebConsole::routes() {
     server_.send(200, "application/json", out);
   });
   server_.on("/api/network/test", HTTP_POST, [this]() { handleTestSta(); });
+  server_.on("/api/network/provision-fleet", HTTP_POST, [this]() {
+    beginRequestLog("/api/network/provision-fleet", true, false, true);
+    handleProvisionFleetWifi();
+    finishRequestLog();
+  });
+  server_.on("/api/provisioning/start", HTTP_POST, [this]() {
+    beginRequestLog("/api/provisioning/start", true, false, true);
+    handleProvisioningStart();
+    finishRequestLog();
+  });
+  server_.on("/api/provisioning/status", HTTP_GET, [this]() {
+    beginRequestLog("/api/provisioning/status", true, true, true);
+    handleProvisioningStatus();
+    finishRequestLog();
+  });
+  server_.on("/api/provisioning/events", HTTP_GET, [this]() {
+    beginRequestLog("/api/provisioning/events", true, false, false);
+    handleProvisioningEvents();
+    finishRequestLog();
+  });
+  server_.on("/api/provisioning/provision-all", HTTP_POST, [this]() {
+    beginRequestLog("/api/provisioning/provision-all", true, false, true);
+    handleProvisioningProvisionAll();
+    finishRequestLog();
+  });
+  server_.on("/api/provisioning/cancel", HTTP_POST, [this]() {
+    beginRequestLog("/api/provisioning/cancel", true, false, true);
+    handleProvisioningCancel();
+    finishRequestLog();
+  });
   server_.on("/api/mqtt/test", HTTP_POST, [this]() { handleTestMqtt(); });
   server_.on("/api/settings", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
@@ -1721,8 +2724,12 @@ void WebConsole::routes() {
       "/api/ota", HTTP_POST, [this]() { handleOtaUpload(); }, [this]() { handleOtaUploadChunk(); });
   server_.on("/api/logs.csv", HTTP_GET, [this]() { handleLogsCsv(); });
   server_.on("/api/logs.txt", HTTP_GET, [this]() { handleLogsText(); });
+  server_.on("/api/system/factory-reset", HTTP_POST, [this]() { handleFactoryReset(); });
   server_.on("/api/reboot", HTTP_POST, [this]() { handleReboot(); });
   server_.onNotFound([this]() {
+    if (server_.method() == HTTP_POST && handleFleetDeviceActionRoute(server_.uri())) {
+      return;
+    }
     if (isSoftApActive()) {
       handleCaptiveProbe();
       return;
@@ -1733,21 +2740,69 @@ void WebConsole::routes() {
 
 void WebConsole::handleIndex() {
   if (!requireAuth(false)) return;
+  if (needsFleetSetupPrompt()) {
+    server_.sendHeader("Location", "/setup");
+    sendTracked(302, "text/plain", "redirect");
+    return;
+  }
+  const uint32_t heapBefore = lrslog::heapFree();
+  const uint32_t maxBlockBefore = lrslog::heapMaxFreeBlock();
+  const uint8_t fragBefore = lrslog::heapFragPercent();
+  LRS_LOGI(WEB,
+           "event=index_send_start heap_free=%lu heap_frag=%u max_free_block=%lu",
+           static_cast<unsigned long>(heapBefore),
+           static_cast<unsigned>(fragBefore),
+           static_cast<unsigned long>(maxBlockBefore));
+  if (heapBefore < kIndexLowHeapRejectFreeBytes || maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes) {
+    LRS_LOGW(WEB,
+             "event=index_send_reject_low_heap heap_free=%lu heap_frag=%u max_free_block=%lu",
+             static_cast<unsigned long>(heapBefore),
+             static_cast<unsigned>(fragBefore),
+             static_cast<unsigned long>(maxBlockBefore));
+    sendTracked(503, "text/plain", "Device busy (low heap). Retry in a moment.");
+    return;
+  }
+  markResponseStatus(200);
   server_.send_P(200, "text/html", kIndexHtml);
+  LRS_LOGI(WEB,
+           "event=index_send_done heap_free=%lu heap_frag=%u max_free_block=%lu",
+           static_cast<unsigned long>(lrslog::heapFree()),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
 }
 
-void WebConsole::handleLoginPage() { server_.send_P(200, "text/html", kLoginHtml); }
+void WebConsole::handleLoginPage() {
+  if (hasSession() && cookieValue("lrs_session") == session_token_) {
+    server_.sendHeader("Location", needsFleetSetupPrompt() ? "/setup" : "/");
+    sendTracked(302, "text/plain", "redirect");
+    return;
+  }
+  markResponseStatus(200);
+  server_.send_P(200, "text/html", kLoginHtml);
+}
+
+void WebConsole::handleFleetSetupPage() {
+  if (!requireAuth(false)) return;
+  if (!needsFleetSetupPrompt()) {
+    server_.sendHeader("Location", "/");
+    sendTracked(302, "text/plain", "redirect");
+    return;
+  }
+  markResponseStatus(200);
+  server_.send_P(200, "text/html", kFleetSetupHtml);
+}
 
 void WebConsole::handleLoginApi() {
   if (locked_until_ms_ != 0 && static_cast<int32_t>(locked_until_ms_ - millis()) > 0) {
-    server_.send(429, "application/json", "{\"error\":\"Too many failed logins. Try again shortly.\"}");
+    sendTracked(429, "application/json", "{\"error\":\"Too many failed logins. Try again shortly.\"}");
+    LRS_LOGW(API, "event=login_blocked ip=%s", server_.client().remoteIP().toString().c_str());
     return;
   }
 
   DynamicJsonDocument doc(256);
   auto err = deserializeJson(doc, server_.arg("plain"));
   if (err) {
-    server_.send(400, "application/json", "{\"error\":\"invalid json\"}");
+    sendTracked(400, "application/json", "{\"error\":\"invalid json\"}");
     return;
   }
   const String posted = String(static_cast<const char *>(doc["password"] | ""));
@@ -1757,20 +2812,83 @@ void WebConsole::handleLoginApi() {
       locked_until_ms_ = millis() + 60000;
       failed_auth_ = 0;
     }
-    server_.send(401, "application/json", "{\"error\":\"Invalid password\"}");
+    sendTracked(401, "application/json", "{\"error\":\"Invalid password\"}");
+    LRS_LOGW(API,
+             "event=login_failed ip=%s remaining_lock_attempts=%u",
+             server_.client().remoteIP().toString().c_str(),
+             static_cast<unsigned>((failed_auth_ < 5) ? (5 - failed_auth_) : 0));
     return;
   }
 
   failed_auth_ = 0;
   locked_until_ms_ = 0;
   startSession();
-  server_.send(200, "application/json", "{\"ok\":true}");
+  DynamicJsonDocument out(128);
+  out["ok"] = true;
+  out["setup_required"] = needsFleetSetupPrompt();
+  String body;
+  serializeJson(out, body);
+  sendTracked(200, "application/json", body);
+  LRS_LOGI(API,
+           "event=login_ok ip=%s setup_required=%u",
+           server_.client().remoteIP().toString().c_str(),
+           needsFleetSetupPrompt() ? 1U : 0U);
+}
+
+void WebConsole::handleFleetSetupApi() {
+  if (!requireAuth(true)) return;
+
+  DynamicJsonDocument doc(384);
+  auto err = deserializeJson(doc, server_.arg("plain"));
+  if (err) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    return;
+  }
+
+  auto &cfg = config_->settings();
+  const bool skip = parseBoolField(doc["skip"], false);
+  if (skip) {
+    cfg.fleet_setup_prompt_dismissed = true;
+    cfg.audit_last_saved_by = "first_login_skip";
+    cfg.audit_last_saved_ms = millis();
+    if (!config_->save()) {
+      sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"save_failed\"}");
+      return;
+    }
+    sendTracked(200, "application/json", "{\"ok\":true,\"skipped\":true}");
+    LRS_LOGI(API, "event=fleet_setup_skip");
+    return;
+  }
+
+  String fleetKey = String(static_cast<const char *>(doc["fleet_passphrase"] | ""));
+  fleetKey.trim();
+  if (fleetKey.length() < kMinDeploymentKeyLen) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"deployment_key_too_short\"}");
+    return;
+  }
+  if (isDefaultDeploymentKey(fleetKey)) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"deployment_key_default_blocked\"}");
+    return;
+  }
+
+  cfg.fleet_passphrase = fleetKey;
+  cfg.fleet_setup_prompt_dismissed = true;
+  cfg.audit_last_saved_by = "first_login_setup";
+  cfg.audit_last_saved_ms = millis();
+  if (!config_->save()) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"save_failed\"}");
+    return;
+  }
+  if (on_apply_) on_apply_(false, false);
+  sendTracked(200, "application/json", "{\"ok\":true}");
+  LRS_LOGI(API, "event=fleet_key_set key=%s", lrslog::maskSecret(fleetKey).c_str());
 }
 
 void WebConsole::handleLogoutApi() {
   clearSession();
   server_.sendHeader("Set-Cookie", "lrs_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
-  server_.send(200, "application/json", "{\"ok\":true}");
+  sendTracked(200, "application/json", "{\"ok\":true}");
+  LRS_LOGI(API, "event=logout ip=%s", server_.client().remoteIP().toString().c_str());
 }
 
 void WebConsole::handleSessionApi() {
@@ -1778,12 +2896,16 @@ void WebConsole::handleSessionApi() {
   const bool ok = hasSession() && cookieValue("lrs_session") == session_token_;
   doc["ok"] = ok;
   doc["remaining_s"] = ok ? sessionRemainingS() : 0;
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  doc["setup_required"] = ok ? needsFleetSetupPrompt() : false;
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 
 void WebConsole::handleStatus() {
+  if (rejectApiIfLowHeap("/api/status", kApiLowHeapRejectFreeBytes, kApiLowHeapRejectMaxBlockBytes)) return;
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
@@ -1845,6 +2967,8 @@ void WebConsole::handleStatus() {
   doc["relay_reason"] = relayReason;
   doc["deployment_key"] = cfg.fleet_passphrase;
   doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
+  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
+  doc["fleet_setup_required"] = needsFleetSetupPrompt();
 
   doc["ap_ssid"] = config_->apSsid();
   doc["ap_ip"] = WiFi.softAPIP().toString();
@@ -1882,12 +3006,15 @@ void WebConsole::handleStatus() {
     doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
   }
 
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 
-void WebConsole::handleRemotes() {
+void WebConsole::handleFleet() {
+  if (rejectApiIfLowHeap("/api/fleet", kApiLowHeapRejectFreeBytes, kApiLowHeapRejectMaxBlockBytes)) return;
   DynamicJsonDocument doc(4096);
   auto &cfg = config_->settings();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
@@ -1895,12 +3022,12 @@ void WebConsole::handleRemotes() {
   doc["tx_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
   const uint32_t now = millis();
   doc["uptime_ms"] = now;
-  JsonArray arr = doc.createNestedArray("remotes");
+  JsonArray arr = doc.createNestedArray("devices");
   if (cfg.role_tx && sm_ != nullptr) {
-    const size_t n = sm_->remoteNodeCount();
+    const size_t n = sm_->peerCount();
     for (size_t i = 0; i < n; ++i) {
-      RemoteNodeStatusSnapshot node{};
-      if (!sm_->remoteNodeByIndex(i, node)) continue;
+      PeerStatusSnapshot node{};
+      if (!sm_->peerByIndex(i, node)) continue;
       JsonObject r = arr.createNestedObject();
       r["address"] = node.address;
       char addrHex[5];
@@ -1925,72 +3052,117 @@ void WebConsole::handleRemotes() {
       r["last_poll_age_ms"] = pollAgeMs;
       r["poll_pending"] = node.poll_pending;
       r["poll_state"] = node.poll_pending ? "pending" : "idle";
-      uint32_t staleThresholdMs = (node.poll_interval_ms > 0) ? (node.poll_interval_ms * 3U) : 300000U;
-      if (staleThresholdMs < 180000U) staleThresholdMs = 180000U;
-      r["stale_threshold_ms"] = staleThresholdMs;
-      r["stale"] = (node.last_seen_ms == 0) || (seenAgeMs > staleThresholdMs);
+      const uint32_t expectedIntervalMs = (node.poll_interval_ms > 0) ? node.poll_interval_ms : 300000U;
+      uint32_t staleAfterMs = expectedIntervalMs * 3U;
+      if (staleAfterMs < 180000U) staleAfterMs = 180000U;
+      r["expected_interval_ms"] = expectedIntervalMs;
+      r["stale_after_ms"] = staleAfterMs;
+      r["stale_threshold_ms"] = staleAfterMs;
+      r["stale"] = (node.last_seen_ms == 0) || (seenAgeMs > staleAfterMs);
     }
   }
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 
-void WebConsole::handleRemoteAction() {
+void WebConsole::handleFleetEvents() {
   if (!requireAuth(true)) return;
-  DynamicJsonDocument doc(512);
-  auto err = deserializeJson(doc, server_.arg("plain"));
-  if (err) {
-    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
-    return;
-  }
+  DynamicJsonDocument doc(256);
   auto &cfg = config_->settings();
-  if (!cfg.role_tx) {
-    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"tx_only\"}");
-    return;
+  doc["event"] = "fleet";
+  doc["ts_ms"] = millis();
+  doc["tx"] = cfg.role_tx;
+  doc["count"] = (cfg.role_tx && sm_ != nullptr) ? sm_->peerCount() : 0;
+  String payload;
+  serializeJson(doc, payload);
+
+  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server_.sendHeader("Cache-Control", "no-cache");
+  server_.sendHeader("Connection", "keep-alive");
+  server_.sendHeader("X-Accel-Buffering", "no");
+  markResponseStatus(200);
+  server_.send(200, "text/event-stream", "");
+  server_.sendContent("retry: 2000\n");
+  server_.sendContent("event: fleet\n");
+  server_.sendContent("data: ");
+  server_.sendContent(payload);
+  server_.sendContent("\n\n");
+  server_.client().stop();
+}
+
+bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
+  const String prefix = "/api/fleet/";
+  if (!uri.startsWith(prefix)) return false;
+  const String suffix = uri.substring(prefix.length());
+  const int slash = suffix.indexOf('/');
+  if (slash <= 0) {
+    server_.send(404, "application/json", "{\"ok\":false,\"error\":\"not_found\"}");
+    return true;
   }
 
-  uint8_t addr = parseAddressField(doc["addr"], 0);
-  if (addr == 0) addr = parseAddressField(doc["address"], 0);
+  if (!requireAuth(true)) return true;
+  auto &cfg = config_->settings();
+  if (!cfg.role_tx || sm_ == nullptr) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"tx_only\"}");
+    return true;
+  }
+
+  const uint8_t addr = parseAddressText(suffix.substring(0, slash), 0);
   if (addr == 0 || addr == 255) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_address\"}");
-    return;
+    return true;
   }
-  String action = String(static_cast<const char *>(doc["action"] | ""));
-  action.trim();
-  action.toLowerCase();
-  if (action.length() == 0) {
-    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"missing_action\"}");
-    return;
+
+  const String actionPrefix = "actions/";
+  const String tail = suffix.substring(slash + 1);
+  if (!tail.startsWith(actionPrefix)) {
+    server_.send(404, "application/json", "{\"ok\":false,\"error\":\"not_found\"}");
+    return true;
+  }
+  const String action = tail.substring(actionPrefix.length());
+
+  DynamicJsonDocument doc(256);
+  if (server_.arg("plain").length() > 0) {
+    auto err = deserializeJson(doc, server_.arg("plain"));
+    if (err) {
+      server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return true;
+    }
   }
 
   bool ok = false;
-  if (action == "poll_now") {
-    ok = sm_ != nullptr && sm_->mqttPollRemoteNow(addr);
+  if (action == "poll-now") {
+    ok = sm_->mqttPollPeerNow(addr);
   } else if (action == "forget") {
-    ok = sm_ != nullptr && sm_->mqttForgetRemote(addr);
-  } else if (action == "set_interval") {
+    ok = sm_->mqttForgetPeer(addr);
+  } else if (action == "poll-interval") {
     uint32_t sec = doc["interval_s"] | 0;
     if (sec > 0 && sec < 60U) sec = 60U;
     if (sec > 3600U) sec = 3600U;
-    ok = sm_ != nullptr && sm_->mqttSetRemotePollIntervalMs(addr, sec * 1000U);
-  } else if (action == "set_schedule") {
+    ok = sm_->mqttSetPeerPollIntervalMs(addr, sec * 1000U);
+  } else if (action == "schedule") {
     const bool enabled = parseBoolField(doc["enabled"], true);
     uint32_t sec = doc["interval_s"] | (cfg.tx_mqtt_remote_default_poll_interval_ms / 1000U);
     if (sec > 0 && sec < 60U) sec = 60U;
     if (sec > 3600U) sec = 3600U;
-    const uint32_t intervalMs = enabled ? (sec * 1000U) : 0U;
-    ok = sm_ != nullptr && sm_->mqttSetRemotePollIntervalMs(addr, intervalMs);
+    ok = sm_->mqttSetPeerPollIntervalMs(addr, enabled ? (sec * 1000U) : 0U);
+  } else if (action == "factory-reset") {
+    const bool keepSharedFleetKey = parseBoolField(doc["keep_shared_fleet_key"], true);
+    ok = sm_->sendPeerFactoryReset(addr, keepSharedFleetKey);
   } else {
-    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"unknown_action\"}");
-    return;
+    server_.send(404, "application/json", "{\"ok\":false,\"error\":\"not_found\"}");
+    return true;
   }
 
   if (!ok) {
     server_.send(409, "application/json", "{\"ok\":false,\"error\":\"action_failed\"}");
-    return;
+    return true;
   }
   server_.send(200, "application/json", "{\"ok\":true}");
+  return true;
 }
 
 void WebConsole::handleFactory() {
@@ -2048,6 +3220,7 @@ void WebConsole::handleGetSettings() {
   doc["wifi_sta_password"] = cfg.wifi_sta_password;
   doc["lan_hostname"] = cfg.lan_hostname;
   doc["fleet_passphrase"] = cfg.fleet_passphrase;
+  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
   doc["admin_password"] = cfg.admin_password;
   doc["ap_always_on"] = cfg.ap_always_on;
   doc["mqtt_enabled"] = cfg.mqtt_enabled;
@@ -2063,6 +3236,63 @@ void WebConsole::handleGetSettings() {
   String out;
   serializeJson(doc, out);
   server_.send(200, "application/json", out);
+}
+
+void WebConsole::handleGetAutomationRules() {
+  if (automation_ == nullptr) {
+    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"automation_engine_unavailable\"}");
+    return;
+  }
+
+  DynamicJsonDocument metaDoc(1536);
+  JsonObject meta = metaDoc.to<JsonObject>();
+  automation_->appendApiMeta(meta);
+  String metaJson;
+  serializeJson(metaDoc, metaJson);
+
+  const String raw = automation_->exportJson();
+  if (raw.length() == 0) {
+    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"automation_rules_empty\"}");
+    return;
+  }
+
+  // Stream the response to avoid duplicating large JSON documents in heap.
+  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server_.send(200, "application/json", "");
+  server_.sendContent("{\"ok\":true,\"meta\":");
+  server_.sendContent(metaJson);
+  server_.sendContent(",\"config\":");
+  server_.sendContent(raw);
+  server_.sendContent("}");
+}
+
+void WebConsole::handlePostAutomationRules() {
+  if (automation_ == nullptr) {
+    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"automation_engine_unavailable\"}");
+    return;
+  }
+  const String raw = server_.arg("plain");
+  if (raw.length() == 0) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"missing_body\"}");
+    return;
+  }
+  String saveErr;
+  if (!automation_->saveJson(raw, saveErr)) {
+    DynamicJsonDocument out(256);
+    out["ok"] = false;
+    out["error"] = saveErr;
+    String body;
+    serializeJson(out, body);
+    server_.send(400, "application/json", body);
+    return;
+  }
+  DynamicJsonDocument out(512);
+  out["ok"] = true;
+  out["path"] = AutomationRulesEngine::rulesPath();
+  if (logs_) logs_->add("auto_rules_api_save", 0, 0, 0);
+  String body;
+  serializeJson(out, body);
+  server_.send(200, "application/json", body);
 }
 
 void WebConsole::handlePostSettings() {
@@ -2147,6 +3377,9 @@ void WebConsole::handlePostSettings() {
   if (hasFleetPassphraseField && !allowDefaultDeploymentKey && isDefaultDeploymentKey(cfg.fleet_passphrase)) {
     server_.send(400, "text/plain", "deployment key cannot be default; set unique key");
     return;
+  }
+  if (hasFleetPassphraseField && !isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+    cfg.fleet_setup_prompt_dismissed = true;
   }
   if (cfg.lora_frequency_hz < kMinFrequencyHz || cfg.lora_frequency_hz > kMaxFrequencyHz) {
     cfg.lora_frequency_hz = kDefaultFrequencyHz;
@@ -2353,6 +3586,240 @@ void WebConsole::handleTestSta() {
   }
 }
 
+void WebConsole::handleProvisionFleetWifi() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+
+  DynamicJsonDocument body(512);
+  auto err = deserializeJson(body, server_.arg("plain"));
+  if (err) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    return;
+  }
+  const String ssid = String(static_cast<const char *>(body["wifi_sta_ssid"] | config_->settings().wifi_sta_ssid.c_str()));
+  const String pass = String(static_cast<const char *>(body["wifi_sta_password"] | config_->settings().wifi_sta_password.c_str()));
+  if (ssid.length() == 0) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"ssid_required\"}");
+    return;
+  }
+  if (ssid.length() > 32 || pass.length() > 64) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"credentials_too_long\"}");
+    return;
+  }
+  if (isDefaultDeploymentKey(config_->settings().fleet_passphrase)) {
+    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"fleet_key_default\"}");
+    return;
+  }
+
+  const uint32_t cooldownRemainingMs = sm_->fleetWifiProvisionCooldownRemainingMs();
+  if (cooldownRemainingMs > 0) {
+    DynamicJsonDocument cooldown(160);
+    cooldown["ok"] = false;
+    cooldown["error"] = "cooldown_active";
+    cooldown["retry_after_ms"] = cooldownRemainingMs;
+    cooldown["retry_after_s"] = (cooldownRemainingMs + 999U) / 1000U;
+    String out;
+    serializeJson(cooldown, out);
+    sendTracked(429, "application/json", out);
+    return;
+  }
+
+  if (!sm_->sendFleetWifiProvision(ssid, pass)) {
+    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"send_failed\"}");
+    return;
+  }
+
+  const size_t totalLen = static_cast<size_t>(ssid.length() + pass.length());
+  const size_t chunks = (totalLen + 6U) / 7U;
+  DynamicJsonDocument out(128);
+  out["ok"] = true;
+  out["packets"] = static_cast<uint32_t>(chunks + 2U);  // start + chunks + commit
+  String json;
+  serializeJson(out, json);
+  sendTracked(200, "application/json", json);
+  LRS_LOGI(API,
+           "event=fleet_wifi_provision_tx ssid=%s password=%s packets=%lu",
+           ssid.c_str(),
+           lrslog::maskSecret(pass).c_str(),
+           static_cast<unsigned long>(chunks + 2U));
+}
+
+void WebConsole::handleProvisioningStatus() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+  if (rejectApiIfLowHeap("/api/provisioning/status", kApiLowHeapRejectFreeBytes, kApiLowHeapRejectMaxBlockBytes)) return;
+  const size_t totalDevices = sm_->provisioningDeviceCount();
+  const size_t maxDevicesReturned = 64;
+  const size_t returnedDevices = (totalDevices < maxDevicesReturned) ? totalDevices : maxDevicesReturned;
+  size_t docCap = 1024U + (returnedDevices * 192U);
+  if (docCap < 2048U) docCap = 2048U;
+  if (docCap > 12288U) docCap = 12288U;
+  DynamicJsonDocument doc(docCap);
+  doc["ok"] = true;
+  ProvisioningSessionSnapshot sess{};
+  sm_->provisioningSession(sess);
+  JsonObject s = doc.createNestedObject("session");
+  s["active"] = sess.active;
+  s["state"] = provisioningSessionStateText(sess.state);
+  s["session_nonce"] = sess.session_nonce;
+  s["estimated_count"] = sess.estimated_count;
+  s["started_ms"] = sess.started_ms;
+  s["phase_deadline_ms"] = sess.phase_deadline_ms;
+  s["retry_enabled"] = sess.retry_enabled;
+  s["retry_used"] = sess.retry_used;
+  s["paused_normal_tx"] = sess.paused_normal_tx;
+  s["discovered_count"] = sess.discovered_count;
+  s["selected_count"] = sess.selected_count;
+  s["conflict_count"] = sess.conflict_count;
+  s["verified_count"] = sess.verified_count;
+  s["failed_count"] = sess.failed_count;
+  s["now_ms"] = millis();
+  s["devices_total"] = totalDevices;
+  s["devices_returned"] = returnedDevices;
+  s["devices_truncated"] = (returnedDevices < totalDevices);
+  if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
+    last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
+    LRS_LOGI(API,
+             "event=provisioning_phase state=%s discovered=%u conflicts=%u verified=%u failed=%u",
+             provisioningSessionStateText(sess.state),
+             static_cast<unsigned>(sess.discovered_count),
+             static_cast<unsigned>(sess.conflict_count),
+             static_cast<unsigned>(sess.verified_count),
+             static_cast<unsigned>(sess.failed_count));
+  }
+
+  JsonArray arr = doc.createNestedArray("devices");
+  for (size_t i = 0; i < returnedDevices; ++i) {
+    ProvisioningDeviceSnapshot d{};
+    if (!sm_->provisioningDeviceByIndex(i, d)) continue;
+    JsonObject o = arr.createNestedObject();
+    o["chip_id"] = d.chip_id;
+    char chipHex[11];
+    snprintf(chipHex, sizeof(chipHex), "0x%08lX", static_cast<unsigned long>(d.chip_id));
+    o["chip_id_hex"] = chipHex;
+    o["current_address"] = d.current_address;
+    o["assigned_address"] = d.assigned_address;
+    o["role"] = d.role_tx ? "tx" : "rx";
+    o["fw_major"] = d.fw_major;
+    o["fw_minor"] = d.fw_minor;
+    o["fw_patch"] = d.fw_patch;
+    o["rssi"] = d.rssi;
+    o["selected"] = d.selected;
+    o["address_conflict"] = d.address_conflict;
+    o["state"] = provisioningDeviceStateText(d.state);
+  }
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
+}
+
+void WebConsole::handleProvisioningEvents() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+  DynamicJsonDocument doc(512);
+  ProvisioningSessionSnapshot sess{};
+  sm_->provisioningSession(sess);
+  doc["event"] = "provisioning";
+  doc["ts_ms"] = millis();
+  doc["active"] = sess.active;
+  doc["state"] = provisioningSessionStateText(sess.state);
+  doc["discovered_count"] = sess.discovered_count;
+  doc["conflict_count"] = sess.conflict_count;
+  doc["verified_count"] = sess.verified_count;
+  doc["failed_count"] = sess.failed_count;
+  String payload;
+  serializeJson(doc, payload);
+
+  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server_.sendHeader("Cache-Control", "no-cache");
+  server_.sendHeader("Connection", "keep-alive");
+  server_.sendHeader("X-Accel-Buffering", "no");
+  markResponseStatus(200);
+  server_.send(200, "text/event-stream", "");
+  server_.sendContent("retry: 1000\n");
+  server_.sendContent("event: provisioning\n");
+  server_.sendContent("data: ");
+  server_.sendContent(payload);
+  server_.sendContent("\n\n");
+  server_.client().stop();
+}
+
+void WebConsole::handleProvisioningStart() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+  DynamicJsonDocument body(256);
+  if (server_.arg("plain").length() > 0) {
+    auto err = deserializeJson(body, server_.arg("plain"));
+    if (err) {
+      sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return;
+    }
+  }
+  uint16_t estimated = 10;
+  if (!body["estimated_count"].isNull()) {
+    int v = body["estimated_count"].as<int>();
+    if (v < 1) v = 1;
+    if (v > 250) v = 250;
+    estimated = static_cast<uint16_t>(v);
+  }
+  const bool retryOnce = parseBoolField(body["retry_once"], true);
+  if (!sm_->provisioningStartDiscovery(estimated, retryOnce)) {
+    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"start_failed\"}");
+    return;
+  }
+  LRS_LOGI(API,
+           "event=provisioning_start estimated=%u retry_once=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
+           static_cast<unsigned>(estimated),
+           retryOnce ? 1U : 0U,
+           static_cast<unsigned long>(lrslog::heapFree()),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  handleProvisioningStatus();
+}
+
+void WebConsole::handleProvisioningProvisionAll() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+  if (!sm_->provisioningStartProvisionAll()) {
+    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"invalid_state\"}");
+    return;
+  }
+  LRS_LOGI(API,
+           "event=provisioning_provision_all heap_free=%lu heap_frag=%u max_free_block=%lu",
+           static_cast<unsigned long>(lrslog::heapFree()),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  handleProvisioningStatus();
+}
+
+void WebConsole::handleProvisioningCancel() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+  sm_->provisioningCancel();
+  sendTracked(200, "application/json", "{\"ok\":true}");
+  LRS_LOGI(API, "event=provisioning_cancel");
+}
+
 void WebConsole::handleTestMqtt() {
   if (!requireAuth(true)) return;
   DynamicJsonDocument body(512);
@@ -2454,6 +3921,36 @@ void WebConsole::handleLogsCsv() {
 void WebConsole::handleLogsText() {
   if (!requireAuth()) return;
   server_.send(200, "text/plain", logs_->asText());
+}
+
+void WebConsole::handleFactoryReset() {
+  if (!requireAuth(true)) return;
+
+  DynamicJsonDocument body(512);
+  auto err = deserializeJson(body, server_.arg("plain"));
+  if (err) {
+    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    return;
+  }
+
+  auto &cfg = config_->settings();
+  const String postedPassword = String(static_cast<const char *>(body["admin_password"] | ""));
+  if (postedPassword != cfg.admin_password) {
+    server_.send(403, "application/json", "{\"ok\":false,\"error\":\"invalid_password\"}");
+    return;
+  }
+  const bool keepSharedFleetKey = parseBoolField(body["keep_shared_fleet_key"], true);
+
+  if (!config_->factoryReset(keepSharedFleetKey)) {
+    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"reset_save_failed\"}");
+    return;
+  }
+
+  clearSession();
+  server_.sendHeader("Set-Cookie", "lrs_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+  server_.send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
+  delay(120);
+  ESP.restart();
 }
 
 void WebConsole::handleReboot() {

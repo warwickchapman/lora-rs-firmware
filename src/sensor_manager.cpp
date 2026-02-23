@@ -3,6 +3,8 @@
 #include <DallasTemperature.h>
 #include <OneWire.h>
 
+#include "logger.h"
+
 namespace {
 constexpr float kInvalidTemp = -127.0f;
 
@@ -55,6 +57,7 @@ void SensorManager::tick() {
     temp_.valid = false;
     temp_.error = "read_failed";
     if (logs_) logs_->add("temp_read_failed", 0, 0, 0);
+    LRS_LOGW(SENSOR, "event=temp_read_failed pin=%u", static_cast<unsigned>(temp_.pin));
     return;
   }
 
@@ -94,6 +97,7 @@ void SensorManager::setupBus() {
     temp_.error = "not_detected";
     ow_->reset_search();
     if (logs_) logs_->add("temp_not_detected", 0, 0, temp_.pin);
+    LRS_LOGW(SENSOR, "event=temp_not_detected pin=%u", static_cast<unsigned>(temp_.pin));
     return;
   }
   ow_->reset_search();
@@ -105,6 +109,7 @@ void SensorManager::setupBus() {
   temp_.error = "";
   ds_->setResolution(addr_, 12);
   if (logs_) logs_->add("temp_detected", 0, 0, temp_.pin);
+  LRS_LOGI(SENSOR, "event=temp_detected pin=%u addr=%s", static_cast<unsigned>(temp_.pin), temp_.address.c_str());
 }
 
 String SensorManager::formatAddress() const {

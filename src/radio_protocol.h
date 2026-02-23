@@ -14,6 +14,9 @@ enum class MessageType : uint8_t {
   MqttStatus = 'S',
   PollRequest = 'P',
   PollResponse = 'R',
+  WifiProvision = 'W',
+  FactoryReset = 'X',
+  Provisioning = 'V',
 };
 
 struct ProtocolMessage {
@@ -25,10 +28,12 @@ struct ProtocolMessage {
   uint8_t sensor_mask;
   uint8_t sensor_digital0;
   uint16_t sensor_analog0;
+  uint32_t unix_time_s;
   uint32_t counter;
   uint8_t src;
   uint8_t dst;
   int rssi;
+  bool via_factory_key = false;
 };
 
 class RadioProtocol {
@@ -37,16 +42,24 @@ class RadioProtocol {
   void applyConfig(const Settings &cfg);
 
   bool send(MessageType type, uint8_t relay, uint8_t input, uint8_t flags, uint32_t counter, uint8_t src, uint8_t dst,
-            uint8_t temp_code = 0xFF, uint8_t sensor_mask = 0, uint8_t sensor_digital0 = 0xFF, uint16_t sensor_analog0 = 0xFFFF);
+            uint8_t temp_code = 0xFF, uint8_t sensor_mask = 0, uint8_t sensor_digital0 = 0xFF, uint16_t sensor_analog0 = 0xFFFF,
+            uint32_t unix_time_s = 0);
+  bool sendRaw(MessageType type, uint32_t counter, uint8_t src, uint8_t dst, const uint8_t payload[12]);
+  bool sendProvisioningRaw(uint32_t counter, uint8_t src, uint8_t dst, const uint8_t payload[12], bool useFactoryKey);
   bool receive(ProtocolMessage &msg);
 
  private:
   Settings cfg_{};
   LogBuffer *logs_ = nullptr;
   bool lora_enabled_ = true;
+  bool default_key_configured_ = false;
   uint8_t enc_key_[16]{};
   uint8_t mac_key_[32]{};
+  uint8_t factory_enc_key_[16]{};
+  uint8_t factory_mac_key_[32]{};
 
   void deriveKeys();
   void refreshRadioRuntimeState();
+  bool sendRawWithKeys(MessageType type, uint32_t counter, uint8_t src, uint8_t dst, const uint8_t payload[12],
+                       const uint8_t encKey[16], const uint8_t macKey[32], const char *logEvent);
 };

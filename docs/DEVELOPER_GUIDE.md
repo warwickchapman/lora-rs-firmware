@@ -60,6 +60,12 @@ This ordering keeps LoRa control priority above MQTT.
 ## 7. Web API
 - `GET /`
 - `GET /api/status`
+- `GET /api/remotes`
+- `GET /api/remotes/events` (SSE)
+- `POST /api/remotes/:addr/actions/poll-now`
+- `POST /api/remotes/:addr/actions/forget`
+- `POST /api/remotes/:addr/actions/poll-interval`
+- `POST /api/remotes/:addr/actions/schedule`
 - `GET /api/settings`
 - `POST /api/settings`
 - `GET /api/factory`
@@ -69,8 +75,11 @@ This ordering keeps LoRa control priority above MQTT.
 - `POST /api/reboot`
 
 ## 8. Packet and Compatibility
-Current payload is 8 encrypted bytes with sensor fields.
-Older 4-byte payload firmware is not wire-compatible.
+Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.
+Older 8-byte payload firmware is not wire-compatible.
+
+Current message types include control/status (`A/C/H/M/S/P/R`) plus provisioning/reset extensions (`W`/`X`).
+`W` (WiFi provisioning) and `X` (factory reset) reuse the same encrypted 12-byte payload slot with custom byte layouts via the radio layer raw-payload send path.
 
 If payload semantics change again, add protocol-version signaling first.
 
@@ -98,11 +107,11 @@ Subscribed control topics:
 - `relay`: sets local relay directly on that node.
 - `control`: TX-only JSON control for remote LoRa relay send.
 - `control.addr` parsing: JSON number = decimal address, JSON string = hex address.
-- TX publishes per-remote child state under `<root>/lrs-<tx_chipid>/remote/0xNN/...` (canonical path).
-- TX can be commanded to poll remotes via:
-  - `<root>/lrs-<tx_chipid>/remote/0xNN/poll_interval_s`
-  - `<root>/lrs-<tx_chipid>/remote/0xNN/poll_now`
-  - `<root>/lrs-<tx_chipid>/remote/0xNN/forget` (payload `1` removes runtime node and clears retained remote subtree topics)
+- TX publishes per-peer child state under `<root>/lrs-<tx_chipid>/peer/0xNN/...` (canonical path).
+- TX can be commanded to poll peers via:
+  - `<root>/lrs-<tx_chipid>/peer/0xNN/poll_interval_s`
+  - `<root>/lrs-<tx_chipid>/peer/0xNN/poll_now`
+  - `<root>/lrs-<tx_chipid>/peer/0xNN/forget` (payload `1` removes runtime node and clears retained peer subtree topics)
 
 TX input-to-LoRa control gate:
 - Setting: `tx_input_lora_control_enabled` (LoRa tab).

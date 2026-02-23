@@ -81,7 +81,7 @@ def main():
     ap.add_argument("--flash", action="store_true", help="Run pio upload before reading IDs")
     ap.add_argument("--csv", default="factory_sticker.csv")
     ap.add_argument("--batch-id", default=dt.date.today().strftime("%y%m%d"), help="Factory batch/run id used in suggested deployment key seed")
-    ap.add_argument("--deployment-key", default="", help="Optional explicit deployment key; otherwise generated as readable three-word key")
+    ap.add_argument("--fleet-key", default="", help="Optional explicit fleet key (shared across a batch); otherwise generated as readable three-word key")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -101,7 +101,7 @@ def main():
     local_addr, remote_addr = derive_addresses(chip_int)
     password = derive_password(chip)
     role = "tx"
-    deployment_key = args.deployment_key.strip() or three_word_key(f"{args.batch_id}:{args.env}:{chip}")
+    deployment_key = args.fleet_key.strip() or three_word_key(f"{args.batch_id}:{args.env}:{chip}")
 
     record = {
         "serial": serial_for(chip),

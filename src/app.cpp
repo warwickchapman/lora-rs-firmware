@@ -3,13 +3,19 @@
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
+#include <time.h>
 
 #include "build_info.h"
+#include "logger.h"
 
 namespace {
 constexpr uint32_t kStaConnectTimeoutMs = 20000;
 constexpr uint32_t kStaReconnectIntervalMs = 10000;
 constexpr uint32_t kApDisableDelayAfterStaMs = 60000;
+constexpr uint32_t kNtpPollNoFixMs = 5000;
+constexpr uint32_t kNtpPollFixedMs = 60000;
+constexpr uint32_t kNtpForceRefreshMs = 21600000;
+constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
 
 const char *wifiStatusText(wl_status_t st) {
   switch (st) {
@@ -42,16 +48,18 @@ const char *wifiStatusText(wl_status_t st) {
 }
 
 void App::begin() {
-  Serial.printf("[LRS] fw=%s git=%s branch=%s dirty=%d built=%s %s\n",
-                LRS_FW_VERSION,
-                LRS_GIT_SHA,
-                LRS_GIT_BRANCH,
-                static_cast<int>(LRS_GIT_DIRTY),
-                __DATE__,
-                __TIME__);
+  LRS_LOGI(SYS,
+           "event=boot_banner fw=%s git=%s branch=%s dirty=%d built=\"%s %s\" reset_reason=%s",
+           LRS_FW_VERSION,
+           LRS_GIT_SHA,
+           LRS_GIT_BRANCH,
+           static_cast<int>(LRS_GIT_DIRTY),
+           __DATE__,
+           __TIME__,
+           ESP.getResetReason().c_str());
   const bool fsReady = config_.begin();
   if (!fsReady) {
-    Serial.println("Config storage init failed");
+    LRS_LOGE(FS, "event=config_store_init_failed");
   }
 
   startNetworking();
@@ -62,9 +70,17 @@ void App::begin() {
   sensors_.begin(config_.settings(), &logs_);
 
   sm_.begin(config_.settings(), &radio_, &logs_);
+  auto unixProvider = [this](uint32_t &unixTimeS) {
+    if (!sm_.sharedUnixTimeValid()) return false;
+    unixTimeS = sm_.sharedUnixTime();
+    return (unixTimeS != 0);
+  };
+  logs_.setTimeProvider(unixProvider);
+  lrslog::setUnixTimeProvider(unixProvider);
   mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_, &logs_);
+  automation_.begin(&sm_, &logs_, config_.settings());
 
-  web_.begin(&config_, &sm_, &sensors_, &logs_, [this](bool restartNetwork, bool restartOtaAuth) {
+  web_.begin(&config_, &sm_, &sensors_, &logs_, &automation_, [this](bool restartNetwork, bool restartOtaAuth) {
     applyUpdatedConfig(restartNetwork, restartOtaAuth);
   });
 
@@ -75,6 +91,7 @@ void App::begin() {
 
 void App::tick() {
   updateNetworking();
+  tickTimeSync();
   refreshCaptiveDns();
   if (dns_running_) {
     dns_.processNextRequest();
@@ -83,6 +100,66 @@ void App::tick() {
   const TempSensorStatus ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   sm_.tick();
+  automation_.tick();
+  {
+    String provSsid;
+    String provPassword;
+    uint8_t provSrc = 0;
+    if (sm_.consumePendingWifiProvision(provSsid, provPassword, provSrc)) {
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.wifi_sta_ssid != provSsid) || (cfg.wifi_sta_password != provPassword);
+      cfg.wifi_sta_ssid = provSsid;
+      cfg.wifi_sta_password = provPassword;
+      cfg.audit_last_saved_by = "lora_wifi_provision";
+      cfg.audit_last_saved_ms = millis();
+      if (config_.save()) {
+        logs_.add("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
+        if (changed) {
+          applyUpdatedConfig(true, false);
+        }
+      } else {
+        logs_.add("wifi_prov_save_fail", 0, provSrc, 0);
+      }
+    }
+  }
+  {
+    bool keepFleetKey = true;
+    uint8_t resetSrc = 0;
+    if (sm_.consumePendingFactoryReset(keepFleetKey, resetSrc)) {
+      logs_.add(keepFleetKey ? "factory_reset_exec_keep" : "factory_reset_exec_full", 0, resetSrc, 0);
+      if (config_.factoryReset(keepFleetKey)) {
+        delay(100);
+        ESP.restart();
+        return;
+      }
+      logs_.add("factory_reset_exec_save_fail", 0, resetSrc, 0);
+    }
+  }
+  {
+    uint16_t provSession = 0;
+    uint8_t provAddr = 0;
+    bool provRoleTx = false;
+    String provFleetKey;
+    if (sm_.consumePendingFleetProvisionApply(provSession, provAddr, provRoleTx, provFleetKey)) {
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.local_address != provAddr) || (cfg.role_tx != provRoleTx) || (cfg.fleet_passphrase != provFleetKey);
+      cfg.local_address = provAddr;
+      cfg.role_tx = provRoleTx;
+      cfg.fleet_passphrase = provFleetKey;
+      cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
+      cfg.audit_last_saved_by = "lora_fleet_provision";
+      cfg.audit_last_saved_ms = millis();
+      if (config_.save()) {
+        logs_.add("fleet_prov_applied", 0, provSession, provAddr);
+        if (changed) {
+          applyUpdatedConfig(false, false);
+        }
+        sm_.sendProvisioningVerify(provSession, provAddr);
+      } else {
+        logs_.add("fleet_prov_save_fail", 0, provSession, provAddr);
+      }
+    }
+  }
   mqtt_.tick(WiFi.isConnected());
   sensors_.tick();
   web_.tick();
@@ -101,6 +178,11 @@ void App::startNetworking() {
   sta_connected_since_ms_ = 0;
   ap_enabled_ = false;
   dns_running_ = false;
+  ntp_started_ = false;
+  ntp_time_valid_ = false;
+  ntp_last_check_ms_ = 0;
+  ntp_last_sync_ms_ = 0;
+  ntp_last_epoch_s_ = 0;
 
   ensureApEnabled();
 
@@ -121,10 +203,12 @@ void App::updateNetworking() {
       sta_connected_since_ms_ = millis();
       const int rssi = WiFi.RSSI();
       logs_.add("sta_connected", rssi, 0, 0);
-      Serial.printf("[LRS] STA connected ssid=%s ip=%s rssi=%d dBm\n",
-                    cfg.wifi_sta_ssid.c_str(),
-                    WiFi.localIP().toString().c_str(),
-                    rssi);
+      LRS_LOGI(WIFI,
+               "event=sta_connected ssid=%s ip=%s rssi=%d",
+               cfg.wifi_sta_ssid.c_str(),
+               WiFi.localIP().toString().c_str(),
+               rssi);
+      startNtpClient();
       maybeDisableAp();
       return;
     }
@@ -135,10 +219,11 @@ void App::updateNetworking() {
       WiFi.disconnect();
       wifi_sta_retry_ms_ = millis();
       logs_.add("sta_connect_failed_fallback_ap", 0, 0, 0);
-      Serial.printf("[LRS] STA connect failed ssid=%s reason=%s[%d], AP fallback active\n",
-                    cfg.wifi_sta_ssid.c_str(),
-                    wifiStatusText(st),
-                    static_cast<int>(st));
+      LRS_LOGW(WIFI,
+               "event=sta_connect_failed ssid=%s reason=%s status=%d ap_fallback=1",
+               cfg.wifi_sta_ssid.c_str(),
+               wifiStatusText(st),
+               static_cast<int>(st));
       ensureApEnabled();
     }
     return;
@@ -150,10 +235,12 @@ void App::updateNetworking() {
       sta_connected_since_ms_ = millis();
       const int rssi = WiFi.RSSI();
       logs_.add("sta_connected", rssi, 0, 0);
-      Serial.printf("[LRS] STA connected ssid=%s ip=%s rssi=%d dBm\n",
-                    cfg.wifi_sta_ssid.c_str(),
-                    WiFi.localIP().toString().c_str(),
-                    rssi);
+      LRS_LOGI(WIFI,
+               "event=sta_connected ssid=%s ip=%s rssi=%d",
+               cfg.wifi_sta_ssid.c_str(),
+               WiFi.localIP().toString().c_str(),
+               rssi);
+      startNtpClient();
     }
     maybeDisableAp();
     return;
@@ -162,7 +249,7 @@ void App::updateNetworking() {
   if (sta_connected_) {
     sta_connected_ = false;
     logs_.add("sta_disconnected", 0, 0, 0);
-    Serial.println("[LRS] STA disconnected");
+    LRS_LOGW(WIFI, "event=sta_disconnected");
     ensureApEnabled();
     wifi_sta_retry_ms_ = millis();
   }
@@ -179,24 +266,86 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
   sm_.applyConfig(config_.settings());
   mqtt_.applyConfig(config_.settings(), config_.chipIdHex());
   sensors_.applyConfig(config_.settings());
+  automation_.applyConfig(config_.settings());
 
   if (restartOtaAuth) {
     // ESP8266 ArduinoOTA cannot replace password once initialized in-process.
     // Reboot is required to apply new OTA credentials reliably.
     logs_.add("ota_auth_changed_reboot", 0, 0, 0);
+    LRS_LOGI(SYS, "event=config_apply restart_network=0 restart_ota_auth=1 action=reboot");
     delay(100);
     ESP.restart();
     return;
   }
 
   if (restartNetwork) {
+    LRS_LOGI(SYS, "event=config_apply restart_network=1 restart_ota_auth=0");
     WiFi.disconnect();
     delay(50);
     startNetworking();
+  } else {
+    LRS_LOGI(SYS, "event=config_apply restart_network=0 restart_ota_auth=0");
   }
   refreshMdns();
 
   logs_.add("config_reloaded", 0, 0, 0);
+}
+
+void App::startNtpClient() {
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+  ntp_started_ = true;
+  ntp_last_check_ms_ = 0;
+  logs_.add("ntp_start", 0, 0, 0);
+  LRS_LOGI(NTP, "event=ntp_start servers=pool.ntp.org,time.nist.gov,time.google.com");
+}
+
+void App::tickTimeSync() {
+  if (!sta_connected_) {
+    return;
+  }
+  if (!ntp_started_) {
+    startNtpClient();
+  }
+
+  const uint32_t nowMs = millis();
+  const uint32_t pollInterval = ntp_time_valid_ ? kNtpPollFixedMs : kNtpPollNoFixMs;
+  if ((nowMs - ntp_last_check_ms_) < pollInterval) {
+    return;
+  }
+  ntp_last_check_ms_ = nowMs;
+
+  const time_t nowUnix = time(nullptr);
+  if (nowUnix < static_cast<time_t>(kMinValidUnixTimeS)) {
+    return;
+  }
+
+  const bool hadValidTime = ntp_time_valid_;
+  const bool refreshDue = ntp_time_valid_ && ((nowMs - ntp_last_sync_ms_) >= kNtpForceRefreshMs);
+  const uint32_t unixTimeS = static_cast<uint32_t>(nowUnix);
+  bool shouldPushToStateMachine = !sm_.sharedUnixTimeValid();
+  if (!shouldPushToStateMachine) {
+    const uint32_t shared = sm_.sharedUnixTime();
+    const uint32_t delta = (shared > unixTimeS) ? (shared - unixTimeS) : (unixTimeS - shared);
+    shouldPushToStateMachine = delta > 2U;
+  }
+  ntp_time_valid_ = true;
+  ntp_last_epoch_s_ = unixTimeS;
+  ntp_last_sync_ms_ = nowMs;
+  if (shouldPushToStateMachine) {
+    sm_.setAuthoritativeUnixTime(unixTimeS);
+  }
+
+  if (!hadValidTime || refreshDue) {
+    LRS_LOGI(NTP,
+             "event=ntp_sync_ok unix=%lu push_state=%u refresh_due=%u",
+             static_cast<unsigned long>(unixTimeS),
+             shouldPushToStateMachine ? 1U : 0U,
+             refreshDue ? 1U : 0U);
+  }
+
+  if (refreshDue) {
+    startNtpClient();
+  }
 }
 
 void App::ensureApEnabled() {
@@ -205,7 +354,7 @@ void App::ensureApEnabled() {
   const String apPass = config_.apPassword();
   WiFi.softAP(apSsid.c_str(), apPass.c_str());
   ap_enabled_ = true;
-  Serial.printf("[LRS] AP active ssid=%s ip=%s\n", apSsid.c_str(), WiFi.softAPIP().toString().c_str());
+  LRS_LOGI(WIFI, "event=ap_active ssid=%s ip=%s", apSsid.c_str(), WiFi.softAPIP().toString().c_str());
 }
 
 void App::maybeDisableAp() {
@@ -221,7 +370,7 @@ void App::maybeDisableAp() {
     dns_.stop();
     dns_running_ = false;
   }
-  Serial.println("[LRS] AP disabled (STA stable)");
+  LRS_LOGI(WIFI, "event=ap_disabled reason=sta_stable");
 }
 
 void App::refreshCaptiveDns() {
@@ -247,7 +396,7 @@ void App::beginStaConnect() {
   wifi_sta_started_ms_ = millis();
   wifi_sta_retry_ms_ = millis();
   logs_.add("sta_connect_start", 0, 0, 0);
-  Serial.printf("[LRS] STA connect start ssid=%s host=%s\n", cfg.wifi_sta_ssid.c_str(), host.c_str());
+  LRS_LOGI(WIFI, "event=sta_connect_start ssid=%s host=%s", cfg.wifi_sta_ssid.c_str(), host.c_str());
 }
 
 void App::startOta() {
@@ -278,11 +427,13 @@ void App::refreshMdns() {
   MDNS.close();
   if (!MDNS.begin(desired.c_str())) {
     logs_.add("mdns_failed", 0, 0, 0);
+    LRS_LOGW(MDNS, "event=mdns_start_failed host=%s", desired.c_str());
     return;
   }
   MDNS.addService("http", "tcp", 80);
   active_mdns_hostname_ = desired;
   logs_.add(String("mdns_ready_") + desired, 0, 0, 0);
+  LRS_LOGI(MDNS, "event=mdns_ready host=%s", desired.c_str());
 }
 
 String App::normalizeHostname(const String &input) const {

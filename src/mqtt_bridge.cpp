@@ -11,13 +11,13 @@ constexpr uint32_t kReconnectIntervalMs = 30000;
 constexpr uint32_t kPublishIntervalMs = 10000;
 constexpr uint32_t kDiscoveryPublishIntervalMs = 60000;
 
-const char *remoteAckStateText(RemoteAckState s) {
+const char *peerAckStateText(PeerAckState s) {
   switch (s) {
-    case RemoteAckState::Pending:
+    case PeerAckState::Pending:
       return "pending";
-    case RemoteAckState::Ok:
+    case PeerAckState::Ok:
       return "ok";
-    case RemoteAckState::Timeout:
+    case PeerAckState::Timeout:
       return "timeout";
     default:
       return "unknown";
@@ -44,17 +44,17 @@ bool parseDecAddressSegment(const String &segment, uint8_t &out) {
   return true;
 }
 
-bool knownRemoteAddress(NodeStateMachine *sm, uint8_t addr) {
+bool knownPeerAddress(NodeStateMachine *sm, uint8_t addr) {
   if (sm == nullptr) return false;
-  const size_t n = sm->remoteNodeCount();
+  const size_t n = sm->peerCount();
   for (size_t i = 0; i < n; ++i) {
-    RemoteNodeStatusSnapshot node{};
-    if (sm->remoteNodeByIndex(i, node) && node.address == addr) return true;
+    PeerStatusSnapshot node{};
+    if (sm->peerByIndex(i, node) && node.address == addr) return true;
   }
   return false;
 }
 
-bool parseRemoteAddressSegment(const String &segment, NodeStateMachine *sm, uint8_t &out) {
+bool parsePeerAddressSegment(const String &segment, NodeStateMachine *sm, uint8_t &out) {
   // Explicit hex forms stay hex for backward compatibility.
   if (segment.startsWith("0x") || segment.startsWith("0X")) {
     return parseHexAddressSegment(segment.substring(2), out);
@@ -79,8 +79,8 @@ bool parseRemoteAddressSegment(const String &segment, NodeStateMachine *sm, uint
   if (!decOk && !hexOk) return false;
 
   if (decOk && hexOk && decAddr != hexAddr) {
-    const bool decKnown = knownRemoteAddress(sm, decAddr);
-    const bool hexKnown = knownRemoteAddress(sm, hexAddr);
+    const bool decKnown = knownPeerAddress(sm, decAddr);
+    const bool hexKnown = knownPeerAddress(sm, hexAddr);
     if (decKnown && !hexKnown) {
       out = decAddr;
       return true;
@@ -120,11 +120,11 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   mqtt_client_.setSocketTimeout(1);
   mqtt_client_.setBufferSize(768);
   mqtt_client_.setCallback(MqttBridge::staticCallback);
-  memset(remote_last_seen_published_, 0, sizeof(remote_last_seen_published_));
-  memset(remote_last_cmd_published_, 0, sizeof(remote_last_cmd_published_));
-  memset(remote_published_once_, 0, sizeof(remote_published_once_));
-  memset(remote_input_published_, 0, sizeof(remote_input_published_));
-  memset(remote_input_value_, 0, sizeof(remote_input_value_));
+  memset(peer_last_seen_published_, 0, sizeof(peer_last_seen_published_));
+  memset(peer_last_cmd_published_, 0, sizeof(peer_last_cmd_published_));
+  memset(peer_published_once_, 0, sizeof(peer_published_once_));
+  memset(peer_input_published_, 0, sizeof(peer_input_published_));
+  memset(peer_input_value_, 0, sizeof(peer_input_value_));
   return true;
 }
 
@@ -136,11 +136,11 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
   if (mqtt_client_.connected()) {
     mqtt_client_.disconnect();
   }
-  memset(remote_last_seen_published_, 0, sizeof(remote_last_seen_published_));
-  memset(remote_last_cmd_published_, 0, sizeof(remote_last_cmd_published_));
-  memset(remote_published_once_, 0, sizeof(remote_published_once_));
-  memset(remote_input_published_, 0, sizeof(remote_input_published_));
-  memset(remote_input_value_, 0, sizeof(remote_input_value_));
+  memset(peer_last_seen_published_, 0, sizeof(peer_last_seen_published_));
+  memset(peer_last_cmd_published_, 0, sizeof(peer_last_cmd_published_));
+  memset(peer_published_once_, 0, sizeof(peer_published_once_));
+  memset(peer_input_published_, 0, sizeof(peer_input_published_));
+  memset(peer_input_value_, 0, sizeof(peer_input_value_));
 }
 
 void MqttBridge::tick(bool wifiConnected) {
@@ -232,7 +232,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
-    sm_->mqttSendRemoteRelay(addr, relay ? 1 : 0);
+    sm_->mqttSendPeerRelay(addr, relay ? 1 : 0);
     if (logs_) {
       logs_->add("mqtt_control_topic", 0, 0, relay ? 1 : 0);
     }
@@ -240,7 +240,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 
   if (cfg_.role_tx && sm_ != nullptr) {
-    const String remotePrefix = topic_base_ + "/remote/";
+    const String remotePrefix = topic_base_ + "/peer/";
     if (!topicStr.startsWith(remotePrefix)) {
       return;
     }
@@ -252,7 +252,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     }
 
     uint8_t addr = 0;
-    if (!parseRemoteAddressSegment(suffix.substring(0, slash), sm_, addr)) {
+    if (!parsePeerAddressSegment(suffix.substring(0, slash), sm_, addr)) {
       return;
     }
 
@@ -265,7 +265,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       if (sec < 0) sec = 0;
       if (sec > 0 && sec < 60) sec = 60;
       if (sec > 3600) sec = 3600;
-      sm_->mqttSetRemotePollIntervalMs(addr, static_cast<uint32_t>(sec) * 1000U);
+      sm_->mqttSetPeerPollIntervalMs(addr, static_cast<uint32_t>(sec) * 1000U);
       if (logs_) {
         logs_->add("mqtt_remote_poll_interval", 0, static_cast<uint32_t>(sec), addr);
       }
@@ -273,7 +273,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     }
 
     if (leaf == "poll_now") {
-      sm_->mqttPollRemoteNow(addr);
+      sm_->mqttPollPeerNow(addr);
       if (logs_) {
         logs_->add("mqtt_remote_poll_now", 0, 0, addr);
       }
@@ -283,8 +283,8 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     if (leaf == "forget") {
       const bool forget = (length > 0 && payload[0] != '0');
       if (!forget) return;
-      const bool removed = sm_->mqttForgetRemote(addr);
-      clearRemoteRetainedTopics(addr);
+      const bool removed = sm_->mqttForgetPeer(addr);
+      clearPeerRetainedTopics(addr);
       if (logs_) {
         logs_->add(removed ? "mqtt_remote_forget_ok" : "mqtt_remote_forget_missing", 0, 0, addr);
       }
@@ -293,13 +293,13 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 }
 
-void MqttBridge::clearRemoteRetainedTopics(uint8_t addr) {
+void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   if (!mqtt_client_.connected()) return;
-  remote_last_seen_published_[addr] = 0;
-  remote_last_cmd_published_[addr] = 0;
-  remote_published_once_[addr] = false;
-  remote_input_published_[addr] = false;
-  remote_input_value_[addr] = 0;
+  peer_last_seen_published_[addr] = 0;
+  peer_last_cmd_published_[addr] = 0;
+  peer_published_once_[addr] = false;
+  peer_input_published_[addr] = false;
+  peer_input_value_[addr] = 0;
 
   char addrHex[3];
   snprintf(addrHex, sizeof(addrHex), "%02X", addr);
@@ -309,9 +309,9 @@ void MqttBridge::clearRemoteRetainedTopics(uint8_t addr) {
   snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(addr));
 
   const String bases[] = {
-      topic_base_ + "/remote/" + String(addrHexPrefixed),
-      topic_base_ + "/remote/" + String(addrHex),
-      topic_base_ + "/remote/" + String(addrDec),
+      topic_base_ + "/peer/" + String(addrHexPrefixed),
+      topic_base_ + "/peer/" + String(addrHex),
+      topic_base_ + "/peer/" + String(addrDec),
   };
 
   const char *leaves[] = {
@@ -356,9 +356,9 @@ bool MqttBridge::connectIfNeeded() {
 
   mqtt_client_.subscribe(relay_topic_.c_str());
   mqtt_client_.subscribe(control_topic_.c_str());
-  mqtt_client_.subscribe((topic_base_ + "/remote/+/poll_interval_s").c_str());
-  mqtt_client_.subscribe((topic_base_ + "/remote/+/poll_now").c_str());
-  mqtt_client_.subscribe((topic_base_ + "/remote/+/forget").c_str());
+  mqtt_client_.subscribe((topic_base_ + "/peer/+/poll_interval_s").c_str());
+  mqtt_client_.subscribe((topic_base_ + "/peer/+/poll_now").c_str());
+  mqtt_client_.subscribe((topic_base_ + "/peer/+/forget").c_str());
 
   if (logs_) {
     logs_->add("mqtt_connected", 0, 0, 0);
@@ -404,16 +404,16 @@ void MqttBridge::publishStatus() {
   mqtt_client_.publish(last_updated_topic_.c_str(), updatedMs, true);
 
   if (cfg_.role_tx) {
-    const size_t nodeCount = sm_->remoteNodeCount();
+    const size_t nodeCount = sm_->peerCount();
     for (size_t i = 0; i < nodeCount; ++i) {
-      RemoteNodeStatusSnapshot node{};
-      if (!sm_->remoteNodeByIndex(i, node)) {
+      PeerStatusSnapshot node{};
+      if (!sm_->peerByIndex(i, node)) {
         continue;
       }
       const uint8_t addr = node.address;
       if (!cfg_.tx_mqtt_remote_polling_enabled) {
-        const bool changed = !remote_published_once_[addr] || remote_last_seen_published_[addr] != node.last_seen_ms ||
-                             remote_last_cmd_published_[addr] != node.last_cmd_counter;
+        const bool changed = !peer_published_once_[addr] || peer_last_seen_published_[addr] != node.last_seen_ms ||
+                             peer_last_cmd_published_[addr] != node.last_cmd_counter;
         if (!changed) {
           continue;
         }
@@ -426,17 +426,17 @@ void MqttBridge::publishStatus() {
       char addrDec[4];
       snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(node.address));
 
-      const String baseHex = topic_base_ + "/remote/" + String(addrHexPrefixed);
+      const String baseHex = topic_base_ + "/peer/" + String(addrHexPrefixed);
 
       auto publishRemote = [&](const String &base) {
         mqtt_client_.publish((base + "/relay").c_str(), node.relay_state ? "1" : "0", true);
         const uint8_t inputValue = node.input_state ? 1 : 0;
-        if (!remote_input_published_[addr] || remote_input_value_[addr] != inputValue) {
+        if (!peer_input_published_[addr] || peer_input_value_[addr] != inputValue) {
           mqtt_client_.publish((base + "/input").c_str(), inputValue ? "1" : "0", true);
-          remote_input_published_[addr] = true;
-          remote_input_value_[addr] = inputValue;
+          peer_input_published_[addr] = true;
+          peer_input_value_[addr] = inputValue;
         }
-        mqtt_client_.publish((base + "/ack_state").c_str(), remoteAckStateText(node.ack_state), true);
+        mqtt_client_.publish((base + "/ack_state").c_str(), peerAckStateText(node.ack_state), true);
         mqtt_client_.publish((base + "/addr_hex").c_str(), addrHex, true);
         mqtt_client_.publish((base + "/addr_dec").c_str(), addrDec, true);
 
@@ -467,9 +467,9 @@ void MqttBridge::publishStatus() {
       };
 
       publishRemote(baseHex);
-      remote_last_seen_published_[addr] = node.last_seen_ms;
-      remote_last_cmd_published_[addr] = node.last_cmd_counter;
-      remote_published_once_[addr] = true;
+      peer_last_seen_published_[addr] = node.last_seen_ms;
+      peer_last_cmd_published_[addr] = node.last_cmd_counter;
+      peer_published_once_[addr] = true;
     }
   }
 

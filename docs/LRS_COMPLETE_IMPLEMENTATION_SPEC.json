@@ -296,18 +296,23 @@
         {"name": "type", "size_bytes": 1},
         {"name": "counter", "size_bytes": 4},
         {"name": "nonce", "size_bytes": 8},
-        {"name": "encrypted", "size_bytes": 8},
+        {"name": "encrypted", "size_bytes": 12},
         {"name": "mac", "size_bytes": 8}
       ],
-      "total_bytes": 31
+      "total_bytes": 35
     },
     "message_types": {
       "A": "Ack",
       "C": "Change",
       "H": "Heartbeat",
-      "M": "Mqtt"
+      "M": "Mqtt",
+      "S": "MqttStatus",
+      "P": "PollRequest",
+      "R": "PollResponse",
+      "W": "WifiProvision",
+      "X": "FactoryReset"
     },
-    "payload_8b": {
+    "payload_12b_standard": {
       "b0": "relay_state",
       "b1": "input_state",
       "b2": "flags",
@@ -315,7 +320,16 @@
       "b4": "sensor_mask (bit0 digital present, bit1 temperature present)",
       "b5": "sensor_digital0 (defaults to input if not provided)",
       "b6": "sensor_analog0_lsb",
-      "b7": "sensor_analog0_msb"
+      "b7": "sensor_analog0_msb",
+      "b8": "unix_time_s_lsb",
+      "b9": "unix_time_s_b1",
+      "b10": "unix_time_s_b2",
+      "b11": "unix_time_s_msb"
+    },
+    "payload_12b_custom_types": {
+      "W": "Wifi provisioning segmented transfer (start/data/commit) using custom payload byte semantics",
+      "X": "Factory reset command with keep-fleet-key option using custom payload byte semantics",
+      "transport_note": "Uses same encrypted 12-byte payload slot and packet framing via raw payload send path"
     },
     "nonce_and_iv": {
       "nonce_generation": "8 random bytes",
@@ -341,7 +355,8 @@
     },
     "wire_compatibility": {
       "compatible_with_legacy_4b_payload": false,
-      "upgrade_requirement": "paired nodes must run the new 8-byte payload firmware"
+      "compatible_with_legacy_8b_payload": false,
+      "upgrade_requirement": "paired nodes must run the new 12-byte payload firmware"
     }
   },
   "state_machine_contract": {

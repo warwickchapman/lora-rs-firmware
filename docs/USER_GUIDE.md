@@ -124,29 +124,29 @@ Per-device topics:
 - `<root>/lrs-<chipid>/control`
 - `<root>/lrs-<chipid>/last_updated`
 
-TX remote child topics (per RX address seen/controlled):
-- `<root>/lrs-<tx_chipid>/remote/0xNN/relay`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/input`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/temp_c`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/uplink_rssi_dbm`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/downlink_rssi_dbm`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/ack_state` (`pending`/`ok`/`timeout`/`unknown`)
-- `<root>/lrs-<tx_chipid>/remote/0xNN/last_seen_ms`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/last_cmd_counter`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_interval_s`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/last_poll_tx_ms`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_state`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/addr_hex`
-- `<root>/lrs-<tx_chipid>/remote/0xNN/addr_dec`
+TX peer child topics (per RX address seen/controlled):
+- `<root>/lrs-<tx_chipid>/peer/0xNN/relay`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/input`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/temp_c`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/uplink_rssi_dbm`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/downlink_rssi_dbm`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/ack_state` (`pending`/`ok`/`timeout`/`unknown`)
+- `<root>/lrs-<tx_chipid>/peer/0xNN/last_seen_ms`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/last_cmd_counter`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/poll_interval_s`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/last_poll_tx_ms`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/poll_state`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/addr_hex`
+- `<root>/lrs-<tx_chipid>/peer/0xNN/addr_dec`
 
 Address format:
-- Canonical remote topic path is `0xNN` (for example `0x51`, `0x9D`).
+- Canonical peer topic path is `0xNN` (for example `0x51`, `0x9D`).
 - Local `addr` topic is also published as `0xNN`.
 
-TX remote control topics (subscribe on TX):
-- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_interval_s` payload seconds (`0` disables polling)
-- `<root>/lrs-<tx_chipid>/remote/0xNN/poll_now` payload any value (trigger immediate poll)
-- `<root>/lrs-<tx_chipid>/remote/0xNN/forget` payload `1` (remove remote node from TX runtime + clear retained remote topics for that node)
+TX peer control topics (subscribe on TX):
+- `<root>/lrs-<tx_chipid>/peer/0xNN/poll_interval_s` payload seconds (`0` disables polling)
+- `<root>/lrs-<tx_chipid>/peer/0xNN/poll_now` payload any value (trigger immediate poll)
+- `<root>/lrs-<tx_chipid>/peer/0xNN/forget` payload `1` (remove peer node from TX runtime + clear retained peer topics for that node)
 
 Discovery topic (retained JSON):
 - `<root>/discovery/lrs-<chipid>`

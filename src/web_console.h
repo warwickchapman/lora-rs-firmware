@@ -8,6 +8,7 @@ class ConfigStore;
 class NodeStateMachine;
 class LogBuffer;
 class SensorManager;
+class AutomationRulesEngine;
 
 class WebConsole {
  public:
@@ -15,6 +16,7 @@ class WebConsole {
              NodeStateMachine *sm,
              SensorManager *sensors,
              LogBuffer *logs,
+             AutomationRulesEngine *automation,
              std::function<void(bool, bool)> onApply);
   void tick();
 
@@ -24,6 +26,7 @@ class WebConsole {
   NodeStateMachine *sm_ = nullptr;
   SensorManager *sensors_ = nullptr;
   LogBuffer *logs_ = nullptr;
+  AutomationRulesEngine *automation_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
 
   uint16_t failed_auth_ = 0;
@@ -41,12 +44,20 @@ class WebConsole {
   void startSession();
   uint32_t sessionRemainingS() const;
   void routes();
+  void beginRequestLog(const char *path, bool api, bool poll = false, bool heapDiag = false);
+  void finishRequestLog();
+  void markResponseStatus(int status);
+  void sendTracked(int code, const char *contentType, const char *body);
+  void sendTracked(int code, const char *contentType, const String &body);
+  bool rejectApiIfLowHeap(const char *path, uint32_t minFreeBytes, uint32_t minMaxBlockBytes = 0);
   bool isSoftApActive() const;
   void handleCaptiveProbe();
 
   void handleIndex();
   void handleLoginPage();
+  void handleFleetSetupPage();
   void handleLoginApi();
+  void handleFleetSetupApi();
   void handleLogoutApi();
   void handleSessionApi();
   void handleStatus();
@@ -55,14 +66,39 @@ class WebConsole {
   void handlePostSettings();
   void handleExportSettings();
   void handleImportSettings();
-  void handleRemotes();
-  void handleRemoteAction();
+  void handleFleet();
+  void handleFleetEvents();
+  void handleGetAutomationRules();
+  void handlePostAutomationRules();
+  bool handleFleetDeviceActionRoute(const String &uri);
   void handleDiagnostics();
   void handleTestSta();
+  void handleProvisionFleetWifi();
+  void handleProvisioningStart();
+  void handleProvisioningStatus();
+  void handleProvisioningEvents();
+  void handleProvisioningProvisionAll();
+  void handleProvisioningCancel();
   void handleTestMqtt();
   void handleOtaUpload();
   void handleOtaUploadChunk();
   void handleLogsCsv();
   void handleLogsText();
+  void handleFactoryReset();
   void handleReboot();
+  bool needsFleetSetupPrompt() const;
+
+  struct RequestLogState {
+    bool active = false;
+    bool api = false;
+    bool poll = false;
+    bool heap_diag = false;
+    uint32_t started_ms = 0;
+    int status = 0;
+    String path;
+    String client_ip;
+  };
+  RequestLogState request_log_{};
+  uint32_t last_low_heap_warn_ms_ = 0;
+  uint8_t last_logged_prov_state_ = 0xFF;
 };
