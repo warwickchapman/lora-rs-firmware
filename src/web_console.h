@@ -58,6 +58,8 @@ class WebConsole {
   void handleLogoutApi();
   void handleSessionApi();
   void handleStatus();
+  void handleStatusLive();
+  void handleStatusStatic();
   void handleStatusLite();
   void handleFactory();
   void handleGetSettings();

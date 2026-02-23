@@ -360,6 +360,9 @@ header .wifi{font-size:.9rem;background:rgba(255,255,255,.16);border:1px solid r
 header .relay-head{font-size:.9rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;white-space:nowrap}
 header .relay-head.on{background:rgba(126,211,121,.24);border-color:rgba(126,211,121,.6)}
 header .relay-head.off{background:rgba(255,255,255,.12)}
+header .relay-head.mem-ok{background:rgba(126,211,121,.18);border-color:rgba(126,211,121,.48)}
+header .relay-head.mem-warn{background:rgba(245,158,11,.18);border-color:rgba(245,158,11,.55);color:#ffe8bf}
+header .relay-head.mem-crit{background:rgba(239,68,68,.18);border-color:rgba(239,68,68,.6);color:#ffd6d6}
 header .reason-head{font-size:.85rem;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:6px 10px;white-space:nowrap;display:none}
 header .reason-head.show{display:inline-flex}
 header .right{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -501,7 +504,6 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
-<div id="deploymentKeyNotice" class="deploy-note">Deployment Key (Encryption): checking...</div>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
 <div class="status-grid">
 <div>
@@ -574,7 +576,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><h4 style="margin:10px 0 6px 0">System Information</h4><div id="diagSystem" class="status-table"></div><div id="diagText" class="small"></div></section>
 <section class="card page" id="page-logs"><h3>Logs</h3><div class="actions"><button onclick="refreshLogs()">Refresh</button><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button></div><pre id="logView" style="max-height:320px;overflow:auto"></pre></section>
 </main>
-<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101</div></footer>
+<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101 | <span id="footerFw">FW: -</span></div></footer>
 <div id="toast" class="toast"></div>
 <script>
 const FREQ_MIN_MHZ = 400.0;
@@ -610,6 +612,8 @@ let provUiSessionState = 'idle';
 let settingsPageLoaded = false;
 let settingsPageLoadInFlight = false;
 let wifiProvisionResultTimer=0;
+let statusStaticCache = null;
+let statusStaticLoadInFlight = false;
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -984,6 +988,7 @@ function showPage(page){
   if(nav) nav.classList.toggle('active', p===activePage);
  });
  if(activePage==='settings'){ showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(()=>{}); }
+ if(activePage==='status'){ statusStaticCache = null; ensureStatusStatic(true).catch(()=>{}); }
  if(activePage==='logs'){ refreshLogs(); }
  if(activePage==='diagnostics'){ refreshDiagnostics(); }
  if(activePage==='fleet'){ showFleetTab(activeFleetTab); }
@@ -1020,13 +1025,29 @@ function togglePasswordField(id,btn){
  el.type=show?'text':'password';
  if(btn){ btn.innerText=show?'Hide':'Show'; }
 }
+async function ensureStatusStatic(silent){
+ if(location.pathname !== '/') return statusStaticCache;
+ if(statusStaticCache) return statusStaticCache;
+ if(statusStaticLoadInFlight) return null;
+ statusStaticLoadInFlight = true;
+ const st = await apiJson('/api/status-static',{silent:!!silent});
+ if(st && st.ok!==false){
+  statusStaticCache = st;
+  const footerFw=document.getElementById('footerFw');
+  if(footerFw){
+   footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
+  }
+ }
+ statusStaticLoadInFlight = false;
+ return statusStaticCache;
+}
 async function refreshStatus(){
  if(location.pathname !== '/') return;
  if(statusRefreshInFlight) return;
  if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs) || isFleetManageActive() || isProvisioningUiBusy()) return;
  statusRefreshInFlight = true;
- const st=await apiJson('/api/status',{silent:true});
- if(!st){
+ const live=await apiJson('/api/status-live',{silent:true});
+ if(!live){
   statusFailCount++;
   if(statusFailCount >= 3){
    const s=document.getElementById('statusTable');
@@ -1036,6 +1057,10 @@ async function refreshStatus(){
   return;
  }
  statusFailCount = 0;
+ if(!statusStaticCache && !statusStaticLoadInFlight){
+  ensureStatusStatic(true).catch(()=>{});
+ }
+ const st=Object.assign({}, statusStaticCache||{}, live||{});
  applyHeaderStatus(st);
  const relayOn = Number(st.relay_state) === 1;
  const hasLora = Number(st.lora_last_packet_ms||0) > 0;
@@ -1080,15 +1105,11 @@ async function refreshStatus(){
  const rm=document.getElementById('relayMeta');
  if(rm){ rm.innerText = `Link: ${st.link_state}`; }
  const table=document.getElementById('statusTable');
- const keyNotice=document.getElementById('deploymentKeyNotice');
  const deployKey=String(st.deployment_key || '');
  const deployKeyCopyBtn = copyButtonHtml(deployKey, 'Fleet key');
- const deployDefault=!!st.deployment_key_default;
- if(keyNotice){
-   keyNotice.className = `deploy-note${deployDefault ? ' warn' : ''}`;
-   keyNotice.innerHTML = deployDefault
-    ? `Deployment Key (Encryption): <b>${escapeHtml(deployKey)}</b> ${deployKeyCopyBtn} (default). Change this now to isolate your deployment.`
-    : `Deployment Key (Encryption): <b>${escapeHtml(deployKey || 'not_set')}</b> ${deployKeyCopyBtn}`;
+ const footerFw=document.getElementById('footerFw');
+ if(footerFw){
+  footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
  }
  if(table){
  table.className='status-table';
@@ -1096,8 +1117,6 @@ async function refreshStatus(){
    `<div class="section">LoRa</div>
     <div class="k">Role</div><div class="v copyable">${copyableValueHtml(escapeHtml(roleDisplay), roleDisplay, 'Role')}</div>
     <div class="k">Fleet key</div><div class="v copyable">${copyableValueHtml(escapeHtml(deployKey || 'not_set'), deployKey, 'Fleet key')}</div>
-    <div class="k">Firmware</div><div class="v">${escapeHtml(st.fw_display || `${st.fw_version || 'n/a'} (${st.fw_git_sha || 'n/a'}${st.fw_dirty ? ', dirty' : ''})`)}</div>
-    <div class="k">Build</div><div class="v">${escapeHtml(st.build_date || 'n/a')} ${escapeHtml(st.build_time || '')}</div>
     <div class="k">Link</div><div class="v">${escapeHtml(st.link_state)}</div>
     <div class="k">LoRa RSSI</div><div class="v">${loraRssiText}</div>
     <div class="k">Last LoRa TX</div><div class="v">${escapeHtml(loraLastTxText)}</div>
@@ -1183,7 +1202,7 @@ function applyHeaderStatus(st){
   rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
  }
  if(heapEl){
-  const heapBytes=Number(st.heap_free_bytes||0);
+ const heapBytes=Number(st.heap_free_bytes||0);
   const maxBlockBytes=Number(st.max_free_block_bytes||0);
   const heapFrag=Number(st.heap_frag_percent||0);
   const heapK = heapBytes>0 ? (heapBytes/1024) : 0;
@@ -1191,7 +1210,13 @@ function applyHeaderStatus(st){
   const heapTxt = heapBytes>0 ? (heapK>=10 ? String(Math.round(heapK)) : heapK.toFixed(1)) : '-';
   const maxTxt = maxBlockBytes>0 ? (maxK>=10 ? String(Math.round(maxK)) : maxK.toFixed(1)) : '-';
   heapEl.innerText = (heapBytes>0 && maxBlockBytes>0) ? `Mem ${heapTxt}/${maxTxt}` : 'Mem -/-';
-  heapEl.className = 'relay-head off';
+  let memClass='off';
+  if(heapBytes>0 && maxBlockBytes>0){
+   const crit = (maxBlockBytes < 1200) || (heapBytes < 3000 && maxBlockBytes < 1600);
+   const warn = !crit && ((maxBlockBytes < 1800) || (heapBytes < 4000));
+   memClass = crit ? 'mem-crit' : (warn ? 'mem-warn' : 'mem-ok');
+  }
+  heapEl.className = `relay-head ${memClass}`;
   if(heapBytes>0 || maxBlockBytes>0){
    heapEl.title = `Free heap: ${heapBytes} B | Max block: ${maxBlockBytes} B | Frag: ${heapFrag}%`;
   }else{
@@ -2462,6 +2487,24 @@ void WebConsole::routes() {
     handleStatus();
     finishRequestLog();
   });
+  server_.on("/api/status-live", HTTP_GET, [this]() {
+    beginRequestLog("/api/status-live", true, true, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handleStatusLive();
+    finishRequestLog();
+  });
+  server_.on("/api/status-static", HTTP_GET, [this]() {
+    beginRequestLog("/api/status-static", true, false, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handleStatusStatic();
+    finishRequestLog();
+  });
   server_.on("/api/status-lite", HTTP_GET, [this]() {
     beginRequestLog("/api/status-lite", true, true, true);
     if (!requireAuth(true)) {
@@ -2753,6 +2796,9 @@ void WebConsole::handleStatus() {
 
   doc["sta_target_rssi"] = -127;
   doc["sta_target_rssi_text"] = "disabled";
+  doc["heap_free_bytes"] = ESP.getFreeHeap();
+  doc["heap_frag_percent"] = lrslog::heapFragPercent();
+  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
   doc["uptime_ms"] = millis();
   String relayReason = "boot";
   if (cfg.role_tx) {
@@ -2826,6 +2872,125 @@ void WebConsole::handleStatus() {
     doc["sensor_temp_error"] = ts.error;
     doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
   }
+
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
+}
+
+void WebConsole::handleStatusLive() {
+  if (rejectApiIfLowHeap("/api/status-live", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
+  DynamicJsonDocument doc(512);
+  auto &cfg = config_->settings();
+  const wl_status_t st = WiFi.status();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
+  doc["link_state"] = linkStateText(sm_->linkState());
+  doc["relay_state"] = sm_->relayState();
+  doc["input_state"] = sm_->inputState();
+  doc["local_input_state"] = sm_->localDryContactState();
+  doc["lora_last_rssi"] = sm_->lastPacketRssi();
+  doc["lora_last_packet_ms"] = sm_->lastPacketMs();
+  doc["lora_last_tx_ms"] = sm_->lastTxMs();
+  doc["lora_remote_temp_valid"] = sm_->remoteTemperatureValid();
+  doc["lora_remote_temp_c"] = sm_->remoteTemperatureC();
+  doc["lora_remote_temp_ms"] = sm_->remoteTemperatureMs();
+  doc["sta_connected"] = WiFi.isConnected();
+  doc["sta_ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
+  doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
+  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
+  doc["sta_status_code"] = static_cast<int>(st);
+  doc["sta_status_text"] = wifiStatusText(st);
+  doc["heap_free_bytes"] = ESP.getFreeHeap();
+  doc["heap_frag_percent"] = lrslog::heapFragPercent();
+  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
+  doc["uptime_ms"] = millis();
+
+  String relayReason = "boot";
+  if (cfg.role_tx) {
+    if (sm_->relayState() == 0) {
+      if (sm_->inputState() == 0) {
+        relayReason = "input_open";
+      } else if (sm_->linkState() == LinkState::Timeout) {
+        relayReason = "ack_timeout";
+      } else if (sm_->linkState() == LinkState::WaitAck) {
+        relayReason = "wait_ack";
+      } else {
+        relayReason = "no_lora_link";
+      }
+    } else {
+      relayReason = "ok";
+    }
+  } else {
+    const bool relayOn = sm_->relayState() != 0;
+    switch (sm_->lastRxControlSource()) {
+      case RxControlSource::Mqtt:
+        relayReason = relayOn ? "mqtt_on" : "mqtt_off";
+        break;
+      case RxControlSource::LoRa:
+        relayReason = relayOn ? "lora_on" : "lora_off";
+        break;
+      default:
+        relayReason = "boot";
+        break;
+    }
+  }
+  doc["relay_reason"] = relayReason;
+
+  if (sensors_) {
+    const TempSensorStatus ts = sensors_->tempStatus();
+    doc["sensor_temp_enabled"] = ts.enabled;
+    doc["sensor_temp_detected"] = ts.detected;
+    doc["sensor_temp_valid"] = ts.valid;
+    doc["sensor_temp_c"] = ts.celsius;
+    doc["sensor_temp_addr"] = ts.address;
+    doc["sensor_temp_error"] = ts.error;
+    doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
+  }
+
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
+}
+
+void WebConsole::handleStatusStatic() {
+  if (rejectApiIfLowHeap("/api/status-static", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
+  DynamicJsonDocument doc(512);
+  auto &cfg = config_->settings();
+  doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
+  doc["deployment_key"] = cfg.fleet_passphrase;
+  doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
+  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
+  doc["fleet_setup_required"] = needsFleetSetupPrompt();
+  doc["ap_ssid"] = config_->apSsid();
+  doc["ap_ip"] = WiFi.softAPIP().toString();
+  doc["mdns_ap"] = "lrs.local";
+  doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
+  doc["fw_version"] = LRS_FW_VERSION;
+  doc["fw_git_sha"] = LRS_GIT_SHA;
+  doc["fw_git_branch"] = LRS_GIT_BRANCH;
+  doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
+  doc["fw_build_id"] = LRS_BUILD_ID;
+  doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
+  const String fwVersion = String(LRS_FW_VERSION);
+  if (LRS_GIT_DIRTY == 0) {
+    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ")";
+  } else {
+    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ", dirty)";
+  }
+  doc["build_date"] = __DATE__;
+  doc["build_time"] = __TIME__;
+  doc["session_remaining_s"] = sessionRemainingS();
+  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
+  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
+  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
+  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
+  doc["audit_boot_count"] = cfg.audit_boot_count;
 
   const size_t len = measureJson(doc);
   server_.setContentLength(len);
