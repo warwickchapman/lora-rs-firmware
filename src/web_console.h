@@ -59,6 +59,7 @@ class WebConsole {
   void handleSessionApi();
   void handleStatus();
   void handleStatusLive();
+  void handleStatusLiveEvents();
   void handleStatusStatic();
   void handleStatusLite();
   void handleFactory();
@@ -84,6 +85,27 @@ class WebConsole {
   void handleReboot();
   bool needsFleetSetupPrompt() const;
 
+  struct JsonResponseCache {
+    String body;
+    uint32_t built_ms = 0;
+  };
+
+  bool apiHeapHealthy(uint32_t minFreeBytes, uint32_t minMaxBlockBytes) const;
+  bool tryServeCachedJson(const char *path,
+                          uint32_t minFreeBytes,
+                          uint32_t minMaxBlockBytes,
+                          uint32_t ttlMs,
+                          JsonResponseCache &cache);
+  void initStatusCaches();
+  void setUiNoStoreHeaders();
+  void tickStatusLiveSse();
+  void closeStatusLiveSse();
+  uint32_t computeStatusLiveSseIntervalMs() const;
+  bool buildStatusLiveCache();
+  bool buildStatusStaticCache();
+  bool buildStatusLiteCache();
+  bool buildStatusCompatCacheFromLiveStatic();
+
   struct RequestLogState {
     bool active = false;
     bool api = false;
@@ -97,4 +119,16 @@ class WebConsole {
   RequestLogState request_log_{};
   uint32_t last_low_heap_warn_ms_ = 0;
   uint8_t last_logged_prov_state_ = 0xFF;
+  uint32_t last_status_compat_hit_log_ms_ = 0;
+  JsonResponseCache status_cache_{};
+  JsonResponseCache status_live_cache_{};
+  JsonResponseCache status_static_cache_{};
+  JsonResponseCache status_lite_cache_{};
+  WiFiClient status_live_sse_client_{};
+  bool status_live_sse_active_ = false;
+  uint32_t status_live_sse_last_push_ms_ = 0;
+  uint32_t status_live_sse_last_keepalive_ms_ = 0;
+  uint32_t status_live_sse_last_sent_cache_ms_ = 0;
+  uint32_t status_live_sse_last_interval_ms_ = 0;
+  uint32_t last_web_pressure_ms_ = 0;
 };

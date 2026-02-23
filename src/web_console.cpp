@@ -34,12 +34,34 @@ constexpr uint32_t kApiLightLowHeapRejectFreeBytes = 3000;
 constexpr uint32_t kApiLightLowHeapRejectMaxBlockBytes = 1200;
 constexpr uint32_t kApiLowHeapRejectFreeBytes = 6500;
 constexpr uint32_t kApiLowHeapRejectMaxBlockBytes = 2500;
+constexpr uint32_t kApiStatusLiveLowHeapRejectFreeBytes = 4500;
+constexpr uint32_t kApiStatusLiveLowHeapRejectMaxBlockBytes = 1800;
+constexpr uint32_t kApiStatusStaticLowHeapRejectFreeBytes = 4500;
+constexpr uint32_t kApiStatusStaticLowHeapRejectMaxBlockBytes = 1800;
 constexpr uint32_t kApiFleetLowHeapRejectFreeBytes = 4500;
 constexpr uint32_t kApiFleetLowHeapRejectMaxBlockBytes = 1800;
 constexpr uint32_t kApiProvStatusCompactFreeBytes = 3500;
 constexpr uint32_t kApiProvStatusCompactMaxBlockBytes = 1400;
 constexpr uint32_t kIndexLowHeapRejectFreeBytes = 3800;
 constexpr uint32_t kIndexLowHeapRejectMaxBlockBytes = 2400;
+constexpr uint32_t kStatusCacheTtlMs = 3000;
+constexpr uint32_t kStatusLiveCacheTtlMs = 1500;
+constexpr uint32_t kStatusStaticCacheTtlMs = 15000;
+constexpr uint32_t kStatusLiteCacheTtlMs = 1000;
+constexpr size_t kStatusCacheReserveBytes = 1600;
+constexpr size_t kStatusLiveCacheReserveBytes = 1024;
+constexpr size_t kStatusStaticCacheReserveBytes = 1024;
+constexpr size_t kStatusLiteCacheReserveBytes = 384;
+constexpr uint32_t kStatusCompatHitLogMinIntervalMs = 5000;
+constexpr uint32_t kStatusLiveSseKeepAliveMs = 15000;
+constexpr uint32_t kStatusLiveSseConnectMinFreeBytes = 5000;
+constexpr uint32_t kStatusLiveSseConnectMinMaxBlockBytes = 2000;
+constexpr uint32_t kStatusLiveSsePushHealthyMs = 2000;
+constexpr uint32_t kStatusLiveSsePushWarnMs = 4000;
+constexpr uint32_t kStatusLiveSsePushPressureMs = 8000;
+constexpr uint32_t kStatusLiveSsePushSevereMs = 12000;
+constexpr uint32_t kStatusLiveSsePressureWindowMs = 12000;
+constexpr uint32_t kWebRequestPressureDurMs = 80;
 
 #ifdef REGION_US
 constexpr long kMinFrequencyHz = 902000000L;
@@ -505,6 +527,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
+<div class="actions" style="margin-top:0;margin-bottom:8px"><button type="button" onclick="refreshStatus(true)">Refresh now</button><span id="statusLiveNotice" class="small" style="align-self:center">Waiting for device updates...</span></div>
 <div class="status-grid">
 <div>
 <div id="statusTable">Loading status...</div>
@@ -614,6 +637,13 @@ let settingsPageLoadInFlight = false;
 let wifiProvisionResultTimer=0;
 let statusStaticCache = null;
 let statusStaticLoadInFlight = false;
+let statusLiveEventSource = null;
+let statusLiveSseConnected = false;
+let statusLiveSseLastMessageMs = 0;
+let statusLiveSseReconnectTimer = 0;
+let statusLiveSseBackoffMs = 1000;
+let statusLiveUiTicker = 0;
+let statusLiveHasLiveData = false;
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -988,7 +1018,14 @@ function showPage(page){
   if(nav) nav.classList.toggle('active', p===activePage);
  });
  if(activePage==='settings'){ showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(()=>{}); }
- if(activePage==='status'){ statusStaticCache = null; ensureStatusStatic(true).catch(()=>{}); }
+ if(activePage==='status'){
+  statusStaticCache = null;
+  statusStaticLoadInFlight = false;
+  statusLiveHasLiveData = false;
+  statusLiveSseLastMessageMs = 0;
+  ensureStatusStatic(true).catch(()=>{});
+  refreshStatusLiveNotice();
+ }
  if(activePage==='logs'){ refreshLogs(); }
  if(activePage==='diagnostics'){ refreshDiagnostics(); }
  if(activePage==='fleet'){ showFleetTab(activeFleetTab); }
@@ -1041,26 +1078,137 @@ async function ensureStatusStatic(silent){
  statusStaticLoadInFlight = false;
  return statusStaticCache;
 }
-async function refreshStatus(){
- if(location.pathname !== '/') return;
- if(statusRefreshInFlight) return;
- if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs) || isFleetManageActive() || isProvisioningUiBusy()) return;
- statusRefreshInFlight = true;
- const live=await apiJson('/api/status-live',{silent:true});
- if(!live){
-  statusFailCount++;
-  if(statusFailCount >= 3){
-   const s=document.getElementById('statusTable');
-   if(s){ s.innerText='API status temporarily unavailable'; }
-  }
-  statusRefreshInFlight = false;
+function setStatusLiveNotice(text){
+ const el=document.getElementById('statusLiveNotice');
+ if(!el) return;
+ el.innerText = String(text || '');
+}
+function refreshStatusLiveNotice(){
+ if(location.pathname !== '/' || activePage !== 'status'){
   return;
  }
+ if(document.hidden){
+  setStatusLiveNotice('Status updates paused while tab is hidden');
+  return;
+ }
+ if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs)){
+  setStatusLiveNotice('Status updates paused while device is busy');
+  return;
+ }
+ if(statusLiveSseConnected){
+  const age = statusLiveSseLastMessageMs > 0 ? (Date.now() - statusLiveSseLastMessageMs) : 0;
+  if(age > 12000){
+   setStatusLiveNotice('Waiting for device updates...');
+  }else{
+   setStatusLiveNotice('Live updates: connected');
+  }
+  return;
+ }
+ if(statusLiveHasLiveData){
+  setStatusLiveNotice('Live updates disconnected; waiting to reconnect...');
+ }else{
+  setStatusLiveNotice('Waiting for device updates...');
+ }
+}
+function stopStatusLiveUiTicker(){
+ if(statusLiveUiTicker){ clearTimeout(statusLiveUiTicker); statusLiveUiTicker=0; }
+}
+function startStatusLiveUiTicker(){
+ stopStatusLiveUiTicker();
+ if(location.pathname !== '/' || activePage !== 'status') return;
+ const loop=()=>{
+  if(location.pathname !== '/' || activePage !== 'status'){ statusLiveUiTicker=0; return; }
+  refreshStatusLiveNotice();
+  statusLiveUiTicker=setTimeout(loop, 1000);
+ };
+ loop();
+}
+function closeStatusLiveSse(){
+ if(statusLiveSseReconnectTimer){ clearTimeout(statusLiveSseReconnectTimer); statusLiveSseReconnectTimer=0; }
+ if(statusLiveEventSource){
+  try{ statusLiveEventSource.close(); }catch(e){}
+  statusLiveEventSource = null;
+ }
+ statusLiveSseConnected = false;
+ statusLiveSseLastMessageMs = 0;
+ refreshStatusLiveNotice();
+}
+function shouldUseStatusLiveSse(){
+ if(location.pathname !== '/') return false;
+ if(activePage !== 'status') return false;
+ if(typeof EventSource === 'undefined') return false;
+ if(document.hidden) return false;
+ if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs)) return false;
+ if(isFleetManageActive() || isProvisioningUiBusy()) return false;
+ return true;
+}
+function scheduleStatusLiveSseReconnect(){
+ if(statusLiveSseReconnectTimer || !shouldUseStatusLiveSse()) return;
+ const delay = Math.max(1000, Math.min(10000, Number(statusLiveSseBackoffMs || 1000)));
+ statusLiveSseReconnectTimer = setTimeout(()=>{
+  statusLiveSseReconnectTimer = 0;
+  if(shouldUseStatusLiveSse()){ startStatusLiveSse(); }
+ }, delay);
+ statusLiveSseBackoffMs = Math.min(10000, delay * 2);
+}
+function handleStatusLivePayload(live){
+ if(!live || typeof live !== 'object') return;
  statusFailCount = 0;
+ statusLiveHasLiveData = true;
+ statusLiveSseLastMessageMs = Date.now();
  if(!statusStaticCache && !statusStaticLoadInFlight){
   ensureStatusStatic(true).catch(()=>{});
  }
  const st=Object.assign({}, statusStaticCache||{}, live||{});
+ applyStatusPageState(st);
+ refreshStatusLiveNotice();
+}
+function startStatusLiveSse(){
+ if(!shouldUseStatusLiveSse()) return;
+ if(statusLiveEventSource) return;
+ try{
+  const es = new EventSource('/api/status-live/events');
+  statusLiveEventSource = es;
+  es.onopen = ()=>{
+   statusLiveSseConnected = true;
+   statusLiveSseBackoffMs = 1000;
+   statusLiveSseLastMessageMs = Date.now();
+   refreshStatusLiveNotice();
+  };
+  const onStatusEvent = (ev)=>{
+   try{
+    const live = JSON.parse(ev.data);
+    handleStatusLivePayload(live);
+   }catch(e){}
+  };
+  es.addEventListener('status', onStatusEvent);
+  es.onmessage = onStatusEvent;
+  es.onerror = ()=>{
+   if(statusLiveEventSource !== es) return;
+   try{ es.close(); }catch(e){}
+   statusLiveEventSource = null;
+   statusLiveSseConnected = false;
+   refreshStatusLiveNotice();
+   scheduleStatusLiveSseReconnect();
+  };
+ }catch(e){
+  statusLiveSseConnected = false;
+  refreshStatusLiveNotice();
+  scheduleStatusLiveSseReconnect();
+ }
+}
+function syncStatusLiveSse(){
+ if(shouldUseStatusLiveSse()){
+  startStatusLiveSse();
+  startStatusLiveUiTicker();
+ }else{
+  closeStatusLiveSse();
+  if(activePage !== 'status'){ stopStatusLiveUiTicker(); }
+ }
+ refreshStatusLiveNotice();
+}
+function applyStatusPageState(st){
+ if(!st) return;
  applyHeaderStatus(st);
  const relayOn = Number(st.relay_state) === 1;
  const hasLora = Number(st.lora_last_packet_ms||0) > 0;
@@ -1177,6 +1325,27 @@ async function refreshStatus(){
     sdLast.innerText = Number(st.sensor_temp_last_read_ms || 0) > 0 ? `Last read: ${humanAgeMs(ageMs)}` : 'Last read: n/a';
   }
  }
+}
+async function refreshStatus(force){
+ if(location.pathname !== '/') return;
+ if(statusRefreshInFlight) return;
+ if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs) || isFleetManageActive() || isProvisioningUiBusy()) return;
+ if(!force && statusLiveSseConnected && statusLiveSseLastMessageMs > 0 && (Date.now() - statusLiveSseLastMessageMs) < 5000){
+  return;
+ }
+ statusRefreshInFlight = true;
+ const live=await apiJson('/api/status-live',{silent:true});
+ if(!live){
+  statusFailCount++;
+  if(statusFailCount >= 3){
+   const s=document.getElementById('statusTable');
+   if(s){ s.innerText='API status temporarily unavailable'; }
+  }
+  refreshStatusLiveNotice();
+  statusRefreshInFlight = false;
+  return;
+ }
+ handleStatusLivePayload(live);
  statusRefreshInFlight = false;
 }
 function applyHeaderStatus(st){
@@ -1239,6 +1408,8 @@ function stopAllUiPollingForAuthExpiry(){
  try{ stopProvisioningPolling(); }catch(e){}
  try{ stopPagePolling(); }catch(e){}
  try{ stopHeaderPolling(); }catch(e){}
+ try{ stopStatusLiveUiTicker(); }catch(e){}
+ try{ closeStatusLiveSse(); }catch(e){}
  try{ provStatusInFlight = false; }catch(e){}
  try{ statusRefreshInFlight = false; }catch(e){}
  try{ headerStatusRefreshInFlight = false; }catch(e){}
@@ -1277,7 +1448,8 @@ async function logout(){
 }
 async function load(){
   if(activePage==='status'){
-   await refreshStatus();
+   await ensureStatusStatic(true);
+   refreshStatusLiveNotice();
   }
 }
 async function loadSettingsPageData(force){
@@ -1571,7 +1743,7 @@ async function testSta(){
  if(btn){ btn.innerText='Test'; }
  updateStaTestButtonState();
  if(!out){
-  const st=await apiJson('/api/status',{silent:true,timeoutMs:5000});
+  const st=await apiJson('/api/status-live',{silent:true,timeoutMs:5000});
   if(st && st.sta_connected && String(st.sta_ssid || '').trim()===requestedSsid){
    const msg=`STA connect OK${st.sta_rssi?` (${st.sta_rssi} dBm)`:''}`;
    el.className='result-line show ok';
@@ -1727,7 +1899,7 @@ function headerPollDelayMs(){
 function scheduleHeaderPolling(){
  stopHeaderPolling();
  if(location.pathname !== '/') return;
- if(activePage==='status') return;  // Full status page uses /api/status
+ if(activePage==='status') return;  // Status page updates via /api/status-live/events (SSE)
  const generation = headerPollGeneration;
  const loop=async()=>{
   if(generation !== headerPollGeneration) return;
@@ -1741,9 +1913,8 @@ function schedulePagePoll(){
  stopPagePolling();
  const generation = pagePollGeneration;
  let fn=null;
- if(activePage==='status'){
-  fn=refreshStatus;
- }else if(activePage==='fleet' && lastRoleIsTx && activeFleetTab==='devices'){
+ let delayFn=pagePollDelayMs;
+ if(activePage==='fleet' && lastRoleIsTx && activeFleetTab==='devices'){
   fn=refreshFleet;
  }else if(activePage==='logs'){
   fn=refreshLogs;
@@ -1754,16 +1925,17 @@ function schedulePagePoll(){
   if(generation !== pagePollGeneration) return;
   if(document.hidden && activePage!=='logs'){
    if(generation !== pagePollGeneration) return;
-   pagePollTimer=setTimeout(loop, pagePollDelayMs());
+   pagePollTimer=setTimeout(loop, delayFn());
    return;
   }
   await fn();
   if(generation !== pagePollGeneration) return;
-  pagePollTimer=setTimeout(loop, pagePollDelayMs());
+  pagePollTimer=setTimeout(loop, delayFn());
  };
  loop();
 }
 function syncPagePolling(){
+ syncStatusLiveSse();
  if(activePage==='fleet' && activeFleetTab==='manage'){
   stopPagePolling();
  if(activeFleetManageTab==='lora'){
@@ -1942,11 +2114,6 @@ function isFleetManageActive(){
 function isProvisioningUiBusy(){
  const st=String(provUiSessionState||'idle');
  return !!provUiSessionActive || st==='discovering' || st==='discovery_retry' || st==='provisioning';
-}
-function statusPollDelayMs(){
- if(document.hidden) return 5000;
- if(isFleetManageActive() || isProvisioningUiBusy()) return 3000;
- return 1500;
 }
 function sessionPollDelayMs(){
  if(document.hidden) return 1800000;
@@ -2188,7 +2355,8 @@ function initPage(){
  if(menuBtn){ menuBtn.setAttribute('aria-expanded','false'); }
  document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ toggleDrawer(false); } });
  showPage('status');
-window.addEventListener('beforeunload', ()=>{ stopProvisioningPolling(); stopPagePolling(); stopHeaderPolling(); });
+ window.addEventListener('beforeunload', ()=>{ stopProvisioningPolling(); stopPagePolling(); stopHeaderPolling(); closeStatusLiveSse(); });
+ document.addEventListener('visibilitychange', ()=>{ syncPagePolling(); });
  load();
  syncPagePolling();
 }
@@ -2221,14 +2389,18 @@ bool WebConsole::begin(ConfigStore *config,
   sensors_ = sensors;
   logs_ = logs;
   on_apply_ = onApply;
-  server_.collectHeaders("Cookie");
+  server_.collectHeaders("Cookie", "User-Agent");
+  initStatusCaches();
 
   routes();
   server_.begin();
   return true;
 }
 
-void WebConsole::tick() { server_.handleClient(); }
+void WebConsole::tick() {
+  server_.handleClient();
+  tickStatusLiveSse();
+}
 
 void WebConsole::beginRequestLog(const char *path, bool api, bool poll, bool heapDiag) {
   request_log_.active = true;
@@ -2289,6 +2461,12 @@ void WebConsole::finishRequestLog() {
                  ip.c_str());
   }
 
+  if (durMs >= kWebRequestPressureDurMs) {
+    // Local proxy for "recent slow-phase pressure" used by SSE pacing.
+    // We don't currently have app-level slow-phase state exposed to WebConsole.
+    last_web_pressure_ms_ = endMs;
+  }
+
   request_log_ = RequestLogState{};
 }
 
@@ -2304,6 +2482,306 @@ void WebConsole::sendTracked(int code, const char *contentType, const char *body
 void WebConsole::sendTracked(int code, const char *contentType, const String &body) {
   markResponseStatus(code);
   server_.send(code, contentType, body);
+}
+
+void WebConsole::initStatusCaches() {
+  status_cache_.body.reserve(kStatusCacheReserveBytes);
+  status_live_cache_.body.reserve(kStatusLiveCacheReserveBytes);
+  status_static_cache_.body.reserve(kStatusStaticCacheReserveBytes);
+  status_lite_cache_.body.reserve(kStatusLiteCacheReserveBytes);
+  status_cache_.built_ms = 0;
+  status_live_cache_.built_ms = 0;
+  status_static_cache_.built_ms = 0;
+  status_lite_cache_.built_ms = 0;
+}
+
+bool WebConsole::apiHeapHealthy(uint32_t minFreeBytes, uint32_t minMaxBlockBytes) const {
+  const uint32_t freeHeap = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  return freeHeap >= minFreeBytes && (minMaxBlockBytes == 0 || maxBlock >= minMaxBlockBytes);
+}
+
+bool WebConsole::tryServeCachedJson(const char *path,
+                                    uint32_t minFreeBytes,
+                                    uint32_t minMaxBlockBytes,
+                                    uint32_t ttlMs,
+                                    JsonResponseCache &cache) {
+  const uint32_t now = millis();
+  if (cache.body.length() > 0 && ttlMs > 0 && (now - cache.built_ms) < ttlMs) {
+    sendTracked(200, "application/json", cache.body);
+    return true;
+  }
+
+  if (apiHeapHealthy(minFreeBytes, minMaxBlockBytes)) {
+    return false;
+  }
+
+  if (cache.body.length() > 0) {
+    LRS_LOGW(API,
+             "event=api_cached_stale path=%s heap_free=%lu heap_frag=%u max_free_block=%lu age_ms=%lu",
+             path ? path : server_.uri().c_str(),
+             static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned>(lrslog::heapFragPercent()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()),
+             static_cast<unsigned long>(now - cache.built_ms));
+    sendTracked(200, "application/json", cache.body);
+    return true;
+  }
+
+  return rejectApiIfLowHeap(path, minFreeBytes, minMaxBlockBytes);
+}
+
+void WebConsole::setUiNoStoreHeaders() {
+  server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  server_.sendHeader("Pragma", "no-cache");
+  server_.sendHeader("Expires", "0");
+}
+
+void WebConsole::closeStatusLiveSse() {
+  if (status_live_sse_client_) {
+    status_live_sse_client_.flush();
+    status_live_sse_client_.stop();
+  }
+  status_live_sse_client_ = WiFiClient();
+  status_live_sse_active_ = false;
+  status_live_sse_last_push_ms_ = 0;
+  status_live_sse_last_keepalive_ms_ = 0;
+  status_live_sse_last_sent_cache_ms_ = 0;
+  status_live_sse_last_interval_ms_ = 0;
+}
+
+uint32_t WebConsole::computeStatusLiveSseIntervalMs() const {
+  const uint32_t now = millis();
+  const uint32_t freeHeap = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  const uint32_t ratioPct = (freeHeap == 0U) ? 0U : ((maxBlock * 100U) / freeHeap);
+  const bool recentPressure =
+      (last_web_pressure_ms_ != 0U) && (static_cast<uint32_t>(now - last_web_pressure_ms_) < kStatusLiveSsePressureWindowMs);
+
+  if (maxBlock < 1200U || ratioPct < 30U || freeHeap < 3000U) return kStatusLiveSsePushSevereMs;
+  if (maxBlock < 1700U || ratioPct < 40U || (recentPressure && maxBlock < 2600U)) return kStatusLiveSsePushPressureMs;
+  if (maxBlock < 2400U || ratioPct < 55U || recentPressure) return kStatusLiveSsePushWarnMs;
+  return kStatusLiveSsePushHealthyMs;
+}
+
+bool WebConsole::buildStatusLiveCache() {
+  if (!config_ || !sm_) return false;
+
+  DynamicJsonDocument doc(512);
+  auto &cfg = config_->settings();
+  const wl_status_t st = WiFi.status();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
+  doc["link_state"] = linkStateText(sm_->linkState());
+  doc["relay_state"] = sm_->relayState();
+  doc["input_state"] = sm_->inputState();
+  doc["local_input_state"] = sm_->localDryContactState();
+  doc["lora_last_rssi"] = sm_->lastPacketRssi();
+  doc["lora_last_packet_ms"] = sm_->lastPacketMs();
+  doc["lora_last_tx_ms"] = sm_->lastTxMs();
+  doc["lora_remote_temp_valid"] = sm_->remoteTemperatureValid();
+  doc["lora_remote_temp_c"] = sm_->remoteTemperatureC();
+  doc["lora_remote_temp_ms"] = sm_->remoteTemperatureMs();
+  doc["sta_connected"] = WiFi.isConnected();
+  doc["sta_ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
+  doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
+  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
+  doc["sta_status_code"] = static_cast<int>(st);
+  doc["sta_status_text"] = wifiStatusText(st);
+  doc["heap_free_bytes"] = ESP.getFreeHeap();
+  doc["heap_frag_percent"] = lrslog::heapFragPercent();
+  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
+  doc["uptime_ms"] = millis();
+
+  String relayReason = "boot";
+  if (cfg.role_tx) {
+    if (sm_->relayState() == 0) {
+      if (sm_->inputState() == 0) {
+        relayReason = "input_open";
+      } else if (sm_->linkState() == LinkState::Timeout) {
+        relayReason = "ack_timeout";
+      } else if (sm_->linkState() == LinkState::WaitAck) {
+        relayReason = "wait_ack";
+      } else {
+        relayReason = "no_lora_link";
+      }
+    } else {
+      relayReason = "ok";
+    }
+  } else {
+    const bool relayOn = sm_->relayState() != 0;
+    switch (sm_->lastRxControlSource()) {
+      case RxControlSource::Mqtt:
+        relayReason = relayOn ? "mqtt_on" : "mqtt_off";
+        break;
+      case RxControlSource::LoRa:
+        relayReason = relayOn ? "lora_on" : "lora_off";
+        break;
+      default:
+        relayReason = "boot";
+        break;
+    }
+  }
+  doc["relay_reason"] = relayReason;
+
+  if (sensors_) {
+    const TempSensorStatus &ts = sensors_->tempStatus();
+    doc["sensor_temp_enabled"] = ts.enabled;
+    doc["sensor_temp_detected"] = ts.detected;
+    doc["sensor_temp_valid"] = ts.valid;
+    doc["sensor_temp_c"] = ts.celsius;
+    doc["sensor_temp_addr"] = ts.address;
+    doc["sensor_temp_error"] = ts.error;
+    doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
+  }
+
+  status_live_cache_.body = "";
+  serializeJson(doc, status_live_cache_.body);
+  status_live_cache_.built_ms = millis();
+  return status_live_cache_.body.length() > 0;
+}
+
+bool WebConsole::buildStatusStaticCache() {
+  if (!config_) return false;
+
+  DynamicJsonDocument doc(512);
+  auto &cfg = config_->settings();
+  doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
+  doc["deployment_key"] = cfg.fleet_passphrase;
+  doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
+  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
+  doc["fleet_setup_required"] = needsFleetSetupPrompt();
+  doc["ap_ssid"] = config_->apSsid();
+  doc["ap_ip"] = WiFi.softAPIP().toString();
+  doc["mdns_ap"] = "lrs.local";
+  doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
+  doc["fw_version"] = LRS_FW_VERSION;
+  doc["fw_git_sha"] = LRS_GIT_SHA;
+  doc["fw_git_branch"] = LRS_GIT_BRANCH;
+  doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
+  doc["fw_build_id"] = LRS_BUILD_ID;
+  doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
+  const String fwVersion = String(LRS_FW_VERSION);
+  if (LRS_GIT_DIRTY == 0) {
+    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ")";
+  } else {
+    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ", dirty)";
+  }
+  doc["build_date"] = __DATE__;
+  doc["build_time"] = __TIME__;
+  doc["session_remaining_s"] = sessionRemainingS();
+  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
+  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
+  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
+  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
+  doc["audit_boot_count"] = cfg.audit_boot_count;
+
+  status_static_cache_.body = "";
+  serializeJson(doc, status_static_cache_.body);
+  status_static_cache_.built_ms = millis();
+  return status_static_cache_.body.length() > 0;
+}
+
+bool WebConsole::buildStatusLiteCache() {
+  if (!config_) return false;
+
+  DynamicJsonDocument doc(256);
+  auto &cfg = config_->settings();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["relay_state"] = sm_ ? sm_->relayState() : 0;
+  doc["lora_last_rssi"] = sm_ ? sm_->lastPacketRssi() : 0;
+  doc["lora_last_packet_ms"] = sm_ ? sm_->lastPacketMs() : 0;
+  doc["lora_last_tx_ms"] = sm_ ? sm_->lastTxMs() : 0;
+  doc["sta_connected"] = WiFi.isConnected();
+  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
+  doc["heap_free_bytes"] = ESP.getFreeHeap();
+  doc["heap_frag_percent"] = lrslog::heapFragPercent();
+  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
+  doc["uptime_ms"] = millis();
+
+  status_lite_cache_.body = "";
+  serializeJson(doc, status_lite_cache_.body);
+  status_lite_cache_.built_ms = millis();
+  return status_lite_cache_.body.length() > 0;
+}
+
+bool WebConsole::buildStatusCompatCacheFromLiveStatic() {
+  if (status_live_cache_.body.length() == 0 || status_static_cache_.body.length() == 0) {
+    return false;
+  }
+
+  DynamicJsonDocument liveDoc(768);
+  DynamicJsonDocument staticDoc(768);
+  if (deserializeJson(staticDoc, status_static_cache_.body)) return false;
+  if (deserializeJson(liveDoc, status_live_cache_.body)) return false;
+
+  DynamicJsonDocument merged(1536);
+  JsonObject dst = merged.to<JsonObject>();
+  JsonObject staticObj = staticDoc.as<JsonObject>();
+  for (JsonPair kv : staticObj) {
+    dst[kv.key()] = kv.value();
+  }
+  JsonObject liveObj = liveDoc.as<JsonObject>();
+  for (JsonPair kv : liveObj) {
+    dst[kv.key()] = kv.value();
+  }
+
+  status_cache_.body = "";
+  serializeJson(merged, status_cache_.body);
+  status_cache_.built_ms = millis();
+  return status_cache_.body.length() > 0;
+}
+
+void WebConsole::tickStatusLiveSse() {
+  if (!status_live_sse_active_) return;
+  if (!status_live_sse_client_ || !status_live_sse_client_.connected()) {
+    closeStatusLiveSse();
+    return;
+  }
+
+  const uint32_t now = millis();
+  const uint32_t pushIntervalMs = computeStatusLiveSseIntervalMs();
+  status_live_sse_last_interval_ms_ = pushIntervalMs;
+
+  if (status_live_sse_last_keepalive_ms_ == 0 || (now - status_live_sse_last_keepalive_ms_) >= kStatusLiveSseKeepAliveMs) {
+    if (status_live_sse_client_.print(F(": keepalive\n\n")) == 0) {
+      closeStatusLiveSse();
+      return;
+    }
+    status_live_sse_last_keepalive_ms_ = now;
+  }
+
+  if (status_live_sse_last_push_ms_ != 0 && (now - status_live_sse_last_push_ms_) < pushIntervalMs) {
+    return;
+  }
+
+  bool cacheUpdated = false;
+  if (status_live_cache_.body.length() == 0 || (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) {
+    if (apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes, kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
+      cacheUpdated = buildStatusLiveCache();
+    }
+  }
+
+  if (status_live_cache_.body.length() == 0) {
+    return;
+  }
+
+  if (!cacheUpdated && status_live_cache_.built_ms == status_live_sse_last_sent_cache_ms_) {
+    return;
+  }
+
+  if (status_live_sse_client_.print(F("event: status\nid: ")) == 0 ||
+      status_live_sse_client_.print(status_live_cache_.built_ms) == 0 ||
+      status_live_sse_client_.print(F("\ndata: ")) == 0 ||
+      status_live_sse_client_.print(status_live_cache_.body) == 0 ||
+      status_live_sse_client_.print(F("\n\n")) == 0) {
+    closeStatusLiveSse();
+    return;
+  }
+
+  status_live_sse_last_push_ms_ = now;
+  status_live_sse_last_sent_cache_ms_ = status_live_cache_.built_ms;
 }
 
 bool WebConsole::rejectApiIfLowHeap(const char *path, uint32_t minFreeBytes, uint32_t minMaxBlockBytes) {
@@ -2496,6 +2974,15 @@ void WebConsole::routes() {
     handleStatusLive();
     finishRequestLog();
   });
+  server_.on("/api/status-live/events", HTTP_GET, [this]() {
+    beginRequestLog("/api/status-live/events", true, true, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handleStatusLiveEvents();
+    finishRequestLog();
+  });
   server_.on("/api/status-static", HTTP_GET, [this]() {
     beginRequestLog("/api/status-static", true, false, true);
     if (!requireAuth(true)) {
@@ -2605,6 +3092,7 @@ void WebConsole::routes() {
 void WebConsole::handleIndex() {
   if (!requireAuth(false)) return;
   if (needsFleetSetupPrompt()) {
+    setUiNoStoreHeaders();
     server_.sendHeader("Location", "/setup");
     sendTracked(302, "text/plain", "redirect");
     return;
@@ -2627,6 +3115,7 @@ void WebConsole::handleIndex() {
     return;
   }
   markResponseStatus(200);
+  setUiNoStoreHeaders();
   server_.send_P(200, "text/html", kIndexHtml);
   LRS_LOGI(WEB,
            "event=index_send_done heap_free=%lu heap_frag=%u max_free_block=%lu",
@@ -2637,22 +3126,26 @@ void WebConsole::handleIndex() {
 
 void WebConsole::handleLoginPage() {
   if (hasSession() && cookieValue("lrs_session") == session_token_) {
+    setUiNoStoreHeaders();
     server_.sendHeader("Location", needsFleetSetupPrompt() ? "/setup" : "/");
     sendTracked(302, "text/plain", "redirect");
     return;
   }
   markResponseStatus(200);
+  setUiNoStoreHeaders();
   server_.send_P(200, "text/html", kLoginHtml);
 }
 
 void WebConsole::handleFleetSetupPage() {
   if (!requireAuth(false)) return;
   if (!needsFleetSetupPrompt()) {
+    setUiNoStoreHeaders();
     server_.sendHeader("Location", "/");
     sendTracked(302, "text/plain", "redirect");
     return;
   }
   markResponseStatus(200);
+  setUiNoStoreHeaders();
   server_.send_P(200, "text/html", kFleetSetupHtml);
 }
 
@@ -2769,256 +3262,144 @@ void WebConsole::handleSessionApi() {
 }
 
 void WebConsole::handleStatus() {
-  if (rejectApiIfLowHeap("/api/status", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
-  DynamicJsonDocument doc(512);
-  auto &cfg = config_->settings();
-  const wl_status_t st = WiFi.status();
-  doc["role"] = cfg.role_tx ? "tx" : "rx";
-  doc["local_address"] = cfg.local_address;
-  doc["remote_address"] = cfg.remote_address;
-  doc["link_state"] = linkStateText(sm_->linkState());
-  doc["relay_state"] = sm_->relayState();
-  doc["input_state"] = sm_->inputState();
-  doc["local_input_state"] = sm_->localDryContactState();
-  doc["lora_last_rssi"] = sm_->lastPacketRssi();
-  doc["lora_last_packet_ms"] = sm_->lastPacketMs();
-  doc["lora_last_tx_ms"] = sm_->lastTxMs();
-  doc["lora_remote_temp_valid"] = sm_->remoteTemperatureValid();
-  doc["lora_remote_temp_c"] = sm_->remoteTemperatureC();
-  doc["lora_remote_temp_ms"] = sm_->remoteTemperatureMs();
-  doc["sta_connected"] = WiFi.isConnected();
-  doc["sta_ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
-  doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
-  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
-  doc["sta_status_code"] = static_cast<int>(st);
-  doc["sta_status_text"] = wifiStatusText(st);
-  doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
+  if (tryServeCachedJson("/api/status",
+                         kApiLowHeapRejectFreeBytes,
+                         kApiLowHeapRejectMaxBlockBytes,
+                         kStatusCacheTtlMs,
+                         status_cache_)) {
+    return;
+  }
 
-  doc["sta_target_rssi"] = -127;
-  doc["sta_target_rssi_text"] = "disabled";
-  doc["heap_free_bytes"] = ESP.getFreeHeap();
-  doc["heap_frag_percent"] = lrslog::heapFragPercent();
-  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
-  doc["uptime_ms"] = millis();
-  String relayReason = "boot";
-  if (cfg.role_tx) {
-    if (sm_->relayState() == 0) {
-      if (sm_->inputState() == 0) {
-        relayReason = "input_open";
-      } else if (sm_->linkState() == LinkState::Timeout) {
-        relayReason = "ack_timeout";
-      } else if (sm_->linkState() == LinkState::WaitAck) {
-        relayReason = "wait_ack";
-      } else if (sm_->lastPacketMs() == 0) {
-        relayReason = "no_lora_link";
-      } else {
-        relayReason = "no_lora_link";
-      }
-    } else {
-      relayReason = "ok";
+  const uint32_t now = millis();
+  if (last_status_compat_hit_log_ms_ == 0 || (now - last_status_compat_hit_log_ms_) >= kStatusCompatHitLogMinIntervalMs) {
+    last_status_compat_hit_log_ms_ = now;
+    String ua = server_.header("User-Agent");
+    if (ua.length() > 96) ua = ua.substring(0, 96);
+    const String clientTag = server_.arg("client");
+    LRS_LOGW(API,
+             "event=status_compat_hit ip=%s client=%s ua=%s",
+             server_.client().remoteIP().toString().c_str(),
+             clientTag.length() ? clientTag.c_str() : "-",
+             ua.length() ? ua.c_str() : "-");
+  }
+
+  if ((status_live_cache_.body.length() == 0 || (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) &&
+      apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes, kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
+    buildStatusLiveCache();
+  }
+  if ((status_static_cache_.body.length() == 0 || (now - status_static_cache_.built_ms) >= kStatusStaticCacheTtlMs) &&
+      apiHeapHealthy(kApiStatusStaticLowHeapRejectFreeBytes, kApiStatusStaticLowHeapRejectMaxBlockBytes)) {
+    buildStatusStaticCache();
+  }
+
+  if (!buildStatusCompatCacheFromLiveStatic()) {
+    if (status_cache_.body.length() > 0) {
+      LRS_LOGW(API,
+               "event=status_compat_stale_fallback heap_free=%lu heap_frag=%u max_free_block=%lu",
+               static_cast<unsigned long>(lrslog::heapFree()),
+               static_cast<unsigned>(lrslog::heapFragPercent()),
+               static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+      sendTracked(200, "application/json", status_cache_.body);
+      return;
     }
-  } else {
-    const bool relayOn = sm_->relayState() != 0;
-    switch (sm_->lastRxControlSource()) {
-      case RxControlSource::Mqtt:
-        relayReason = relayOn ? "mqtt_on" : "mqtt_off";
-        break;
-      case RxControlSource::LoRa:
-        relayReason = relayOn ? "lora_on" : "lora_off";
-        break;
-      default:
-        relayReason = "boot";
-        break;
-    }
-  }
-  doc["relay_reason"] = relayReason;
-  doc["deployment_key"] = cfg.fleet_passphrase;
-  doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
-  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
-  doc["fleet_setup_required"] = needsFleetSetupPrompt();
-
-  doc["ap_ssid"] = config_->apSsid();
-  doc["ap_ip"] = WiFi.softAPIP().toString();
-  doc["mdns_ap"] = "lrs.local";
-  doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
-  doc["fw_version"] = LRS_FW_VERSION;
-  doc["fw_git_sha"] = LRS_GIT_SHA;
-  doc["fw_git_branch"] = LRS_GIT_BRANCH;
-  doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
-  doc["fw_build_id"] = LRS_BUILD_ID;
-  doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
-  const String fwVersion = String(LRS_FW_VERSION);
-  if (LRS_GIT_DIRTY == 0) {
-    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ")";
-  } else {
-    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ", dirty)";
-  }
-  doc["build_date"] = __DATE__;
-  doc["build_time"] = __TIME__;
-  doc["session_remaining_s"] = sessionRemainingS();
-  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
-  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
-  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
-  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
-  doc["audit_boot_count"] = cfg.audit_boot_count;
-
-  if (sensors_) {
-    const TempSensorStatus ts = sensors_->tempStatus();
-    doc["sensor_temp_enabled"] = ts.enabled;
-    doc["sensor_temp_detected"] = ts.detected;
-    doc["sensor_temp_valid"] = ts.valid;
-    doc["sensor_temp_c"] = ts.celsius;
-    doc["sensor_temp_addr"] = ts.address;
-    doc["sensor_temp_error"] = ts.error;
-    doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
+    sendTracked(503, "application/json", "{\"ok\":false,\"error\":\"compat_cache_unavailable\"}");
+    return;
   }
 
-  const size_t len = measureJson(doc);
-  server_.setContentLength(len);
-  markResponseStatus(200);
-  server_.send(200, "application/json", "");
-  serializeJson(doc, server_.client());
+  sendTracked(200, "application/json", status_cache_.body);
 }
 
 void WebConsole::handleStatusLive() {
-  if (rejectApiIfLowHeap("/api/status-live", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
-  DynamicJsonDocument doc(512);
-  auto &cfg = config_->settings();
-  const wl_status_t st = WiFi.status();
-  doc["role"] = cfg.role_tx ? "tx" : "rx";
-  doc["local_address"] = cfg.local_address;
-  doc["remote_address"] = cfg.remote_address;
-  doc["link_state"] = linkStateText(sm_->linkState());
-  doc["relay_state"] = sm_->relayState();
-  doc["input_state"] = sm_->inputState();
-  doc["local_input_state"] = sm_->localDryContactState();
-  doc["lora_last_rssi"] = sm_->lastPacketRssi();
-  doc["lora_last_packet_ms"] = sm_->lastPacketMs();
-  doc["lora_last_tx_ms"] = sm_->lastTxMs();
-  doc["lora_remote_temp_valid"] = sm_->remoteTemperatureValid();
-  doc["lora_remote_temp_c"] = sm_->remoteTemperatureC();
-  doc["lora_remote_temp_ms"] = sm_->remoteTemperatureMs();
-  doc["sta_connected"] = WiFi.isConnected();
-  doc["sta_ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
-  doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
-  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
-  doc["sta_status_code"] = static_cast<int>(st);
-  doc["sta_status_text"] = wifiStatusText(st);
-  doc["heap_free_bytes"] = ESP.getFreeHeap();
-  doc["heap_frag_percent"] = lrslog::heapFragPercent();
-  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
-  doc["uptime_ms"] = millis();
-
-  String relayReason = "boot";
-  if (cfg.role_tx) {
-    if (sm_->relayState() == 0) {
-      if (sm_->inputState() == 0) {
-        relayReason = "input_open";
-      } else if (sm_->linkState() == LinkState::Timeout) {
-        relayReason = "ack_timeout";
-      } else if (sm_->linkState() == LinkState::WaitAck) {
-        relayReason = "wait_ack";
-      } else {
-        relayReason = "no_lora_link";
-      }
-    } else {
-      relayReason = "ok";
-    }
-  } else {
-    const bool relayOn = sm_->relayState() != 0;
-    switch (sm_->lastRxControlSource()) {
-      case RxControlSource::Mqtt:
-        relayReason = relayOn ? "mqtt_on" : "mqtt_off";
-        break;
-      case RxControlSource::LoRa:
-        relayReason = relayOn ? "lora_on" : "lora_off";
-        break;
-      default:
-        relayReason = "boot";
-        break;
-    }
+  if (tryServeCachedJson("/api/status-live",
+                         kApiStatusLiveLowHeapRejectFreeBytes,
+                         kApiStatusLiveLowHeapRejectMaxBlockBytes,
+                         kStatusLiveCacheTtlMs,
+                         status_live_cache_))
+    return;
+  if (!buildStatusLiveCache()) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_live_build_failed\"}");
+    return;
   }
-  doc["relay_reason"] = relayReason;
+  sendTracked(200, "application/json", status_live_cache_.body);
+}
 
-  if (sensors_) {
-    const TempSensorStatus ts = sensors_->tempStatus();
-    doc["sensor_temp_enabled"] = ts.enabled;
-    doc["sensor_temp_detected"] = ts.detected;
-    doc["sensor_temp_valid"] = ts.valid;
-    doc["sensor_temp_c"] = ts.celsius;
-    doc["sensor_temp_addr"] = ts.address;
-    doc["sensor_temp_error"] = ts.error;
-    doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
+void WebConsole::handleStatusLiveEvents() {
+  if (!apiHeapHealthy(kStatusLiveSseConnectMinFreeBytes, kStatusLiveSseConnectMinMaxBlockBytes) &&
+      status_live_cache_.body.length() == 0) {
+    rejectApiIfLowHeap("/api/status-live/events",
+                       kStatusLiveSseConnectMinFreeBytes,
+                       kStatusLiveSseConnectMinMaxBlockBytes);
+    return;
   }
 
-  const size_t len = measureJson(doc);
-  server_.setContentLength(len);
+  if (status_live_sse_active_) {
+    closeStatusLiveSse();
+  }
+
+  const uint32_t now = millis();
+  if ((status_live_cache_.body.length() == 0 || (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) &&
+      apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes, kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
+    buildStatusLiveCache();
+  }
+
+  WiFiClient client = server_.client();
+  client.setNoDelay(true);
+  client.setSync(true);
+  status_live_sse_client_ = client;
+  status_live_sse_active_ = true;
+  status_live_sse_last_push_ms_ = 0;
+  status_live_sse_last_keepalive_ms_ = 0;
+  status_live_sse_last_sent_cache_ms_ = 0;
+
+  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
   markResponseStatus(200);
-  server_.send(200, "application/json", "");
-  serializeJson(doc, server_.client());
+  server_.sendContent_P(PSTR("HTTP/1.1 200 OK\r\n"
+                             "Content-Type: text/event-stream\r\n"
+                             "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+                             "Pragma: no-cache\r\n"
+                             "Connection: keep-alive\r\n"
+                             "X-Accel-Buffering: no\r\n"
+                             "\r\n"));
+  if (!status_live_sse_client_ || !status_live_sse_client_.connected()) {
+    closeStatusLiveSse();
+    return;
+  }
+  status_live_sse_client_.print(F("retry: 3000\n\n"));
+  tickStatusLiveSse();
+  LRS_LOGI(API,
+           "event=status_live_sse_open ip=%s heap_free=%lu heap_frag=%u max_free_block=%lu",
+           server_.client().remoteIP().toString().c_str(),
+           static_cast<unsigned long>(lrslog::heapFree()),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
 }
 
 void WebConsole::handleStatusStatic() {
-  if (rejectApiIfLowHeap("/api/status-static", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
-  DynamicJsonDocument doc(512);
-  auto &cfg = config_->settings();
-  doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
-  doc["deployment_key"] = cfg.fleet_passphrase;
-  doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
-  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
-  doc["fleet_setup_required"] = needsFleetSetupPrompt();
-  doc["ap_ssid"] = config_->apSsid();
-  doc["ap_ip"] = WiFi.softAPIP().toString();
-  doc["mdns_ap"] = "lrs.local";
-  doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
-  doc["fw_version"] = LRS_FW_VERSION;
-  doc["fw_git_sha"] = LRS_GIT_SHA;
-  doc["fw_git_branch"] = LRS_GIT_BRANCH;
-  doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
-  doc["fw_build_id"] = LRS_BUILD_ID;
-  doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
-  const String fwVersion = String(LRS_FW_VERSION);
-  if (LRS_GIT_DIRTY == 0) {
-    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ")";
-  } else {
-    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ", dirty)";
+  if (tryServeCachedJson("/api/status-static",
+                         kApiStatusStaticLowHeapRejectFreeBytes,
+                         kApiStatusStaticLowHeapRejectMaxBlockBytes,
+                         kStatusStaticCacheTtlMs,
+                         status_static_cache_))
+    return;
+  if (!buildStatusStaticCache()) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_static_build_failed\"}");
+    return;
   }
-  doc["build_date"] = __DATE__;
-  doc["build_time"] = __TIME__;
-  doc["session_remaining_s"] = sessionRemainingS();
-  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
-  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
-  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
-  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
-  doc["audit_boot_count"] = cfg.audit_boot_count;
-
-  const size_t len = measureJson(doc);
-  server_.setContentLength(len);
-  markResponseStatus(200);
-  server_.send(200, "application/json", "");
-  serializeJson(doc, server_.client());
+  sendTracked(200, "application/json", status_static_cache_.body);
 }
 
 void WebConsole::handleStatusLite() {
-  if (rejectApiIfLowHeap("/api/status-lite", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
-  DynamicJsonDocument doc(256);
-  auto &cfg = config_->settings();
-  doc["role"] = cfg.role_tx ? "tx" : "rx";
-  doc["relay_state"] = sm_ ? sm_->relayState() : 0;
-  doc["lora_last_rssi"] = sm_ ? sm_->lastPacketRssi() : 0;
-  doc["lora_last_packet_ms"] = sm_ ? sm_->lastPacketMs() : 0;
-  doc["lora_last_tx_ms"] = sm_ ? sm_->lastTxMs() : 0;
-  doc["sta_connected"] = WiFi.isConnected();
-  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
-  doc["heap_free_bytes"] = ESP.getFreeHeap();
-  doc["heap_frag_percent"] = lrslog::heapFragPercent();
-  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
-  doc["uptime_ms"] = millis();
-  const size_t len = measureJson(doc);
-  server_.setContentLength(len);
-  markResponseStatus(200);
-  server_.send(200, "application/json", "");
-  serializeJson(doc, server_.client());
+  if (tryServeCachedJson("/api/status-lite",
+                         kApiLightLowHeapRejectFreeBytes,
+                         kApiLightLowHeapRejectMaxBlockBytes,
+                         kStatusLiteCacheTtlMs,
+                         status_lite_cache_))
+    return;
+  if (!buildStatusLiteCache()) {
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_lite_build_failed\"}");
+    return;
+  }
+  sendTracked(200, "application/json", status_lite_cache_.body);
 }
 
 void WebConsole::handleFleet() {
