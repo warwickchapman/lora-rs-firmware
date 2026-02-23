@@ -2,7 +2,9 @@
 
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
+#if LRS_ENABLE_MDNS
 #include <ESP8266mDNS.h>
+#endif
 #include <time.h>
 
 #include "build_info.h"
@@ -16,14 +18,18 @@ constexpr uint32_t kNtpPollNoFixMs = 5000;
 constexpr uint32_t kNtpPollFixedMs = 60000;
 constexpr uint32_t kNtpForceRefreshMs = 21600000;
 constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
+#if LRS_ENABLE_MDNS
 constexpr uint32_t kMdnsSuspendFreeHeapBytes = 9000;
 constexpr uint32_t kMdnsSuspendMaxBlockBytes = 3000;
 constexpr uint32_t kMdnsResumeFreeHeapBytes = 12000;
 constexpr uint32_t kMdnsResumeMaxBlockBytes = 5000;
+#endif
 constexpr uint32_t kStartupTraceWindowMs = 15000;
 constexpr uint32_t kStartupTraceBreadcrumbMs = 1000;
 constexpr uint32_t kStartupSlowTickWarnMs = 25;
 constexpr uint32_t kStartupNonEssentialDeferralMs = 10000;
+constexpr uint32_t kOtaStartupMinFreeHeapBytes = 3000;
+constexpr uint32_t kOtaStartupMinMaxBlockBytes = 1200;
 constexpr uint32_t kSteadySlowPhaseWarnMs = 50;
 constexpr uint32_t kSteadySlowPhaseWarnRateLimitMs = 5000;
 constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
@@ -272,6 +278,7 @@ void App::tick() {
   phaseStartMs = millis();
   refreshMdns();
   phaseSlowWarn("refresh_mdns_post", phaseStartMs);
+#if LRS_ENABLE_MDNS
   {
     ProvisioningSessionSnapshot prov{};
     const bool provActive = sm_.provisioningSession(prov) && prov.active;
@@ -281,10 +288,13 @@ void App::tick() {
       phaseSlowWarn("mdns_update", phaseStartMs);
     }
   }
+#endif
   if (!startupDeferNonEssential) {
-    phaseStartMs = millis();
-    ArduinoOTA.handle();
-    phaseSlowWarn("ota_handle", phaseStartMs);
+    if (ota_enabled_) {
+      phaseStartMs = millis();
+      ArduinoOTA.handle();
+      phaseSlowWarn("ota_handle", phaseStartMs);
+    }
   }
 }
 
@@ -525,6 +535,20 @@ void App::beginStaConnect() {
 }
 
 void App::startOta() {
+  ota_enabled_ = false;
+  const uint32_t freeHeap = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  if (freeHeap < kOtaStartupMinFreeHeapBytes || maxBlock < kOtaStartupMinMaxBlockBytes) {
+    logs_.add("ota_disabled_heap", 0, 0, 0);
+    LRS_LOGW(SYS,
+             "event=ota_disabled reason=low_startup_heap heap_free=%lu max_free_block=%lu min_free=%lu min_max_block=%lu",
+             static_cast<unsigned long>(freeHeap),
+             static_cast<unsigned long>(maxBlock),
+             static_cast<unsigned long>(kOtaStartupMinFreeHeapBytes),
+             static_cast<unsigned long>(kOtaStartupMinMaxBlockBytes));
+    return;
+  }
+
   const auto &cfg = config_.settings();
   if (cached_sta_hostname_.length() == 0) {
     refreshCachedStaHostname();
@@ -532,11 +556,16 @@ void App::startOta() {
   const String &host = cached_sta_hostname_;
   ArduinoOTA.setHostname(host.c_str());
   ArduinoOTA.setPassword(cfg.admin_password.c_str());
-  ArduinoOTA.begin();
+  // Disable ArduinoOTA's internal mDNS to avoid extra heap pressure and mDNS parsing work.
+  ArduinoOTA.begin(false);
+  ota_enabled_ = true;
   logs_.add("ota_ready", 0, 0, 0);
 }
 
 void App::refreshMdns() {
+#if !LRS_ENABLE_MDNS
+  return;
+#else
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxBlock = ESP.getMaxFreeBlockSize();
   const bool lowHeapNow = (freeHeap < kMdnsSuspendFreeHeapBytes) || (maxBlock < kMdnsSuspendMaxBlockBytes);
@@ -616,6 +645,7 @@ void App::refreshMdns() {
   active_mdns_hostname_ = desiredName;
   logs_.add(String("mdns_ready_") + active_mdns_hostname_, 0, 0, 0);
   LRS_LOGI(MDNS, "event=mdns_ready host=%s", desiredName);
+#endif
 }
 
 void App::refreshCachedStaHostname() {

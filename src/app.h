@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef LRS_ENABLE_MDNS
+#define LRS_ENABLE_MDNS 1
+#endif
+
 #include <DNSServer.h>
 
 #include "config_store.h"
@@ -36,9 +40,12 @@ class App {
   uint32_t ntp_last_check_ms_ = 0;
   uint32_t ntp_last_sync_ms_ = 0;
   uint32_t ntp_last_epoch_s_ = 0;
+  bool ota_enabled_ = false;
+#if LRS_ENABLE_MDNS
   String active_mdns_hostname_;
   bool mdns_suspended_for_provisioning_ = false;
   bool mdns_suspended_for_low_heap_ = false;
+#endif
   uint32_t startup_trace_until_ms_ = 0;
   uint32_t startup_trace_next_breadcrumb_ms_ = 0;
   bool startup_defer_logged_ = false;

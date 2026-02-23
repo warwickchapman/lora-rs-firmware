@@ -13,6 +13,10 @@
 #include "sensor_manager.h"
 #include "state_machine.h"
 
+#ifndef LRS_ENABLE_MDNS
+#define LRS_ENABLE_MDNS 1
+#endif
+
 namespace {
 constexpr uint32_t kMinHeartbeatMs = 60000;
 constexpr uint32_t kMaxHeartbeatMs = 3600000;
@@ -367,6 +371,68 @@ fleet.focus();
 </script></body></html>
 )HTML";
 
+const char kIndexLowHeapHtml[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+<title>LRS Console (Low-Memory Mode)</title>
+<style>
+:root{--bg:#08101d;--card:#0f1a2e;--txt:#e5e7eb;--muted:#94a3b8;--border:#31435f;--btn:#005f73}
+body{margin:0;background:linear-gradient(180deg,#07111f,#0b1322);color:var(--txt);font-family:ui-sans-serif,system-ui;-webkit-text-size-adjust:100%}
+.wrap{max-width:680px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
+h1{margin:0 0 6px;font-size:1.2rem} p{margin:0;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.tile{border:1px solid var(--border);border-radius:10px;padding:10px;background:#111c31}
+.k{font-size:12px;color:var(--muted)} .v{font-size:1rem;font-weight:700;margin-top:4px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button,a.btn{background:var(--btn);color:#fff;border:0;border-radius:10px;padding:10px 12px;text-decoration:none;font-size:15px}
+a.btn.alt,button.alt{background:transparent;border:1px solid var(--border);color:var(--txt)}
+.mono{font-family:ui-monospace,monospace}
+</style></head><body><div class="wrap">
+<div class="card">
+ <h1>LRS Console (Low-memory mode)</h1>
+ <p id="notice">Full console payload was skipped to protect stability. Showing lightweight status only.</p>
+ <div class="row">
+  <button onclick="refreshLite()">Refresh</button>
+  <button class="alt" onclick="location.href='/?force_full=1'">Force full console</button>
+  <a class="btn alt" href="/login">Login</a>
+ </div>
+ <div class="grid">
+  <div class="tile"><div class="k">Role</div><div class="v" id="role">-</div></div>
+  <div class="tile"><div class="k">Relay</div><div class="v" id="relay">-</div></div>
+  <div class="tile"><div class="k">WiFi</div><div class="v" id="wifi">-</div></div>
+  <div class="tile"><div class="k">LoRa</div><div class="v" id="lora">-</div></div>
+  <div class="tile"><div class="k">Memory</div><div class="v" id="mem">-</div></div>
+  <div class="tile"><div class="k">Updated</div><div class="v" id="updated">never</div></div>
+ </div>
+ <div style="margin-top:10px" class="mono" id="raw"></div>
+</div>
+<script>
+let lastOk=0;
+function setText(id,v){ const el=document.getElementById(id); if(el) el.innerText=String(v); }
+function age(ms){ if(ms<1000) return `${ms} ms`; const s=Math.round(ms/1000); return `${s}s`; }
+async function refreshLite(){
+ try{
+  const res=await fetch('/api/status-lite',{cache:'no-store'});
+  if(res.status===401){ location.href='/login?expired=1'; return; }
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const st=await res.json();
+  lastOk=Date.now();
+  setText('role', String(st.role||'-').toUpperCase());
+  setText('relay', Number(st.relay_state)===1?'ON':'OFF');
+  setText('wifi', st.sta_connected ? `${st.sta_rssi} dBm` : 'disconnected');
+  setText('lora', Number(st.lora_last_packet_ms||0)>0 ? `${st.lora_last_rssi} dBm` : 'no packets');
+  const hf=Number(st.heap_free_bytes||0), mb=Number(st.max_free_block_bytes||0);
+  setText('mem', (hf&&mb) ? `${(hf/1024).toFixed(1)}k / ${(mb/1024).toFixed(1)}k` : '-');
+  setText('updated', new Date().toLocaleTimeString());
+  setText('raw', `heap=${hf} max=${mb} frag=${Number(st.heap_frag_percent||0)}% uptime=${Number(st.uptime_ms||0)}ms`);
+ }catch(e){
+  setText('notice', `Low-memory mode: ${e.message}`);
+ }
+}
+refreshLite();
+</script></body></html>
+)HTML";
+
 const char kIndexHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Console</title>
@@ -577,7 +643,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)">Show</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
-<div style="grid-column:1/-1"><label>LAN hostname (mDNS)</label><input id="lan_hostname" /><div class="hint">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
+<div style="grid-column:1/-1"><label id="lan_hostname_label">LAN hostname</label><input id="lan_hostname" /><div class="hint" id="lan_hostname_hint">Used as the device hostname for WiFi and OTA.</div><div class="hint" id="lan_hostname_preview_wrap" style="display:none">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
 </div><div class="actions"><button onclick="saveNetwork()">Save</button><button id="btnTestSta" onclick="testSta()">Test</button></div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_enabled" type="checkbox" /><label for="mqtt_enabled">Enable MQTT</label></div></div>
 <div><label>Broker host</label><input id="mqtt_host" /></div>
@@ -605,6 +671,15 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 const FREQ_MIN_MHZ = 400.0;
 const FREQ_MAX_MHZ = 1000.0;
 const MIN_DEPLOYMENT_KEY_LEN = 16;
+)HTML"
+#if LRS_ENABLE_MDNS
+R"HTML(const UI_MDNS_ENABLED = true;
+)HTML"
+#else
+R"HTML(const UI_MDNS_ENABLED = false;
+)HTML"
+#endif
+R"HTML(
 let statusFailCount = 0;
 let activePage = 'status';
 let activeSettingsTab = 'lora';
@@ -644,6 +719,7 @@ let statusLiveSseReconnectTimer = 0;
 let statusLiveSseBackoffMs = 1000;
 let statusLiveUiTicker = 0;
 let statusLiveHasLiveData = false;
+let statusDegradedLiteMode = false;
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -677,8 +753,17 @@ function refreshRoleLabels(){
  if(rxPushIntervalRow){ rxPushIntervalRow.style.display = tx ? 'none' : ''; }
 }
 function refreshHostnamePreview(){
+ if(!UI_MDNS_ENABLED) return;
+ const label=document.getElementById('lan_hostname_label');
+ const hint=document.getElementById('lan_hostname_hint');
+ const wrap=document.getElementById('lan_hostname_preview_wrap');
+ const preview=document.getElementById('lan_hostname_preview');
+ if(label) label.innerText='LAN hostname (mDNS)';
+ if(hint) hint.innerText='Used as the device hostname for WiFi, OTA, and LAN mDNS.';
+ if(wrap) wrap.style.display='';
+ if(!preview) return;
  const raw=(document.getElementById('lan_hostname').value||'').trim()||'lrs';
- document.getElementById('lan_hostname_preview').innerHTML=`<a class="link" href="http://${raw}.local">http://${raw}.local</a>`;
+ preview.innerHTML=`<a class="link" href="http://${raw}.local">http://${raw}.local</a>`;
 }
 function isDefaultDeploymentKey(v){
  return String(v||'').trim() === 'lora-default-passphrase';
@@ -913,6 +998,7 @@ function normalizeLanHost(raw){
  return `${h}.local`;
 }
 function startLanHostnameRedirect(hostname){
+ if(!UI_MDNS_ENABLED) return;
  const targetHost=normalizeLanHost(hostname);
  if(!targetHost) return;
  const targetUrl=`http://${targetHost}/`;
@@ -943,7 +1029,7 @@ function isLikelyStaSessionPath(){
  const lanMdns=stripPort(currentLanMdns);
  if(host.length===0) return false;
  if(staIp && host===staIp) return true;
- if(lanMdns && host===lanMdns) return true;
+ if(UI_MDNS_ENABLED && lanMdns && host===lanMdns) return true;
  return false;
 }
 function toggleDrawer(force){
@@ -1022,6 +1108,7 @@ function showPage(page){
   statusStaticCache = null;
   statusStaticLoadInFlight = false;
   statusLiveHasLiveData = false;
+  statusDegradedLiteMode = false;
   statusLiveSseLastMessageMs = 0;
   ensureStatusStatic(true).catch(()=>{});
   refreshStatusLiveNotice();
@@ -1070,13 +1157,70 @@ async function ensureStatusStatic(silent){
  const st = await apiJson('/api/status-static',{silent:!!silent});
  if(st && st.ok!==false){
   statusStaticCache = st;
+  statusDegradedLiteMode = false;
   const footerFw=document.getElementById('footerFw');
   if(footerFw){
    footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
   }
+ }else{
+  const lite = await apiJson('/api/status-lite',{silent:true});
+  if(lite && lite.ok!==false){
+   applyStatusLiteDegraded(lite, 'Low-memory mode: limited status');
+  }
  }
  statusStaticLoadInFlight = false;
  return statusStaticCache;
+}
+function buildStatusFallbackFromLite(lite){
+ const role = String((lite && lite.role) || (lastRoleIsTx ? 'tx' : 'rx') || 'tx').toLowerCase();
+ return {
+  role: (role === 'rx') ? 'rx' : 'tx',
+  local_address: Number((lite && lite.local_address) || 0),
+  remote_address: Number((lite && lite.remote_address) || 0),
+  link_state: String((lite && lite.link_state) || 'unknown'),
+  relay_state: Number((lite && lite.relay_state) || 0),
+  relay_reason: String((lite && lite.relay_reason) || 'unknown'),
+  input_state: Number((lite && lite.input_state) || 0),
+  local_input_state: Number((lite && lite.local_input_state) || 0),
+  lora_last_rssi: Number((lite && lite.lora_last_rssi) || -127),
+  lora_last_packet_ms: Number((lite && lite.lora_last_packet_ms) || 0),
+  lora_last_tx_ms: Number((lite && lite.lora_last_tx_ms) || 0),
+  lora_remote_temp_valid: false,
+  lora_remote_temp_c: 0,
+  sta_connected: !!(lite && lite.sta_connected),
+  sta_ip: String((lite && lite.sta_ip) || ''),
+  sta_ssid: String((lite && lite.sta_ssid) || ''),
+  sta_target_ssid: String((lite && lite.sta_target_ssid) || ''),
+  sta_rssi: Number((lite && lite.sta_rssi) || -127),
+  sta_status_code: Number((lite && lite.sta_status_code) || 0),
+  sta_status_text: String((lite && lite.sta_status_text) || (((lite && lite.sta_connected) ? 'connected' : 'unknown'))),
+  heap_free_bytes: Number((lite && lite.heap_free_bytes) || 0),
+  heap_frag_percent: Number((lite && lite.heap_frag_percent) || 0),
+  max_free_block_bytes: Number((lite && lite.max_free_block_bytes) || 0),
+  uptime_ms: Number((lite && lite.uptime_ms) || 0),
+  ap_ssid: String((lite && lite.ap_ssid) || ''),
+  ap_ip: String((lite && lite.ap_ip) || ''),
+  mdns_ap: String((lite && lite.mdns_ap) || ''),
+  mdns_lan: String((lite && lite.mdns_lan) || ''),
+  deployment_key: String((lite && lite.deployment_key) || ''),
+  sensor_temp_enabled: false,
+  sensor_temp_detected: false,
+  sensor_temp_valid: false,
+  sensor_temp_c: 0,
+  sensor_temp_error: 'n/a',
+  sensor_temp_addr: '',
+  sensor_temp_last_read_ms: 0,
+  fw_display: String((lite && lite.fw_display) || (lite && lite.fw_version) || '-')
+ };
+}
+function applyStatusLiteDegraded(lite, noticeText){
+ if(!lite || lite.ok===false) return false;
+ const fallback = buildStatusFallbackFromLite(lite);
+ statusStaticCache = Object.assign({}, statusStaticCache || {}, fallback);
+ statusDegradedLiteMode = true;
+ applyStatusPageState(statusStaticCache);
+ if(noticeText){ setStatusLiveNotice(noticeText); }
+ return true;
 }
 function setStatusLiveNotice(text){
  const el=document.getElementById('statusLiveNotice');
@@ -1093,6 +1237,10 @@ function refreshStatusLiveNotice(){
  }
  if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs)){
   setStatusLiveNotice('Status updates paused while device is busy');
+  return;
+ }
+ if(statusDegradedLiteMode && !statusLiveSseConnected){
+  setStatusLiveNotice('Low-memory mode: limited status');
   return;
  }
  if(statusLiveSseConnected){
@@ -1154,6 +1302,7 @@ function scheduleStatusLiveSseReconnect(){
 function handleStatusLivePayload(live){
  if(!live || typeof live !== 'object') return;
  statusFailCount = 0;
+ statusDegradedLiteMode = false;
  statusLiveHasLiveData = true;
  statusLiveSseLastMessageMs = Date.now();
  if(!statusStaticCache && !statusStaticLoadInFlight){
@@ -1241,10 +1390,16 @@ function applyStatusPageState(st){
   connectedStaSsid = '';
  }
  updateStaTestButtonState();
-  const apUrl = st.mdns_ap ? `http://${st.mdns_ap}` : '';
-  const lanUrl = st.mdns_lan ? `http://${st.mdns_lan}` : '';
-  const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a>` : escapeHtml(st.mdns_lan || 'n/a');
-  const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a>` : escapeHtml(st.mdns_ap || 'n/a');
+ const apUrl = UI_MDNS_ENABLED && st.mdns_ap ? `http://${st.mdns_ap}` : '';
+ const lanUrl = UI_MDNS_ENABLED && st.mdns_lan ? `http://${st.mdns_lan}` : '';
+ const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a>` : escapeHtml(st.mdns_lan || 'n/a');
+ const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a>` : escapeHtml(st.mdns_ap || 'n/a');
+ const statusMdnsRows = UI_MDNS_ENABLED
+   ? `<div class="k">LAN mDNS</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, st.mdns_lan, 'LAN mDNS')}</div>`
+   : '';
+ const apMdnsRow = UI_MDNS_ENABLED
+   ? `<div class="k">AP mDNS</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, st.mdns_ap, 'AP mDNS')}</div>`
+   : '';
  const rb=document.getElementById('relayBadge');
  if(rb){
   rb.className = `relay-badge ${relayOn ? 'on' : 'off'}`;
@@ -1275,11 +1430,11 @@ function applyStatusPageState(st){
     <div class="k">STA State</div><div class="v">${escapeHtml(st.sta_status_text)} [${escapeHtml(st.sta_status_code)}]</div>
     <div class="k">Current RSSI</div><div class="v">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'n/a')}</div>
     <div class="k">STA IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.sta_ip || 'n/a'), st.sta_ip, 'STA IP')}</div>
-    <div class="k">LAN mDNS</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, st.mdns_lan, 'LAN mDNS')}</div>
+    ${statusMdnsRows}
     <div class="section">Soft AP</div>
     <div class="k">AP SSID</div><div class="v">${escapeHtml(st.ap_ssid)}</div>
     <div class="k">AP IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.ap_ip || 'n/a'), st.ap_ip, 'AP IP')}</div>
-    <div class="k">AP mDNS</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, st.mdns_ap, 'AP mDNS')}</div>`;
+    ${apMdnsRow}`;
  }
  const t=document.getElementById('sensorTempTile');
  if(t){
@@ -1336,6 +1491,13 @@ async function refreshStatus(force){
  statusRefreshInFlight = true;
  const live=await apiJson('/api/status-live',{silent:true});
  if(!live){
+  const lite=await apiJson('/api/status-lite',{silent:true});
+  if(applyStatusLiteDegraded(lite, 'Low-memory mode: live status unavailable')){
+   statusFailCount = 0;
+   refreshStatusLiveNotice();
+   statusRefreshInFlight = false;
+   return;
+  }
   statusFailCount++;
   if(statusFailCount >= 3){
    const s=document.getElementById('statusTable');
@@ -1646,11 +1808,15 @@ async function saveLora(){
 }
 async function saveNetwork(){
  const body=collectNetworkBody();
- const oldHost=normalizeLanHost(currentLanMdns);
- const newHost=normalizeLanHost(body.lan_hostname);
- const hostChanged=oldHost.length>0 && newHost.length>0 && oldHost!==newHost;
- const shouldRedirect=hostChanged && isLikelyStaSessionPath();
- const ok=await postSettings(body,{skipReload:shouldRedirect});
+ let shouldRedirect=false;
+ let newHost='';
+ if(UI_MDNS_ENABLED){
+  const oldHost=normalizeLanHost(currentLanMdns);
+  newHost=normalizeLanHost(body.lan_hostname);
+  const hostChanged=oldHost.length>0 && newHost.length>0 && oldHost!==newHost;
+  shouldRedirect=hostChanged && isLikelyStaSessionPath();
+ }
+ const ok=await postSettings(body, shouldRedirect ? {skipReload:true} : undefined);
  if(!ok) return;
  if(shouldRedirect){
   startLanHostnameRedirect(newHost);
@@ -1725,7 +1891,7 @@ async function testSta(){
  if(btn && btn.disabled) return;
  const requestedSsid=normalizedInputValue('wifi_sta_ssid');
  if(staIsConnected && requestedSsid.length && requestedSsid!==connectedStaSsid && isLikelyStaSessionPath()){
-  const apHint=currentApIp ? `http://${currentApIp}` : (currentApMdns ? `http://${currentApMdns}` : 'the Soft AP URL');
+  const apHint=currentApIp ? `http://${currentApIp}` : (UI_MDNS_ENABLED && currentApMdns ? `http://${currentApMdns}` : 'the Soft AP URL');
   const msg=`Cannot test a different SSID from current LAN session (it drops this connection). Join device Soft AP and retry via ${apHint}.`;
   el.className='result-line show err';
   el.innerText=msg;
@@ -2342,7 +2508,7 @@ function initPage(){
  if(roleRx) roleRx.addEventListener('change',syncRole);
  if(local) local.addEventListener('input',refreshAddressHints);
  if(remote) remote.addEventListener('input',refreshAddressHints);
- if(host) host.addEventListener('input',refreshHostnamePreview);
+ if(host && UI_MDNS_ENABLED) host.addEventListener('input',refreshHostnamePreview);
  if(fleetKey) fleetKey.addEventListener('input',updateDeploymentKeyStrength);
  if(staSsid) staSsid.addEventListener('input',updateStaTestButtonState);
  if(staPass) staPass.addEventListener('input',updateStaTestButtonState);
@@ -2485,10 +2651,7 @@ void WebConsole::sendTracked(int code, const char *contentType, const String &bo
 }
 
 void WebConsole::initStatusCaches() {
-  status_cache_.body.reserve(kStatusCacheReserveBytes);
-  status_live_cache_.body.reserve(kStatusLiveCacheReserveBytes);
-  status_static_cache_.body.reserve(kStatusStaticCacheReserveBytes);
-  status_lite_cache_.body.reserve(kStatusLiteCacheReserveBytes);
+  // Keep cache allocation lazy on low-RAM boards; reserve() here can OOM during boot.
   status_cache_.built_ms = 0;
   status_live_cache_.built_ms = 0;
   status_static_cache_.built_ms = 0;
@@ -2654,8 +2817,10 @@ bool WebConsole::buildStatusStaticCache() {
   doc["fleet_setup_required"] = needsFleetSetupPrompt();
   doc["ap_ssid"] = config_->apSsid();
   doc["ap_ip"] = WiFi.softAPIP().toString();
+#if LRS_ENABLE_MDNS
   doc["mdns_ap"] = "lrs.local";
   doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
+#endif
   doc["fw_version"] = LRS_FW_VERSION;
   doc["fw_git_sha"] = LRS_GIT_SHA;
   doc["fw_git_branch"] = LRS_GIT_BRANCH;
@@ -3100,19 +3265,30 @@ void WebConsole::handleIndex() {
   const uint32_t heapBefore = lrslog::heapFree();
   const uint32_t maxBlockBefore = lrslog::heapMaxFreeBlock();
   const uint8_t fragBefore = lrslog::heapFragPercent();
+  const bool forceFull = server_.hasArg("force_full") && server_.arg("force_full") != "0";
   LRS_LOGI(WEB,
            "event=index_send_start heap_free=%lu heap_frag=%u max_free_block=%lu",
            static_cast<unsigned long>(heapBefore),
            static_cast<unsigned>(fragBefore),
            static_cast<unsigned long>(maxBlockBefore));
-  if (heapBefore < kIndexLowHeapRejectFreeBytes || maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes) {
+  if (!forceFull && (heapBefore < kIndexLowHeapRejectFreeBytes || maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes)) {
     LRS_LOGW(WEB,
              "event=index_send_reject_low_heap heap_free=%lu heap_frag=%u max_free_block=%lu",
              static_cast<unsigned long>(heapBefore),
              static_cast<unsigned>(fragBefore),
              static_cast<unsigned long>(maxBlockBefore));
-    sendTracked(503, "text/plain", "Device busy (low heap). Retry in a moment.");
+    LRS_LOGI(WEB, "event=index_send_low_heap_fallback");
+    markResponseStatus(200);
+    setUiNoStoreHeaders();
+    server_.send_P(200, "text/html", kIndexLowHeapHtml);
     return;
+  }
+  if (forceFull && (heapBefore < kIndexLowHeapRejectFreeBytes || maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes)) {
+    LRS_LOGW(WEB,
+             "event=index_send_force_low_heap heap_free=%lu heap_frag=%u max_free_block=%lu",
+             static_cast<unsigned long>(heapBefore),
+             static_cast<unsigned>(fragBefore),
+             static_cast<unsigned long>(maxBlockBefore));
   }
   markResponseStatus(200);
   setUiNoStoreHeaders();
@@ -3324,13 +3500,8 @@ void WebConsole::handleStatusLive() {
 }
 
 void WebConsole::handleStatusLiveEvents() {
-  if (!apiHeapHealthy(kStatusLiveSseConnectMinFreeBytes, kStatusLiveSseConnectMinMaxBlockBytes) &&
-      status_live_cache_.body.length() == 0) {
-    rejectApiIfLowHeap("/api/status-live/events",
-                       kStatusLiveSseConnectMinFreeBytes,
-                       kStatusLiveSseConnectMinMaxBlockBytes);
-    return;
-  }
+  const bool connectHeapHealthy =
+      apiHeapHealthy(kStatusLiveSseConnectMinFreeBytes, kStatusLiveSseConnectMinMaxBlockBytes);
 
   if (status_live_sse_active_) {
     closeStatusLiveSse();
@@ -3364,14 +3535,20 @@ void WebConsole::handleStatusLiveEvents() {
     closeStatusLiveSse();
     return;
   }
-  status_live_sse_client_.print(F("retry: 3000\n\n"));
+  if (status_live_sse_client_.print(F("retry: ")) == 0 ||
+      status_live_sse_client_.print(connectHeapHealthy ? 3000U : 10000U) == 0 ||
+      status_live_sse_client_.print(F("\n\n")) == 0) {
+    closeStatusLiveSse();
+    return;
+  }
   tickStatusLiveSse();
   LRS_LOGI(API,
-           "event=status_live_sse_open ip=%s heap_free=%lu heap_frag=%u max_free_block=%lu",
+           "event=status_live_sse_open ip=%s heap_free=%lu heap_frag=%u max_free_block=%lu heap_ok=%u",
            server_.client().remoteIP().toString().c_str(),
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
-           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()),
+           connectHeapHealthy ? 1U : 0U);
 }
 
 void WebConsole::handleStatusStatic() {
