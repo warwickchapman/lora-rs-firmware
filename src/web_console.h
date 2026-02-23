@@ -8,7 +8,6 @@ class ConfigStore;
 class NodeStateMachine;
 class LogBuffer;
 class SensorManager;
-class AutomationRulesEngine;
 
 class WebConsole {
  public:
@@ -16,7 +15,6 @@ class WebConsole {
              NodeStateMachine *sm,
              SensorManager *sensors,
              LogBuffer *logs,
-             AutomationRulesEngine *automation,
              std::function<void(bool, bool)> onApply);
   void tick();
 
@@ -26,7 +24,6 @@ class WebConsole {
   NodeStateMachine *sm_ = nullptr;
   SensorManager *sensors_ = nullptr;
   LogBuffer *logs_ = nullptr;
-  AutomationRulesEngine *automation_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
 
   uint16_t failed_auth_ = 0;
@@ -61,22 +58,19 @@ class WebConsole {
   void handleLogoutApi();
   void handleSessionApi();
   void handleStatus();
+  void handleStatusLite();
   void handleFactory();
   void handleGetSettings();
   void handlePostSettings();
   void handleExportSettings();
   void handleImportSettings();
   void handleFleet();
-  void handleFleetEvents();
-  void handleGetAutomationRules();
-  void handlePostAutomationRules();
   bool handleFleetDeviceActionRoute(const String &uri);
   void handleDiagnostics();
   void handleTestSta();
   void handleProvisionFleetWifi();
   void handleProvisioningStart();
   void handleProvisioningStatus();
-  void handleProvisioningEvents();
   void handleProvisioningProvisionAll();
   void handleProvisioningCancel();
   void handleTestMqtt();

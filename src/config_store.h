@@ -58,7 +58,7 @@ class ConfigStore {
   bool begin();
   Settings &settings();
   bool save();
-  bool factoryReset(bool keepSharedFleetKey);
+  bool factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials = false);
 
   String chipIdHex() const;
   String defaultLanHostnameForRole(bool roleTx) const;

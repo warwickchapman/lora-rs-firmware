@@ -350,9 +350,11 @@ bool ConfigStore::save() {
   return ok;
 }
 
-bool ConfigStore::factoryReset(bool keepSharedFleetKey) {
+bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials) {
   const String preservedFleetKey = cfg_.fleet_passphrase;
   const bool preservedFleetPromptDismissed = cfg_.fleet_setup_prompt_dismissed;
+  const String preservedWifiSsid = cfg_.wifi_sta_ssid;
+  const String preservedWifiPassword = cfg_.wifi_sta_password;
 
   setDefaults();
   ensureProvisionedDefaults();
@@ -361,15 +363,32 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey) {
     cfg_.fleet_passphrase = preservedFleetKey;
     cfg_.fleet_setup_prompt_dismissed = preservedFleetPromptDismissed || (cfg_.fleet_passphrase != kDefaultDeploymentKey);
   }
+  if (keepWifiCredentials) {
+    cfg_.wifi_sta_ssid = preservedWifiSsid;
+    cfg_.wifi_sta_password = preservedWifiPassword;
+  }
 
-  cfg_.audit_last_saved_by = keepSharedFleetKey ? "factory_reset_keep_fleet" : "factory_reset_full";
+  if (keepSharedFleetKey && keepWifiCredentials) {
+    cfg_.audit_last_saved_by = "factory_reset_keep_fleet_wifi";
+    cfg_.audit_last_reboot_reason = "factory_reset_keep_fleet_wifi";
+  } else if (keepSharedFleetKey) {
+    cfg_.audit_last_saved_by = "factory_reset_keep_fleet";
+    cfg_.audit_last_reboot_reason = "factory_reset_keep_fleet";
+  } else if (keepWifiCredentials) {
+    cfg_.audit_last_saved_by = "factory_reset_keep_wifi";
+    cfg_.audit_last_reboot_reason = "factory_reset_keep_wifi";
+  } else {
+    cfg_.audit_last_saved_by = "factory_reset_full";
+    cfg_.audit_last_reboot_reason = "factory_reset_full";
+  }
   cfg_.audit_last_saved_ms = 0;
-  cfg_.audit_last_reboot_reason = keepSharedFleetKey ? "factory_reset_keep_fleet" : "factory_reset_full";
   cfg_.audit_last_reboot_ms = 0;
   LRS_LOGW(SYS,
-           "event=factory_reset_apply keep_fleet_key=%u fleet_key=%s",
+           "event=factory_reset_apply keep_fleet_key=%u keep_wifi=%u fleet_key=%s wifi_ssid=%s",
            keepSharedFleetKey ? 1U : 0U,
-           lrslog::maskSecret(cfg_.fleet_passphrase).c_str());
+           keepWifiCredentials ? 1U : 0U,
+           lrslog::maskSecret(cfg_.fleet_passphrase).c_str(),
+           cfg_.wifi_sta_ssid.c_str());
   return save();
 }
 

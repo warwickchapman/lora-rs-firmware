@@ -1,40 +1,54 @@
 #include "log_buffer.h"
 
 #include <Arduino.h>
+#include <cstring>
 
 #include "logger.h"
 
 namespace {
-lrslog::Category classifyCategory(const String &event) {
-  if (event.startsWith("sta_") || event.startsWith("wifi_")) return lrslog::Category::WIFI;
-  if (event.startsWith("ntp_")) return lrslog::Category::NTP;
-  if (event.startsWith("mdns_")) return lrslog::Category::MDNS;
-  if (event.startsWith("temp_")) return lrslog::Category::SENSOR;
+bool startsWith(const char *event, const char *prefix);
 
-  if (event == "time_sync_ntp") return lrslog::Category::NTP;
-  if (event == "time_sync_peer") return lrslog::Category::LORA;
+lrslog::Category classifyCategory(const char *event) {
+  if (event == nullptr) return lrslog::Category::SYS;
+  if (startsWith(event, "sta_") || startsWith(event, "wifi_")) return lrslog::Category::WIFI;
+  if (startsWith(event, "ntp_")) return lrslog::Category::NTP;
+  if (startsWith(event, "mdns_")) return lrslog::Category::MDNS;
+  if (startsWith(event, "temp_")) return lrslog::Category::SENSOR;
 
-  if (event.startsWith("tx_") || event.startsWith("rx_") || event.startsWith("mqtt_remote_") || event.startsWith("prov_") ||
-      event.startsWith("wifi_prov_") || event.startsWith("factory_reset_") || event == "radio_start_failed") {
+  if (strcmp(event, "time_sync_ntp") == 0) return lrslog::Category::NTP;
+  if (strcmp(event, "time_sync_peer") == 0) return lrslog::Category::LORA;
+
+  if (startsWith(event, "tx_") || startsWith(event, "rx_") || startsWith(event, "mqtt_remote_") || startsWith(event, "prov_") ||
+      startsWith(event, "wifi_prov_") || startsWith(event, "factory_reset_") || strcmp(event, "radio_start_failed") == 0) {
     return lrslog::Category::LORA;
   }
   return lrslog::Category::SYS;
 }
 
-bool containsAny(const String &event, const char *a, const char *b = nullptr, const char *c = nullptr, const char *d = nullptr) {
-  if (a && event.indexOf(a) >= 0) return true;
-  if (b && event.indexOf(b) >= 0) return true;
-  if (c && event.indexOf(c) >= 0) return true;
-  if (d && event.indexOf(d) >= 0) return true;
+bool startsWith(const char *event, const char *prefix) {
+  if (event == nullptr || prefix == nullptr) return false;
+  const size_t n = strlen(prefix);
+  return strncmp(event, prefix, n) == 0;
+}
+
+bool containsAny(const char *event, const char *a, const char *b = nullptr, const char *c = nullptr, const char *d = nullptr) {
+  if (event == nullptr) return false;
+  if (a && strstr(event, a) != nullptr) return true;
+  if (b && strstr(event, b) != nullptr) return true;
+  if (c && strstr(event, c) != nullptr) return true;
+  if (d && strstr(event, d) != nullptr) return true;
   return false;
 }
 
-lrslog::Level classifyLevel(const String &event) {
-  if (event == "radio_start_failed") return lrslog::Level::ERROR;
+lrslog::Level classifyLevel(const char *event) {
+  if (event != nullptr && strcmp(event, "radio_start_failed") == 0) return lrslog::Level::ERROR;
   if (containsAny(event, "invalid_size", "bad_mac", "wrong_address", "wrong_source") || containsAny(event, "filtered_source", "replay_drop")) {
     return lrslog::Level::DEBUG;  // frequent noise in the field; available when needed
   }
-  if (event == "tx_packet" || event == "rx_packet" || event == "temp_read_ok") return lrslog::Level::DEBUG;
+  if (event != nullptr &&
+      (strcmp(event, "tx_packet") == 0 || strcmp(event, "rx_packet") == 0 || strcmp(event, "temp_read_ok") == 0)) {
+    return lrslog::Level::DEBUG;
+  }
   if (containsAny(event, "_failed", "_fail", "_timeout", "_bad") ||
       containsAny(event, "_orphan", "_hash_fail", "_incomplete")) {
     return lrslog::Level::WARN;
@@ -46,9 +60,6 @@ lrslog::Level classifyLevel(const String &event) {
 void LogBuffer::setTimeProvider(TimeProvider provider) { time_provider_ = provider; }
 
 void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t state) {
-  if (entries_.size() >= kMaxEntries) {
-    entries_.pop_front();
-  }
   uint32_t unixTimeS = 0;
   if (time_provider_) {
     uint32_t candidate = 0;
@@ -56,16 +67,55 @@ void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t sta
       unixTimeS = candidate;
     }
   }
-  const LogItem item{millis(), unixTimeS, event, rssi, counter, state};
-  entries_.push_back(item);
+  LogItem item{};
+  item.ms = millis();
+  item.unix_time_s = unixTimeS;
+  event.substring(0, LogItem::kEventBytes - 1).toCharArray(item.event, LogItem::kEventBytes);
+  item.rssi = rssi;
+  item.counter = counter;
+  item.state = state;
+  if (count_ < kMaxEntries) {
+    const size_t idx = (head_ + count_) % kMaxEntries;
+    entries_[idx] = item;
+    ++count_;
+  } else {
+    entries_[head_] = item;
+    head_ = (head_ + 1) % kMaxEntries;
+  }
 
   // Mirror ring-buffer events to serial using structured logs for live diagnostics.
+  if (strcmp(item.event, "tx_prov") == 0) {
+    if (item.state == 0xFF) {
+      lrslog::logAtf(classifyLevel(item.event),
+                     classifyCategory(item.event),
+                     item.ms,
+                     item.unix_time_s,
+                     "event=%s target=bcast rssi=%d counter=%lu state=%u",
+                     item.event,
+                     item.rssi,
+                     static_cast<unsigned long>(item.counter),
+                     static_cast<unsigned>(item.state));
+    } else {
+      lrslog::logAtf(classifyLevel(item.event),
+                     classifyCategory(item.event),
+                     item.ms,
+                     item.unix_time_s,
+                     "event=%s target=0x%02X rssi=%d counter=%lu state=%u",
+                     item.event,
+                     static_cast<unsigned>(item.state),
+                     item.rssi,
+                     static_cast<unsigned long>(item.counter),
+                     static_cast<unsigned>(item.state));
+    }
+    return;
+  }
+
   lrslog::logAtf(classifyLevel(item.event),
                  classifyCategory(item.event),
                  item.ms,
                  item.unix_time_s,
                  "event=%s rssi=%d counter=%lu state=%u",
-                 item.event.c_str(),
+                 item.event,
                  item.rssi,
                  static_cast<unsigned long>(item.counter),
                  static_cast<unsigned>(item.state));
@@ -73,23 +123,21 @@ void LogBuffer::add(const String &event, int rssi, uint32_t counter, uint8_t sta
 
 String LogBuffer::asCsv() const {
   String out = "millis,unix_time_s,event,rssi,counter,state\n";
-  for (const auto &e : entries_) {
-    out += String(e.ms) + "," + String(e.unix_time_s) + "," + e.event + "," + String(e.rssi) + "," + String(e.counter) + "," +
+  forEachEntry([&out](const LogItem &e) {
+    out += String(e.ms) + "," + String(e.unix_time_s) + "," + String(e.event) + "," + String(e.rssi) + "," + String(e.counter) + "," +
            String(e.state) + "\n";
-  }
+  });
   return out;
 }
 
 String LogBuffer::asText() const {
   String out;
-  for (const auto &e : entries_) {
+  forEachEntry([&out](const LogItem &e) {
     out += "[LRS] t=" + String(e.ms);
     if (e.unix_time_s != 0) {
       out += " unix=" + String(e.unix_time_s);
     }
-    out += " event=" + e.event + " rssi=" + String(e.rssi) + " counter=" + String(e.counter) + " state=" + String(e.state) + "\n";
-  }
+    out += " event=" + String(e.event) + " rssi=" + String(e.rssi) + " counter=" + String(e.counter) + " state=" + String(e.state) + "\n";
+  });
   return out;
 }
-
-const std::deque<LogItem> &LogBuffer::entries() const { return entries_; }

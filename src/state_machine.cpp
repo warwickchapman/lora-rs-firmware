@@ -315,18 +315,11 @@ void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
   }
 }
 
-void NodeStateMachine::automationSetLocalRelay(uint8_t relayState) {
-  relay_state_ = relayState ? 1 : 0;
-  digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
-  if (logs_) {
-    logs_->add("auto_local_relay", 0, last_counter_, relay_state_);
-  }
-}
-
 void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent) {
   const uint32_t now = millis();
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
+  yield();  // Feed ESP8266 watchdog before retry/start-sync LoRa sends during startup loops.
   if (!radio_->send(type, relayState, inputState, txFlags(), last_counter_, cfg_.local_address, cfg_.remote_address, local_temp_code_,
                     0, 0xFF, 0xFFFF, unixTimeS)) {
     link_state_ = LinkState::Idle;
@@ -353,6 +346,7 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
   if (logs_ && logEvent != nullptr) {
     logs_->add(logEvent, 0, last_counter_, relayState ? 1 : 0);
   }
+  yield();  // LoRa send path yields too, but yield again after scheduling/logging to avoid tight retry loops.
 }
 
 bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter) {

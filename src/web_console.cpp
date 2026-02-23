@@ -4,8 +4,8 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <Updater.h>
+#include <cstring>
 
-#include "automation_rules.h"
 #include "build_info.h"
 #include "config_store.h"
 #include "logger.h"
@@ -30,8 +30,14 @@ constexpr const char *kHardwareVersion = "v1.2";
 constexpr const char *kHardwareBatch = "251101";
 constexpr uint32_t kLowHeapWarnThresholdBytes = 14000;
 constexpr uint32_t kLowHeapWarnMinIntervalMs = 5000;
+constexpr uint32_t kApiLightLowHeapRejectFreeBytes = 3000;
+constexpr uint32_t kApiLightLowHeapRejectMaxBlockBytes = 1200;
 constexpr uint32_t kApiLowHeapRejectFreeBytes = 6500;
 constexpr uint32_t kApiLowHeapRejectMaxBlockBytes = 2500;
+constexpr uint32_t kApiFleetLowHeapRejectFreeBytes = 4500;
+constexpr uint32_t kApiFleetLowHeapRejectMaxBlockBytes = 1800;
+constexpr uint32_t kApiProvStatusCompactFreeBytes = 3500;
+constexpr uint32_t kApiProvStatusCompactMaxBlockBytes = 1400;
 constexpr uint32_t kIndexLowHeapRejectFreeBytes = 3800;
 constexpr uint32_t kIndexLowHeapRejectMaxBlockBytes = 2400;
 
@@ -492,7 +498,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head>
-<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-automation" onclick="showPage('automation')">Automations</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="deploymentKeyNotice" class="deploy-note">Deployment Key (Encryption): checking...</div>
@@ -518,30 +524,9 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 </section>
 <section class="card page" id="page-fleet">
 <h3>Fleet</h3>
-<div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-tools" onclick="showFleetTab('tools')">Fleet Tools</button></div>
+<div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div>
 <div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div>
-<div class="fleet-pane" id="fleet-pane-tools"><div class="grid"><div style="grid-column:1/-1"><label>Fleet WiFi Provisioning (LoRa)</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div><div style="grid-column:1/-1"><label>Fleet Provisioning Wizard (LoRa)</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet. Live updates stream over SSE.</div><div class="grid"><div><label>Estimated devices</label><input id="prov_estimated_count" type="number" min="1" max="250" value="10" /></div><div><label>&nbsp;</label><div class="check-row"><input id="prov_retry_once" type="checkbox" checked /><label for="prov_retry_once">Retry discovery once</label></div></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn">Provision All</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div></div></div></div>
-</section>
-<section class="card page" id="page-automation">
-<h3>Automation Rules</h3>
-<div class="small" id="automationRulesMeta">Loading automation engine...</div>
-<div class="check-row" style="margin:8px 0"><input id="autoRulesEnabled" type="checkbox" onchange="updateAutomationJsonPreview()" /><label for="autoRulesEnabled">Enable automations on this device</label></div>
-<div class="grid">
-<div><label>Execution mode (v1)</label><input id="autoExecutionMode" type="text" value="standalone" readonly /></div>
-<div><label>Peer display</label><select id="automationPeerDisplayMode" onchange="onAutomationPeerDisplayModeChange()"><option value="addresses" selected>Addresses</option><option value="names">Names</option></select></div>
-<div><label>Action target (v1)</label><input id="autoActionTargetSummary" type="text" value="self" readonly /></div>
-</div>
-<div class="small" style="margin-top:6px">Builder is address-centric. Runtime execution in v1 is gated to standalone mode and local relay actions only.</div>
-<div class="actions"><button type="button" onclick="addAutomationRule()">Add Rule</button><button type="button" onclick="saveAutomationRules()">Save Rules</button><button type="button" onclick="loadAutomationRules(true)">Reload</button></div>
-<div id="automationRulesHost" style="margin-top:8px">Loading rules...</div>
-<details id="automationJsonDetails" style="margin-top:10px">
-<summary>JSON Preview</summary>
-<div class="small" style="margin:6px 0">Use this for copy/paste transport. Builder validates and saves the same JSON shape.</div>
-<div class="actions"><button type="button" onclick="copyAutomationJson()">Copy JSON</button><button type="button" onclick="applyAutomationJsonFromPaste()">Load JSON Into Builder</button></div>
-<textarea id="automationJsonPaste" rows="6" placeholder="Paste automation JSON here"></textarea>
-<pre id="automationJsonPreview" style="max-height:320px;overflow:auto"></pre>
-</details>
-<div id="automationSaveResult" class="result-line"></div>
+<div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet.</div><div class="grid"><div><label>Estimated devices</label><input id="prov_estimated_count" type="number" min="1" max="250" value="10" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="searchMoreFleetProvisioning()" title="Search more" aria-label="Search more">↻</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div></div></div></div></div>
 </section>
 <section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane active" id="settings-pane-lora"><div class="grid">
 <div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
@@ -575,7 +560,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div><label>MQTT user</label><input id="mqtt_user" /></div>
 <div><label>MQTT password</label><input id="mqtt_password" /></div>
 <div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
-</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><div class="check-row"><input id="factory_reset_keep_fleet_local" type="checkbox" checked /><label for="factory_reset_keep_fleet_local">Keep shared fleet key</label></div><div class="small">Untick to remove this device from the LoRa fleet and require manual provisioning again.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
+</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><div class="check-row"><input id="factory_reset_keep_fleet_local" type="checkbox" /><label for="factory_reset_keep_fleet_local">Keep shared fleet key</label></div><div class="small">Tick to keep this device in the LoRa fleet.</div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
 <section class="card page" id="page-sensors"><h3>Sensors</h3>
 <h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
 <div class="check-row" style="margin-bottom:8px"><input id="sensor_temp_enabled" type="checkbox" /><label for="sensor_temp_enabled">Enable DS18B20 (GPIO0)</label></div>
@@ -589,7 +574,7 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><h4 style="margin:10px 0 6px 0">System Information</h4><div id="diagSystem" class="status-table"></div><div id="diagText" class="small"></div></section>
 <section class="card page" id="page-logs"><h3>Logs</h3><div class="actions"><button onclick="refreshLogs()">Refresh</button><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button></div><pre id="logView" style="max-height:320px;overflow:auto"></pre></section>
 </main>
-<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div id="sessionLeft" class="small card">Session: --:-- | HW: v1.2 | Batch: 251101</div></footer>
+<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101</div></footer>
 <div id="toast" class="toast"></div>
 <script>
 const FREQ_MIN_MHZ = 400.0;
@@ -612,16 +597,17 @@ let fleetDevicesCache = [];
 let selectedFleetDeviceAddr = 0;
 let fleetDeviceDetailTab = 'state';
 let activeFleetTab = 'devices';
-let fleetEventSource = null;
-let fleetEventRetryTimer = null;
+let activeFleetManageTab = 'lora';
 let statusRefreshInFlight = false;
+let headerStatusRefreshInFlight = false;
+let sessionRefreshInFlight = false;
 let provStatusInFlight = false;
 let provLastStatusRefreshMs = 0;
+let provUiSessionActive = false;
+let provUiSessionState = 'idle';
 let settingsPageLoaded = false;
 let settingsPageLoadInFlight = false;
-let automationRulesConfig = null;
-let automationRulesMeta = null;
-let automationPeerDisplayMode = 'addresses';
+let wifiProvisionResultTimer=0;
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -630,61 +616,12 @@ function parseAddress(v){
  return parseInt(t,10);
 }
 function toHexByte(n){ return '0x'+Number(n).toString(16).toUpperCase().padStart(2,'0'); }
-function automationSelfLabel(){
- const localEl=document.getElementById('local_address');
- const n=parseAddress(localEl ? localEl.value : '');
- if(Number.isInteger(n) && n >= 1 && n <= 254){
-  return `self (${toHexByte(n)})`;
- }
- return 'self';
-}
-function formatPeerAddressDisplay(n){
- if(!Number.isInteger(n) || n < 1 || n > 254) return 'invalid address';
- return `${n} (${toHexByte(n)})`;
-}
-function formatPeerTokenDisplay(token){
- const t=String(token||'').trim();
- if(!t) return '';
- const low=t.toLowerCase();
- if(low==='self'){
-  const localEl=document.getElementById('local_address');
-  const n=parseAddress(localEl ? localEl.value : '');
-  if(automationPeerDisplayMode==='names'){
-   return Number.isInteger(n) ? `Self (${formatPeerAddressDisplay(n)})` : 'Self';
-  }
-  return Number.isInteger(n) ? formatPeerAddressDisplay(n) : 'self (local address not set)';
- }
- const n=parseAddress(t);
- if(automationPeerDisplayMode==='names'){
-  return Number.isInteger(n) ? `Peer ${formatPeerAddressDisplay(n)}` : 'Peer (unparsed)';
- }
- return Number.isInteger(n) ? formatPeerAddressDisplay(n) : 'unparsed';
-}
-function refreshAutomationPeerDisplayHints(){
- const autoTarget=document.getElementById('autoActionTargetSummary');
- if(autoTarget){
-  autoTarget.value = formatPeerTokenDisplay('self') || automationSelfLabel();
- }
- document.querySelectorAll('[data-auto-peer-hint]').forEach((el)=>{
-  const rule=el.getAttribute('data-arule');
-  const pred=el.getAttribute('data-apred');
-  const input=document.querySelector(`[data-arule="${rule}"][data-apred="${pred}"][data-af="peer"]`);
-  if(!input) return;
-  const txt=formatPeerTokenDisplay(input.value);
-  el.innerText = txt ? `Display: ${txt}` : 'Enter self or peer address';
- });
-}
-function onAutomationPeerDisplayModeChange(){
- const el=document.getElementById('automationPeerDisplayMode');
- automationPeerDisplayMode = (el && el.value==='names') ? 'names' : 'addresses';
- renderAutomationRules();
-}
+ 
 function refreshAddressHints(){
  const local=parseAddress(document.getElementById('local_address').value);
  const remote=parseAddress(document.getElementById('remote_address').value);
  document.getElementById('local_address_hex').innerText=Number.isInteger(local)?`hex ${toHexByte(local)}`:'enter dec or hex (e.g. 10 or 0x0A)';
  document.getElementById('remote_address_hex').innerText=Number.isInteger(remote)?`hex ${toHexByte(remote)}`:'enter dec or hex (e.g. 10 or 0x0A)';
- refreshAutomationPeerDisplayHints();
 }
 function refreshRoleLabels(){
  const tx=document.getElementById('role_tx').value==='true';
@@ -1004,19 +941,36 @@ function showSystemTab(tab){
  });
 }
 function showFleetTab(tab){
- const target = (tab==='tools') ? 'tools' : 'devices';
+ const target = (tab==='manage') ? 'manage' : 'devices';
  activeFleetTab = target;
- ['devices','tools'].forEach(p=>{
+ ['devices','manage'].forEach(p=>{
   const pane=document.getElementById(`fleet-pane-${p}`);
   const btn=document.getElementById(`fleet-tab-${p}`);
+ if(pane) pane.classList.toggle('active', p===target);
+ if(btn) btn.classList.toggle('active', p===target);
+ });
+ if(activePage==='fleet' && target==='devices'){ refreshFleet(); }
+ if(activePage==='fleet' && target==='manage'){ showFleetManageTab(activeFleetManageTab); }
+ syncPagePolling();
+}
+function showFleetManageTab(tab){
+ const target = (tab==='lora') ? 'lora' : 'wifi';
+ activeFleetManageTab = target;
+ ['wifi','lora'].forEach(p=>{
+  const pane=document.getElementById(`fleet-manage-pane-${p}`);
+  const btn=document.getElementById(`fleet-manage-tab-${p}`);
   if(pane) pane.classList.toggle('active', p===target);
   if(btn) btn.classList.toggle('active', p===target);
  });
- syncFleetDevicesLive();
- if(activePage==='fleet' && target==='devices'){ refreshFleet(); }
+ if(!(activePage==='fleet' && activeFleetTab==='manage')) return;
+ if(target!=='lora'){
+  stopProvisioningPolling();
+ }else{
+  startProvisioningPolling();
+ }
 }
 function showPage(page){
- const allowed=['status','fleet','automation','sensors','diagnostics','logs','settings'];
+ const allowed=['status','fleet','sensors','diagnostics','logs','settings'];
  activePage = allowed.includes(page) ? page : 'status';
  allowed.forEach(p=>{
   const sec=document.getElementById(`page-${p}`);
@@ -1028,9 +982,8 @@ function showPage(page){
  if(activePage==='logs'){ refreshLogs(); }
  if(activePage==='diagnostics'){ refreshDiagnostics(); }
  if(activePage==='fleet'){ showFleetTab(activeFleetTab); }
- if(activePage==='automation'){ loadAutomationRules(); }
- syncFleetDevicesLive();
  toggleDrawer(false);
+ syncPagePolling();
 }
 function applyFleetTabVisibility(){
  const fleetTabBtn=document.getElementById('nav-fleet');
@@ -1063,7 +1016,9 @@ function togglePasswordField(id,btn){
  if(btn){ btn.innerText=show?'Hide':'Show'; }
 }
 async function refreshStatus(){
+ if(location.pathname !== '/') return;
  if(statusRefreshInFlight) return;
+ if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs) || isFleetManageActive() || isProvisioningUiBusy()) return;
  statusRefreshInFlight = true;
  const st=await apiJson('/api/status',{silent:true});
  if(!st){
@@ -1076,6 +1031,24 @@ async function refreshStatus(){
   return;
  }
  statusFailCount = 0;
+ applyHeaderStatus(st);
+ const relayOn = Number(st.relay_state) === 1;
+ const hasLora = Number(st.lora_last_packet_ms||0) > 0;
+ const hasLoraTx = Number(st.lora_last_tx_ms||0) > 0;
+ const loraAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_packet_ms||0);
+ const loraTxAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_tx_ms||0);
+ const roleText=String(st.role||'').toLowerCase();
+ if(roleText==='tx' || roleText==='rx'){
+  lastRoleIsTx = roleText==='tx';
+ }
+ applyFleetTabVisibility();
+ const roleIsTx = lastRoleIsTx;
+ const txAddress = roleIsTx ? st.local_address : st.remote_address;
+ const rxAddress = roleIsTx ? st.remote_address : st.local_address;
+ const roleDisplay = `${roleIsTx ? 'Transmitter' : 'Receiver'} (tx ${txAddress}, rx ${rxAddress})`;
+ const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
+ const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
+ const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
  staIsConnected = !!st.sta_connected;
  currentStaIp = String(st.sta_ip || '');
  currentLanMdns = String(st.mdns_lan || '');
@@ -1090,46 +1063,14 @@ async function refreshStatus(){
   connectedStaSsid = '';
  }
  updateStaTestButtonState();
- setSessionLeft(st.session_remaining_s || 0);
- const roleTag = String(st.role || '').toLowerCase() === 'tx' ? 'TX' : 'RX';
- const titleEl = document.getElementById('consoleTitle');
- const pageTitle = `LRS Device Console (${roleTag})`;
- if(titleEl){ titleEl.innerText = pageTitle; }
- document.title = pageTitle;
- const level = st.sta_connected ? rssiToLevel(st.sta_rssi) : 0;
- setWifiBadge(level, 'WiFi');
   const apUrl = st.mdns_ap ? `http://${st.mdns_ap}` : '';
   const lanUrl = st.mdns_lan ? `http://${st.mdns_lan}` : '';
   const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a>` : escapeHtml(st.mdns_lan || 'n/a');
   const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a>` : escapeHtml(st.mdns_ap || 'n/a');
-  const relayOn = Number(st.relay_state) === 1;
-  const hasLora = Number(st.lora_last_packet_ms||0) > 0;
- const hasLoraTx = Number(st.lora_last_tx_ms||0) > 0;
-  const loraAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_packet_ms||0);
-  const loraTxAgoMs = Number(st.uptime_ms||0) - Number(st.lora_last_tx_ms||0);
-  const roleText=String(st.role||'').toLowerCase();
-  if(roleText==='tx' || roleText==='rx'){
-   lastRoleIsTx = roleText==='tx';
-  }
-  applyFleetTabVisibility();
-  const roleIsTx = lastRoleIsTx;
-  const txAddress = roleIsTx ? st.local_address : st.remote_address;
-  const rxAddress = roleIsTx ? st.remote_address : st.local_address;
-  const roleDisplay = `${roleIsTx ? 'Transmitter' : 'Receiver'} (tx ${txAddress}, rx ${rxAddress})`;
-  const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
-  const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
-  const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
- const loraLevel = hasLora ? rssiToLevel(st.lora_last_rssi) : 0;
- setLoraBadge(loraLevel, 'LoRa');
  const rb=document.getElementById('relayBadge');
  if(rb){
   rb.className = `relay-badge ${relayOn ? 'on' : 'off'}`;
   rb.innerText = relayOn ? 'RELAY ON' : 'RELAY OFF';
- }
- const rh=document.getElementById('relayHeader');
- if(rh){
-  rh.className=`relay-head ${relayOn ? 'on' : 'off'}`;
-  rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
  }
  const rm=document.getElementById('relayMeta');
  if(rm){ rm.innerText = `Link: ${st.link_state}`; }
@@ -1214,6 +1155,38 @@ async function refreshStatus(){
  }
  statusRefreshInFlight = false;
 }
+function applyHeaderStatus(st){
+ if(!st) return;
+ const roleTag = String(st.role || '').toLowerCase() === 'tx' ? 'TX' : 'RX';
+ const titleEl = document.getElementById('consoleTitle');
+ const pageTitle = `LRS Device Console (${roleTag})`;
+ if(titleEl){ titleEl.innerText = pageTitle; }
+ document.title = pageTitle;
+ const roleText=String(st.role||'').toLowerCase();
+ if(roleText==='tx' || roleText==='rx'){
+  lastRoleIsTx = roleText==='tx';
+  applyFleetTabVisibility();
+ }
+ setWifiBadge(st.sta_connected ? rssiToLevel(st.sta_rssi) : 0, 'WiFi');
+ const hasLora = Number(st.lora_last_packet_ms||0) > 0;
+ setLoraBadge(hasLora ? rssiToLevel(st.lora_last_rssi) : 0, 'LoRa');
+ const relayOn = Number(st.relay_state) === 1;
+ const rh=document.getElementById('relayHeader');
+ if(rh){
+  rh.className=`relay-head ${relayOn ? 'on' : 'off'}`;
+  rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
+ }
+}
+async function refreshHeaderStatus(){
+ if(location.pathname !== '/') return;
+ if(activePage==='status') return;
+ if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs)) return;
+ if(headerStatusRefreshInFlight) return;
+ headerStatusRefreshInFlight = true;
+ const st=await apiJson('/api/status-lite',{silent:true});
+ if(st && st.ok!==false){ applyHeaderStatus(st); }
+ headerStatusRefreshInFlight = false;
+}
 async function apiJson(url, options){
  let t=null;
  try{
@@ -1241,16 +1214,10 @@ async function logout(){
  try{ await fetch('/api/logout',{method:'POST'}); }catch(e){}
  location.href='/login?logged_out=1';
 }
-function setSessionLeft(seconds){
- const el=document.getElementById('sessionLeft');
- if(!el) return;
- const s=Math.max(0,Math.floor(Number(seconds||0)));
- const m=Math.floor(s/60);
- const r=s%60;
- el.innerText=`Session: ${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')} | HW: v1.2 | Batch: 251101`;
-}
 async function load(){
-  await refreshStatus();
+  if(activePage==='status'){
+   await refreshStatus();
+  }
 }
 async function loadSettingsPageData(force){
  if(settingsPageLoadInFlight) return;
@@ -1479,9 +1446,11 @@ async function factoryResetLocal(){
  const el=document.getElementById('factoryResetResult');
  const pwEl=document.getElementById('factory_reset_password');
  const keepEl=document.getElementById('factory_reset_keep_fleet_local');
- if(!el || !pwEl || !keepEl) return;
+ const keepWifiEl=document.getElementById('factory_reset_keep_wifi_local');
+ if(!el || !pwEl || !keepEl || !keepWifiEl) return;
  const password=String(pwEl.value||'');
  const keepFleet=!!keepEl.checked;
+ const keepWifi=!!keepWifiEl.checked;
  if(!password.length){
   el.className='result-line show err';
   el.innerText='Enter admin password to factory reset.';
@@ -1496,12 +1465,16 @@ async function factoryResetLocal(){
    return;
   }
  }
- if(!confirm(`Factory reset this device${keepFleet ? ' (keep shared fleet key)' : ''}? It will reboot.`)){
+ const keepBits=[];
+ if(keepFleet) keepBits.push('shared fleet key');
+ if(keepWifi) keepBits.push('WiFi credentials');
+ const keepMsg=keepBits.length ? ` (keep ${keepBits.join(' + ')})` : '';
+ if(!confirm(`Factory reset this device${keepMsg}? It will reboot.`)){
   return;
  }
  el.className='result-line show';
  el.innerText='Factory reset requested...';
- const out=await apiJson('/api/system/factory-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_password:password,keep_shared_fleet_key:keepFleet}),silent:true});
+ const out=await apiJson('/api/system/factory-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_password:password,keep_shared_fleet_key:keepFleet,keep_wifi_credentials:keepWifi}),silent:true});
  if(out && out.ok){
   el.className='result-line show ok';
   el.innerText='Factory reset started. Device is rebooting...';
@@ -1562,14 +1535,18 @@ async function testSta(){
   showToast(msg, true);
  }
 }
-let provEventSource=null;
 let provStatusPollTimer=0;
-function closeProvisioningEventSource(){
- if(provEventSource){ try{ provEventSource.close(); }catch(e){} provEventSource=null; }
+let provLastRowsHtml='';
+let provPollSeenActive=false;
+let provPollGraceUntilMs=0;
+let suspendGlobalPollsUntilMs=0;
+function stopProvisioningPolling(){
  if(provStatusPollTimer){ clearTimeout(provStatusPollTimer); provStatusPollTimer=0; }
 }
 function provisioningSessionStateLabel(s){
- return String(s||'idle').split('_').join(' ');
+ const key=String(s||'idle');
+ if(key==='provisioning') return 'devices';
+ return key.split('_').join(' ');
 }
 function renderProvisioningStatus(out){
  const result=document.getElementById('provWizardResult');
@@ -1579,9 +1556,13 @@ function renderProvisioningStatus(out){
  if(!summary || !rows) return;
  const sess=(out&&out.session)||{};
  const devices=Array.isArray(out&&out.devices)?out.devices:[];
+ provUiSessionActive = !!sess.active;
+ provUiSessionState = String(sess.state||'idle');
+ const compactMode=!!(sess && (sess.compact || sess.devices_truncated));
  if(provisionBtn){
   const st=String(sess.state||'idle');
-  provisionBtn.disabled = !(st==='ready' || st==='complete' || st==='error');
+  const discovered = Number(sess.discovered_count||0);
+  provisionBtn.disabled = !(st==='ready' && discovered>0);
  }
  const now=Number(sess.now_ms||0);
  let countdownTxt='';
@@ -1599,7 +1580,11 @@ function renderProvisioningStatus(out){
   result.innerText=`Provisioning ${provisioningSessionStateLabel(sess.state)}`;
  }
  if(!devices.length){
-  rows.innerHTML='<tr><td colspan="6" class="small">No devices discovered yet.</td></tr>';
+  if(compactMode && provLastRowsHtml){
+   rows.innerHTML=provLastRowsHtml;
+   return;
+  }
+  rows.innerHTML=`<tr><td colspan="6" class="small">${compactMode ? 'Low-memory mode: showing counts only (keeping rows when available).' : 'No devices discovered yet.'}</td></tr>`;
   return;
  }
  rows.innerHTML = devices.map((d)=>{
@@ -1609,8 +1594,10 @@ function renderProvisioningStatus(out){
   const conflict = d.address_conflict ? ' conflict' : '';
   return `<tr><td>${escapeHtml(String(d.chip_id_hex||d.chip_id||''))}</td><td>${cur||'-'}</td><td>${nxt||'-'}</td><td>${escapeHtml(String(fw))}</td><td>${Number(d.rssi||0)}</td><td>${escapeHtml(String(d.state||'unknown'))}${conflict}</td></tr>`;
  }).join('');
+ provLastRowsHtml = rows.innerHTML;
 }
 async function refreshProvisioningStatus(silent=true){
+ if(!(activePage==='fleet' && activeFleetTab==='manage' && activeFleetManageTab==='lora')) return null;
  if(provStatusInFlight) return null;
  provStatusInFlight = true;
  provLastStatusRefreshMs = Date.now();
@@ -1619,53 +1606,154 @@ async function refreshProvisioningStatus(silent=true){
  provStatusInFlight = false;
  return null;
 }
-function connectProvisioningEvents(){
- closeProvisioningEventSource();
- try{
-  provEventSource = new EventSource('/api/provisioning/events');
-  provEventSource.addEventListener('provisioning', async ()=>{
-   const now=Date.now();
-   if(now - provLastStatusRefreshMs < 300) return;
-   await refreshProvisioningStatus(true);
-  });
-  provEventSource.onerror = ()=>{};
- }catch(e){
-  if(!provStatusPollTimer){
-   const loop=async()=>{ await refreshProvisioningStatus(true); provStatusPollTimer=setTimeout(loop, 1500); };
-   loop();
-  }
+function startProvisioningPolling(opts){
+ if(!(activePage==='fleet' && activeFleetTab==='manage' && activeFleetManageTab==='lora')) return;
+ stopProvisioningPolling();
+ const graceMs = Math.max(0, Number(opts && opts.graceMs || 0) || 0);
+ if(graceMs>0){
+  provPollSeenActive = false;
+  provPollGraceUntilMs = Date.now() + graceMs;
+ }else{
+  provPollGraceUntilMs = 0;
  }
+ const loop=async()=>{
+  const out=await refreshProvisioningStatus(true);
+  if(!out || !out.ok){
+   provStatusPollTimer=setTimeout(loop, 1500);
+   return;
+  }
+  const sess=(out&&out.session)||{};
+  const st=String(sess.state||'idle');
+  let nextDelayMs = 1500;
+  if(sess.active){ provPollSeenActive = true; }
+  const withinGrace = (provPollGraceUntilMs>0 && Date.now() < provPollGraceUntilMs && !provPollSeenActive);
+  const terminal = (!withinGrace) && ((!sess.active) || st==='complete' || st==='error' || st==='idle');
+  if(terminal){
+   stopProvisioningPolling();
+   provPollGraceUntilMs = 0;
+   return;
+  }
+  // When discovery is complete and we're waiting on the user to click "Provision All",
+  // back off polling to reduce heap pressure on ESP8266.
+  if(st==='ready') nextDelayMs = 4000;
+  provStatusPollTimer=setTimeout(loop, nextDelayMs);
+ };
+ loop();
 }
-async function startFleetProvisioningDiscovery(){
- const result=document.getElementById('provWizardResult');
- const estEl=document.getElementById('prov_estimated_count');
- const retryEl=document.getElementById('prov_retry_once');
- const est=Math.max(1, Math.min(250, Number(estEl && estEl.value || 10) || 10));
- const retry=!!(retryEl && retryEl.checked);
- if(result){ result.className='result-line show'; result.innerText='Starting discovery...'; }
- connectProvisioningEvents();
- const out=await apiJson('/api/provisioning/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estimated_count:est,retry_once:retry}),silent:true});
- if(out && out.ok){
-  renderProvisioningStatus(out);
-  if(result){ result.className='result-line show ok'; result.innerText='Discovery started. Watching live updates...'; }
+let pagePollTimer=0;
+let pagePollGeneration=0;
+let headerPollTimer=0;
+let headerPollGeneration=0;
+function stopPagePolling(){
+ if(pagePollTimer){ clearTimeout(pagePollTimer); pagePollTimer=0; }
+ pagePollGeneration++;
+}
+function stopHeaderPolling(){
+ if(headerPollTimer){ clearTimeout(headerPollTimer); headerPollTimer=0; }
+ headerPollGeneration++;
+}
+function pagePollDelayMs(){
+ if(document.hidden) return 5000;
+ if(activePage==='fleet' && activeFleetTab==='devices') return 2000;
+ if(activePage==='logs') return 3000;
+ return 1500;
+}
+function headerPollDelayMs(){
+ if(document.hidden) return 8000;
+ if(activePage==='fleet' && activeFleetTab==='manage' && activeFleetManageTab==='lora') return 5000;
+ return 3000;
+}
+function scheduleHeaderPolling(){
+ stopHeaderPolling();
+ if(location.pathname !== '/') return;
+ if(activePage==='status') return;  // Full status page uses /api/status
+ const generation = headerPollGeneration;
+ const loop=async()=>{
+  if(generation !== headerPollGeneration) return;
+  await refreshHeaderStatus();
+  if(generation !== headerPollGeneration) return;
+  headerPollTimer=setTimeout(loop, headerPollDelayMs());
+ };
+ loop();
+}
+function schedulePagePoll(){
+ stopPagePolling();
+ const generation = pagePollGeneration;
+ let fn=null;
+ if(activePage==='status'){
+  fn=refreshStatus;
+ }else if(activePage==='fleet' && lastRoleIsTx && activeFleetTab==='devices'){
+  fn=refreshFleet;
+ }else if(activePage==='logs'){
+  fn=refreshLogs;
+ }else{
   return;
  }
- if(result){ result.className='result-line show err'; result.innerText=`Discovery start failed: ${(out&&out.error)||'request_failed'}`; }
+ const loop=async()=>{
+  if(generation !== pagePollGeneration) return;
+  if(document.hidden && activePage!=='logs'){
+   if(generation !== pagePollGeneration) return;
+   pagePollTimer=setTimeout(loop, pagePollDelayMs());
+   return;
+  }
+  await fn();
+  if(generation !== pagePollGeneration) return;
+  pagePollTimer=setTimeout(loop, pagePollDelayMs());
+ };
+ loop();
+}
+function syncPagePolling(){
+ if(activePage==='fleet' && activeFleetTab==='manage'){
+  stopPagePolling();
+ if(activeFleetManageTab==='lora'){
+   startProvisioningPolling();
+  }else{
+   stopProvisioningPolling();
+  }
+  scheduleHeaderPolling();
+  return;
+ }
+ stopProvisioningPolling();
+ schedulePagePoll();
+ scheduleHeaderPolling();
+}
+async function startFleetProvisioningDiscovery(){
+ return startFleetProvisioningDiscoveryWithMode(false);
+}
+async function searchMoreFleetProvisioning(){
+ return startFleetProvisioningDiscoveryWithMode(true);
+}
+async function startFleetProvisioningDiscoveryWithMode(searchMore){
+ const result=document.getElementById('provWizardResult');
+ const estEl=document.getElementById('prov_estimated_count');
+ const est=Math.max(1, Math.min(250, Number(estEl && estEl.value || 10) || 10));
+ const retry=false;
+ suspendGlobalPollsUntilMs = Date.now() + 5000;
+ if(result){ result.className='result-line show'; result.innerText = searchMore ? 'Searching for more devices...' : 'Starting discovery...'; }
+ const out=await apiJson('/api/provisioning/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estimated_count:est,retry_once:retry}),silent:true});
+ if(out && out.ok){
+  if(out.session){ renderProvisioningStatus(out); }
+  startProvisioningPolling({graceMs:5000});
+  if(result){ result.className='result-line show ok'; result.innerText = searchMore ? 'Search started. Watching live updates...' : 'Discovery started. Watching live updates...'; }
+  return;
+ }
+ if(result){ result.className='result-line show err'; result.innerText=`${searchMore ? 'Search' : 'Discovery'} start failed: ${(out&&out.error)||'request_failed'}`; }
 }
 async function provisionFleetAll(){
  const result=document.getElementById('provWizardResult');
+ suspendGlobalPollsUntilMs = Date.now() + 5000;
  if(result){ result.className='result-line show'; result.innerText='Provisioning discovered devices...'; }
  const out=await apiJson('/api/provisioning/provision-all',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true});
  if(out && out.ok){
-  renderProvisioningStatus(out);
-  connectProvisioningEvents();
+  if(out.session){ renderProvisioningStatus(out); }
+  startProvisioningPolling({graceMs:5000});
   if(result){ result.className='result-line show ok'; result.innerText='Provisioning started. Waiting for verify replies...'; }
   return;
  }
  if(result){ result.className='result-line show err'; result.innerText=`Provisioning failed to start: ${(out&&out.error)||'request_failed'}`; }
 }
 async function cancelFleetProvisioning(){
- closeProvisioningEventSource();
+ stopProvisioningPolling();
  await apiJson('/api/provisioning/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true});
  const out=await refreshProvisioningStatus(true);
  const result=document.getElementById('provWizardResult');
@@ -1674,7 +1762,11 @@ async function cancelFleetProvisioning(){
 async function provisionFleetWifi(){
  const el=document.getElementById('wifiProvisionResult');
  if(!el) return;
- const body=collectNetworkBody();
+ let body=collectNetworkBody();
+ if(!String(body.wifi_sta_ssid||'').trim().length){
+  await loadSettingsPageData(false);
+  body=collectNetworkBody();
+ }
  if(!String(body.wifi_sta_ssid||'').trim().length){
   el.className='result-line show err';
   el.innerText='Enter STA SSID before sending WiFi to fleet.';
@@ -1687,6 +1779,14 @@ async function provisionFleetWifi(){
   const msg=`LoRa WiFi provisioning sent (${out.packets||'?'} packets broadcast)`;
   el.className='result-line show ok';
   el.innerText=msg;
+  if(wifiProvisionResultTimer){ clearTimeout(wifiProvisionResultTimer); wifiProvisionResultTimer=0; }
+  wifiProvisionResultTimer=setTimeout(()=>{
+   const cur=document.getElementById('wifiProvisionResult');
+   if(!cur) return;
+   cur.className='result-line';
+   cur.innerText='';
+   wifiProvisionResultTimer=0;
+  }, 10000);
   showToast(msg);
   return;
  }
@@ -1772,45 +1872,24 @@ async function fleetDeviceFactoryReset(addr){
  await refreshFleet();
 }
 
-function stopFleetEvents(){
- if(fleetEventRetryTimer){
-  clearTimeout(fleetEventRetryTimer);
-  fleetEventRetryTimer = null;
- }
- if(fleetEventSource){
-  fleetEventSource.close();
-  fleetEventSource = null;
- }
-}
-
 function shouldRunFleetDevicesLive(){
  return activePage==='fleet' && lastRoleIsTx && activeFleetTab==='devices';
 }
-
-function startFleetEvents(){
- stopFleetEvents();
- if(!window.EventSource) return;
- fleetEventSource = new EventSource('/api/fleet/events');
- const onFleetEvent = async ()=>{
-  try{
-   if(shouldRunFleetDevicesLive()){
-    await refreshFleet();
-   }
-  }catch(e){}
- };
-  fleetEventSource.addEventListener('fleet', onFleetEvent);
- fleetEventSource.onerror = ()=>{
-  stopFleetEvents();
-  fleetEventRetryTimer = setTimeout(()=>{ startFleetEvents(); }, 2000);
- };
+function isFleetManageActive(){
+ return activePage==='fleet' && activeFleetTab==='manage';
 }
-
-function syncFleetDevicesLive(){
- if(shouldRunFleetDevicesLive()){
-  if(!fleetEventSource) startFleetEvents();
- }else{
-  stopFleetEvents();
- }
+function isProvisioningUiBusy(){
+ const st=String(provUiSessionState||'idle');
+ return !!provUiSessionActive || st==='discovering' || st==='discovery_retry' || st==='provisioning';
+}
+function statusPollDelayMs(){
+ if(document.hidden) return 5000;
+ if(isFleetManageActive() || isProvisioningUiBusy()) return 3000;
+ return 1500;
+}
+function sessionPollDelayMs(){
+ if(document.hidden) return 1800000;
+ return 1800000;
 }
 async function fleetDevicePollNow(addr){
  const ok=await fleetDeviceAction('poll_now', addr);
@@ -1907,6 +1986,7 @@ function renderFleetDeviceDetail(){
   ${fleetDeviceDetailTab==='state' ? stateView : manageView}`;
 }
 async function refreshFleet(){
+ if(!(activePage==='fleet' && activeFleetTab==='devices')) return;
  const host=document.getElementById('fleetTableHost');
  const summary=document.getElementById('fleetSummary');
  const detail=document.getElementById('fleetDetailHost');
@@ -1984,289 +2064,6 @@ async function refreshDiagnostics(){
   <div class="k">SDK/Core</div><div class="v">${escapeHtml(String(d.sdk_version || 'n/a'))} / ${escapeHtml(String(d.core_version || 'n/a'))}</div>`;
  txt.innerText=`Last save: ${d.audit_last_saved_by} at ${d.audit_last_saved_ms} ms | Last reboot: ${d.audit_last_reboot_reason} at ${d.audit_last_reboot_ms} ms | Boot count: ${d.audit_boot_count}`;
 }
-function defaultAutomationRule(idx){
- return {
-  id:`rule_${idx}`,
-  name:`Rule ${idx}`,
-  enabled:false,
-  when:{all:[{peer:'self',field:'input',op:'==',value:1}]},
-  for_ms:0,
-  cooldown_ms:60000,
-  then:[{action:'set_relay',peer:'self',value:1}]
- };
-}
-function defaultAutomationConfig(){
- return {schema_version:1, enabled:false, execution_mode:'standalone', rules:[defaultAutomationRule(1)]};
-}
-function cloneJson(v){ return JSON.parse(JSON.stringify(v)); }
-function normalizeAutomationConfig(raw){
- const cfg=(raw && typeof raw==='object') ? cloneJson(raw) : defaultAutomationConfig();
- cfg.schema_version = 1;
- cfg.enabled = !!cfg.enabled;
- cfg.execution_mode = String(cfg.execution_mode||'standalone') === 'paired+rules' ? 'paired+rules' : 'standalone';
- if(!Array.isArray(cfg.rules)) cfg.rules = [];
- cfg.rules = cfg.rules.slice(0, 8).map((r, idx)=>{
-  const rule=(r && typeof r==='object') ? r : {};
-  const out=defaultAutomationRule(idx+1);
-  out.id = String(rule.id || out.id).trim() || out.id;
-  out.name = String(rule.name || out.name).trim() || out.name;
-  out.enabled = !!rule.enabled;
-  out.for_ms = Math.max(0, Number(rule.for_ms||0)|0);
-  out.cooldown_ms = Math.max(0, Number((rule.cooldown_ms!=null)?rule.cooldown_ms:60000)|0);
-  out.when = {all:[]};
-  const all = rule.when && Array.isArray(rule.when.all) ? rule.when.all : [];
-  out.when.all = all.slice(0,4).map((p)=>({
-   peer:String((p&&p.peer)!=null?p.peer:'self').trim() || 'self',
-   field:String((p&&p.field)||'input').trim() || 'input',
-   op:String((p&&p.op)||'==').trim() || '==',
-   value: (p&&Object.prototype.hasOwnProperty.call(p,'value')) ? p.value : 1
-  }));
-  if(!out.when.all.length) out.when.all=[{peer:'self',field:'input',op:'==',value:1}];
-  const firstAction = Array.isArray(rule.then) && rule.then[0] ? rule.then[0] : {};
-  out.then = [{action:'set_relay', peer:'self', value:Number(firstAction.value)===0?0:1}];
-  return out;
- });
- return cfg;
-}
-function automationFieldOptions(selected){
- const opts=['reachable','input','relay','temp_c','is_stale'];
- return opts.map(v=>`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`).join('');
-}
-function automationOpOptions(selected){
- const opts=['==','!=','>','>=','<','<='];
- return opts.map(v=>`<option value="${escapeHtml(v)}" ${v===selected?'selected':''}>${escapeHtml(v)}</option>`).join('');
-}
-function valueInputHint(field){
- if(field==='reachable' || field==='is_stale') return 'true / false';
- if(field==='temp_c') return 'e.g. 35';
- return '0=open, 1=closed';
-}
-function renderAutomationRules(){
- const host=document.getElementById('automationRulesHost');
- if(!host) return;
- automationRulesConfig = normalizeAutomationConfig(automationRulesConfig);
- const rules = automationRulesConfig.rules || [];
- if(!rules.length){
-  host.innerHTML='<div class="small">No rules yet. Add a rule to start.</div>';
-  updateAutomationJsonPreview();
-  return;
- }
- const html = rules.map((rule, i)=>{
-  const conds = (rule.when && Array.isArray(rule.when.all) ? rule.when.all : []).map((c,j)=>{
-   return `<div class="sensor-tile" style="margin-bottom:8px">
-    <div class="grid">
-     <div><label>Peer</label><input data-arule="${i}" data-apred="${j}" data-af="peer" value="${escapeHtml(c.peer)}" placeholder="self or 82 / 0x52" /><div class="small" data-auto-peer-hint="1" data-arule="${i}" data-apred="${j}">Display: ${escapeHtml(formatPeerTokenDisplay(c.peer))}</div></div>
-     <div><label>Field</label><select data-arule="${i}" data-apred="${j}" data-af="field">${automationFieldOptions(String(c.field||'input'))}</select></div>
-     <div><label>Op</label><select data-arule="${i}" data-apred="${j}" data-af="op">${automationOpOptions(String(c.op||'=='))}</select></div>
-     <div><label>Value</label><input data-arule="${i}" data-apred="${j}" data-af="value" value="${escapeHtml(String(c.value))}" placeholder="${escapeHtml(valueInputHint(String(c.field||'input')))}" /></div>
-    </div>
-    <div class="actions"><button type="button" onclick="removeAutomationCondition(${i},${j})">Remove Condition</button></div>
-   </div>`;
-  }).join('');
-  const actionValue = Number(rule.then && rule.then[0] && rule.then[0].value)===0 ? 0 : 1;
-  return `<div class="card" style="margin:8px 0;padding:12px">
-   <div class="grid">
-    <div><label>Rule name</label><input data-arule="${i}" data-rf="name" value="${escapeHtml(rule.name||'')}" /></div>
-    <div><label>Rule id</label><input data-arule="${i}" data-rf="id" value="${escapeHtml(rule.id||'')}" /></div>
-    <div><div class="check-row"><input type="checkbox" id="auto_rule_enabled_${i}" data-arule="${i}" data-rf="enabled" ${rule.enabled?'checked':''} /><label for="auto_rule_enabled_${i}">Enabled</label></div></div>
-    <div></div>
-    <div><label>Start after condition is true for (seconds)</label><input type="number" min="0" step="1" data-arule="${i}" data-rf="for_s" value="${Math.max(0, Math.round(Number(rule.for_ms||0)/1000))}" /><div class="small">0 = trigger immediately</div></div>
-    <div><label>Do not trigger again for (seconds)</label><input type="number" min="0" step="1" data-arule="${i}" data-rf="cooldown_s" value="${Math.max(0, Math.round(Number((rule.cooldown_ms!=null?rule.cooldown_ms:60000))/1000))}" /><div class="small">Recommended default: 60s</div></div>
-    <div><label>Action target</label><input value="${escapeHtml(formatPeerTokenDisplay('self') || automationSelfLabel())}" readonly /></div>
-    <div><label>Action</label><select data-arule="${i}" data-rf="action_value"><option value="1" ${actionValue===1?'selected':''}>Close relay (1)</option><option value="0" ${actionValue===0?'selected':''}>Open relay (0)</option></select></div>
-   </div>
-   <div style="margin-top:8px"><label>WHEN (ALL conditions)</label><div class="small">Top-down priority: first matching rule wins and processing stops.</div></div>
-   <div style="margin-top:6px">${conds}</div>
-   <div class="actions"><button type="button" onclick="addAutomationCondition(${i})">Add Condition (AND)</button><button type="button" onclick="removeAutomationRule(${i})">Delete Rule</button></div>
-  </div>`;
- }).join('');
- host.innerHTML = html;
- refreshAutomationPeerDisplayHints();
- updateAutomationJsonPreview();
-}
-function collectAutomationRulesFromUi(){
- const cfg = normalizeAutomationConfig(automationRulesConfig);
- const enabledEl=document.getElementById('autoRulesEnabled');
- const modeEl=document.getElementById('autoExecutionMode');
- cfg.enabled = !!(enabledEl && enabledEl.checked);
- cfg.execution_mode = String(modeEl && modeEl.value || 'standalone');
- const host=document.getElementById('automationRulesHost');
- if(!host) return cfg;
- const rules = [];
- const ruleCount = host.querySelectorAll('[data-rf="name"]').length;
- for(let i=0;i<ruleCount;i++){
-  const getRule=(field)=>host.querySelector(`[data-arule="${i}"][data-rf="${field}"]`);
-  const rule = defaultAutomationRule(i+1);
-  const nameEl=getRule('name');
-  const idEl=getRule('id');
-  const enabledRuleEl=getRule('enabled');
-  const forEl=getRule('for_s');
-  const cdEl=getRule('cooldown_s');
-  const actionEl=getRule('action_value');
-  rule.name = String(nameEl && nameEl.value || rule.name).trim() || rule.name;
-  rule.id = String(idEl && idEl.value || rule.id).trim() || rule.id;
-  rule.enabled = !!(enabledRuleEl && enabledRuleEl.checked);
-  rule.for_ms = Math.max(0, Math.floor(Number(forEl && forEl.value || 0) || 0) * 1000);
-  rule.cooldown_ms = Math.max(0, Math.floor(Number(cdEl && cdEl.value || 60) || 0) * 1000);
-  rule.then = [{action:'set_relay', peer:'self', value:(Number(actionEl && actionEl.value)===0?0:1)}];
-  const condEls = [...host.querySelectorAll(`[data-arule="${i}"][data-apred]`)];
-  const condMap = new Map();
-  condEls.forEach(el=>{
-   const idx = Number(el.dataset.apred);
-   if(!condMap.has(idx)) condMap.set(idx, {peer:'self',field:'input',op:'==',value:1});
-   const c = condMap.get(idx);
-   const f = el.dataset.af;
-   c[f] = (el.type === 'checkbox') ? !!el.checked : el.value;
-  });
-  const conds = [...condMap.keys()].sort((a,b)=>a-b).map((k)=>condMap.get(k)).slice(0,4).map((c)=>{
-   const field = String(c.field||'input');
-   let value = c.value;
-   if(field==='reachable' || field==='is_stale'){
-    const t=String(value).trim().toLowerCase();
-    value = (t==='true' || t==='1' || t==='yes' || t==='on');
-   } else if(field==='temp_c'){
-    value = Number(value);
-    if(!Number.isFinite(value)) value = 0;
-   } else {
-    value = Number(value)===0 ? 0 : 1;
-   }
-   return {
-    peer:String(c.peer||'self').trim() || 'self',
-    field,
-    op:String(c.op||'==').trim() || '==',
-    value
-   };
-  });
-  rule.when = {all: conds.length ? conds : [{peer:'self',field:'input',op:'==',value:1}]};
-  rules.push(rule);
- }
- cfg.rules = rules;
- return cfg;
-}
-function updateAutomationJsonPreview(){
- if(!document.getElementById('automationRulesHost')) return;
- automationRulesConfig = collectAutomationRulesFromUi();
- refreshAutomationPeerDisplayHints();
- const pre=document.getElementById('automationJsonPreview');
- if(pre){ pre.innerText = JSON.stringify(automationRulesConfig, null, 2); }
-}
-function setAutomationMetaText(){
- const el=document.getElementById('automationRulesMeta');
- if(!el) return;
- if(!automationRulesMeta){ el.innerText='Automation engine metadata unavailable'; return; }
- const m=automationRulesMeta;
- const rt=m.runtime||{};
- el.innerText = `v1: standalone execution only, self relay action only | Runtime gate: ${rt.gate_reason || 'unknown'} | Max rules: ${m.max_rules || 'n/a'}`;
-}
-async function loadAutomationRules(force=false){
- if(!force && automationRulesConfig && automationRulesMeta) {
-  setAutomationMetaText();
-  return;
- }
- const out=await apiJson('/api/automation-rules',{silent:true});
- const host=document.getElementById('automationRulesHost');
- if(!out || !out.ok){
-  automationRulesMeta = (out && out.meta) ? out.meta : null;
-  if(host){ host.innerHTML='Automation rules unavailable'; }
-  setAutomationMetaText();
-  return;
- }
- automationRulesMeta = out.meta || null;
- automationRulesConfig = normalizeAutomationConfig(out.config);
- const enabledEl=document.getElementById('autoRulesEnabled');
- const modeEl=document.getElementById('autoExecutionMode');
- const peerDisplayEl=document.getElementById('automationPeerDisplayMode');
- if(enabledEl) enabledEl.checked = !!automationRulesConfig.enabled;
- if(modeEl) modeEl.value = String(automationRulesConfig.execution_mode || 'standalone');
- if(peerDisplayEl) peerDisplayEl.value = automationPeerDisplayMode;
-  setAutomationMetaText();
-  renderAutomationRules();
-}
-function addAutomationRule(){
- automationRulesConfig = collectAutomationRulesFromUi();
- const nextIdx = (automationRulesConfig.rules || []).length + 1;
- automationRulesConfig.rules = automationRulesConfig.rules || [];
- automationRulesConfig.rules.push(defaultAutomationRule(nextIdx));
- renderAutomationRules();
-}
-function removeAutomationRule(idx){
- automationRulesConfig = collectAutomationRulesFromUi();
- if(!automationRulesConfig.rules || idx < 0 || idx >= automationRulesConfig.rules.length) return;
- automationRulesConfig.rules.splice(idx,1);
- if(!automationRulesConfig.rules.length){
-  automationRulesConfig.rules.push(defaultAutomationRule(1));
- }
- renderAutomationRules();
-}
-function addAutomationCondition(ruleIdx){
- automationRulesConfig = collectAutomationRulesFromUi();
- const rule = automationRulesConfig.rules && automationRulesConfig.rules[ruleIdx];
- if(!rule) return;
- rule.when = rule.when || {all:[]};
- rule.when.all = Array.isArray(rule.when.all) ? rule.when.all : [];
- if(rule.when.all.length >= 4){ showToast('Max 4 conditions per rule in v1', true); return; }
- rule.when.all.push({peer:'self',field:'input',op:'==',value:1});
- renderAutomationRules();
-}
-function removeAutomationCondition(ruleIdx, condIdx){
- automationRulesConfig = collectAutomationRulesFromUi();
- const rule = automationRulesConfig.rules && automationRulesConfig.rules[ruleIdx];
- if(!rule || !rule.when || !Array.isArray(rule.when.all)) return;
- rule.when.all.splice(condIdx,1);
- if(!rule.when.all.length) rule.when.all.push({peer:'self',field:'input',op:'==',value:1});
- renderAutomationRules();
-}
-async function saveAutomationRules(){
- const el=document.getElementById('automationSaveResult');
- automationRulesConfig = collectAutomationRulesFromUi();
- if(el){ el.className='result-line show'; el.innerText='Saving automation rules...'; }
- try{
-  const res=await fetch('/api/automation-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(automationRulesConfig)});
-  const out=await res.json().catch(()=>({ok:false,error:`HTTP ${res.status}`}));
-  if(!res.ok || !out.ok){
-   if(el){ el.className='result-line show err'; el.innerText=`Save failed: ${out.error || `HTTP ${res.status}`}`; }
-   showToast('Automation rules save failed', true);
-   return;
-  }
-  if(el){ el.className='result-line show ok'; el.innerText='Automation rules saved'; }
-  showToast('Automation rules saved');
-  await loadAutomationRules(true);
- }catch(e){
-  if(el){ el.className='result-line show err'; el.innerText=`Save failed: ${e.message}`; }
-  showToast('Automation rules save failed', true);
- }
-}
-async function copyAutomationJson(){
- updateAutomationJsonPreview();
- try{
-  await writeClipboard(JSON.stringify(automationRulesConfig, null, 2));
-  showToast('Automation JSON copied');
- }catch(e){
-  showToast(`Copy failed: ${e.message}`, true);
- }
-}
-function applyAutomationJsonFromPaste(){
- const ta=document.getElementById('automationJsonPaste');
- const el=document.getElementById('automationSaveResult');
- if(!ta) return;
- const text=String(ta.value||'').trim();
- if(!text){ showToast('Paste JSON first', true); return; }
- try{
-  automationRulesConfig = normalizeAutomationConfig(JSON.parse(text));
-  const enabledEl=document.getElementById('autoRulesEnabled');
-  const modeEl=document.getElementById('autoExecutionMode');
-  const peerDisplayEl=document.getElementById('automationPeerDisplayMode');
-  if(enabledEl) enabledEl.checked = !!automationRulesConfig.enabled;
-  if(modeEl) modeEl.value = String(automationRulesConfig.execution_mode || 'standalone');
-  if(peerDisplayEl) peerDisplayEl.value = automationPeerDisplayMode;
-  renderAutomationRules();
-  if(el){ el.className='result-line show ok'; el.innerText='JSON loaded into builder (not saved yet)'; }
-  showToast('Automation JSON loaded');
- }catch(e){
-  if(el){ el.className='result-line show err'; el.innerText=`JSON parse failed: ${e.message}`; }
-  showToast('Automation JSON parse failed', true);
- }
-}
 async function importConfig(file){
  if(!file) return;
  try{
@@ -2315,11 +2112,6 @@ function initPage(){
  if(fleetKey) fleetKey.addEventListener('input',updateDeploymentKeyStrength);
  if(staSsid) staSsid.addEventListener('input',updateStaTestButtonState);
  if(staPass) staPass.addEventListener('input',updateStaTestButtonState);
- const autoHost=document.getElementById('automationRulesHost');
- if(autoHost){
-  autoHost.addEventListener('input', ()=>{ updateAutomationJsonPreview(); });
-  autoHost.addEventListener('change', ()=>{ updateAutomationJsonPreview(); });
- }
  bindFreqPreset();
  syncRole();
  showFleetTab(activeFleetTab);
@@ -2329,12 +2121,9 @@ function initPage(){
  if(menuBtn){ menuBtn.setAttribute('aria-expanded','false'); }
  document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ toggleDrawer(false); } });
  showPage('status');
- window.addEventListener('beforeunload', ()=>{ stopFleetEvents(); closeProvisioningEventSource(); });
+window.addEventListener('beforeunload', ()=>{ stopProvisioningPolling(); stopPagePolling(); stopHeaderPolling(); });
  load();
- setInterval(()=>{ refreshStatus(); },1000);
- setInterval(()=>{ if(shouldRunFleetDevicesLive()){ refreshFleet(); } },1500);
- setInterval(()=>{ if(activePage==='logs') refreshLogs(); },3000);
- setInterval(async ()=>{ const s=await apiJson('/api/session',{silent:true}); if(s&&s.ok){ setSessionLeft(s.remaining_s); } },1000);
+ syncPagePolling();
 }
 initPage();
 </script></body></html>
@@ -2359,13 +2148,11 @@ bool WebConsole::begin(ConfigStore *config,
                        NodeStateMachine *sm,
                        SensorManager *sensors,
                        LogBuffer *logs,
-                       AutomationRulesEngine *automation,
                        std::function<void(bool, bool)> onApply) {
   config_ = config;
   sm_ = sm;
   sensors_ = sensors;
   logs_ = logs;
-  automation_ = automation;
   on_apply_ = onApply;
   server_.collectHeaders("Cookie");
 
@@ -2466,15 +2253,14 @@ bool WebConsole::rejectApiIfLowHeap(const char *path, uint32_t minFreeBytes, uin
            static_cast<unsigned long>(maxBlock),
            static_cast<unsigned long>(minFreeBytes),
            static_cast<unsigned long>(minMaxBlockBytes));
-  DynamicJsonDocument doc(192);
-  doc["ok"] = false;
-  doc["error"] = "low_heap";
-  doc["heap_free"] = freeHeap;
-  doc["heap_frag"] = lrslog::heapFragPercent();
-  doc["max_free_block"] = maxBlock;
-  String out;
-  serializeJson(doc, out);
-  sendTracked(503, "application/json", out);
+  char body[160];
+  snprintf(body,
+           sizeof(body),
+           "{\"ok\":false,\"error\":\"low_heap\",\"heap_free\":%lu,\"heap_frag\":%u,\"max_free_block\":%lu}",
+           static_cast<unsigned long>(freeHeap),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(maxBlock));
+  sendTracked(503, "application/json", body);
   return true;
 }
 
@@ -2547,14 +2333,16 @@ bool WebConsole::requireAuth(bool api) {
 
   const String cookie = cookieValue("lrs_session");
   if (cookie.length() == 0 || cookie != session_token_) {
-    clearSession();
     if (api) {
       sendTracked(401, "application/json", "{\"error\":\"auth_required\"}");
     } else {
       server_.sendHeader("Location", "/login?expired=1");
       sendTracked(302, "text/plain", "redirect");
     }
-    LRS_LOGW(API, "event=auth_cookie_invalid ip=%s", server_.client().remoteIP().toString().c_str());
+    LRS_LOGW(API,
+             "event=auth_cookie_invalid ip=%s has_cookie=%u",
+             server_.client().remoteIP().toString().c_str(),
+             static_cast<unsigned>(cookie.length() ? 1U : 0U));
     return false;
   }
   session_expires_ms_ = millis() + (30UL * 60UL * 1000UL);
@@ -2632,6 +2420,15 @@ void WebConsole::routes() {
     handleStatus();
     finishRequestLog();
   });
+  server_.on("/api/status-lite", HTTP_GET, [this]() {
+    beginRequestLog("/api/status-lite", true, true, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handleStatusLite();
+    finishRequestLog();
+  });
   server_.on("/api/fleet", HTTP_GET, [this]() {
     beginRequestLog("/api/fleet", true, false, true);
     if (!requireAuth(true)) {
@@ -2640,19 +2437,6 @@ void WebConsole::routes() {
     }
     handleFleet();
     finishRequestLog();
-  });
-  server_.on("/api/fleet/events", HTTP_GET, [this]() {
-    beginRequestLog("/api/fleet/events", true, false, false);
-    handleFleetEvents();
-    finishRequestLog();
-  });
-  server_.on("/api/automation-rules", HTTP_GET, [this]() {
-    if (!requireAuth(true)) return;
-    handleGetAutomationRules();
-  });
-  server_.on("/api/automation-rules", HTTP_POST, [this]() {
-    if (!requireAuth(true)) return;
-    handlePostAutomationRules();
   });
   server_.on("/api/factory", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
@@ -2695,11 +2479,6 @@ void WebConsole::routes() {
   server_.on("/api/provisioning/status", HTTP_GET, [this]() {
     beginRequestLog("/api/provisioning/status", true, true, true);
     handleProvisioningStatus();
-    finishRequestLog();
-  });
-  server_.on("/api/provisioning/events", HTTP_GET, [this]() {
-    beginRequestLog("/api/provisioning/events", true, false, false);
-    handleProvisioningEvents();
     finishRequestLog();
   });
   server_.on("/api/provisioning/provision-all", HTTP_POST, [this]() {
@@ -2905,7 +2684,7 @@ void WebConsole::handleSessionApi() {
 }
 
 void WebConsole::handleStatus() {
-  if (rejectApiIfLowHeap("/api/status", kApiLowHeapRejectFreeBytes, kApiLowHeapRejectMaxBlockBytes)) return;
+  if (rejectApiIfLowHeap("/api/status", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
@@ -3013,8 +2792,27 @@ void WebConsole::handleStatus() {
   serializeJson(doc, server_.client());
 }
 
+void WebConsole::handleStatusLite() {
+  if (rejectApiIfLowHeap("/api/status-lite", kApiLightLowHeapRejectFreeBytes, kApiLightLowHeapRejectMaxBlockBytes)) return;
+  DynamicJsonDocument doc(256);
+  auto &cfg = config_->settings();
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["relay_state"] = sm_ ? sm_->relayState() : 0;
+  doc["lora_last_rssi"] = sm_ ? sm_->lastPacketRssi() : 0;
+  doc["lora_last_packet_ms"] = sm_ ? sm_->lastPacketMs() : 0;
+  doc["lora_last_tx_ms"] = sm_ ? sm_->lastTxMs() : 0;
+  doc["sta_connected"] = WiFi.isConnected();
+  doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
+  doc["uptime_ms"] = millis();
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
+}
+
 void WebConsole::handleFleet() {
-  if (rejectApiIfLowHeap("/api/fleet", kApiLowHeapRejectFreeBytes, kApiLowHeapRejectMaxBlockBytes)) return;
+  if (rejectApiIfLowHeap("/api/fleet", kApiFleetLowHeapRejectFreeBytes, kApiFleetLowHeapRejectMaxBlockBytes)) return;
   DynamicJsonDocument doc(4096);
   auto &cfg = config_->settings();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
@@ -3066,31 +2864,6 @@ void WebConsole::handleFleet() {
   markResponseStatus(200);
   server_.send(200, "application/json", "");
   serializeJson(doc, server_.client());
-}
-
-void WebConsole::handleFleetEvents() {
-  if (!requireAuth(true)) return;
-  DynamicJsonDocument doc(256);
-  auto &cfg = config_->settings();
-  doc["event"] = "fleet";
-  doc["ts_ms"] = millis();
-  doc["tx"] = cfg.role_tx;
-  doc["count"] = (cfg.role_tx && sm_ != nullptr) ? sm_->peerCount() : 0;
-  String payload;
-  serializeJson(doc, payload);
-
-  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server_.sendHeader("Cache-Control", "no-cache");
-  server_.sendHeader("Connection", "keep-alive");
-  server_.sendHeader("X-Accel-Buffering", "no");
-  markResponseStatus(200);
-  server_.send(200, "text/event-stream", "");
-  server_.sendContent("retry: 2000\n");
-  server_.sendContent("event: fleet\n");
-  server_.sendContent("data: ");
-  server_.sendContent(payload);
-  server_.sendContent("\n\n");
-  server_.client().stop();
 }
 
 bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
@@ -3236,63 +3009,6 @@ void WebConsole::handleGetSettings() {
   String out;
   serializeJson(doc, out);
   server_.send(200, "application/json", out);
-}
-
-void WebConsole::handleGetAutomationRules() {
-  if (automation_ == nullptr) {
-    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"automation_engine_unavailable\"}");
-    return;
-  }
-
-  DynamicJsonDocument metaDoc(1536);
-  JsonObject meta = metaDoc.to<JsonObject>();
-  automation_->appendApiMeta(meta);
-  String metaJson;
-  serializeJson(metaDoc, metaJson);
-
-  const String raw = automation_->exportJson();
-  if (raw.length() == 0) {
-    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"automation_rules_empty\"}");
-    return;
-  }
-
-  // Stream the response to avoid duplicating large JSON documents in heap.
-  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server_.send(200, "application/json", "");
-  server_.sendContent("{\"ok\":true,\"meta\":");
-  server_.sendContent(metaJson);
-  server_.sendContent(",\"config\":");
-  server_.sendContent(raw);
-  server_.sendContent("}");
-}
-
-void WebConsole::handlePostAutomationRules() {
-  if (automation_ == nullptr) {
-    server_.send(500, "application/json", "{\"ok\":false,\"error\":\"automation_engine_unavailable\"}");
-    return;
-  }
-  const String raw = server_.arg("plain");
-  if (raw.length() == 0) {
-    server_.send(400, "application/json", "{\"ok\":false,\"error\":\"missing_body\"}");
-    return;
-  }
-  String saveErr;
-  if (!automation_->saveJson(raw, saveErr)) {
-    DynamicJsonDocument out(256);
-    out["ok"] = false;
-    out["error"] = saveErr;
-    String body;
-    serializeJson(out, body);
-    server_.send(400, "application/json", body);
-    return;
-  }
-  DynamicJsonDocument out(512);
-  out["ok"] = true;
-  out["path"] = AutomationRulesEngine::rulesPath();
-  if (logs_) logs_->add("auto_rules_api_save", 0, 0, 0);
-  String body;
-  serializeJson(out, body);
-  server_.send(200, "application/json", body);
 }
 
 void WebConsole::handlePostSettings() {
@@ -3473,15 +3189,15 @@ void WebConsole::handleDiagnostics() {
   uint32_t wifiConnectFail = 0;
   uint32_t wifiDisconnects = 0;
 
-  for (const auto &e : logs_->entries()) {
-    if (e.event == "tx_packet") loraTx++;
-    if (e.event == "tx_ack") ackOk++;
-    if (e.event == "tx_ack_timeout") ackTimeout++;
-    if (e.event == "rx_replay_drop") replayDrop++;
-    if (e.event == "sta_connect_start") wifiConnectAttempts++;
-    if (e.event == "sta_connect_failed_fallback_ap") wifiConnectFail++;
-    if (e.event == "sta_disconnected") wifiDisconnects++;
-  }
+  logs_->forEachEntry([&](const LogItem &e) {
+    if (strcmp(e.event, "tx_packet") == 0) loraTx++;
+    if (strcmp(e.event, "tx_ack") == 0) ackOk++;
+    if (strcmp(e.event, "tx_ack_timeout") == 0) ackTimeout++;
+    if (strcmp(e.event, "rx_replay_drop") == 0) replayDrop++;
+    if (strcmp(e.event, "sta_connect_start") == 0) wifiConnectAttempts++;
+    if (strcmp(e.event, "sta_connect_failed_fallback_ap") == 0) wifiConnectFail++;
+    if (strcmp(e.event, "sta_disconnected") == 0) wifiDisconnects++;
+  });
 
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
@@ -3653,7 +3369,87 @@ void WebConsole::handleProvisioningStatus() {
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
-  if (rejectApiIfLowHeap("/api/provisioning/status", kApiLowHeapRejectFreeBytes, kApiLowHeapRejectMaxBlockBytes)) return;
+  const uint32_t heapFree = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  const bool veryLowHeap =
+      (heapFree < kApiProvStatusCompactFreeBytes || maxBlock < kApiProvStatusCompactMaxBlockBytes);
+  const bool lowHeapForFull =
+      (heapFree < kApiLowHeapRejectFreeBytes || maxBlock < kApiLowHeapRejectMaxBlockBytes);
+  if (lowHeapForFull) {
+    if (veryLowHeap &&
+        rejectApiIfLowHeap("/api/provisioning/status",
+                           kApiProvStatusCompactFreeBytes,
+                           kApiProvStatusCompactMaxBlockBytes)) {
+      return;
+    }
+    StaticJsonDocument<1536> doc;
+    doc["ok"] = true;
+    ProvisioningSessionSnapshot sess{};
+    sm_->provisioningSession(sess);
+    const size_t totalDevices = sm_->provisioningDeviceCount();
+    const size_t maxCompactRows = 8;
+    const size_t returnedDevices = (totalDevices < maxCompactRows) ? totalDevices : maxCompactRows;
+    JsonObject s = doc.createNestedObject("session");
+    s["active"] = sess.active;
+    s["state"] = provisioningSessionStateText(sess.state);
+    s["session_nonce"] = sess.session_nonce;
+    s["estimated_count"] = sess.estimated_count;
+    s["started_ms"] = sess.started_ms;
+    s["phase_deadline_ms"] = sess.phase_deadline_ms;
+    s["retry_enabled"] = sess.retry_enabled;
+    s["retry_used"] = sess.retry_used;
+    s["paused_normal_tx"] = sess.paused_normal_tx;
+    s["discovered_count"] = sess.discovered_count;
+    s["selected_count"] = sess.selected_count;
+    s["conflict_count"] = sess.conflict_count;
+    s["verified_count"] = sess.verified_count;
+    s["failed_count"] = sess.failed_count;
+    s["now_ms"] = millis();
+    s["devices_total"] = totalDevices;
+    s["devices_returned"] = returnedDevices;
+    s["devices_truncated"] = (returnedDevices < totalDevices);
+    s["compact"] = true;
+    JsonArray arr = doc.createNestedArray("devices");
+    for (size_t i = 0; i < returnedDevices; ++i) {
+      ProvisioningDeviceSnapshot d{};
+      if (!sm_->provisioningDeviceByIndex(i, d)) continue;
+      JsonObject o = arr.createNestedObject();
+      char chipHex[11];
+      snprintf(chipHex, sizeof(chipHex), "0x%08lX", static_cast<unsigned long>(d.chip_id));
+      o["chip_id_hex"] = chipHex;
+      o["current_address"] = d.current_address;
+      o["assigned_address"] = d.assigned_address;
+      o["fw_major"] = d.fw_major;
+      o["fw_minor"] = d.fw_minor;
+      o["fw_patch"] = d.fw_patch;
+      o["rssi"] = d.rssi;
+      o["state"] = provisioningDeviceStateText(d.state);
+      o["address_conflict"] = d.address_conflict;
+    }
+
+    if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
+      last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
+      LRS_LOGI(API,
+               "event=provisioning_phase state=%s discovered=%u conflicts=%u verified=%u failed=%u",
+               provisioningSessionStateText(sess.state),
+               static_cast<unsigned>(sess.discovered_count),
+               static_cast<unsigned>(sess.conflict_count),
+               static_cast<unsigned>(sess.verified_count),
+               static_cast<unsigned>(sess.failed_count));
+    }
+
+    const size_t len = measureJson(doc);
+    server_.setContentLength(len);
+    markResponseStatus(200);
+    server_.send(200, "application/json", "");
+    serializeJson(doc, server_.client());
+    LRS_LOGW(API,
+             "event=provisioning_status_compact heap_free=%lu heap_frag=%u max_free_block=%lu",
+             static_cast<unsigned long>(heapFree),
+             static_cast<unsigned>(lrslog::heapFragPercent()),
+             static_cast<unsigned long>(maxBlock));
+    return;
+  }
   const size_t totalDevices = sm_->provisioningDeviceCount();
   const size_t maxDevicesReturned = 64;
   const size_t returnedDevices = (totalDevices < maxDevicesReturned) ? totalDevices : maxDevicesReturned;
@@ -3721,40 +3517,6 @@ void WebConsole::handleProvisioningStatus() {
   serializeJson(doc, server_.client());
 }
 
-void WebConsole::handleProvisioningEvents() {
-  if (!requireAuth(true)) return;
-  if (sm_ == nullptr) {
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
-    return;
-  }
-  DynamicJsonDocument doc(512);
-  ProvisioningSessionSnapshot sess{};
-  sm_->provisioningSession(sess);
-  doc["event"] = "provisioning";
-  doc["ts_ms"] = millis();
-  doc["active"] = sess.active;
-  doc["state"] = provisioningSessionStateText(sess.state);
-  doc["discovered_count"] = sess.discovered_count;
-  doc["conflict_count"] = sess.conflict_count;
-  doc["verified_count"] = sess.verified_count;
-  doc["failed_count"] = sess.failed_count;
-  String payload;
-  serializeJson(doc, payload);
-
-  server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server_.sendHeader("Cache-Control", "no-cache");
-  server_.sendHeader("Connection", "keep-alive");
-  server_.sendHeader("X-Accel-Buffering", "no");
-  markResponseStatus(200);
-  server_.send(200, "text/event-stream", "");
-  server_.sendContent("retry: 1000\n");
-  server_.sendContent("event: provisioning\n");
-  server_.sendContent("data: ");
-  server_.sendContent(payload);
-  server_.sendContent("\n\n");
-  server_.client().stop();
-}
-
 void WebConsole::handleProvisioningStart() {
   if (!requireAuth(true)) return;
   if (sm_ == nullptr) {
@@ -3788,7 +3550,7 @@ void WebConsole::handleProvisioningStart() {
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
            static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
-  handleProvisioningStatus();
+  sendTracked(200, "application/json", "{\"ok\":true,\"started\":true}");
 }
 
 void WebConsole::handleProvisioningProvisionAll() {
@@ -3806,7 +3568,7 @@ void WebConsole::handleProvisioningProvisionAll() {
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
            static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
-  handleProvisioningStatus();
+  sendTracked(200, "application/json", "{\"ok\":true,\"started\":true}");
 }
 
 void WebConsole::handleProvisioningCancel() {
@@ -3939,9 +3701,10 @@ void WebConsole::handleFactoryReset() {
     server_.send(403, "application/json", "{\"ok\":false,\"error\":\"invalid_password\"}");
     return;
   }
-  const bool keepSharedFleetKey = parseBoolField(body["keep_shared_fleet_key"], true);
+  const bool keepSharedFleetKey = parseBoolField(body["keep_shared_fleet_key"], false);
+  const bool keepWifiCredentials = parseBoolField(body["keep_wifi_credentials"], false);
 
-  if (!config_->factoryReset(keepSharedFleetKey)) {
+  if (!config_->factoryReset(keepSharedFleetKey, keepWifiCredentials)) {
     server_.send(500, "application/json", "{\"ok\":false,\"error\":\"reset_save_failed\"}");
     return;
   }

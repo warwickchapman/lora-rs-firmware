@@ -157,7 +157,10 @@ bool RadioProtocol::sendRawWithKeys(MessageType type, uint32_t counter, uint8_t 
   yield();  // Long LoRa airtime can block; feed ESP8266 watchdog between burst packets.
   LoRa.receive();
 
-  if (logs_) logs_->add(logEvent, 0, counter, 0);
+  if (logs_) {
+    const uint8_t logState = (logEvent != nullptr && strcmp(logEvent, "tx_prov") == 0) ? dst : 0;
+    logs_->add(logEvent, 0, counter, logState);
+  }
 
   return true;
 }

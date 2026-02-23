@@ -16,6 +16,14 @@ constexpr uint32_t kNtpPollNoFixMs = 5000;
 constexpr uint32_t kNtpPollFixedMs = 60000;
 constexpr uint32_t kNtpForceRefreshMs = 21600000;
 constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
+constexpr uint32_t kMdnsSuspendFreeHeapBytes = 9000;
+constexpr uint32_t kMdnsSuspendMaxBlockBytes = 3000;
+constexpr uint32_t kMdnsResumeFreeHeapBytes = 12000;
+constexpr uint32_t kMdnsResumeMaxBlockBytes = 5000;
+constexpr uint32_t kStartupTraceWindowMs = 15000;
+constexpr uint32_t kStartupTraceBreadcrumbMs = 1000;
+constexpr uint32_t kStartupSlowTickWarnMs = 25;
+constexpr uint32_t kStartupNonEssentialDeferralMs = 10000;
 
 const char *wifiStatusText(wl_status_t st) {
   switch (st) {
@@ -78,29 +86,61 @@ void App::begin() {
   logs_.setTimeProvider(unixProvider);
   lrslog::setUnixTimeProvider(unixProvider);
   mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_, &logs_);
-  automation_.begin(&sm_, &logs_, config_.settings());
-
-  web_.begin(&config_, &sm_, &sensors_, &logs_, &automation_, [this](bool restartNetwork, bool restartOtaAuth) {
+  web_.begin(&config_, &sm_, &sensors_, &logs_, [this](bool restartNetwork, bool restartOtaAuth) {
     applyUpdatedConfig(restartNetwork, restartOtaAuth);
   });
 
   startOta();
+  startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
+  startup_trace_next_breadcrumb_ms_ = 0;
+  startup_defer_logged_ = false;
 
   logs_.add("boot", 0, 0, 0);
 }
 
 void App::tick() {
+  const uint32_t tickStartMs = millis();
+  const bool startupTrace = static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
+  bool emitStartupBreadcrumb = false;
+  auto startupSlowWarn = [&](const char *phase, uint32_t phaseStartMs) {
+    if (!startupTrace) return;
+    const uint32_t durMs = millis() - phaseStartMs;
+    if (durMs < kStartupSlowTickWarnMs) return;
+    LRS_LOGW(SYS, "event=startup_tick_slow phase=%s dur_ms=%lu heap_free=%lu max_free_block=%lu", phase,
+             static_cast<unsigned long>(durMs), static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  };
+  if (startupTrace && (startup_trace_next_breadcrumb_ms_ == 0 || static_cast<int32_t>(tickStartMs - startup_trace_next_breadcrumb_ms_) >= 0)) {
+    startup_trace_next_breadcrumb_ms_ = tickStartMs + kStartupTraceBreadcrumbMs;
+    emitStartupBreadcrumb = true;
+    LRS_LOGD(SYS, "event=startup_tick phase=begin ms=%lu heap_free=%lu max_free_block=%lu",
+             static_cast<unsigned long>(tickStartMs), static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  }
+
+  uint32_t phaseStartMs = millis();
   updateNetworking();
+  startupSlowWarn("update_networking", phaseStartMs);
+  phaseStartMs = millis();
   tickTimeSync();
+  startupSlowWarn("tick_time_sync", phaseStartMs);
+  phaseStartMs = millis();
   refreshCaptiveDns();
   if (dns_running_) {
     dns_.processNextRequest();
   }
+  startupSlowWarn("dns", phaseStartMs);
+  phaseStartMs = millis();
   refreshMdns();
+  startupSlowWarn("refresh_mdns_pre", phaseStartMs);
   const TempSensorStatus ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
+  if (emitStartupBreadcrumb) {
+    LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu", static_cast<unsigned long>(millis()));
+  }
+  phaseStartMs = millis();
   sm_.tick();
-  automation_.tick();
+  startupSlowWarn("sm_tick", phaseStartMs);
   {
     String provSsid;
     String provPassword;
@@ -160,11 +200,46 @@ void App::tick() {
       }
     }
   }
-  mqtt_.tick(WiFi.isConnected());
+  const bool startupDeferNonEssential = !WiFi.isConnected() && (millis() < kStartupNonEssentialDeferralMs);
+  if (startupDeferNonEssential) {
+    if (!startup_defer_logged_) {
+      startup_defer_logged_ = true;
+      LRS_LOGI(SYS, "event=startup_defer_nonessential until_ms=%lu reason=wifi_not_connected",
+               static_cast<unsigned long>(kStartupNonEssentialDeferralMs));
+    }
+  } else {
+    startup_defer_logged_ = false;
+    phaseStartMs = millis();
+    mqtt_.tick(WiFi.isConnected());
+    startupSlowWarn("mqtt_tick", phaseStartMs);
+  }
+  phaseStartMs = millis();
   sensors_.tick();
+  startupSlowWarn("sensors_tick", phaseStartMs);
+  if (emitStartupBreadcrumb) {
+    LRS_LOGD(SYS, "event=startup_tick phase=web_enter ms=%lu", static_cast<unsigned long>(millis()));
+  }
+  phaseStartMs = millis();
   web_.tick();
-  MDNS.update();
-  ArduinoOTA.handle();
+  startupSlowWarn("web_tick", phaseStartMs);
+  // Re-check mDNS after web handlers because API requests can drop heap quickly.
+  phaseStartMs = millis();
+  refreshMdns();
+  startupSlowWarn("refresh_mdns_post", phaseStartMs);
+  {
+    ProvisioningSessionSnapshot prov{};
+    const bool provActive = sm_.provisioningSession(prov) && prov.active;
+    if (!provActive && !mdns_suspended_for_low_heap_) {
+      phaseStartMs = millis();
+      MDNS.update();
+      startupSlowWarn("mdns_update", phaseStartMs);
+    }
+  }
+  if (!startupDeferNonEssential) {
+    phaseStartMs = millis();
+    ArduinoOTA.handle();
+    startupSlowWarn("ota_handle", phaseStartMs);
+  }
 }
 
 void App::startNetworking() {
@@ -266,7 +341,6 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
   sm_.applyConfig(config_.settings());
   mqtt_.applyConfig(config_.settings(), config_.chipIdHex());
   sensors_.applyConfig(config_.settings());
-  automation_.applyConfig(config_.settings());
 
   if (restartOtaAuth) {
     // ESP8266 ArduinoOTA cannot replace password once initialized in-process.
@@ -409,6 +483,55 @@ void App::startOta() {
 }
 
 void App::refreshMdns() {
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t maxBlock = ESP.getMaxFreeBlockSize();
+  const bool lowHeapNow = (freeHeap < kMdnsSuspendFreeHeapBytes) || (maxBlock < kMdnsSuspendMaxBlockBytes);
+  const bool heapRecovered = (freeHeap >= kMdnsResumeFreeHeapBytes) && (maxBlock >= kMdnsResumeMaxBlockBytes);
+  if (lowHeapNow) {
+    if (!mdns_suspended_for_low_heap_) {
+      MDNS.close();
+      active_mdns_hostname_ = "";
+      mdns_suspended_for_low_heap_ = true;
+      logs_.add("mdns_paused_heap", 0, 0, 0);
+      LRS_LOGW(MDNS,
+               "event=mdns_paused reason=low_heap heap_free=%lu max_free_block=%lu",
+               freeHeap,
+               maxBlock);
+    }
+    return;
+  }
+  if (mdns_suspended_for_low_heap_) {
+    if (!heapRecovered) {
+      return;
+    }
+    mdns_suspended_for_low_heap_ = false;
+    logs_.add("mdns_resume_heap", 0, 0, 0);
+    LRS_LOGI(MDNS,
+             "event=mdns_resumed reason=heap_recovered heap_free=%lu max_free_block=%lu",
+             freeHeap,
+             maxBlock);
+  }
+
+  {
+    ProvisioningSessionSnapshot prov{};
+    const bool provActive = sm_.provisioningSession(prov) && prov.active;
+    if (provActive) {
+      if (!mdns_suspended_for_provisioning_) {
+        MDNS.close();
+        active_mdns_hostname_ = "";
+        mdns_suspended_for_provisioning_ = true;
+        logs_.add("mdns_paused_prov", 0, prov.session_nonce, 0);
+        LRS_LOGI(MDNS, "event=mdns_paused reason=provisioning session=%u", prov.session_nonce);
+      }
+      return;
+    }
+    if (mdns_suspended_for_provisioning_) {
+      mdns_suspended_for_provisioning_ = false;
+      logs_.add("mdns_resume_prov", 0, 0, 0);
+      LRS_LOGI(MDNS, "event=mdns_resumed reason=provisioning_complete");
+    }
+  }
+
   String desired;
   if (ap_enabled_ && WiFi.softAPgetStationNum() > 0) {
     desired = "lrs";
