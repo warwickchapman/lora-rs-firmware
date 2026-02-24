@@ -2,25 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
+#include "web_console_internal.h"
 
-namespace {
-
-bool isOwnLrsSoftApLike(const String &ssid) {
-  String s = ssid;
-  s.toLowerCase();
-  if (!s.startsWith("lrs-")) return false;
-  if (s.endsWith("-tx") || s.endsWith("-rx")) return true;
-  // New role-independent AP naming: lrs-<8 hex chars>
-  if (s.length() != 12) return false;
-  for (size_t i = 4; i < 12; ++i) {
-    const char c = s.charAt(i);
-    const bool isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-    if (!isHex) return false;
-  }
-  return true;
-}
-
-}  // namespace
+using namespace webconsole_internal;
 
 void WebConsole::routes() {
   server_.on("/", HTTP_GET, [this]() {
