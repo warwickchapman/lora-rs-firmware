@@ -6,6 +6,10 @@
 #include "config_store.h"
 #include "radio_protocol.h"
 
+#ifndef LRS_PROVISIONING_MAX_DEVICES
+#define LRS_PROVISIONING_MAX_DEVICES 250
+#endif
+
 enum class LinkState : uint8_t {
   Boot,
   Idle,
@@ -272,7 +276,7 @@ class NodeStateMachine {
     bool key_start_sent = false;
     bool key_commit_sent = false;
   };
-  static constexpr size_t kMaxProvisioningDevices = 250;
+  static constexpr size_t kMaxProvisioningDevices = static_cast<size_t>(LRS_PROVISIONING_MAX_DEVICES);
   ProvisioningDevice prov_devices_[kMaxProvisioningDevices]{};
   size_t prov_device_count_ = 0;
 

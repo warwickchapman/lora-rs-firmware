@@ -225,6 +225,10 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   prov_rx_ = ProvTargetRxState{};
   prov_device_count_ = 0;
   for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  LRS_LOGI(SYS,
+           "event=prov_capacity max_devices=%u bytes=%u",
+           static_cast<unsigned>(kMaxProvisioningDevices),
+           static_cast<unsigned>(sizeof(prov_devices_)));
   memset(last_seen_boot_nonce_by_src_, 0, sizeof(last_seen_boot_nonce_by_src_));
   memset(last_seen_counter_by_src_, 0, sizeof(last_seen_counter_by_src_));
   return true;
