@@ -3,7 +3,6 @@
 #include "logger.h"
 
 namespace {
-constexpr uint8_t kLedPin = 2;
 constexpr uint32_t kRssiGoodIntervalMs = 5000;
 constexpr uint32_t kRssiMediumIntervalMs = 3000;
 constexpr uint32_t kRssiLowIntervalMs = 1000;

@@ -9,7 +9,6 @@
 namespace {
 constexpr uint8_t kInputPin = 4;
 constexpr uint8_t kRelayPin = 5;
-constexpr uint8_t kLedPin = 2;
 constexpr uint32_t kDebounceMs = 50;
 constexpr uint32_t kTxRelayEchoDelayMs = 500;
 constexpr uint32_t kAckRetryScheduleMs[] = {3000, 5000, 8000, 13000, 21000, 34000, 55000};

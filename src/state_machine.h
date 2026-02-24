@@ -162,6 +162,7 @@ class NodeStateMachine {
     uint32_t rx_push_min_interval_ms = 60000;
     bool tx_input_lora_control_enabled = false;
   };
+  static constexpr uint8_t kLedPin = 2;
 
   const Settings *settings_ = nullptr;
   RuntimeCfg runtime_{};
