@@ -378,7 +378,7 @@ R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sen
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
-<div class="actions" style="margin-top:0;margin-bottom:8px"><button type="button" onclick="refreshStatus(true)">Refresh now</button><span id="statusLiveNotice" class="small" style="align-self:center">Waiting for device updates...</span></div>
+<div class="actions" style="margin-top:0;margin-bottom:8px"><span id="statusLiveNotice" class="small" style="align-self:center">Waiting for device updates...</span></div>
 <div class="status-grid">
 <div>
 <div id="statusTable">Loading status...</div>
@@ -512,7 +512,6 @@ let selectedFleetDeviceAddr = 0;
 let fleetDeviceDetailTab = 'state';
 let activeFleetTab = 'devices';
 let activeFleetManageTab = 'lora';
-let statusRefreshInFlight = false;
 let headerStatusRefreshInFlight = false;
 let sessionRefreshInFlight = false;
 let fleetRefreshInFlight = false;
@@ -1712,35 +1711,6 @@ function applyStatusPageState(st){
   }
  }
 }
-async function refreshStatus(force){
- if(location.pathname !== '/') return;
- if(statusRefreshInFlight) return;
- if((suspendGlobalPollsUntilMs>0 && Date.now() < suspendGlobalPollsUntilMs) || isFleetManageActive() || isProvisioningUiBusy()) return;
- if(!force && statusLiveSseConnected && statusLiveSseLastMessageMs > 0 && (Date.now() - statusLiveSseLastMessageMs) < 5000){
-  return;
- }
- statusRefreshInFlight = true;
- const live=await apiJson('/api/status-live',{silent:true});
- if(!live){
-  const lite=await apiJson('/api/status-lite',{silent:true});
-  if(applyStatusLiteDegraded(lite, 'Low-memory mode: live status unavailable')){
-   statusFailCount = 0;
-   refreshStatusLiveNotice();
-   statusRefreshInFlight = false;
-   return;
-  }
-  statusFailCount++;
-  if(statusFailCount >= 3){
-   const s=document.getElementById('statusTable');
-   if(s){ s.innerText='API status temporarily unavailable'; }
-  }
-  refreshStatusLiveNotice();
-  statusRefreshInFlight = false;
-  return;
- }
- handleStatusLivePayload(live);
- statusRefreshInFlight = false;
-}
 function applyHeaderStatus(st){
  if(!st) return;
  const heapEl=document.getElementById('heapHeader');
@@ -1804,7 +1774,6 @@ function stopAllUiPollingForAuthExpiry(){
  try{ stopStatusLiveUiTicker(); }catch(e){}
  try{ closeStatusLiveSse(); }catch(e){}
  try{ provStatusInFlight = false; }catch(e){}
- try{ statusRefreshInFlight = false; }catch(e){}
  try{ headerStatusRefreshInFlight = false; }catch(e){}
  try{ fleetRefreshInFlight = false; }catch(e){}
 }
