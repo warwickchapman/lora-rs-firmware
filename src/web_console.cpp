@@ -3826,8 +3826,6 @@ void WebConsole::handleGetSettings() {
   doc["mqtt_password_set"] = (cfg.mqtt_password.length() > 0);
   doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
-  doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
-  doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
 
   String out;
   serializeJson(doc, out);
@@ -3894,8 +3892,6 @@ void WebConsole::handlePostSettings() {
   next.mqtt_password = String(static_cast<const char *>(doc["mqtt_password"] | next.mqtt_password.c_str()));
   next.mqtt_topic_root = String(static_cast<const char *>(doc["mqtt_topic_root"] | next.mqtt_topic_root.c_str()));
   next.sensor_temp_enabled = parseBoolField(doc["sensor_temp_enabled"], next.sensor_temp_enabled);
-  next.sensor_temp_pin = 0;
-  next.sensor_temp_interval_s = static_cast<uint16_t>(doc["sensor_temp_interval_s"] | next.sensor_temp_interval_s);
 
   String newAdmin = String(static_cast<const char *>(doc["admin_password"] | next.admin_password.c_str()));
   if (newAdmin.length() >= 8) {
@@ -3941,9 +3937,6 @@ void WebConsole::handlePostSettings() {
   if (next.rx_push_min_interval_ms > kMaxRxPushIntervalMs) next.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
   if (next.mqtt_port == 0) next.mqtt_port = 1883;
   if (next.mqtt_topic_root.length() == 0) next.mqtt_topic_root = "lora";
-  next.sensor_temp_pin = 0;
-  if (next.sensor_temp_interval_s < 2) next.sensor_temp_interval_s = 2;
-  if (next.sensor_temp_interval_s > 300) next.sensor_temp_interval_s = 300;
   next.audit_last_saved_by = "admin";
   next.audit_last_saved_ms = millis();
 
@@ -3998,8 +3991,6 @@ void WebConsole::handleExportSettings() {
   doc["mqtt_password"] = cfg.mqtt_password;
   doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
-  doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
-  doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
   String out;
   serializeJsonPretty(doc, out);
   server_.send(200, "application/json", out);
