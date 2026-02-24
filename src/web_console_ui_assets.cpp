@@ -423,7 +423,7 @@ R"HTML(<section class="card page" id="page-automations">
 </section>
 )HTML"
 #endif
-R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane active" id="settings-pane-lora"><div class="grid">
+R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane" id="settings-pane-lora"><div class="grid">
 <div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
 <div style="grid-column:1/-1"><label>Deployment Key (Encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
@@ -443,7 +443,7 @@ R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class
 <div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
 <div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_input_lora_control_enabled" type="checkbox" /><label for="tx_input_lora_control_enabled">Input drives LoRa relay control</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
-</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane" id="settings-pane-network"><div class="grid">
+</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)">Show</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
@@ -493,7 +493,7 @@ R"HTML(const UI_AUTOMATIONS_ENABLED = false;
 R"HTML(
 let statusFailCount = 0;
 let activePage = 'status';
-let activeSettingsTab = 'lora';
+let activeSettingsTab = 'network';
 let activeSystemTab = 'security';
 let currentTheme = 'dark';
 let staIsConnected = false;
@@ -523,6 +523,7 @@ let provUiSessionActive = false;
 let provUiSessionState = 'idle';
 let settingsPageLoaded = false;
 let settingsPageLoadInFlight = false;
+let wifiScanInFlight = false;
 let wifiProvisionResultTimer=0;
 let statusStaticCache = null;
 let statusStaticLoadInFlight = false;
@@ -1331,7 +1332,7 @@ function showPage(page){
   if(sec) sec.classList.toggle('active', p===activePage);
   if(nav) nav.classList.toggle('active', p===activePage);
  });
- if(activePage==='settings'){ showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(()=>{}); }
+ if(activePage==='settings'){ showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(()=>{}); scanWifi().catch(()=>{}); }
  if(activePage==='automations'){ loadAutomationsPageData(false).catch(()=>{}); }
  if(activePage==='status'){
   statusStaticCache = null;
@@ -1923,7 +1924,10 @@ async function refreshLogs(){
  }
 }
 async function scanWifi(){
+ if(wifiScanInFlight) return;
  const host=document.getElementById('wifi_scan_list');
+ if(!host) return;
+ wifiScanInFlight = true;
  host.innerHTML='Scanning...';
  try{
   const out=await apiJson('/api/wifi/scan');
@@ -1945,9 +1949,11 @@ async function scanWifi(){
       document.getElementById('wifi_sta_ssid').value=btn.getAttribute('data-ssid');
       updateStaTestButtonState();
     });
-  });
+ });
  }catch(e){
   host.innerHTML='Scan failed';
+ } finally {
+  wifiScanInFlight = false;
  }
 }
 async function save(){
