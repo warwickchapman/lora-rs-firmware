@@ -5,22 +5,30 @@ const char kLoginHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Login</title>
 <style>
-:root{--bg:#0b1220;--card:#111827;--txt:#e5e7eb;--muted:#94a3b8;--border:#334155;--field:#0f172a;--btn:#005f73}
-body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--muted:#4b5563;--border:#d4dbe2;--field:#fff}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--bg),#111827);font-family:ui-sans-serif,system-ui;color:var(--txt);-webkit-text-size-adjust:100%}
-body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
-.card{width:min(92vw,420px);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:0 12px 30px rgba(0,0,0,.22)}
-h1{margin:0 0 10px;font-size:1.4rem}
-p{margin:0 0 10px;color:var(--muted)}
-label{display:block;margin:0 0 6px;color:var(--txt);font-size:14px;font-weight:600}
-input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:17px;background:var(--field);color:var(--txt)}
+:root{--bg:#0f172a;--card:rgba(30,41,59,0.7);--txt:#f8fafc;--muted:#94a3b8;--border:rgba(255,255,255,0.1);--field:rgba(15,23,42,0.6);--btn:#3b82f6;--btn-hover:#2563eb;--focus:rgba(59,130,246,0.5)}
+body.light{--bg:#f1f5f9;--card:rgba(255,255,255,0.8);--txt:#0f172a;--muted:#64748b;--border:rgba(0,0,0,0.1);--field:rgba(255,255,255,0.9);--btn:#0ea5e9;--btn-hover:#0284c7;--focus:rgba(14,165,233,0.5)}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#0f172a,#020617);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--txt);-webkit-text-size-adjust:100%}
+body.light{background:linear-gradient(135deg,#e0e7ff,#f8fafc)}
+.card{width:min(90vw,380px);background:var(--card);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:0 20px 40px rgba(0,0,0,.3)}
+body.light .card{box-shadow:0 20px 40px rgba(0,0,0,.08)}
+h1{margin:0 0 8px;font-size:1.5rem;font-weight:700;letter-spacing:-0.025em}
+p{margin:0 0 16px;color:var(--muted);font-size:0.95rem;line-height:1.4}
+label{display:block;margin:0 0 6px;color:var(--txt);font-size:0.875rem;font-weight:600}
+input{box-sizing:border-box;width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:1rem;background:var(--field);color:var(--txt);transition:border-color 0.2s,box-shadow 0.2s;outline:none}
+input:focus{border-color:var(--btn);box-shadow:0 0 0 3px var(--focus)}
 .pass-field{display:flex;align-items:center;gap:8px}
 .pass-field input{flex:1 1 auto}
-.pass-toggle{width:auto;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--txt);font-size:13px}
-button{margin-top:10px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:16px}
-.msg{margin-top:8px;font-size:14px;min-height:1.2em}.err{color:#b42318}.ok{color:#166534}
-.top{display:flex;justify-content:flex-end}
-.theme-btn{width:auto;margin:0;padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--txt)}
+.pass-toggle{width:auto;margin:0;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--field);color:var(--txt);font-size:0.85rem;font-weight:600;cursor:pointer;transition:background 0.2s}
+.pass-toggle:hover{background:rgba(255,255,255,0.1)}
+body.light .pass-toggle:hover{background:rgba(0,0,0,0.05)}
+button{margin-top:16px;width:100%;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(59,130,246,0.3)}
+button:hover{background:var(--btn-hover);transform:translateY(-1px);box-shadow:0 6px 16px rgba(59,130,246,0.4)}
+button:active{transform:translateY(1px)}
+.msg{margin-top:12px;font-size:0.875rem;min-height:1.2em;text-align:center;font-weight:500}.err{color:#ef4444}.ok{color:#22c55e}
+.top{display:flex;justify-content:flex-end;margin-bottom:8px}
+.theme-btn{width:auto;margin:0;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--field);color:var(--txt);cursor:pointer;font-size:0.85rem;box-shadow:none;transition:background 0.2s}
+.theme-btn:hover{background:rgba(255,255,255,0.1);transform:none;box-shadow:none}
+body.light .theme-btn:hover{background:rgba(0,0,0,0.05)}
 </style></head><body><div class="card">
 <div class="top"><button id="themeBtn" class="theme-btn" type="button" onclick="toggleTheme()">☀</button></div>
 <h1>LRS Device Console Login</h1>
@@ -83,17 +91,26 @@ const char kFleetSetupHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Fleet Key Setup</title>
 <style>
-:root{--bg:#0b1220;--card:#111827;--txt:#e5e7eb;--muted:#94a3b8;--border:#334155;--field:#0f172a;--btn:#005f73;--btn2:#334155}
-body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--muted:#4b5563;--border:#d4dbe2;--field:#fff;--btn2:#e5e7eb}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--bg),#111827);font-family:ui-sans-serif,system-ui;color:var(--txt);-webkit-text-size-adjust:100%}
-body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
-.card{width:min(92vw,460px);background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:0 12px 30px rgba(0,0,0,.22)}
-h1{margin:0 0 8px;font-size:1.25rem} p{margin:0 0 12px;color:var(--muted)} label{display:block;margin:0 0 6px;font-size:14px;font-weight:600}
-input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:16px;background:var(--field);color:var(--txt)}
-.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1 1 0}
-button{margin-top:10px;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:15px}
-button.secondary{background:var(--btn2);color:var(--txt);border:1px solid var(--border)}
-.msg{margin-top:8px;font-size:14px;min-height:1.2em}.err{color:#b42318}.ok{color:#166534}.small{font-size:12px;color:var(--muted)}
+:root{--bg:#0f172a;--card:rgba(30,41,59,0.7);--txt:#f8fafc;--muted:#94a3b8;--border:rgba(255,255,255,0.1);--field:rgba(15,23,42,0.6);--btn:#3b82f6;--btn-hover:#2563eb;--btn2:rgba(30,41,59,0.6);--focus:rgba(59,130,246,0.5)}
+body.light{--bg:#f1f5f9;--card:rgba(255,255,255,0.8);--txt:#0f172a;--muted:#64748b;--border:rgba(0,0,0,0.1);--field:rgba(255,255,255,0.9);--btn:#0ea5e9;--btn-hover:#0284c7;--btn2:rgba(255,255,255,0.6);--focus:rgba(14,165,233,0.5)}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#0f172a,#020617);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--txt);-webkit-text-size-adjust:100%}
+body.light{background:linear-gradient(135deg,#e0e7ff,#f8fafc)}
+.card{width:min(90vw,440px);background:var(--card);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:0 20px 40px rgba(0,0,0,.3)}
+body.light .card{box-shadow:0 20px 40px rgba(0,0,0,.08)}
+h1{margin:0 0 8px;font-size:1.35rem;font-weight:700;letter-spacing:-0.025em}
+p{margin:0 0 16px;color:var(--muted);font-size:0.95rem;line-height:1.4}
+label{display:block;margin:0 0 6px;color:var(--txt);font-size:0.875rem;font-weight:600}
+input{box-sizing:border-box;width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:1rem;background:var(--field);color:var(--txt);transition:border-color 0.2s,box-shadow 0.2s;outline:none}
+input:focus{border-color:var(--btn);box-shadow:0 0 0 3px var(--focus)}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}
+.row button{flex:1 1 0}
+button{padding:12px 16px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:0.95rem;font-weight:600;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(59,130,246,0.3)}
+button:hover{background:var(--btn-hover);transform:translateY(-1px);box-shadow:0 6px 16px rgba(59,130,246,0.4)}
+button:active{transform:translateY(1px)}
+button.secondary{background:var(--btn2);color:var(--txt);border:1px solid var(--border);box-shadow:none}
+button.secondary:hover{background:rgba(255,255,255,0.05);border-color:var(--muted)}
+body.light button.secondary:hover{background:rgba(0,0,0,0.03)}
+.msg{margin-top:12px;font-size:0.875rem;min-height:1.2em;text-align:center;font-weight:500}.err{color:#ef4444}.ok{color:#22c55e}.small{font-size:0.8rem;color:var(--muted);line-height:1.4;margin-top:6px}
 </style></head><body><div class="card">
 <h1>Set Fleet Key (Optional)</h1>
 <p>This is shown once on first login. Set a shared Fleet key now to enable LoRa communication and fleet provisioning, or skip and configure later.</p>
@@ -126,22 +143,24 @@ const char kIndexLowHeapHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Console Unavailable (Low Memory)</title>
 <style>
-:root{--bg:#08101d;--card:#0f1a2e;--txt:#e5e7eb;--muted:#94a3b8;--border:#31435f;--btn:#005f73;--ok:#1f8f5f;--warn:#b7791f;--crit:#b42318}
-body{margin:0;background:linear-gradient(180deg,#07111f,#0b1322);color:var(--txt);font-family:ui-sans-serif,system-ui;-webkit-text-size-adjust:100%}
-.wrap{max-width:680px;margin:0 auto;padding:14px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
-h1{margin:0 0 6px;font-size:1.2rem} p{margin:0;color:var(--muted)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.tile{border:1px solid var(--border);border-radius:10px;padding:10px;background:#111c31}
-.k{font-size:12px;color:var(--muted)} .v{font-size:1rem;font-weight:700;margin-top:4px}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-button,a.btn{background:var(--btn);color:#fff;border:0;border-radius:10px;padding:10px 12px;text-decoration:none;font-size:15px}
-a.btn.alt,button.alt{background:transparent;border:1px solid var(--border);color:var(--txt)}
-.mono{font-family:ui-monospace,monospace}
-.banner{border-left:4px solid var(--warn);background:#16131d;padding:10px 12px;border-radius:10px;color:#ffe8bf}
-.metric.ok{border-color:rgba(31,143,95,.65)} .metric.warn{border-color:rgba(183,121,31,.7)} .metric.crit{border-color:rgba(180,35,24,.8)}
-.metric.ok .v{color:#7ee0b7} .metric.warn .v{color:#ffd08a} .metric.crit .v{color:#ffb6ae}
-.small{font-size:12px;color:var(--muted)}
+:root{--bg:#0f172a;--card:rgba(30,41,59,0.7);--txt:#f8fafc;--muted:#94a3b8;--border:rgba(255,255,255,0.1);--btn:#3b82f6;--btn-hover:#2563eb;--ok:#22c55e;--warn:#f59e0b;--crit:#ef4444}
+body{margin:0;background:linear-gradient(135deg,#0f172a,#020617);color:var(--txt);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+.wrap{max-width:720px;margin:0 auto;padding:16px}
+.card{background:var(--card);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;box-shadow:0 20px 40px rgba(0,0,0,.3)}
+h1{margin:0 0 10px;font-size:1.35rem;font-weight:700;letter-spacing:-0.025em} p{margin:0;color:var(--muted);font-size:0.95rem;line-height:1.4}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.tile{border:1px solid var(--border);border-radius:12px;padding:12px;background:rgba(15,23,42,0.4);transition:border-color 0.2s}
+.k{font-size:0.8rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em} .v{font-size:1.1rem;font-weight:700;margin-top:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+button,a.btn{background:var(--btn);color:#fff;border:0;border-radius:10px;padding:10px 14px;text-decoration:none;font-size:0.95rem;font-weight:600;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 12px rgba(59,130,246,0.2)}
+button:hover,a.btn:hover{background:var(--btn-hover);transform:translateY(-1px);box-shadow:0 6px 16px rgba(59,130,246,0.3)}
+a.btn.alt,button.alt{background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--txt);box-shadow:none}
+a.btn.alt:hover,button.alt:hover{background:rgba(255,255,255,0.1);border-color:var(--muted)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+.banner{border-left:4px solid var(--warn);background:rgba(245,158,11,0.1);padding:12px 16px;border-radius:10px;color:#fcd34d;font-size:0.95rem;line-height:1.4}
+.metric.ok{border-color:rgba(34,197,94,0.5);background:rgba(34,197,94,0.05)} .metric.warn{border-color:rgba(245,158,11,0.5);background:rgba(245,158,11,0.05)} .metric.crit{border-color:rgba(239,68,68,0.5);background:rgba(239,68,68,0.05)}
+.metric.ok .v{color:#4ade80} .metric.warn .v{color:#fbbf24} .metric.crit .v{color:#f87171}
+.small{font-size:0.8rem;color:var(--muted);margin-top:4px}
 </style></head><body><div class="wrap">
 <div class="card">
  <h1>Console Unavailable (Low Memory)</h1>
@@ -212,169 +231,242 @@ refreshLite();
 </script></body></html>
 )HTML";
 
-const char kIndexHtml[] PROGMEM = R"HTML(
+const char kIndexHtml[] PROGMEM =
+    R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Console</title>
 <style>
-:root{--bg:#0b1220;--card:#111827;--accent:#005f73;--txt:#e5e7eb;--border:#334155;--field:#0f172a;--muted:#94a3b8;--link:#67e8f9}
-body.light{--bg:#f4f6f8;--card:#fff;--txt:#122;--border:#d4dbe2;--field:#fff;--muted:#4b5563;--link:#0b5f75}
+:root{--bg:#0f172a;--card:rgba(30,41,59,0.7);--accent:#3b82f6;--accent-hover:#2563eb;--txt:#f8fafc;--border:rgba(255,255,255,0.1);--field:rgba(15,23,42,0.6);--muted:#94a3b8;--link:#7dd3fc;--focus:rgba(59,130,246,0.5)}
+body.light{--bg:#f1f5f9;--card:rgba(255,255,255,0.8);--accent:#0ea5e9;--accent-hover:#0284c7;--txt:#0f172a;--border:rgba(0,0,0,0.1);--field:rgba(255,255,255,0.9);--muted:#64748b;--link:#0284c7;--focus:rgba(14,165,233,0.5)}
 *{box-sizing:border-box}
-body{margin:0;font-family:ui-sans-serif,system-ui;background:linear-gradient(135deg,var(--bg),#111827);color:var(--txt);-webkit-text-size-adjust:100%}
-body.light{background:linear-gradient(135deg,#e3f2fd,#f9fbff)}
-header{background:var(--accent);color:#fff;padding:12px 16px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-header .title{font-size:1.1rem}
-header .wifi{font-size:.9rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;white-space:nowrap;display:flex;align-items:center;gap:8px}
-header .relay-head{font-size:.9rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;white-space:nowrap}
-header .relay-head.on{background:rgba(126,211,121,.24);border-color:rgba(126,211,121,.6)}
-header .relay-head.off{background:rgba(255,255,255,.12)}
-header .relay-head.mem-ok{background:rgba(126,211,121,.18);border-color:rgba(126,211,121,.48)}
-header .relay-head.mem-warn{background:rgba(245,158,11,.18);border-color:rgba(245,158,11,.55);color:#ffe8bf}
-header .relay-head.mem-crit{background:rgba(239,68,68,.18);border-color:rgba(239,68,68,.6);color:#ffd6d6}
-header .reason-head{font-size:.85rem;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:6px 10px;white-space:nowrap;display:none}
+body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:linear-gradient(135deg,#0f172a,#020617);color:var(--txt);-webkit-text-size-adjust:100%}
+body.light{background:linear-gradient(135deg,#e0e7ff,#f8fafc)}
+header{background:rgba(15,23,42,0.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid var(--border);color:var(--txt);padding:12px 16px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:10;box-shadow:0 4px 20px rgba(0,0,0,0.2)}
+body.light header{background:rgba(255,255,255,0.8);box-shadow:0 4px 20px rgba(0,0,0,0.05)}
+header .title{font-size:1.15rem;letter-spacing:-0.02em;background:linear-gradient(to right,var(--txt),var(--muted));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header .wifi{font-size:.85rem;background:var(--field);border:1px solid var(--border);border-radius:999px;padding:6px 12px;white-space:nowrap;display:flex;align-items:center;gap:8px;font-weight:600}
+header .relay-head{font-size:.85rem;background:var(--field);border:1px solid var(--border);border-radius:999px;padding:6px 12px;white-space:nowrap;font-weight:600;transition:all 0.3s ease}
+header .relay-head.on{background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.4);color:#4ade80;box-shadow:0 0 10px rgba(34,197,94,0.2)}
+body.light header .relay-head.on{color:#15803d}
+header .relay-head.off{background:rgba(255,255,255,0.05)}
+body.light header .relay-head.off{background:rgba(0,0,0,0.03)}
+header .relay-head.mem-ok{background:rgba(34,197,94,0.1);border-color:rgba(34,197,94,0.3);color:#4ade80}
+header .relay-head.mem-warn{background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.4);color:#fcd34d}
+header .relay-head.mem-crit{background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.4);color:#fca5a5}
+header .reason-head{font-size:.8rem;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:999px;padding:6px 10px;white-space:nowrap;display:none}
 header .reason-head.show{display:inline-flex}
 header .right{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-header .theme{margin-top:0;padding:6px 10px;min-width:38px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);border-radius:999px}
-header .logout{margin-top:0;padding:6px 10px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);border-radius:999px}
-main{padding:12px;display:grid;gap:12px;max-width:860px;margin:0 auto}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:0 8px 20px rgba(0,0,0,.12)}
-label{display:block;font-size:12px;margin-top:8px}
-.grid{display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
-input,select,textarea{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:17px;background:var(--field);color:var(--txt)}
+header .theme{margin-top:0;padding:6px 12px;min-width:38px;border:1px solid var(--border);background:var(--field);border-radius:999px;cursor:pointer;transition:background 0.2s}
+header .logout{margin-top:0;padding:6px 12px;border:1px solid var(--border);background:var(--field);border-radius:999px;cursor:pointer;transition:background 0.2s}
+header .theme:hover, header .logout:hover{background:rgba(255,255,255,0.1)}
+body.light header .theme:hover, body.light header .logout:hover{background:rgba(0,0,0,0.05)}
+main{padding:16px;display:grid;gap:16px;max-width:900px;margin:0 auto}
+.card{background:var(--card);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:0 12px 30px rgba(0,0,0,.15);transition:transform 0.2s ease}
+body.light .card{box-shadow:0 12px 30px rgba(0,0,0,.04)}
+label{display:block;font-size:0.85rem;margin-top:10px;font-weight:600;color:var(--txt)}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
+input,select,textarea{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:1rem;background:var(--field);color:var(--txt);transition:border-color 0.2s,box-shadow 0.2s;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--focus)}
 .pass-field{display:flex;align-items:center;gap:8px}
 .pass-field input{flex:1 1 auto}
-.pass-toggle{margin-top:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--txt);white-space:nowrap}
-input[type=checkbox]{width:18px;height:18px;padding:0}
-.check-row{display:flex;align-items:center;gap:8px;margin-top:8px}
-.radio-row{display:flex;align-items:center;gap:0;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:max-content;max-width:100%}
-.radio-row label{margin:0;display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none;font-weight:600;min-height:42px}
+.pass-toggle{margin-top:0;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--field);color:var(--txt);white-space:nowrap;cursor:pointer;font-weight:600;transition:background 0.2s}
+.pass-toggle:hover{background:rgba(255,255,255,0.1)}
+body.light .pass-toggle:hover{background:rgba(0,0,0,0.05)}
+input[type=checkbox]{width:18px;height:18px;padding:0;accent-color:var(--accent);cursor:pointer}
+.check-row{display:flex;align-items:center;gap:10px;margin-top:10px}
+.radio-row{display:flex;align-items:center;gap:0;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:max-content;max-width:100%;background:var(--field)}
+.radio-row label{margin:0;display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;user-select:none;font-weight:600}
 .radio-row label + label{border-left:1px solid var(--border)}
-.radio-row input[type=radio]{width:18px;height:18px;accent-color:#4caf50;flex:0 0 auto}
+.radio-row input[type=radio]{width:18px;height:18px;accent-color:var(--accent);flex:0 0 auto;cursor:pointer}
 .lora-field{display:flex;flex-direction:column}
 .lora-field .radio-row{margin-top:6px}
 .freq-wrap{display:flex;flex-direction:column;gap:8px}
-.freq-wrap input[readonly]{opacity:.85}
+.freq-wrap input[readonly]{opacity:.7}
 .check-row label{margin:0}
-button{margin-top:10px;padding:10px 14px;border:0;border-radius:8px;background:var(--accent);color:#fff}
-button:disabled{opacity:.45;cursor:not-allowed;filter:saturate(.35)}
-.small{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.key-strength{margin-top:6px;font-size:12px;font-weight:700}
-.key-strength.weak{color:#fca5a5}
-.key-strength.ok{color:#facc15}
-.key-strength.strong{color:#86efac}
-.actions{display:flex;gap:8px;flex-wrap:wrap}
-#status{overflow-wrap:anywhere;line-height:1.4}
-.inline-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.hint{font-size:12px;opacity:.85}
-details summary{cursor:pointer;font-weight:700;margin:6px 0}
+button{margin-top:12px;padding:12px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;font-size:0.95rem;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(59,130,246,0.2)}
+button:hover{background:var(--accent-hover);transform:translateY(-1px);box-shadow:0 6px 16px rgba(59,130,246,0.3)}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+.small{font-size:0.8rem;color:var(--muted);line-height:1.4;overflow-wrap:anywhere}
+.key-strength{margin-top:6px;font-size:0.8rem;font-weight:700}
+.key-strength.weak{color:#f87171}
+.key-strength.ok{color:#fbbf24}
+.key-strength.strong{color:#4ade80}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+#status{overflow-wrap:anywhere;line-height:1.5}
+.inline-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hint{font-size:0.8rem;opacity:.8;margin-top:4px;color:var(--muted)}
+details summary{cursor:pointer;font-weight:700;margin:8px 0;padding:8px 0;outline:none}
 .wifi-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:14px}
 .wifi-icon svg{width:18px;height:14px;display:block}
-.wifi-icon .arc,.wifi-icon .dot{stroke:rgba(255,255,255,.35);fill:none;stroke-width:2;stroke-linecap:round}
-.wifi-icon .dot{fill:rgba(255,255,255,.35);stroke:none}
-.wifi-icon .x{stroke:#ff6b6b;stroke-width:2;stroke-linecap:round;display:none}
-.wifi-icon.lv1 .dot,.wifi-icon.lv2 .dot,.wifi-icon.lv3 .dot,.wifi-icon.lv4 .dot{fill:#95d65e}
-.wifi-icon.lv2 .a3,.wifi-icon.lv3 .a3,.wifi-icon.lv4 .a3{stroke:#95d65e}
-.wifi-icon.lv3 .a2,.wifi-icon.lv4 .a2{stroke:#95d65e}
-.wifi-icon.lv4 .a1{stroke:#95d65e}
+.wifi-icon .arc,.wifi-icon .dot{stroke:rgba(255,255,255,.3);fill:none;stroke-width:2;stroke-linecap:round;transition:stroke 0.3s}
+body.light .wifi-icon .arc, body.light .wifi-icon .dot{stroke:rgba(0,0,0,.2)}
+.wifi-icon .dot{fill:rgba(255,255,255,.3);stroke:none;transition:fill 0.3s}
+body.light .wifi-icon .dot{fill:rgba(0,0,0,.2)}
+.wifi-icon .x{stroke:#ef4444;stroke-width:2;stroke-linecap:round;display:none}
+.wifi-icon.lv1 .dot,.wifi-icon.lv2 .dot,.wifi-icon.lv3 .dot,.wifi-icon.lv4 .dot{fill:#4ade80}
+.wifi-icon.lv2 .a3,.wifi-icon.lv3 .a3,.wifi-icon.lv4 .a3{stroke:#4ade80}
+.wifi-icon.lv3 .a2,.wifi-icon.lv4 .a2{stroke:#4ade80}
+.wifi-icon.lv4 .a1{stroke:#4ade80}
 .wifi-icon.lv0 .x{display:block}
-.wifi-list{margin-top:8px}
-.wifi-table{width:100%;border-collapse:collapse;font-size:14px}
-.wifi-table th,.wifi-table td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+.wifi-list{margin-top:12px;background:rgba(0,0,0,0.2);border-radius:10px;overflow:hidden}
+body.light .wifi-list{background:rgba(255,255,255,0.5);border:1px solid var(--border)}
+.wifi-table{width:100%;border-collapse:collapse;font-size:0.9rem}
+.wifi-table th,.wifi-table td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left}
+.wifi-table th{font-weight:600;color:var(--muted);background:rgba(0,0,0,0.1)}
+body.light .wifi-table th{background:rgba(0,0,0,0.02)}
 .wifi-table th:last-child,.wifi-table td:last-child{text-align:right}
-.sig{display:inline-flex;align-items:flex-end;gap:1px;height:10px;margin-right:6px;vertical-align:-1px}
-.sig i{display:block;width:2px;background:#b8c6cf;border-radius:2px}
-.sig i:nth-child(1){height:3px}.sig i:nth-child(2){height:5px}.sig i:nth-child(3){height:7px}.sig i:nth-child(4){height:9px}
+.sig{display:inline-flex;align-items:flex-end;gap:2px;height:12px;margin-right:8px;vertical-align:-1px}
+.sig i{display:block;width:3px;background:rgba(255,255,255,0.2);border-radius:2px;transition:background 0.3s}
+body.light .sig i{background:rgba(0,0,0,0.1)}
+.sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:9px}.sig i:nth-child(4){height:12px}
 .sig.scan.lv1 i:nth-child(1),
 .sig.scan.lv2 i:nth-child(-n+2),
 .sig.scan.lv3 i:nth-child(-n+3),
-.sig.scan.lv4 i:nth-child(-n+4){background:#2f9e64}
-.sig.lora i{background:#d0d7df}
+.sig.scan.lv4 i:nth-child(-n+4){background:#4ade80}
+.sig.lora i{background:rgba(255,255,255,0.2)}
+body.light .sig.lora i{background:rgba(0,0,0,0.1)}
 .sig.lora.lv1 i:nth-child(1),
 .sig.lora.lv2 i:nth-child(-n+2),
 .sig.lora.lv3 i:nth-child(-n+3),
-.sig.lora.lv4 i:nth-child(-n+4){background:#111827}
-.sec-chip{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:999px;font-size:11px;font-weight:700}
-.sec-chip.y{background:#d9f3e2;color:#166534}
-.sec-chip.n{background:#f3f4f6;color:#4b5563}
-.link{color:var(--link);text-decoration:underline}
-.menu-btn{margin-top:0;padding:6px 10px;min-width:38px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);border-radius:999px}
-.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:20}
-.drawer{position:fixed;left:0;top:0;bottom:0;width:min(82vw,290px);padding:16px 12px;background:var(--card);border-right:1px solid var(--border);transform:translateX(-100%);transition:transform .2s ease;z-index:21;overflow:auto}
-.drawer h4{margin:4px 8px 10px 8px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-.navbtn{display:flex;align-items:center;gap:10px;width:100%;margin-top:0;padding:10px 12px;border:1px solid transparent;background:transparent;color:var(--txt);text-align:left;font-weight:600}
-.navbtn.active{background:rgba(0,95,115,.22);border-color:var(--accent);color:#fff}
-.navbtn.cog::before{content:'⚙';font-size:14px}
-body.light .navbtn.active{color:#083344}
+.sig.lora.lv4 i:nth-child(-n+4){background:#60a5fa}
+body.light .sig.lora.lv1 i:nth-child(1),
+body.light .sig.lora.lv2 i:nth-child(-n+2),
+body.light .sig.lora.lv3 i:nth-child(-n+3),
+body.light .sig.lora.lv4 i:nth-child(-n+4){background:#3b82f6}
+.sec-chip{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;font-size:0.65rem;font-weight:700}
+.sec-chip.y{background:rgba(34,197,94,0.15);color:#4ade80}
+.sec-chip.n{background:rgba(255,255,255,0.1);color:var(--muted)}
+body.light .sec-chip.y{background:rgba(34,197,94,0.15);color:#15803d}
+body.light .sec-chip.n{background:rgba(0,0,0,0.05)}
+.link{color:var(--link);text-decoration:none;font-weight:600;transition:opacity 0.2s}
+.link:hover{opacity:0.8;text-decoration:underline}
+.menu-btn{margin-top:0;padding:6px 12px;min-width:44px;border:1px solid var(--border);background:var(--field);border-radius:10px;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;box-shadow:none;transition:background 0.2s}
+.menu-btn:hover{background:rgba(255,255,255,0.1);transform:none}
+body.light .menu-btn:hover{background:rgba(0,0,0,0.05)}
+.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:20}
+.drawer{position:fixed;left:0;top:-10px;bottom:-10px;width:min(85vw,300px);padding:24px 16px;background:var(--card);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-right:1px solid var(--border);transform:translateX(-100%);transition:transform .3s cubic-bezier(0.4,0,0.2,1);z-index:21;overflow-y:auto;box-shadow:10px 0 30px rgba(0,0,0,0.3)}
+body.light .drawer{box-shadow:10px 0 30px rgba(0,0,0,0.05)}
+.drawer h4{margin:10px 12px 16px 12px;font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.navbtn{display:flex;align-items:center;gap:12px;width:100%;margin-top:0;margin-bottom:4px;padding:12px 14px;border:0;border-radius:10px;background:transparent;color:var(--txt);text-align:left;font-weight:600;font-size:0.95rem;transition:all 0.2s;box-shadow:none}
+.navbtn:hover{background:rgba(255,255,255,0.05);transform:none}
+body.light .navbtn:hover{background:rgba(0,0,0,0.03)}
+.navbtn.active{background:rgba(59,130,246,0.15);color:#60a5fa}
+body.light .navbtn.active{background:rgba(14,165,233,0.1);color:#0284c7}
+.navbtn.cog::before{content:'⚙';font-size:1.1rem;opacity:0.8}
 body.nav-open .drawer{transform:translateX(0)}
 body.nav-open .drawer-backdrop{opacity:1;pointer-events:auto}
 body.nav-open{overflow:hidden}
-.tabbtn{background:#1f2937;color:#e5e7eb;border:1px solid var(--border)}
-body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
-.tabbtn.active{background:var(--accent);color:#fff}
+.tabbtn{background:var(--field);color:var(--muted);border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer;transition:all 0.2s;box-shadow:none;margin-top:0}
+.tabbtn:hover{background:rgba(255,255,255,0.05);color:var(--txt);transform:none}
+body.light .tabbtn:hover{background:rgba(0,0,0,0.03)}
+.tabbtn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+body.light .tabbtn.active{color:#fff}
 .page{display:none}
-.page.active{display:block}
-.settings-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.page.active{display:block;animation:fadeIn 0.3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.settings-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
 .settings-pane{display:none}
-.settings-pane.active{display:block}
+.settings-pane.active{display:block;animation:fadeIn 0.3s ease}
 .fleet-pane{display:none}
-.fleet-pane.active{display:block}
-.system-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px 0}
+.fleet-pane.active{display:block;animation:fadeIn 0.3s ease}
+.system-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 16px 0}
 .system-pane{display:none}
-.system-pane.active{display:block}
-.fleet-table{width:100%;border-collapse:collapse;font-size:14px}
-.fleet-table th,.fleet-table td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
-.fleet-table th{color:var(--muted);font-weight:700}
-.fleet-table tr.selected{background:rgba(0,95,115,.18)}
-.fleet-row-actions{display:flex;gap:6px;flex-wrap:wrap}
-.fleet-row-actions button{margin-top:0;padding:6px 8px;font-size:12px}
-.fleet-detail{margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:rgba(255,255,255,.02)}
-.fleet-detail-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.fleet-detail-tabs .tabbtn{margin-top:0;padding:6px 10px}
-.fleet-detail-grid{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:14px}
-.fleet-detail-grid .k{color:var(--muted)}
+.system-pane.active{display:block;animation:fadeIn 0.3s ease}
+.fleet-table{width:100%;border-collapse:separate;border-spacing:0;font-size:0.9rem;margin-top:12px}
+.fleet-table th{color:var(--muted);font-weight:600;padding:12px;text-align:left;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.2)}
+body.light .fleet-table th{background:rgba(0,0,0,0.02)}
+.fleet-table td{padding:12px;border-bottom:1px solid var(--border);vertical-align:middle;background:rgba(15,23,42,0.3);transition:background 0.2s}
+body.light .fleet-table td{background:rgba(255,255,255,0.5)}
+.fleet-table tr:hover td{background:rgba(255,255,255,0.05);cursor:pointer}
+body.light .fleet-table tr:hover td{background:rgba(0,0,0,0.02)}
+.fleet-table tr:first-child td:first-child{border-top-left-radius:10px}
+.fleet-table tr:first-child td:last-child{border-top-right-radius:10px}
+.fleet-table tr:last-child td:first-child{border-bottom-left-radius:10px}
+.fleet-table tr:last-child td:last-child{border-bottom-right-radius:10px}
+.fleet-table tr.selected td{background:rgba(59,130,246,0.15)}
+body.light .fleet-table tr.selected td{background:rgba(14,165,233,0.1)}
+.fleet-row-actions{display:flex;gap:8px;flex-wrap:wrap}
+.fleet-row-actions button{margin-top:0;padding:8px 12px;font-size:0.8rem;border-radius:8px}
+.fleet-detail{margin-top:16px;border:1px solid var(--border);border-radius:12px;padding:16px;background:rgba(15,23,42,0.4)}
+body.light .fleet-detail{background:rgba(255,255,255,0.5)}
+.fleet-detail-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.fleet-detail-tabs .tabbtn{margin-top:0;padding:8px 14px;font-size:0.85rem}
+.fleet-detail-grid{display:grid;grid-template-columns:160px 1fr;gap:10px 16px;font-size:0.95rem}
+.fleet-detail-grid .k{color:var(--muted);font-weight:500}
 .fleet-detail-grid .v{font-weight:600;overflow-wrap:anywhere}
-.chip{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid transparent}
-.chip.ok{background:#d9f6df;color:#166534;border-color:#3ea86b}
-.chip.warn{background:#fef3c7;color:#92400e;border-color:#f59e0b}
-.chip.err{background:#fee2e2;color:#b42318;border-color:#fca5a5}
-.chip.neutral{background:#e5e7eb;color:#374151;border-color:#cfd4db}
-.status-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
-.deploy-note{padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.03);margin-bottom:10px}
-.deploy-note.warn{border-color:#f59e0b;background:rgba(245,158,11,.10);color:#fef3c7}
-.status-table{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;font-size:15px}
-.status-table .k{color:var(--muted)}
+.chip{display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;border-radius:999px;font-size:0.75rem;font-weight:700;letter-spacing:0.02em}
+.chip.ok{background:rgba(34,197,94,0.15);color:#4ade80}
+body.light .chip.ok{color:#15803d;background:rgba(34,197,94,0.15)}
+.chip.warn{background:rgba(245,158,11,0.15);color:#fcd34d}
+body.light .chip.warn{color:#b45309;background:rgba(245,158,11,0.2)}
+.chip.err{background:rgba(239,68,68,0.15);color:#fca5a5}
+body.light .chip.err{color:#b91c1c;background:rgba(239,68,68,0.15)}
+.chip.neutral{background:rgba(255,255,255,0.1);color:var(--txt)}
+body.light .chip.neutral{background:rgba(0,0,0,0.05);color:var(--txt)}
+.status-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start}
+.deploy-note{padding:16px;border:1px solid var(--border);border-radius:12px;background:rgba(15,23,42,0.4);margin-bottom:16px;line-height:1.5}
+.deploy-note.warn{border-color:rgba(245,158,11,0.5);background:rgba(245,158,11,0.1);color:#fcd34d}
+body.light .deploy-note.warn{color:#b45309;background:rgba(245,158,11,0.1)}
+.status-table{display:grid;grid-template-columns:160px 1fr;gap:10px 16px;font-size:0.95rem;background:rgba(15,23,42,0.3);padding:16px;border-radius:12px;border:1px solid var(--border)}
+body.light .status-table{background:rgba(255,255,255,0.5)}
+.status-table .k{color:var(--muted);font-weight:500}
 .status-table .v{font-weight:600;overflow-wrap:anywhere}
-.status-table .v.copyable{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.status-table .section{grid-column:1/-1;font-weight:800;margin-top:4px;padding-top:6px;border-top:1px solid var(--border)}
-.copy-btn{margin:0;padding:4px 8px;font-size:12px;border-radius:6px;background:#2f9e64;color:#fff}
-.copy-btn:hover{filter:brightness(1.05)}
-.relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:12px}
-.relay-badge{width:90px;height:90px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
-.relay-badge.on{background:#d9f6df;color:#166534;border:2px solid #3ea86b}
-.relay-badge.off{background:#f3f4f6;color:#4b5563;border:2px solid #c6cdd6}
-.sensor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.sensor-tile{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:8px}
-.sensor-state{display:inline-flex;align-items:center;justify-content:center;min-width:82px;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700}
-.sensor-state.open{background:#f3f4f6;color:#4b5563}
-.sensor-state.closed{background:#d9f6df;color:#166534}
-.toast{position:fixed;right:14px;bottom:14px;background:#0b6a80;color:#fff;padding:10px 12px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.2);font-size:14px;z-index:9999;display:none}
+.status-table .v.copyable{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.status-table .section{grid-column:1/-1;font-weight:700;margin-top:8px;padding-top:12px;border-top:1px solid var(--border);color:var(--txt)}
+.copy-btn{margin:0;padding:6px 12px;font-size:0.75rem;border-radius:8px;background:var(--field);color:var(--txt);border:1px solid var(--border);box-shadow:none}
+.copy-btn:hover{background:rgba(255,255,255,0.1)}
+body.light .copy-btn:hover{background:rgba(0,0,0,0.05)}
+.relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(15,23,42,0.4);border:1px solid var(--border);border-radius:16px;padding:32px 20px;box-shadow:inset 0 2px 10px rgba(0,0,0,0.1)}
+body.light .relay-card{background:rgba(255,255,255,0.5)}
+.relay-badge{width:110px;height:110px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:700;letter-spacing:0.05em;transition:all 0.4s cubic-bezier(0.4,0,0.2,1);position:relative}
+.relay-badge::before{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid transparent;transition:border-color 0.4s}
+.relay-badge.on{background:rgba(34,197,94,0.15);color:#4ade80;box-shadow:0 0 30px rgba(34,197,94,0.3), inset 0 0 20px rgba(34,197,94,0.2)}
+.relay-badge.on::before{border-color:rgba(34,197,94,0.5)}
+body.light .relay-badge.on{color:#15803d;box-shadow:0 0 30px rgba(34,197,94,0.2), inset 0 0 20px rgba(34,197,94,0.1)}
+.relay-badge.off{background:rgba(255,255,255,0.05);color:var(--muted);box-shadow:inset 0 0 20px rgba(0,0,0,0.2)}
+.relay-badge.off::before{border-color:rgba(255,255,255,0.1)}
+body.light .relay-badge.off{background:rgba(0,0,0,0.03);box-shadow:inset 0 0 20px rgba(0,0,0,0.05)}
+body.light .relay-badge.off::before{border-color:rgba(0,0,0,0.1)}
+.sensor-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:12px;margin-top:12px}
+.sensor-tile{background:rgba(15,23,42,0.4);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:0.95rem;transition:transform 0.2s}
+body.light .sensor-tile{background:rgba(255,255,255,0.5)}
+.sensor-tile:hover{transform:translateY(-2px)}
+.sensor-state{display:inline-flex;align-items:center;justify-content:center;min-width:70px;padding:4px 10px;border-radius:999px;font-size:0.75rem;font-weight:700;letter-spacing:0.05em}
+.sensor-state.open{background:rgba(255,255,255,0.1);color:var(--muted)}
+body.light .sensor-state.open{background:rgba(0,0,0,0.05);color:var(--muted)}
+.sensor-state.closed{background:rgba(34,197,94,0.15);color:#4ade80}
+body.light .sensor-state.closed{background:rgba(34,197,94,0.15);color:#15803d}
+.toast{position:fixed;right:20px;bottom:20px;background:rgba(15,23,42,0.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--border);color:var(--txt);padding:14px 20px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4);font-size:0.95rem;font-weight:500;z-index:9999;display:none;animation:slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)}
+@keyframes slideUp{from{transform:translateY(100px);opacity:0}to{transform:translateY(0);opacity:1}}
+body.light .toast{background:rgba(255,255,255,0.95);color:#0f172a;box-shadow:0 10px 30px rgba(0,0,0,.15);border-color:rgba(0,0,0,0.1)}
 .toast.show{display:block}
-.toast.err{background:#b42318}
-.result-line{margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);font-weight:700;display:none}
-.result-line.show{display:block}
-.result-line.ok{background:#d9f6df;color:#166534;border-color:#3ea86b}
-.result-line.err{background:#fee2e2;color:#b42318;border-color:#fca5a5}
-.spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:sp 0.8s linear infinite;margin-right:8px;vertical-align:-2px}
+.toast.err{border-left:4px solid #ef4444}
+.result-line{margin-top:12px;padding:12px 16px;border-radius:10px;border:1px solid var(--border);font-weight:600;font-size:0.9rem;display:none}
+.result-line.show{display:block;animation:fadeIn 0.3s ease}
+.result-line.ok{background:rgba(34,197,94,0.1);color:#4ade80;border-color:rgba(34,197,94,0.3)}
+body.light .result-line.ok{color:#15803d}
+.result-line.err{background:rgba(239,68,68,0.1);color:#fca5a5;border-color:rgba(239,68,68,0.3)}
+body.light .result-line.err{color:#b91c1c}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp 0.8s linear infinite;margin-right:10px;vertical-align:-2px}
+body.light .spin{border-color:rgba(0,0,0,0.2);border-top-color:var(--accent)}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
-@media(max-width:650px){.grid{grid-template-columns:1fr}}
+@media(max-width:650px){
+ .grid{grid-template-columns:1fr}
+ .fleet-detail-grid{grid-template-columns:120px 1fr}
+ .status-table{grid-template-columns:120px 1fr}
+ .relay-card{flex-direction:row;justify-content:space-between;padding:20px}
+ .relay-badge{width:80px;height:80px}
+}
 </style></head>
 <body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button>
 )HTML"
 #if LRS_ENABLE_AUTOMATIONS
-R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automations')">Automations</button>
+    R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automations')">Automations</button>
 )HTML"
 #endif
-R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
@@ -406,7 +498,7 @@ R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sen
 </section>
  )HTML"
 #if LRS_ENABLE_AUTOMATIONS
-R"HTML(<section class="card page" id="page-automations">
+    R"HTML(<section class="card page" id="page-automations">
 <h3>Automations</h3>
 <div class="small" style="margin-bottom:8px">Builder shell (Phase 2). Rules are saved and validated only; runtime execution is not enabled in this phase.</div>
 <div class="small" style="margin-bottom:8px">v1 limits: max 8 rules, max 4 conditions per rule, max 4 actions per rule, action type <code>set_relay</code> only.</div>
@@ -423,7 +515,7 @@ R"HTML(<section class="card page" id="page-automations">
 </section>
 )HTML"
 #endif
-R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane" id="settings-pane-lora"><div class="grid">
+    R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane" id="settings-pane-lora"><div class="grid">
 <div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
 <div style="grid-column:1/-1"><label>Deployment Key (Encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
@@ -477,20 +569,20 @@ const FREQ_MAX_MHZ = 1000.0;
 const MIN_DEPLOYMENT_KEY_LEN = 16;
 )HTML"
 #if LRS_ENABLE_MDNS
-R"HTML(const UI_MDNS_ENABLED = true;
+    R"HTML(const UI_MDNS_ENABLED = true;
 )HTML"
 #else
-R"HTML(const UI_MDNS_ENABLED = false;
+    R"HTML(const UI_MDNS_ENABLED = false;
 )HTML"
 #endif
 #if LRS_ENABLE_AUTOMATIONS
-R"HTML(const UI_AUTOMATIONS_ENABLED = true;
+    R"HTML(const UI_AUTOMATIONS_ENABLED = true;
 )HTML"
 #else
-R"HTML(const UI_AUTOMATIONS_ENABLED = false;
+    R"HTML(const UI_AUTOMATIONS_ENABLED = false;
 )HTML"
 #endif
-R"HTML(
+    R"HTML(
 let statusFailCount = 0;
 let activePage = 'status';
 let activeSettingsTab = 'network';
@@ -643,10 +735,10 @@ function bindFreqPreset(){
  f915.addEventListener('change',apply);
 }
 function escapeHtml(v){
- return String(v??'').replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+ return String(v===undefined || v===null ? '' : v).replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 function copyButtonHtml(value, label='Value'){
- const txt=String(value??'').trim();
+ const txt=String(value===undefined || value===null ? '' : value).trim();
  const low=txt.toLowerCase();
  if(!txt || low==='n/a' || low==='not_set') return '';
  return `<button type="button" class="copy-btn" data-copy="${escapeHtml(txt)}" data-label="${escapeHtml(label)}" onclick="copyFromButton(this)">Copy</button>`;
@@ -1017,7 +1109,7 @@ function automationTopChanged(){
 function automationFormatValueForInput(pred){
  if(!pred) return '';
  if(pred.field==='reachable') return pred.value ? 'true' : 'false';
- return String(pred.value ?? '');
+ return String(pred.value === undefined || pred.value === null ? '' : pred.value);
 }
 function automationFieldHint(field){
  if(field==='temp_c') return 'numeric (e.g. 35)';
@@ -1118,7 +1210,7 @@ function renderAutomationsRules(){
   (((r.when && r.when.all) || [])).forEach((p,pi)=>{
    html += `<div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px">`;
    html += `<div class="grid">`;
-   html += `<div><label>Peer</label><input value="${escapeHtml(String(p.peer ?? 'self'))}" oninput="automationSetPredicateField(${ri},${pi},'peer',this.value)"></div>`;
+   html += `<div><label>Peer</label><input value="${escapeHtml(String(p.peer === undefined || p.peer === null ? 'self' : p.peer))}" oninput="automationSetPredicateField(${ri},${pi},'peer',this.value)"></div>`;
    html += `<div><label>Field</label><select onchange="automationSetPredicateField(${ri},${pi},'field',this.value)">`;
    ['temp_c','reachable','input','relay'].forEach(f=>{ html += `<option value="${f}" ${p.field===f?'selected':''}>${f}</option>`; });
    html += `</select></div>`;
@@ -1134,7 +1226,7 @@ function renderAutomationsRules(){
    html += `<div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px">`;
    html += `<div class="grid">`;
    html += `<div><label>Action</label><select disabled><option selected>set_relay</option></select></div>`;
-   html += `<div><label>Target peer</label><input value="${escapeHtml(String(a.peer ?? 'self'))}" oninput="automationSetActionField(${ri},${ai},'peer',this.value)"></div>`;
+   html += `<div><label>Target peer</label><input value="${escapeHtml(String(a.peer === undefined || a.peer === null ? 'self' : a.peer))}" oninput="automationSetActionField(${ri},${ai},'peer',this.value)"></div>`;
    html += `<div><label>Relay state</label><select onchange="automationSetActionField(${ri},${ai},'value',this.value)"><option value="0" ${Number(a.value)===0?'selected':''}>Open relay (0)</option><option value="1" ${Number(a.value)===1?'selected':''}>Close relay (1)</option></select></div>`;
    html += `<div></div>`;
    html += `</div>`;
@@ -1249,7 +1341,7 @@ function applyAutomationsDocToForm(){
  if(enabledEl) enabledEl.checked = !!d.enabled;
  if(modeEl) modeEl.value = d.execution_mode==='paired+rules' ? 'paired+rules' : 'standalone';
  if(peerDisplayEl) peerDisplayEl.value = d.peer_display==='names' ? 'names' : 'addresses';
- if(targetEl) targetEl.value = String(d.action_target ?? 'self');
+ if(targetEl) targetEl.value = String(d.action_target === undefined || d.action_target === null ? 'self' : d.action_target);
  renderAutomationsRules();
 }
 async function loadAutomationsPageData(force){
