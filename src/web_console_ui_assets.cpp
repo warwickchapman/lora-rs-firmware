@@ -1783,8 +1783,10 @@ async function apiJson(url, options){
   const merged=Object.assign({cache:'no-store',silent:false,timeoutMs:8000}, options||{});
   const controller = new AbortController();
   const timeoutMs = Number(merged.timeoutMs || 8000);
+  const allowHttpError = !!merged.allowHttpError;
   t = setTimeout(()=>controller.abort(), timeoutMs);
   delete merged.timeoutMs;
+  delete merged.allowHttpError;
   merged.signal = controller.signal;
   const res=await fetch(url,merged);
   if(res.status===401){
@@ -1792,7 +1794,14 @@ async function apiJson(url, options){
    location.href='/login?expired=1';
    return null;
   }
-  if(!res.ok){ throw new Error(`HTTP ${res.status}`); }
+  if(!res.ok){
+   if(allowHttpError){
+    const out = await res.json();
+    if(out && typeof out === 'object' && out._http_status == null){ out._http_status = res.status; }
+    return out;
+   }
+   throw new Error(`HTTP ${res.status}`);
+  }
   return await res.json();
  }catch(e){
   if(!options || !options.silent){
@@ -2365,7 +2374,7 @@ async function startFleetProvisioningDiscoveryWithMode(searchMore){
  const retry=false;
  suspendGlobalPollsUntilMs = Date.now() + 5000;
  if(result){ result.className='result-line show'; result.innerText = searchMore ? 'Searching for more devices...' : 'Starting discovery...'; }
- const out=await apiJson('/api/provisioning/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estimated_count:est,retry_once:retry}),silent:true});
+ const out=await apiJson('/api/provisioning/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estimated_count:est,retry_once:retry}),silent:true,allowHttpError:true});
  if(out && out.ok){
   if(out.session){ renderProvisioningStatus(out); }
   startProvisioningPolling({graceMs:5000});
@@ -2378,7 +2387,7 @@ async function provisionFleetAll(){
  const result=document.getElementById('provWizardResult');
  suspendGlobalPollsUntilMs = Date.now() + 5000;
  if(result){ result.className='result-line show'; result.innerText='Provisioning discovered devices...'; }
- const out=await apiJson('/api/provisioning/provision-all',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true});
+ const out=await apiJson('/api/provisioning/provision-all',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true,allowHttpError:true});
  if(out && out.ok){
   if(out.session){ renderProvisioningStatus(out); }
   startProvisioningPolling({graceMs:5000});
@@ -2389,7 +2398,7 @@ async function provisionFleetAll(){
 }
 async function cancelFleetProvisioning(){
  stopProvisioningPolling();
- await apiJson('/api/provisioning/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true});
+ await apiJson('/api/provisioning/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',silent:true,allowHttpError:true});
  const out=await refreshProvisioningStatus(true);
  const result=document.getElementById('provWizardResult');
  if(result){ result.className='result-line show'; result.innerText = out && out.session && out.session.active ? 'Provisioning session updated.' : 'Provisioning session cancelled.'; }
