@@ -21,6 +21,7 @@ enum class RxControlSource : uint8_t {
   None,
   LoRa,
   Mqtt,
+  Automation,
 };
 
 enum class PeerAckState : uint8_t {
@@ -128,6 +129,7 @@ class NodeStateMachine {
   size_t peerCount() const;
   bool peerByIndex(size_t index, PeerStatusSnapshot &out) const;
   void mqttSetLocalRelay(uint8_t relayState);
+  void automationSetLocalRelay(uint8_t relayState);
   bool mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState);
   bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
   bool mqttPollPeerNow(uint8_t dstAddress);

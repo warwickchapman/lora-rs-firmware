@@ -382,6 +382,15 @@ void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
   }
 }
 
+void NodeStateMachine::automationSetLocalRelay(uint8_t relayState) {
+  relay_state_ = relayState ? 1 : 0;
+  digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
+  if (!runtime_.role_tx) {
+    last_rx_control_source_ = RxControlSource::Automation;
+  }
+  lrslog::event("automation_local_relay", 0, last_counter_, relay_state_);
+}
+
 void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent) {
   const uint32_t now = millis();
   last_counter_++;
