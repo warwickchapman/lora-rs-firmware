@@ -63,6 +63,7 @@ constexpr uint32_t kStatusLiveSsePushPressureMs = 8000;
 constexpr uint32_t kStatusLiveSsePushSevereMs = 12000;
 constexpr uint32_t kStatusLiveSsePressureWindowMs = 12000;
 constexpr uint32_t kWebRequestPressureDurMs = 80;
+constexpr int kStaTestMaxAttempts = 40;  // 40 * 100ms = 4s max blocking window (commissioning only)
 
 #ifdef REGION_US
 constexpr long kMinFrequencyHz = 902000000L;
@@ -4038,6 +4039,10 @@ void WebConsole::handleDiagnostics() {
 
 void WebConsole::handleTestSta() {
   if (!requireAuth(true)) return;
+  if (!needsFleetSetupPrompt()) {
+    server_.send(403, "application/json", "{\"ok\":false,\"error\":\"setup_only\"}");
+    return;
+  }
   DynamicJsonDocument body(512);
   auto err = deserializeJson(body, server_.arg("plain"));
   if (err) {
@@ -4070,7 +4075,7 @@ void WebConsole::handleTestSta() {
 
   WiFi.begin(ssid.c_str(), pass.c_str());
   wl_status_t st = WL_IDLE_STATUS;
-  for (int i = 0; i < 120; i++) {
+  for (int i = 0; i < kStaTestMaxAttempts; i++) {
     delay(100);
     yield();
     st = WiFi.status();
