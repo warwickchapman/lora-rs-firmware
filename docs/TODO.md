@@ -30,6 +30,10 @@
 - Phase 2 (later mass refactor): convert remaining ad-hoc prints across modules to the shared logging API; standardize event names/fields; add state-change/rate-limited logging patterns; review LoRa/web/API logs for spam/noise; expand structured coverage for provisioning/fleet workflows; document log taxonomy and operational/debug logging policy.
 - Phase 2 guardrails: no secret leakage (fleet keys, passwords, tokens), avoid heap-heavy log string construction in hot paths, and preserve current runtime timing priorities (LoRa control path before MQTT).
 
+## MQTT / Heap Discipline
+- Measure fragmentation impact of recent MQTT topic-churn reduction using paired before/after probes (`heap_free`, `max_free_block`, `heap_frag_percent`) around `applyConfig()`, MQTT enable/disable, reconnect, and steady-state publish loops; treat `max_free_block` as the primary success metric.
+- Deferred optimization (only if needed): tighten MQTT topic buffer sizes, reduce persistent topic buffers, and move rarely used topic buffers to stack/cold helpers to claw back static RAM **only after** confirming the publish-path refactor improves `max_free_block` stability.
+
 ## Fleet (Fleet-Wide Tools / Actions)
 - Broadcast WiFi provisioning (current feature; keep as anchor item).
 - Add fleet WiFi provisioning acknowledgements/status tracking (LoRa per-device ACK + optional WiFi join result) so UI can show `sent/acked/connected/failed` instead of broadcast-send-only feedback.

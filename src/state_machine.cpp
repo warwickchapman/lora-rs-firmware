@@ -1648,7 +1648,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         prov_.pause_normal_tx = false;
         return;
       }
-      const String fleetKey = settings_->fleet_passphrase;
+      const String &fleetKey = settings_->fleet_passphrase;
       const size_t keyLen = static_cast<size_t>(fleetKey.length());
       if (keyLen == 0 || keyLen > (kProvChunkBitmapMax * kProvKeyChunkBytes)) {
         d.state = ProvisioningDeviceState::Failed;
