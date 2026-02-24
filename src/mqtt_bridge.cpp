@@ -27,26 +27,6 @@ const char *peerAckStateText(PeerAckState s) {
   }
 }
 
-bool parseHexAddressSegment(const String &segment, uint8_t &out) {
-  if (segment.length() == 0) return false;
-  char *end = nullptr;
-  long parsed = strtol(segment.c_str(), &end, 16);
-  if (end == nullptr || *end != '\0') return false;
-  if (parsed < 1 || parsed > 254) return false;
-  out = static_cast<uint8_t>(parsed);
-  return true;
-}
-
-bool parseDecAddressSegment(const String &segment, uint8_t &out) {
-  if (segment.length() == 0) return false;
-  char *end = nullptr;
-  long parsed = strtol(segment.c_str(), &end, 10);
-  if (end == nullptr || *end != '\0') return false;
-  if (parsed < 1 || parsed > 254) return false;
-  out = static_cast<uint8_t>(parsed);
-  return true;
-}
-
 bool knownPeerAddress(NodeStateMachine *sm, uint8_t addr) {
   if (sm == nullptr) return false;
   const size_t n = sm->peerCount();
@@ -57,28 +37,54 @@ bool knownPeerAddress(NodeStateMachine *sm, uint8_t addr) {
   return false;
 }
 
-bool parsePeerAddressSegment(const String &segment, NodeStateMachine *sm, uint8_t &out) {
-  // Explicit hex forms stay hex for backward compatibility.
-  if (segment.startsWith("0x") || segment.startsWith("0X")) {
-    return parseHexAddressSegment(segment.substring(2), out);
+bool parseHexAddressSegmentCstr(const char *segment, size_t len, uint8_t &out) {
+  if (segment == nullptr || len == 0 || len > 8) return false;
+  char buf[9];
+  memcpy(buf, segment, len);
+  buf[len] = '\0';
+  char *end = nullptr;
+  long parsed = strtol(buf, &end, 16);
+  if (end == nullptr || *end != '\0') return false;
+  if (parsed < 1 || parsed > 254) return false;
+  out = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+bool parseDecAddressSegmentCstr(const char *segment, size_t len, uint8_t &out) {
+  if (segment == nullptr || len == 0 || len > 8) return false;
+  char buf[9];
+  memcpy(buf, segment, len);
+  buf[len] = '\0';
+  char *end = nullptr;
+  long parsed = strtol(buf, &end, 10);
+  if (end == nullptr || *end != '\0') return false;
+  if (parsed < 1 || parsed > 254) return false;
+  out = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+bool parsePeerAddressSegmentCstr(const char *segment, size_t len, NodeStateMachine *sm, uint8_t &out) {
+  if (segment == nullptr || len == 0) return false;
+  if (len >= 2 && segment[0] == '0' && (segment[1] == 'x' || segment[1] == 'X')) {
+    return parseHexAddressSegmentCstr(segment + 2, len - 2, out);
   }
 
   bool hasHexAlpha = false;
-  for (size_t i = 0; i < segment.length(); ++i) {
-    const char c = segment.charAt(i);
+  for (size_t i = 0; i < len; ++i) {
+    const char c = segment[i];
     if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
       hasHexAlpha = true;
       break;
     }
   }
   if (hasHexAlpha) {
-    return parseHexAddressSegment(segment, out);
+    return parseHexAddressSegmentCstr(segment, len, out);
   }
 
   uint8_t decAddr = 0;
   uint8_t hexAddr = 0;
-  const bool decOk = parseDecAddressSegment(segment, decAddr);
-  const bool hexOk = parseHexAddressSegment(segment, hexAddr);
+  const bool decOk = parseDecAddressSegmentCstr(segment, len, decAddr);
+  const bool hexOk = parseHexAddressSegmentCstr(segment, len, hexAddr);
   if (!decOk && !hexOk) return false;
 
   if (decOk && hexOk && decAddr != hexAddr) {
@@ -92,8 +98,7 @@ bool parsePeerAddressSegment(const String &segment, NodeStateMachine *sm, uint8_
       out = hexAddr;
       return true;
     }
-    // Ambiguous and unknown: keep old behavior for short IDs (hex).
-    if (segment.length() <= 2) {
+    if (len <= 2) {
       out = hexAddr;
       return true;
     }
@@ -104,6 +109,37 @@ bool parsePeerAddressSegment(const String &segment, NodeStateMachine *sm, uint8_
     return true;
   }
   out = hexAddr;
+  return true;
+}
+
+bool parseSignedPayloadLong(const uint8_t *payload, unsigned int length, long &out) {
+  if (payload == nullptr) return false;
+  if (length == 0) {
+    out = 0;
+    return true;
+  }
+  if (length >= 24) return false;
+  char buf[24];
+  unsigned int n = 0;
+  for (unsigned int i = 0; i < length && n < (sizeof(buf) - 1); ++i) {
+    const char c = static_cast<char>(payload[i]);
+    if (c == '\r' || c == '\n' || c == '\t') continue;
+    buf[n++] = c;
+  }
+  while (n > 0 && buf[n - 1] == ' ') --n;
+  size_t start = 0;
+  while (start < n && buf[start] == ' ') ++start;
+  if (start > 0 && start < n) memmove(buf, buf + start, n - start);
+  if (start > 0) n = (start < n) ? (n - start) : 0;
+  buf[n] = '\0';
+  if (n == 0) {
+    out = 0;
+    return true;
+  }
+  char *end = nullptr;
+  long parsed = strtol(buf, &end, 10);
+  if (end == nullptr || *end != '\0') return false;
+  out = parsed;
   return true;
 }
 }
@@ -227,9 +263,9 @@ bool MqttBridge::buildPeerTopic(char *out, size_t outLen, const char *addrSegmen
 }
 
 void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length) {
-  String topicStr(topic);
+  if (topic == nullptr) return;
 
-  if (topicStr == relay_topic_) {
+  if (strcmp(topic, relay_topic_) == 0) {
     if (length == 0 || sm_ == nullptr) {
       return;
     }
@@ -243,7 +279,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     return;
   }
 
-  if (topicStr == control_topic_) {
+  if (strcmp(topic, control_topic_) == 0) {
     if (!runtime_.role_tx || sm_ == nullptr) {
       return;
     }
@@ -260,7 +296,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     uint8_t addr = 0;
     if (doc["addr"].is<const char *>()) {
       const char *addrStr = doc["addr"];
-      if (addrStr == nullptr || !parsePeerAddressSegment(String(addrStr), sm_, addr)) {
+      if (addrStr == nullptr || !parsePeerAddressSegmentCstr(addrStr, strlen(addrStr), sm_, addr)) {
         return;
       }
     } else if (doc["addr"].is<int>()) {
@@ -280,27 +316,27 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 
   if (runtime_.role_tx && sm_ != nullptr) {
-    if (!topicStr.startsWith(remote_prefix_)) {
+    const size_t remotePrefixLen = strlen(remote_prefix_);
+    if (strncmp(topic, remote_prefix_, remotePrefixLen) != 0) {
       return;
     }
 
-    const String suffix = topicStr.substring(strlen(remote_prefix_));
-    const int slash = suffix.indexOf('/');
-    if (slash <= 0) {
+    const char *suffix = topic + remotePrefixLen;
+    const char *slash = strchr(suffix, '/');
+    if (slash == nullptr || slash == suffix) {
       return;
     }
 
     uint8_t addr = 0;
-    if (!parsePeerAddressSegment(suffix.substring(0, slash), sm_, addr)) {
+    const size_t addrLen = static_cast<size_t>(slash - suffix);
+    if (!parsePeerAddressSegmentCstr(suffix, addrLen, sm_, addr)) {
       return;
     }
 
-    const String leaf = suffix.substring(slash + 1);
-    if (leaf == "poll_interval_s") {
-      String value;
-      for (unsigned int i = 0; i < length; ++i) value += static_cast<char>(payload[i]);
-      value.trim();
-      long sec = value.toInt();
+    const char *leaf = slash + 1;
+    if (strcmp(leaf, "poll_interval_s") == 0) {
+      long sec = 0;
+      if (!parseSignedPayloadLong(payload, length, sec)) return;
       if (sec < 0) sec = 0;
       if (sec > 0 && sec < 60) sec = 60;
       if (sec > 3600) sec = 3600;
@@ -311,7 +347,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
-    if (leaf == "poll_now") {
+    if (strcmp(leaf, "poll_now") == 0) {
       sm_->mqttPollPeerNow(addr);
       {
         lrslog::event("mqtt_remote_poll_now", 0, 0, addr);
@@ -319,7 +355,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
-    if (leaf == "forget") {
+    if (strcmp(leaf, "forget") == 0) {
       const bool forget = (length > 0 && payload[0] != '0');
       if (!forget) return;
       const bool removed = sm_->mqttForgetPeer(addr);
@@ -346,12 +382,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
   char addrDec[4];
   snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(addr));
-
-  const String bases[] = {
-      String(topic_base_) + "/peer/" + String(addrHexPrefixed),
-      String(topic_base_) + "/peer/" + String(addrHex),
-      String(topic_base_) + "/peer/" + String(addrDec),
-  };
+  const char *addrSegments[] = {addrHexPrefixed, addrHex, addrDec};
 
   const char *leaves[] = {
       "relay",           "input",          "ack_state",        "addr_hex",         "addr_dec",
@@ -359,10 +390,11 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
       "last_poll_tx_ms", "poll_state",     "temp_c",           "forget",           "poll_now",
   };
 
-  for (const String &base : bases) {
+  char topic[kMqttTopicBufBytes];
+  for (const char *addrSegment : addrSegments) {
     for (const char *leaf : leaves) {
-      const String topic = base + "/" + leaf;
-      mqtt_client_.publish(topic.c_str(), "", true);
+      if (!buildPeerTopic(topic, sizeof(topic), addrSegment, leaf)) continue;
+      mqtt_client_.publish(topic, "", true);
     }
   }
 }
