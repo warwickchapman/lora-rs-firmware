@@ -2188,6 +2188,18 @@ function provisioningSessionStateLabel(s){
  if(key==='provisioning') return 'devices';
  return key.split('_').join(' ');
 }
+function provisioningDeviceStatusDisplay(d){
+ const state=String((d&&d.state)||'unknown');
+ if(state==='verified') return '🟢 verified';
+ if(state==='failed'){
+  // If an address was assigned, this is often a verify-timeout/missed final ack on LoRa.
+  // The target may already have applied provisioning successfully.
+  if(Number(d&&d.assigned_address||0)>0) return '🟠 unverified';
+  return '🔴 failed';
+ }
+ if(state==='await_verify') return '🟠 await verify';
+ return state;
+}
 function renderProvisioningStatus(out){
  const result=document.getElementById('provWizardResult');
  const summary=document.getElementById('provWizardSummary');
@@ -2232,7 +2244,7 @@ function renderProvisioningStatus(out){
   const nxt = Number(d.assigned_address||0);
   const fw = d.fw_version || `${d.fw_major||0}.${d.fw_minor||0}.${d.fw_patch||0}`;
   const conflict = d.address_conflict ? ' conflict' : '';
-  return `<tr><td>${escapeHtml(String(d.chip_id_hex||d.chip_id||''))}</td><td>${cur||'-'}</td><td>${nxt||'-'}</td><td>${escapeHtml(String(fw))}</td><td>${Number(d.rssi||0)}</td><td>${escapeHtml(String(d.state||'unknown'))}${conflict}</td></tr>`;
+  return `<tr><td>${escapeHtml(String(d.chip_id_hex||d.chip_id||''))}</td><td>${cur||'-'}</td><td>${nxt||'-'}</td><td>${escapeHtml(String(fw))}</td><td>${Number(d.rssi||0)}</td><td>${escapeHtml(provisioningDeviceStatusDisplay(d))}${conflict}</td></tr>`;
  }).join('');
  provLastRowsHtml = rows.innerHTML;
 }
