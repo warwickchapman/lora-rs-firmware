@@ -1711,6 +1711,26 @@ async function loadSettingsPageData(force){
    if(el.type==='checkbox'){ el.checked=!!s[k]; return; }
    el.value=String(s[k]);
   });
+  const fleetEl=document.getElementById('fleet_passphrase');
+  if(fleetEl){
+   fleetEl.value='';
+   fleetEl.placeholder = s.fleet_passphrase_set ? 'Stored (hidden). Enter new value to change.' : '';
+  }
+  const staPassEl=document.getElementById('wifi_sta_password');
+  if(staPassEl){
+   staPassEl.value='';
+   staPassEl.placeholder = s.wifi_sta_password_set ? 'Stored (hidden). Enter new value to change.' : '';
+  }
+  const mqttPassEl=document.getElementById('mqtt_password');
+  if(mqttPassEl){
+   mqttPassEl.value='';
+   mqttPassEl.placeholder = s.mqtt_password_set ? 'Stored (hidden). Enter new value to change.' : '';
+  }
+  const adminPassEl=document.getElementById('admin_password');
+  if(adminPassEl){
+   adminPassEl.value='';
+   adminPassEl.placeholder = s.admin_password_set ? 'Stored (hidden). Enter new value to change.' : '';
+  }
   updateDeploymentKeyStrength();
   updateStaTestButtonState();
   document.getElementById('role_tx').value = String(!!s.role_tx);
@@ -1830,16 +1850,19 @@ function collectLoraBody(){
  if(!Number.isFinite(mqttRetrySec)||mqttRetrySec<5||mqttRetrySec>3600){alert('MQTT remote retry timeout must be between 5 and 3600 seconds.'); return;}
  if(!Number.isFinite(txPollDefaultSec)||txPollDefaultSec<60||txPollDefaultSec>3600){alert('Default poll interval must be between 60 and 3600 seconds.'); return;}
  if(!Number.isFinite(rxPushMinSec)||rxPushMinSec<60||rxPushMinSec>3600){alert('RX push minimum interval must be between 60 and 3600 seconds.'); return;}
- const ids=['lora_tx_power','lora_spreading_factor','lora_bandwidth_hz','lora_coding_rate','fleet_passphrase'];
+ const ids=['lora_tx_power','lora_spreading_factor','lora_bandwidth_hz','lora_coding_rate'];
  const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
- body.fleet_passphrase=String(body.fleet_passphrase||'').trim();
- if(body.fleet_passphrase.length < MIN_DEPLOYMENT_KEY_LEN){
-   alert(`Deployment Key must be at least ${MIN_DEPLOYMENT_KEY_LEN} characters.`);
-   return;
- }
- if(isDefaultDeploymentKey(body.fleet_passphrase)){
-   alert('Deployment Key cannot be the default value. Please set a unique installation key.');
-   return;
+ const fleetPassphrase=String(document.getElementById('fleet_passphrase').value||'').trim();
+ if(fleetPassphrase.length){
+  if(fleetPassphrase.length < MIN_DEPLOYMENT_KEY_LEN){
+    alert(`Deployment Key must be at least ${MIN_DEPLOYMENT_KEY_LEN} characters.`);
+    return;
+  }
+  if(isDefaultDeploymentKey(fleetPassphrase)){
+    alert('Deployment Key cannot be the default value. Please set a unique installation key.');
+    return;
+  }
+  body.fleet_passphrase=fleetPassphrase;
  }
  body.role_tx=document.getElementById('role_tx_true').checked;
  body.local_address=local;
@@ -1856,17 +1879,24 @@ function collectLoraBody(){
  return body;
 }
 function collectNetworkBody(){
- const ids=['wifi_sta_ssid','wifi_sta_password','lan_hostname'];
+ const ids=['wifi_sta_ssid','lan_hostname'];
  const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
+ const staPass=String(document.getElementById('wifi_sta_password').value||'');
+ if(staPass.length){ body.wifi_sta_password=staPass; }
  body.ap_always_on=document.getElementById('ap_always_on').checked;
  return body;
 }
 function collectSystemBody(){
- return {admin_password: document.getElementById('admin_password').value};
+ const body={};
+ const adminPass=String(document.getElementById('admin_password').value||'');
+ if(adminPass.length){ body.admin_password=adminPass; }
+ return body;
 }
 function collectMqttBody(){
- const ids=['mqtt_host','mqtt_user','mqtt_password','mqtt_topic_root'];
+ const ids=['mqtt_host','mqtt_user','mqtt_topic_root'];
  const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
+ const mqttPass=String(document.getElementById('mqtt_password').value||'');
+ if(mqttPass.length){ body.mqtt_password=mqttPass; }
  const portRaw=String(document.getElementById('mqtt_port').value||'').trim();
  const port=Number(portRaw);
  if(portRaw.length===0 || !Number.isFinite(port) || port<1 || port>65535){
@@ -2890,7 +2920,8 @@ bool WebConsole::buildStatusStaticCache() {
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
   doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
-  doc["deployment_key"] = cfg.fleet_passphrase;
+  doc["deployment_key"] = cfg.fleet_passphrase.length() ? lrslog::maskSecret(cfg.fleet_passphrase) : String("");
+  doc["deployment_key_set"] = (cfg.fleet_passphrase.length() > 0);
   doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
   doc["fleet_setup_required"] = needsFleetSetupPrompt();
@@ -3777,17 +3808,22 @@ void WebConsole::handleGetSettings() {
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
-  doc["wifi_sta_password"] = cfg.wifi_sta_password;
+  doc["wifi_sta_password"] = "";
+  doc["wifi_sta_password_set"] = (cfg.wifi_sta_password.length() > 0);
   doc["lan_hostname"] = cfg.lan_hostname;
-  doc["fleet_passphrase"] = cfg.fleet_passphrase;
+  doc["fleet_passphrase"] = "";
+  doc["fleet_passphrase_set"] = (cfg.fleet_passphrase.length() > 0);
+  doc["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
-  doc["admin_password"] = cfg.admin_password;
+  doc["admin_password"] = "";
+  doc["admin_password_set"] = (cfg.admin_password.length() > 0);
   doc["ap_always_on"] = cfg.ap_always_on;
   doc["mqtt_enabled"] = cfg.mqtt_enabled;
   doc["mqtt_host"] = cfg.mqtt_host;
   doc["mqtt_port"] = cfg.mqtt_port;
   doc["mqtt_user"] = cfg.mqtt_user;
-  doc["mqtt_password"] = cfg.mqtt_password;
+  doc["mqtt_password"] = "";
+  doc["mqtt_password_set"] = (cfg.mqtt_password.length() > 0);
   doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
   doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
