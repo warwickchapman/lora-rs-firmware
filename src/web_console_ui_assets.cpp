@@ -455,7 +455,7 @@ R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class
 <div><label>MQTT user</label><input id="mqtt_user" /></div>
 <div><label>MQTT password</label><input id="mqtt_password" /></div>
 <div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
-</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><label>Confirmation word</label><input id="factory_reset_confirm_word" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="RESET or REMOVE" /><div class="small">Type <code>RESET</code> to keep the fleet key, or <code>REMOVE</code> to clear it.</div></div><div><div class="check-row"><input id="factory_reset_keep_fleet_local" type="checkbox" /><label for="factory_reset_keep_fleet_local">Keep shared fleet key</label></div><div class="small">Tick to keep this device in the LoRa fleet.</div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
+</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><label>Confirmation word</label><input id="factory_reset_confirm_word" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="RESET or REMOVE" /><div class="small">Type <code>RESET</code> to keep the LoRa fleet key, or <code>REMOVE</code> to clear it.</div></div><div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
 <section class="card page" id="page-sensors"><h3>Sensors</h3>
 <h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
 <div class="check-row" style="margin-bottom:8px"><input id="sensor_temp_enabled" type="checkbox" /><label for="sensor_temp_enabled">Enable DS18B20 (GPIO0)</label></div>
@@ -2090,26 +2090,22 @@ async function factoryResetLocal(){
  const el=document.getElementById('factoryResetResult');
  const pwEl=document.getElementById('factory_reset_password');
  const confirmEl=document.getElementById('factory_reset_confirm_word');
- const keepEl=document.getElementById('factory_reset_keep_fleet_local');
  const keepWifiEl=document.getElementById('factory_reset_keep_wifi_local');
- if(!el || !pwEl || !confirmEl || !keepEl || !keepWifiEl) return;
+ if(!el || !pwEl || !confirmEl || !keepWifiEl) return;
  const password=String(pwEl.value||'');
  const confirmWord=String(confirmEl.value||'').trim().toUpperCase();
- const keepFleet=!!keepEl.checked;
+ let keepFleet=false;
+ if(confirmWord==='RESET') keepFleet=true;
+ else if(confirmWord==='REMOVE') keepFleet=false;
  const keepWifi=!!keepWifiEl.checked;
  if(!password.length){
   el.className='result-line show err';
   el.innerText='Enter admin password to factory reset.';
   return;
  }
- if(!keepFleet && confirmWord!=='REMOVE'){
+ if(confirmWord!=='RESET' && confirmWord!=='REMOVE'){
   el.className='result-line show err';
-  el.innerText='Type REMOVE to confirm clearing the shared fleet key.';
-  return;
- }
- if(keepFleet && confirmWord!=='RESET'){
-  el.className='result-line show err';
-  el.innerText='Type RESET to confirm factory reset.';
+  el.innerText='Type RESET (keep fleet key) or REMOVE (clear fleet key).';
   return;
  }
  const keepBits=[];
