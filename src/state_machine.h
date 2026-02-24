@@ -146,10 +146,25 @@ class NodeStateMachine {
   bool provisioningDeviceByIndex(size_t index, ProvisioningDeviceSnapshot &out) const;
   bool hasPendingFleetProvisionApply() const;
   bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, String &fleetKey);
-  bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
+ bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
 
  private:
-  Settings cfg_{};
+  struct RuntimeCfg {
+    bool role_tx = false;
+    uint8_t local_address = 0;
+    uint8_t remote_address = 0;
+    uint32_t heartbeat_ms = 60000;
+    uint32_t ack_timeout_ms = 5000;
+    uint32_t mqtt_remote_retry_timeout_ms = 5000;
+    bool tx_mqtt_remote_polling_enabled = false;
+    uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
+    bool rx_push_on_change_enabled = false;
+    uint32_t rx_push_min_interval_ms = 60000;
+    bool tx_input_lora_control_enabled = false;
+  };
+
+  const Settings *settings_ = nullptr;
+  RuntimeCfg runtime_{};
   RadioProtocol *radio_ = nullptr;
 
   LinkState link_state_ = LinkState::Boot;
@@ -331,6 +346,7 @@ class NodeStateMachine {
   void tickLed();
   void tickProvisioningCoordinator(uint32_t now);
   void tickProvisioningTarget(uint32_t now);
+  void refreshRuntimeCfg(const Settings &cfg);
   void captureRemoteTemp(uint8_t tempCode);
   uint8_t txFlags() const;
   void updateSharedTimeFromPeer(uint32_t unixTimeS, bool authoritative);
