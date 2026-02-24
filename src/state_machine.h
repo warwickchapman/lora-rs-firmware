@@ -160,8 +160,19 @@ class NodeStateMachine {
   uint32_t last_heartbeat_ms_ = 0;
   uint32_t wait_ack_since_ms_ = 0;
   uint32_t last_counter_ = 0;
-  uint32_t last_seen_boot_nonce_by_src_[256] = {0};
-  uint32_t last_seen_counter_by_src_[256] = {0};
+  struct ReplaySourceState {
+    bool in_use = false;
+    uint8_t src = 0;
+    uint32_t boot_nonce = 0;
+    uint32_t counter = 0;
+    uint32_t last_seen_ms = 0;
+  };
+  static constexpr size_t kReplayTrackedSources = 32;
+  ReplaySourceState replay_sources_[kReplayTrackedSources]{};
+  uint32_t replay_table_evictions_ = 0;
+  uint32_t replay_table_stale_evictions_ = 0;
+  uint32_t replay_table_full_drops_ = 0;
+  uint8_t replay_table_peak_used_ = 0;
 
   uint32_t last_debounce_ms_ = 0;
   uint32_t last_packet_ms_ = 0;
@@ -338,6 +349,8 @@ class NodeStateMachine {
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
   bool isDefaultFleetKey() const;
+  bool shouldAcceptReplayAndUpdate(const ProtocolMessage &msg, bool trustedSourceHint);
+  bool isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const;
   ProvisioningDevice *findProvisioningDeviceByChip(uint32_t chipId);
   ProvisioningDevice *upsertProvisioningDevice(uint32_t chipId);
   void recomputeProvisioningConflictsAndAssignments();
