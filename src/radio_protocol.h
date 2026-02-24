@@ -30,6 +30,7 @@ struct ProtocolMessage {
   uint16_t sensor_analog0;
   uint32_t unix_time_s;
   uint32_t counter;
+  uint32_t boot_nonce = 0;
   uint8_t src;
   uint8_t dst;
   int rssi;
@@ -53,6 +54,7 @@ class RadioProtocol {
   LogBuffer *logs_ = nullptr;
   bool lora_enabled_ = true;
   bool default_key_configured_ = false;
+  uint32_t boot_nonce_ = 0;
   uint8_t enc_key_[16]{};
   uint8_t mac_key_[32]{};
   uint8_t factory_enc_key_[16]{};

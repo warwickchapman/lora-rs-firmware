@@ -259,7 +259,6 @@ bool ConfigStore::begin() {
   }
 
   cfg_.audit_boot_count += 1;
-  changed = true;
   if (changed) {
     LRS_LOGI(FS, "event=config_migrated path=%s write_back=1", kConfigPath);
     return save();

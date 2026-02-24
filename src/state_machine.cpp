@@ -227,6 +227,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio, LogBuffe
   prov_rx_ = ProvTargetRxState{};
   prov_device_count_ = 0;
   for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  memset(last_seen_boot_nonce_by_src_, 0, sizeof(last_seen_boot_nonce_by_src_));
   memset(last_seen_counter_by_src_, 0, sizeof(last_seen_counter_by_src_));
   return true;
 }
@@ -264,6 +265,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   prov_rx_ = ProvTargetRxState{};
   prov_device_count_ = 0;
   for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  memset(last_seen_boot_nonce_by_src_, 0, sizeof(last_seen_boot_nonce_by_src_));
   memset(last_seen_counter_by_src_, 0, sizeof(last_seen_counter_by_src_));
 }
 
@@ -1203,10 +1205,15 @@ void NodeStateMachine::tickReceive() {
     return;
   }
 
-  if (msg.counter <= last_seen_counter_by_src_[msg.src]) {
-    if (logs_) logs_->add("rx_replay_drop", msg.rssi, msg.counter, msg.relay_state);
-    return;
+  if (last_seen_boot_nonce_by_src_[msg.src] == msg.boot_nonce) {
+    if (msg.counter <= last_seen_counter_by_src_[msg.src]) {
+      if (logs_) logs_->add("rx_replay_drop", msg.rssi, msg.counter, msg.relay_state);
+      return;
+    }
+  } else if (last_seen_boot_nonce_by_src_[msg.src] != 0 && logs_) {
+    logs_->add("rx_peer_reboot", msg.rssi, msg.counter, msg.relay_state);
   }
+  last_seen_boot_nonce_by_src_[msg.src] = msg.boot_nonce;
   last_seen_counter_by_src_[msg.src] = msg.counter;
   last_packet_ms_ = millis();
   last_packet_rssi_ = msg.rssi;

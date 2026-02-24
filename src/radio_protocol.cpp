@@ -21,6 +21,7 @@ struct __attribute__((packed)) Packet {
   uint8_t src;
   uint8_t type;
   uint32_t counter;
+  uint32_t boot_nonce;
   uint8_t nonce[8];
   uint8_t encrypted[kPayloadSize];
   uint8_t mac[kMacSize];
@@ -56,6 +57,11 @@ bool isDefaultDeploymentKey(const String &v) {
 bool RadioProtocol::begin(const Settings &cfg, LogBuffer *logs) {
   cfg_ = cfg;
   logs_ = logs;
+  if (boot_nonce_ == 0) {
+    boot_nonce_ = static_cast<uint32_t>(random(1, 0x7FFFFFFF));
+    boot_nonce_ ^= static_cast<uint32_t>(micros());
+    if (boot_nonce_ == 0) boot_nonce_ = 1;
+  }
 
   LoRa.setPins(kNss, kRst, kDio0);
   if (!LoRa.begin(cfg_.lora_frequency_hz)) {
@@ -134,6 +140,7 @@ bool RadioProtocol::sendRawWithKeys(MessageType type, uint32_t counter, uint8_t 
   p.src = src;
   p.type = static_cast<uint8_t>(type);
   p.counter = counter;
+  p.boot_nonce = boot_nonce_;
   randomNonce(p.nonce);
 
   uint8_t plain[kPayloadSize]{};
@@ -236,6 +243,7 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
   msg.unix_time_s = static_cast<uint32_t>(plain[8]) | (static_cast<uint32_t>(plain[9]) << 8) |
                     (static_cast<uint32_t>(plain[10]) << 16) | (static_cast<uint32_t>(plain[11]) << 24);
   msg.counter = p.counter;
+  msg.boot_nonce = p.boot_nonce;
   msg.src = p.src;
   msg.dst = p.dst;
   msg.rssi = LoRa.packetRssi();

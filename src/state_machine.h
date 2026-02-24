@@ -159,6 +159,7 @@ class NodeStateMachine {
   uint32_t last_heartbeat_ms_ = 0;
   uint32_t wait_ack_since_ms_ = 0;
   uint32_t last_counter_ = 0;
+  uint32_t last_seen_boot_nonce_by_src_[256] = {0};
   uint32_t last_seen_counter_by_src_[256] = {0};
 
   uint32_t last_debounce_ms_ = 0;
