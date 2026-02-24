@@ -665,10 +665,22 @@ bool NodeStateMachine::isDefaultFleetKey() const {
 }
 
 bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool retryOnce) {
-  if (!runtime_.role_tx || radio_ == nullptr) return false;
+  if (!runtime_.role_tx || radio_ == nullptr) {
+    LRS_LOGW(API,
+             "event=provisioning_start_reject reason=%s role_tx=%u radio=%u",
+             !runtime_.role_tx ? "not_tx" : "radio_unavailable",
+             runtime_.role_tx ? 1U : 0U,
+             (radio_ != nullptr) ? 1U : 0U);
+    return false;
+  }
   if (estimatedCount == 0) estimatedCount = 1;
-  if (estimatedCount > 250) estimatedCount = 250;
-  if (isDefaultFleetKey()) return false;  // coordinator must have a production key
+  if (estimatedCount > static_cast<uint16_t>(kMaxProvisioningDevices)) {
+    estimatedCount = static_cast<uint16_t>(kMaxProvisioningDevices);
+  }
+  if (isDefaultFleetKey()) {
+    LRS_LOGW(API, "event=provisioning_start_reject reason=default_fleet_key");
+    return false;  // coordinator must have a production key
+  }
 
   prov_ = ProvisioningSessionRuntime{};
   prov_.active = true;
@@ -685,6 +697,12 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
   prov_.provision_all_requested = false;
   prov_.current_index = 0;
   if (!ensureProvisioningStorage()) {
+    LRS_LOGW(API,
+             "event=provisioning_start_reject reason=oom_provisioning_storage estimated=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
+             static_cast<unsigned>(estimatedCount),
+             static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned>(lrslog::heapFragPercent()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
     prov_ = ProvisioningSessionRuntime{};
     return false;
   }
@@ -698,6 +716,10 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
   payload[5] = retryOnce ? 1 : 0;
   last_counter_++;
   if (!radio_->sendProvisioningRaw(last_counter_, runtime_.local_address, kProvBroadcastAddress, payload, true)) {
+    LRS_LOGW(API,
+             "event=provisioning_start_reject reason=radio_send_failed counter=%lu local=%u",
+             static_cast<unsigned long>(last_counter_),
+             static_cast<unsigned>(runtime_.local_address));
     prov_ = ProvisioningSessionRuntime{};
     freeProvisioningStorage();
     return false;

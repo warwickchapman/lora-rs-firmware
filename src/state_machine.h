@@ -7,7 +7,7 @@
 #include "radio_protocol.h"
 
 #ifndef LRS_PROVISIONING_MAX_DEVICES
-#define LRS_PROVISIONING_MAX_DEVICES 250
+#define LRS_PROVISIONING_MAX_DEVICES 8
 #endif
 
 enum class LinkState : uint8_t {
