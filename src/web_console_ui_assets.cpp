@@ -1,4 +1,5 @@
 #include "web_console_ui_assets.h"
+#include "feature_flags.h"
 
 const char kLoginHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
@@ -367,7 +368,13 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}}
 </style></head>
-<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button><button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+<body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button>
+)HTML"
+#if LRS_ENABLE_AUTOMATIONS
+R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automations')">Automations</button>
+)HTML"
+#endif
+R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
@@ -397,7 +404,26 @@ body.light .tabbtn{background:#e4eff3;color:#123;border:1px solid #bfd2da}
 <div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div>
 <div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet.</div><div class="grid"><div><label>Estimated devices</label><input id="prov_estimated_count" type="number" min="1" max="250" value="10" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="searchMoreFleetProvisioning()" title="Search more" aria-label="Search more">↻</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div></div></div></div></div>
 </section>
-<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane active" id="settings-pane-lora"><div class="grid">
+ )HTML"
+#if LRS_ENABLE_AUTOMATIONS
+R"HTML(<section class="card page" id="page-automations">
+<h3>Automations</h3>
+<div class="small" style="margin-bottom:8px">Builder shell (Phase 2). Rules are saved and validated only; runtime execution is not enabled in this phase.</div>
+<div class="small" style="margin-bottom:8px">v1 limits: max 8 rules, max 4 conditions per rule, max 4 actions per rule, action type <code>set_relay</code> only.</div>
+<div class="grid">
+<div><div class="check-row"><input id="auto_enabled" type="checkbox" onchange="automationTopChanged()" /><label for="auto_enabled">Enable automations on this device</label></div></div>
+<div><label>Execution mode (v1)</label><select id="auto_execution_mode" onchange="automationTopChanged()"><option value="standalone">standalone</option><option value="paired+rules">paired+rules</option></select></div>
+<div><label>Peer display</label><select id="auto_peer_display" onchange="automationTopChanged()"><option value="addresses">Addresses</option><option value="names">Names</option></select></div>
+<div><label>Action target (v1)</label><input id="auto_action_target" value="self" oninput="automationTopChanged()" /><div class="small">Use <code>self</code> or an address like <code>82</code> / <code>0x52</code>.</div></div>
+</div>
+<div class="actions"><button type="button" onclick="reloadAutomations()">Reload</button><button type="button" onclick="addAutomationRule()">Add Rule</button><button type="button" onclick="saveAutomations()">Save Rules</button></div>
+<div id="autoResult" class="result-line"></div>
+<div id="automationsRulesHost" style="margin-top:8px">Open this page to load automations.</div>
+<details style="margin-top:8px"><summary>JSON Preview</summary><div class="small" style="margin:6px 0">Generated from the form builder. You can paste JSON here and apply it back to the form.</div><textarea id="auto_json_preview" rows="14" style="width:100%;font-family:monospace" spellcheck="false"></textarea><div class="actions"><button type="button" onclick="applyAutomationsJsonFromPreview()">Apply JSON</button><button type="button" onclick="copyAutomationJsonPreview()">Copy JSON</button></div></details>
+</section>
+)HTML"
+#endif
+R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane active" id="settings-pane-lora"><div class="grid">
 <div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
 <div style="grid-column:1/-1"><label>Deployment Key (Encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
@@ -457,6 +483,13 @@ R"HTML(const UI_MDNS_ENABLED = true;
 R"HTML(const UI_MDNS_ENABLED = false;
 )HTML"
 #endif
+#if LRS_ENABLE_AUTOMATIONS
+R"HTML(const UI_AUTOMATIONS_ENABLED = true;
+)HTML"
+#else
+R"HTML(const UI_AUTOMATIONS_ENABLED = false;
+)HTML"
+#endif
 R"HTML(
 let statusFailCount = 0;
 let activePage = 'status';
@@ -468,6 +501,9 @@ let connectedStaSsid = '';
 let staTestInFlight = false;
 let currentStaIp = '';
 let currentLanMdns = '';
+let automationsPageLoaded = false;
+let automationsPageLoadInFlight = false;
+let automationsDoc = null;
 let currentApIp = '';
 let currentApMdns = '';
 let lastRoleIsTx = false;
@@ -614,6 +650,13 @@ function copyButtonHtml(value, label='Value'){
  const low=txt.toLowerCase();
  if(!txt || low==='n/a' || low==='not_set') return '';
  return `<button type="button" class="copy-btn" data-copy="${escapeHtml(txt)}" data-label="${escapeHtml(label)}" onclick="copyFromButton(this)">Copy</button>`;
+}
+function applyAutomationsFeatureVisibility(){
+ const nav=document.getElementById('nav-automations');
+ const page=document.getElementById('page-automations');
+ if(nav) nav.style.display = UI_AUTOMATIONS_ENABLED ? '' : 'none';
+ if(page) page.style.display = UI_AUTOMATIONS_ENABLED ? '' : 'none';
+ if(!UI_AUTOMATIONS_ENABLED && activePage==='automations'){ activePage='status'; }
 }
 function copyableValueHtml(contentHtml, copyValue, label='Value'){
  return `<span>${contentHtml}</span>${copyButtonHtml(copyValue, label)}`;
@@ -872,8 +915,415 @@ function showFleetManageTab(tab){
   startProvisioningPolling();
  }
 }
+function defaultAutomationPredicate(){
+ return {peer:'self', field:'input', op:'==', value:0};
+}
+function defaultAutomationAction(){
+ return {type:'set_relay', peer:'self', value:1};
+}
+function defaultAutomationRule(idx){
+ return {
+  id:`rule_${idx+1}`,
+  name:`Rule ${idx+1}`,
+  enabled:true,
+  for_ms:0,
+  cooldown_ms:60000,
+  when:{all:[defaultAutomationPredicate()]},
+  then:[defaultAutomationAction()]
+ };
+}
+function defaultAutomationsDoc(){
+ return {schema_version:1, enabled:false, execution_mode:'standalone', peer_display:'addresses', action_target:'self', rules:[]};
+}
+function automationNormalizeFieldDefaults(pred){
+ if(!pred) return;
+ if(pred.field==='temp_c'){
+  pred.op='>';
+  pred.value=Number(pred.value);
+  if(!Number.isFinite(pred.value)) pred.value=0;
+  return;
+ }
+ if(pred.field==='reachable'){
+  pred.op='==';
+  pred.value = (pred.value===true || pred.value===1 || String(pred.value).toLowerCase()==='true');
+  return;
+ }
+ pred.op='==';
+ const n=Number(pred.value);
+ pred.value = (n===1) ? 1 : 0;
+}
+function normalizeAutomationsDoc(doc){
+ const out = (doc && typeof doc === 'object') ? doc : {};
+ if(typeof out.schema_version !== 'number') out.schema_version = 1;
+ if(typeof out.enabled !== 'boolean') out.enabled = false;
+ if(out.execution_mode!=='paired+rules') out.execution_mode='standalone';
+ if(out.peer_display!=='names') out.peer_display='addresses';
+ if(typeof out.action_target !== 'string' && typeof out.action_target !== 'number') out.action_target='self';
+ if(!Array.isArray(out.rules)) out.rules = [];
+ out.rules = out.rules.slice(0,8).map((r,i)=>{
+  const rule = (r && typeof r==='object') ? r : {};
+  if(!rule.id) rule.id = `rule_${i+1}`;
+  if(!rule.name) rule.name = `Rule ${i+1}`;
+  rule.enabled = (rule.enabled !== false);
+  rule.for_ms = Math.max(0, Number(rule.for_ms||0)|0);
+  rule.cooldown_ms = Math.max(0, Number(rule.cooldown_ms||0)|0);
+  if(!rule.when || !Array.isArray(rule.when.all)) rule.when = {all:[defaultAutomationPredicate()]};
+  rule.when.all = rule.when.all.slice(0,4).map((p)=>{
+   const pred = (p && typeof p==='object') ? p : defaultAutomationPredicate();
+   pred.peer = (pred.peer===undefined || pred.peer===null || pred.peer==='') ? 'self' : pred.peer;
+   pred.field = String(pred.field||'input');
+   if(!['temp_c','reachable','input','relay'].includes(pred.field)) pred.field='input';
+   pred.op = String(pred.op||'==');
+   if(pred.for_ms !== undefined && pred.for_ms !== null) pred.for_ms = Math.max(0, Number(pred.for_ms)||0);
+   automationNormalizeFieldDefaults(pred);
+   return pred;
+  });
+  if(!rule.when.all.length) rule.when.all = [defaultAutomationPredicate()];
+  let actions = Array.isArray(rule.then) ? rule.then : (rule.then ? [rule.then] : [defaultAutomationAction()]);
+  actions = actions.slice(0,4).map((a)=>{
+   const act = (a && typeof a==='object') ? a : defaultAutomationAction();
+   act.type = 'set_relay';
+   act.peer = (act.peer===undefined || act.peer===null || act.peer==='') ? 'self' : act.peer;
+   const v = Number(act.value);
+   act.value = (v===1) ? 1 : 0;
+   return act;
+  });
+  if(!actions.length) actions = [defaultAutomationAction()];
+  rule.then = actions;
+  return rule;
+ });
+ return out;
+}
+function automationShowResult(msg, kind){
+ const el=document.getElementById('autoResult');
+ if(!el) return;
+ if(!msg){ el.className='result-line'; el.innerText=''; return; }
+ el.className=`result-line show${kind==='ok'?' ok':''}${kind==='err'?' err':''}`;
+ el.innerText=msg;
+}
+function automationTopChanged(){
+ if(!automationsDoc) automationsDoc = defaultAutomationsDoc();
+ const autoEnabledEl = document.getElementById('auto_enabled');
+ const autoModeEl = document.getElementById('auto_execution_mode');
+ const autoPeerDisplayEl = document.getElementById('auto_peer_display');
+ const autoTargetEl = document.getElementById('auto_action_target');
+ automationsDoc.enabled = !!(autoEnabledEl && autoEnabledEl.checked);
+ automationsDoc.execution_mode = (autoModeEl && autoModeEl.value === 'paired+rules') ? 'paired+rules' : 'standalone';
+ automationsDoc.peer_display = (autoPeerDisplayEl && autoPeerDisplayEl.value === 'names') ? 'names' : 'addresses';
+ const target = String((autoTargetEl && autoTargetEl.value) || 'self').trim();
+ automationsDoc.action_target = target || 'self';
+ refreshAutomationsJsonPreview();
+}
+function automationFormatValueForInput(pred){
+ if(!pred) return '';
+ if(pred.field==='reachable') return pred.value ? 'true' : 'false';
+ return String(pred.value ?? '');
+}
+function automationFieldHint(field){
+ if(field==='temp_c') return 'numeric (e.g. 35)';
+ if(field==='reachable') return 'true / false';
+ return '0=open, 1=closed';
+}
+function automationIsToken(s){
+ const t=String(s||'').trim();
+ return /^[A-Za-z0-9_-]{1,32}$/.test(t);
+}
+function automationIsAddressToken(v, allowSelf){
+ const t=String(v===undefined || v===null ? '' : v).trim();
+ if(!t.length) return false;
+ if(allowSelf && t==='self') return true;
+ const n=parseAddress(t);
+ return Number.isInteger(n) && n>=1 && n<=254;
+}
+function automationFriendlyApiError(out){
+ if(!out) return 'Request failed (no response).';
+ const code=String(out.error||'request_failed');
+ const detail=(out.detail!==undefined && out.detail!==null) ? String(out.detail) : '';
+ const msgMap={
+  disabled:'Automations are disabled in this firmware build.',
+  payload_too_large:'Automation rules JSON is too large (max 6 KB in v1).',
+  empty_body:'Automation rules payload was empty.',
+  invalid_json:'Automation JSON is invalid.',
+  bad_root:'Top-level JSON must be an object.',
+  bad_schema:'Unsupported automation schema version.',
+  bad_mode:'Execution mode must be standalone or paired+rules.',
+  bad_peer_display:'Peer display must be addresses or names.',
+  bad_action_target:'Action target must be self or an address (1..254).',
+  bad_rules:'Missing or invalid rules array.',
+  too_many_rules:'Too many rules (max 8).',
+  bad_rule:'A rule has an invalid field, condition, or action.',
+  open_failed:'Could not open automation rules file.',
+  open_tmp:'Could not create temporary rules file.',
+  write_failed:'Could not write rules file.',
+  rename_failed:'Could not finalize rules file save.'
+ };
+ let msg = msgMap[code] || `Save failed (${code}).`;
+ if(detail) msg += ` (${detail})`;
+ return msg;
+}
+function automationValidateDoc(doc){
+ const errs=[];
+ if(!doc || typeof doc!=='object'){ errs.push('Document must be a JSON object.'); return errs; }
+ if(!Array.isArray(doc.rules)){ errs.push('Rules must be an array.'); return errs; }
+ if(doc.rules.length>8) errs.push('Max rules is 8 in v1.');
+ if(doc.execution_mode && !['standalone','paired+rules'].includes(String(doc.execution_mode))) errs.push('Execution mode must be standalone or paired+rules.');
+ if(doc.peer_display && !['addresses','names'].includes(String(doc.peer_display))) errs.push('Peer display must be addresses or names.');
+ if(doc.action_target!==undefined && doc.action_target!==null && !automationIsAddressToken(doc.action_target, true)){
+  errs.push('Action target must be self or address 1..254.');
+ }
+ doc.rules.slice(0,8).forEach((r,ri)=>{
+  if(!r || typeof r!=='object'){ errs.push(`Rule ${ri+1}: must be an object.`); return; }
+  if(!automationIsToken(r.id||'')) errs.push(`Rule ${ri+1}: id must use only letters, numbers, _ or - (max 32).`);
+  const all = r.when && Array.isArray(r.when.all) ? r.when.all : null;
+  if(!all){ errs.push(`Rule ${ri+1}: WHEN all[] is required.`); return; }
+  if(all.length<1 || all.length>4) errs.push(`Rule ${ri+1}: conditions must be 1..4.`);
+  all.slice(0,4).forEach((p,pi)=>{
+   if(!p || typeof p!=='object'){ errs.push(`Rule ${ri+1} condition ${pi+1}: invalid.`); return; }
+   if(!automationIsAddressToken(p.peer, true)) errs.push(`Rule ${ri+1} condition ${pi+1}: peer must be self or address 1..254.`);
+   if(!['temp_c','reachable','input','relay'].includes(String(p.field||''))) errs.push(`Rule ${ri+1} condition ${pi+1}: unsupported field.`);
+   if(p.value===undefined || p.value===null) errs.push(`Rule ${ri+1} condition ${pi+1}: value is required.`);
+  });
+  const acts = Array.isArray(r.then) ? r.then : (r.then ? [r.then] : []);
+  if(acts.length<1 || acts.length>4) errs.push(`Rule ${ri+1}: actions must be 1..4.`);
+  acts.slice(0,4).forEach((a,ai)=>{
+   if(!a || typeof a!=='object'){ errs.push(`Rule ${ri+1} action ${ai+1}: invalid.`); return; }
+   if(String(a.type||'')!=='set_relay') errs.push(`Rule ${ri+1} action ${ai+1}: action must be set_relay.`);
+   if(!automationIsAddressToken(a.peer, true)) errs.push(`Rule ${ri+1} action ${ai+1}: target peer must be self or address 1..254.`);
+   if(!(Number(a.value)===0 || Number(a.value)===1)) errs.push(`Rule ${ri+1} action ${ai+1}: relay state must be 0 or 1.`);
+  });
+ });
+ return errs;
+}
+function renderAutomationsRules(){
+ const host=document.getElementById('automationsRulesHost');
+ if(!host) return;
+ if(!automationsDoc){ host.innerHTML='Automations not loaded.'; return; }
+ const rules = Array.isArray(automationsDoc.rules) ? automationsDoc.rules : [];
+ if(!rules.length){
+  host.innerHTML='<div class="small">No rules yet. Click <b>Add Rule</b> to create one.</div>';
+  refreshAutomationsJsonPreview();
+  return;
+ }
+ let html='';
+ rules.forEach((r,ri)=>{
+  html += `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px;background:rgba(255,255,255,.02)">`;
+  html += `<div class="grid">`;
+  html += `<div><label>Rule name</label><input value="${escapeHtml(r.name||'')}" oninput="automationSetRuleField(${ri},'name',this.value)"></div>`;
+  html += `<div><label>Rule id</label><input value="${escapeHtml(r.id||'')}" oninput="automationSetRuleField(${ri},'id',this.value)"></div>`;
+  html += `<div><div class="check-row"><input type="checkbox" ${r.enabled!==false?'checked':''} onchange="automationSetRuleEnabled(${ri},this.checked)"><label>Enabled</label></div></div><div></div>`;
+  html += `<div><label>Start after condition is true for (seconds)</label><input type="number" min="0" value="${Math.floor(Number(r.for_ms||0)/1000)}" oninput="automationSetRuleMs(${ri},'for_ms',this.value)"></div>`;
+  html += `<div><label>Do not trigger again for (seconds)</label><input type="number" min="0" value="${Math.floor(Number(r.cooldown_ms||0)/1000)}" oninput="automationSetRuleMs(${ri},'cooldown_ms',this.value)"><div class="small">Recommended default: 60s</div></div>`;
+  html += `</div>`;
+  html += `<div class="small" style="margin-top:6px">WHEN (ALL conditions) - first matching rule wins and processing stops.</div>`;
+  (((r.when && r.when.all) || [])).forEach((p,pi)=>{
+   html += `<div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px">`;
+   html += `<div class="grid">`;
+   html += `<div><label>Peer</label><input value="${escapeHtml(String(p.peer ?? 'self'))}" oninput="automationSetPredicateField(${ri},${pi},'peer',this.value)"></div>`;
+   html += `<div><label>Field</label><select onchange="automationSetPredicateField(${ri},${pi},'field',this.value)">`;
+   ['temp_c','reachable','input','relay'].forEach(f=>{ html += `<option value="${f}" ${p.field===f?'selected':''}>${f}</option>`; });
+   html += `</select></div>`;
+   html += `<div><label>Op</label><input value="${escapeHtml(String(p.op||'=='))}" oninput="automationSetPredicateField(${ri},${pi},'op',this.value)"></div>`;
+   html += `<div><label>Value</label><input value="${escapeHtml(automationFormatValueForInput(p))}" oninput="automationSetPredicateField(${ri},${pi},'value',this.value)"><div class="small">${automationFieldHint(p.field)}</div></div>`;
+   html += `</div>`;
+   html += `<div class="actions" style="margin-top:6px"><button type="button" onclick="automationRemovePredicate(${ri},${pi})">Remove Condition</button></div>`;
+   html += `</div>`;
+  });
+  html += `<div class="actions" style="margin-top:6px"><button type="button" onclick="automationAddPredicate(${ri})">Add Condition (AND)</button></div>`;
+  html += `<div class="small" style="margin-top:6px">THEN</div>`;
+  (r.then||[]).forEach((a,ai)=>{
+   html += `<div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px">`;
+   html += `<div class="grid">`;
+   html += `<div><label>Action</label><select disabled><option selected>set_relay</option></select></div>`;
+   html += `<div><label>Target peer</label><input value="${escapeHtml(String(a.peer ?? 'self'))}" oninput="automationSetActionField(${ri},${ai},'peer',this.value)"></div>`;
+   html += `<div><label>Relay state</label><select onchange="automationSetActionField(${ri},${ai},'value',this.value)"><option value="0" ${Number(a.value)===0?'selected':''}>Open relay (0)</option><option value="1" ${Number(a.value)===1?'selected':''}>Close relay (1)</option></select></div>`;
+   html += `<div></div>`;
+   html += `</div>`;
+   html += `<div class="actions" style="margin-top:6px"><button type="button" onclick="automationRemoveAction(${ri},${ai})">Remove Action</button></div>`;
+   html += `</div>`;
+  });
+  html += `<div class="actions" style="margin-top:6px"><button type="button" onclick="automationAddAction(${ri})">Add Action</button><button type="button" onclick="automationDeleteRule(${ri})">Delete Rule</button></div>`;
+  html += `</div>`;
+ });
+ host.innerHTML = html;
+ refreshAutomationsJsonPreview();
+}
+function automationSetRuleField(ri,key,val){
+ if(!automationsDoc || !automationsDoc.rules || !automationsDoc.rules[ri]) return;
+ automationsDoc.rules[ri][key]=String(val||'');
+ refreshAutomationsJsonPreview();
+}
+function automationSetRuleEnabled(ri,val){
+ if(!automationsDoc || !automationsDoc.rules || !automationsDoc.rules[ri]) return;
+ automationsDoc.rules[ri].enabled=!!val;
+ refreshAutomationsJsonPreview();
+}
+function automationSetRuleMs(ri,key,valSec){
+ if(!automationsDoc || !automationsDoc.rules || !automationsDoc.rules[ri]) return;
+ const sec=Math.max(0, Number(valSec)||0);
+ automationsDoc.rules[ri][key]=Math.round(sec*1000);
+ refreshAutomationsJsonPreview();
+}
+function automationSetPredicateField(ri,pi,key,val){
+ const pred=(automationsDoc && automationsDoc.rules && automationsDoc.rules[ri] && automationsDoc.rules[ri].when &&
+             automationsDoc.rules[ri].when.all) ? automationsDoc.rules[ri].when.all[pi] : null;
+ if(!pred) return;
+ if(key==='field'){
+  pred.field=String(val||'input');
+  automationNormalizeFieldDefaults(pred);
+  renderAutomationsRules();
+  return;
+ }
+ if(key==='value'){
+  if(pred.field==='temp_c'){ pred.value = Number(val); if(!Number.isFinite(pred.value)) pred.value = 0; }
+  else if(pred.field==='reachable'){ pred.value = ['1','true','yes','on'].includes(String(val).trim().toLowerCase()); }
+  else { pred.value = (Number(val)===1) ? 1 : 0; }
+ } else {
+  pred[key]=String(val||'');
+ }
+ refreshAutomationsJsonPreview();
+}
+function automationSetActionField(ri,ai,key,val){
+ const act=(automationsDoc && automationsDoc.rules && automationsDoc.rules[ri] && automationsDoc.rules[ri].then)
+   ? automationsDoc.rules[ri].then[ai] : null;
+ if(!act) return;
+ if(key==='value') act.value = (Number(val)===1) ? 1 : 0;
+ else act[key]=String(val||'');
+ refreshAutomationsJsonPreview();
+}
+function automationAddPredicate(ri){
+ const arr=(automationsDoc && automationsDoc.rules && automationsDoc.rules[ri] && automationsDoc.rules[ri].when)
+   ? automationsDoc.rules[ri].when.all : null;
+ if(!arr || arr.length>=4) return;
+ arr.push(defaultAutomationPredicate());
+ renderAutomationsRules();
+}
+function automationRemovePredicate(ri,pi){
+ const arr=(automationsDoc && automationsDoc.rules && automationsDoc.rules[ri] && automationsDoc.rules[ri].when)
+   ? automationsDoc.rules[ri].when.all : null;
+ if(!arr) return;
+ arr.splice(pi,1);
+ if(!arr.length) arr.push(defaultAutomationPredicate());
+ renderAutomationsRules();
+}
+function automationAddAction(ri){
+ const arr=(automationsDoc && automationsDoc.rules && automationsDoc.rules[ri]) ? automationsDoc.rules[ri].then : null;
+ if(!arr || arr.length>=4) return;
+ arr.push(defaultAutomationAction());
+ renderAutomationsRules();
+}
+function automationRemoveAction(ri,ai){
+ const arr=(automationsDoc && automationsDoc.rules && automationsDoc.rules[ri]) ? automationsDoc.rules[ri].then : null;
+ if(!arr) return;
+ arr.splice(ai,1);
+ if(!arr.length) arr.push(defaultAutomationAction());
+ renderAutomationsRules();
+}
+function automationDeleteRule(ri){
+ if(!automationsDoc || !automationsDoc.rules) return;
+ automationsDoc.rules.splice(ri,1);
+ renderAutomationsRules();
+}
+function addAutomationRule(){
+ if(!automationsDoc) automationsDoc = defaultAutomationsDoc();
+ if(!Array.isArray(automationsDoc.rules)) automationsDoc.rules = [];
+ if(automationsDoc.rules.length>=8){
+  automationShowResult('Max rules is 8 in v1.', 'err');
+  return;
+ }
+ automationsDoc.rules.push(defaultAutomationRule(automationsDoc.rules.length));
+ renderAutomationsRules();
+}
+function refreshAutomationsJsonPreview(){
+ if(!automationsDoc) return;
+ const out=document.getElementById('auto_json_preview');
+ if(!out) return;
+ out.value = JSON.stringify(automationsDoc, null, 2);
+}
+function applyAutomationsDocToForm(){
+ if(!automationsDoc) automationsDoc = defaultAutomationsDoc();
+ const d=automationsDoc;
+ const enabledEl=document.getElementById('auto_enabled');
+ const modeEl=document.getElementById('auto_execution_mode');
+ const peerDisplayEl=document.getElementById('auto_peer_display');
+ const targetEl=document.getElementById('auto_action_target');
+ if(enabledEl) enabledEl.checked = !!d.enabled;
+ if(modeEl) modeEl.value = d.execution_mode==='paired+rules' ? 'paired+rules' : 'standalone';
+ if(peerDisplayEl) peerDisplayEl.value = d.peer_display==='names' ? 'names' : 'addresses';
+ if(targetEl) targetEl.value = String(d.action_target ?? 'self');
+ renderAutomationsRules();
+}
+async function loadAutomationsPageData(force){
+ if(!UI_AUTOMATIONS_ENABLED) return;
+ if(automationsPageLoadInFlight) return;
+ if(automationsPageLoaded && !force) return;
+ automationsPageLoadInFlight = true;
+ automationShowResult(force ? 'Reloading automations...' : 'Loading automations...', '');
+ try{
+  const out=await apiJson('/api/automation-rules',{silent:true,timeoutMs:7000});
+  if(!out){ automationShowResult('Automation rules unavailable.', 'err'); return; }
+  if(out && out.ok===false){ automationShowResult(automationFriendlyApiError(out), 'err'); return; }
+  automationsDoc = normalizeAutomationsDoc(out);
+  applyAutomationsDocToForm();
+  automationsPageLoaded = true;
+  automationShowResult('Automations loaded.', 'ok');
+ }catch(e){
+  automationShowResult(`Load failed: ${e.message||e}`, 'err');
+ }finally{
+  automationsPageLoadInFlight = false;
+ }
+}
+function reloadAutomations(){ automationsPageLoaded = false; return loadAutomationsPageData(true); }
+async function saveAutomations(){
+ if(!UI_AUTOMATIONS_ENABLED){ automationShowResult('Automations feature disabled in this firmware build.', 'err'); return; }
+ if(!automationsDoc) automationsDoc = defaultAutomationsDoc();
+ automationTopChanged();
+ const validationErrors = automationValidateDoc(automationsDoc);
+ if(validationErrors.length){
+  automationShowResult(validationErrors[0], 'err');
+  return;
+ }
+ automationShowResult('Saving automations...', '');
+ try{
+  const body = JSON.stringify(automationsDoc);
+  const out = await apiJson('/api/automation-rules',{method:'POST',headers:{'Content-Type':'application/json'},body,timeoutMs:8000,silent:true});
+  if(out && out.ok){
+   automationsPageLoaded = true;
+   automationShowResult(`Automation rules saved${out.saved_bytes?` (${out.saved_bytes} bytes)`:''}.`, 'ok');
+   return;
+  }
+  automationShowResult(automationFriendlyApiError(out), 'err');
+ }catch(e){
+  automationShowResult(`Save failed: ${e.message||e}`, 'err');
+ }
+}
+function applyAutomationsJsonFromPreview(){
+ if(!UI_AUTOMATIONS_ENABLED) return;
+ const ta=document.getElementById('auto_json_preview');
+ if(!ta) return;
+ try{
+  const parsed=JSON.parse(ta.value||'{}');
+  automationsDoc = normalizeAutomationsDoc(parsed);
+  applyAutomationsDocToForm();
+  automationShowResult('JSON applied to form.', 'ok');
+ }catch(e){
+  automationShowResult(`Invalid JSON: ${e.message||e}`, 'err');
+ }
+}
+async function copyAutomationJsonPreview(){
+ if(!UI_AUTOMATIONS_ENABLED) return;
+ const ta=document.getElementById('auto_json_preview');
+ if(!ta) return;
+ try{
+  await writeClipboard(String(ta.value||''));
+  showToast('Automation JSON copied');
+ }catch(e){
+  showToast(`Copy failed: ${e.message}`, true);
+ }
+}
 function showPage(page){
- const allowed=['status','fleet','sensors','diagnostics','logs','settings'];
+ const allowed = UI_AUTOMATIONS_ENABLED
+  ? ['status','fleet','automations','sensors','diagnostics','logs','settings']
+  : ['status','fleet','sensors','diagnostics','logs','settings'];
  activePage = allowed.includes(page) ? page : 'status';
  allowed.forEach(p=>{
   const sec=document.getElementById(`page-${p}`);
@@ -882,6 +1332,7 @@ function showPage(page){
   if(nav) nav.classList.toggle('active', p===activePage);
  });
  if(activePage==='settings'){ showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(()=>{}); }
+ if(activePage==='automations'){ loadAutomationsPageData(false).catch(()=>{}); }
  if(activePage==='status'){
   statusStaticCache = null;
   statusStaticLoadInFlight = false;
@@ -894,6 +1345,7 @@ function showPage(page){
  if(activePage==='logs'){ refreshLogs(); }
  if(activePage==='diagnostics'){ refreshDiagnostics(); }
  if(activePage==='fleet'){ showFleetTab(activeFleetTab); }
+ applyAutomationsFeatureVisibility();
  toggleDrawer(false);
  syncPagePolling();
 }
@@ -1387,6 +1839,7 @@ async function logout(){
  location.href='/login?logged_out=1';
 }
 async function load(){
+  applyAutomationsFeatureVisibility();
   if(activePage==='status'){
    await ensureStatusStatic(true);
    refreshStatusLiveNotice();
@@ -2337,4 +2790,3 @@ function initPage(){
 initPage();
 </script></body></html>
 )HTML";
-
