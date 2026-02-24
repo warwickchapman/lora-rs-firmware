@@ -12,6 +12,7 @@ constexpr uint32_t kPublishIntervalMs = 10000;
 constexpr uint32_t kDiscoveryPublishIntervalMs = 60000;
 constexpr uint8_t kStatusPublishYieldEveryOps = 4;
 constexpr uint8_t kStatusPeerSnapshotsPerTick = 1;
+constexpr size_t kMqttTopicBufBytes = 192;
 
 const char *peerAckStateText(PeerAckState s) {
   switch (s) {
@@ -110,7 +111,8 @@ bool parsePeerAddressSegment(const String &segment, NodeStateMachine *sm, uint8_
 MqttBridge *MqttBridge::instance_ = nullptr;
 
 bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm) {
-  cfg_ = cfg;
+  settings_ = &cfg;
+  refreshRuntimeCfg(cfg);
   chip_id_hex_ = chipIdHex;
   sm_ = sm;
 
@@ -130,7 +132,8 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
 }
 
 void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
-  cfg_ = cfg;
+  settings_ = &cfg;
+  refreshRuntimeCfg(cfg);
   chip_id_hex_ = chipIdHex;
   rebuildTopics();
 
@@ -148,7 +151,7 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
 }
 
 void MqttBridge::tick(bool wifiConnected) {
-  if (!cfg_.mqtt_enabled || cfg_.mqtt_host.length() == 0) {
+  if (!settings_ || !runtime_.mqtt_enabled || settings_->mqtt_host.length() == 0) {
     status_publish_in_progress_ = false;
     status_publish_locals_done_ = false;
     status_publish_peer_index_ = 0;
@@ -190,21 +193,37 @@ void MqttBridge::staticCallback(char *topic, uint8_t *payload, unsigned int leng
   }
 }
 
-void MqttBridge::rebuildTopics() {
-  host_name_ = String("lrs-") + chip_id_hex_;
-  topic_base_ = cfg_.mqtt_topic_root + "/" + host_name_;
-  relay_topic_ = topic_base_ + "/relay";
-  input_topic_ = topic_base_ + "/input";
-  dry_contact_topic_ = topic_base_ + "/dry_contact";
-  temp_topic_ = topic_base_ + "/temp_c";
-  remote_temp_topic_ = topic_base_ + "/remote_temp_c";
-  node_topic_ = topic_base_ + "/type";
-  addr_topic_ = topic_base_ + "/addr";
-  control_topic_ = topic_base_ + "/control";
-  last_updated_topic_ = topic_base_ + "/last_updated";
-  discovery_topic_ = cfg_.mqtt_topic_root + "/discovery/" + host_name_;
+void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
+  runtime_.mqtt_enabled = cfg.mqtt_enabled;
+  runtime_.role_tx = cfg.role_tx;
+  runtime_.local_address = cfg.local_address;
+  runtime_.remote_address = cfg.remote_address;
+  runtime_.mqtt_port = cfg.mqtt_port;
+  runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
+}
 
-  mqtt_client_.setServer(cfg_.mqtt_host.c_str(), cfg_.mqtt_port);
+void MqttBridge::rebuildTopics() {
+  if (!settings_) return;
+  snprintf(host_name_, sizeof(host_name_), "lrs-%s", chip_id_hex_.c_str());
+  snprintf(topic_base_, sizeof(topic_base_), "%s/%s", settings_->mqtt_topic_root.c_str(), host_name_);
+  snprintf(relay_topic_, sizeof(relay_topic_), "%s/relay", topic_base_);
+  snprintf(control_topic_, sizeof(control_topic_), "%s/control", topic_base_);
+  snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peer/", topic_base_);
+  snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
+
+  mqtt_client_.setServer(settings_->mqtt_host.c_str(), runtime_.mqtt_port);
+}
+
+bool MqttBridge::buildLocalTopic(char *out, size_t outLen, const char *leaf) const {
+  if (out == nullptr || outLen == 0) return false;
+  const int n = snprintf(out, outLen, "%s/%s", topic_base_, leaf);
+  return n > 0 && static_cast<size_t>(n) < outLen;
+}
+
+bool MqttBridge::buildPeerTopic(char *out, size_t outLen, const char *addrSegment, const char *leaf) const {
+  if (out == nullptr || outLen == 0) return false;
+  const int n = snprintf(out, outLen, "%s/peer/%s/%s", topic_base_, addrSegment, leaf);
+  return n > 0 && static_cast<size_t>(n) < outLen;
 }
 
 void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length) {
@@ -225,7 +244,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 
   if (topicStr == control_topic_) {
-    if (!cfg_.role_tx || sm_ == nullptr) {
+    if (!runtime_.role_tx || sm_ == nullptr) {
       return;
     }
 
@@ -258,13 +277,12 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     return;
   }
 
-  if (cfg_.role_tx && sm_ != nullptr) {
-    const String remotePrefix = topic_base_ + "/peer/";
-    if (!topicStr.startsWith(remotePrefix)) {
+  if (runtime_.role_tx && sm_ != nullptr) {
+    if (!topicStr.startsWith(remote_prefix_)) {
       return;
     }
 
-    const String suffix = topicStr.substring(remotePrefix.length());
+    const String suffix = topicStr.substring(strlen(remote_prefix_));
     const int slash = suffix.indexOf('/');
     if (slash <= 0) {
       return;
@@ -328,9 +346,9 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(addr));
 
   const String bases[] = {
-      topic_base_ + "/peer/" + String(addrHexPrefixed),
-      topic_base_ + "/peer/" + String(addrHex),
-      topic_base_ + "/peer/" + String(addrDec),
+      String(topic_base_) + "/peer/" + String(addrHexPrefixed),
+      String(topic_base_) + "/peer/" + String(addrHex),
+      String(topic_base_) + "/peer/" + String(addrDec),
   };
 
   const char *leaves[] = {
@@ -360,8 +378,9 @@ bool MqttBridge::connectIfNeeded() {
 
   String clientId = String("LRS-") + chip_id_hex_;
   bool ok = false;
-  if (cfg_.mqtt_user.length() > 0) {
-    ok = mqtt_client_.connect(clientId.c_str(), cfg_.mqtt_user.c_str(), cfg_.mqtt_password.c_str());
+  if (!settings_) return false;
+  if (settings_->mqtt_user.length() > 0) {
+    ok = mqtt_client_.connect(clientId.c_str(), settings_->mqtt_user.c_str(), settings_->mqtt_password.c_str());
   } else {
     ok = mqtt_client_.connect(clientId.c_str());
   }
@@ -373,11 +392,12 @@ bool MqttBridge::connectIfNeeded() {
     return false;
   }
 
-  mqtt_client_.subscribe(relay_topic_.c_str());
-  mqtt_client_.subscribe(control_topic_.c_str());
-  mqtt_client_.subscribe((topic_base_ + "/peer/+/poll_interval_s").c_str());
-  mqtt_client_.subscribe((topic_base_ + "/peer/+/poll_now").c_str());
-  mqtt_client_.subscribe((topic_base_ + "/peer/+/forget").c_str());
+  mqtt_client_.subscribe(relay_topic_);
+  mqtt_client_.subscribe(control_topic_);
+  char topic[kMqttTopicBufBytes];
+  if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
+  if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
+  if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
 
   {
     lrslog::event("mqtt_connected", 0, 0, 0);
@@ -406,49 +426,50 @@ void MqttBridge::publishStatus() {
     mqtt_client_.publish(topic, payload, true);
     maybeYield();
   };
-  auto publishRetainedString = [&](const String &topic, const char *payload) {
-    mqtt_client_.publish(topic.c_str(), payload, true);
+  auto publishRetainedTopic = [&](const char *topic, const char *payload) {
+    mqtt_client_.publish(topic, payload, true);
     maybeYield();
   };
 
   if (!status_publish_locals_done_) {
+    char topic[kMqttTopicBufBytes];
     const bool localInput = sm_->localDryContactState() != 0;
-    publishRetained(input_topic_.c_str(), localInput ? "1" : "0");
-    publishRetained(dry_contact_topic_.c_str(), localInput ? "1" : "0");
-    publishRetained(relay_topic_.c_str(), sm_->relayState() ? "1" : "0");
-    publishRetained(node_topic_.c_str(), cfg_.role_tx ? "tx" : "rx");
+    if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
+    if (buildLocalTopic(topic, sizeof(topic), "dry_contact")) publishRetained(topic, localInput ? "1" : "0");
+    publishRetained(relay_topic_, sm_->relayState() ? "1" : "0");
+    if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
 
     char addrHex[3];
-    snprintf(addrHex, sizeof(addrHex), "%02X", cfg_.local_address);
+    snprintf(addrHex, sizeof(addrHex), "%02X", runtime_.local_address);
     char addrHexPrefixed[5];
     snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
-    publishRetained(addr_topic_.c_str(), addrHexPrefixed);
+    if (buildLocalTopic(topic, sizeof(topic), "addr")) publishRetained(topic, addrHexPrefixed);
 
     char tempBuf[16];
     if (sm_->localTemperatureValid()) {
       dtostrf(sm_->localTemperatureC(), 0, 1, tempBuf);
-      publishRetained(temp_topic_.c_str(), tempBuf);
+      if (buildLocalTopic(topic, sizeof(topic), "temp_c")) publishRetained(topic, tempBuf);
     } else {
-      publishRetained(temp_topic_.c_str(), "");
+      if (buildLocalTopic(topic, sizeof(topic), "temp_c")) publishRetained(topic, "");
     }
 
     if (sm_->remoteTemperatureValid()) {
       dtostrf(sm_->remoteTemperatureC(), 0, 1, tempBuf);
-      publishRetained(remote_temp_topic_.c_str(), tempBuf);
+      if (buildLocalTopic(topic, sizeof(topic), "remote_temp_c")) publishRetained(topic, tempBuf);
     } else {
-      publishRetained(remote_temp_topic_.c_str(), "");
+      if (buildLocalTopic(topic, sizeof(topic), "remote_temp_c")) publishRetained(topic, "");
     }
 
     char updatedMs[16];
     snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));
-    publishRetained(last_updated_topic_.c_str(), updatedMs);
+    if (buildLocalTopic(topic, sizeof(topic), "last_updated")) publishRetained(topic, updatedMs);
     status_publish_locals_done_ = true;
-    if (cfg_.role_tx) {
+    if (runtime_.role_tx) {
       return;
     }
   }
 
-  if (cfg_.role_tx) {
+  if (runtime_.role_tx) {
     const size_t nodeCount = sm_->peerCount();
     if (status_publish_peer_index_ > nodeCount) {
       status_publish_peer_index_ = 0;
@@ -461,7 +482,7 @@ void MqttBridge::publishStatus() {
         continue;
       }
       const uint8_t addr = node.address;
-      if (!cfg_.tx_mqtt_remote_polling_enabled) {
+      if (!runtime_.tx_mqtt_remote_polling_enabled) {
         const bool changed = !peer_published_once_[addr] || peer_last_seen_published_[addr] != node.last_seen_ms ||
                              peer_last_cmd_published_[addr] != node.last_cmd_counter;
         if (!changed) {
@@ -476,47 +497,46 @@ void MqttBridge::publishStatus() {
       char addrDec[4];
       snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(node.address));
 
-      const String baseHex = topic_base_ + "/peer/" + String(addrHexPrefixed);
-
-      auto publishRemote = [&](const String &base) {
-        publishRetainedString(base + "/relay", node.relay_state ? "1" : "0");
+      auto publishRemote = [&](const char *addrSeg) {
+        char topic[kMqttTopicBufBytes];
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
         const uint8_t inputValue = node.input_state ? 1 : 0;
         if (!peer_input_published_[addr] || peer_input_value_[addr] != inputValue) {
-          publishRetainedString(base + "/input", inputValue ? "1" : "0");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
           peer_input_published_[addr] = true;
           peer_input_value_[addr] = inputValue;
         }
-        publishRetainedString(base + "/ack_state", peerAckStateText(node.ack_state));
-        publishRetainedString(base + "/addr_hex", addrHex);
-        publishRetainedString(base + "/addr_dec", addrDec);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ack_state")) publishRetainedTopic(topic, peerAckStateText(node.ack_state));
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_hex")) publishRetainedTopic(topic, addrHex);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_dec")) publishRetainedTopic(topic, addrDec);
 
         char numBuf[24];
         snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
-        publishRetainedString(base + "/uplink_rssi_dbm", numBuf);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
         if (node.downlink_rssi_valid) {
           snprintf(numBuf, sizeof(numBuf), "%d", node.downlink_rssi);
-          publishRetainedString(base + "/downlink_rssi_dbm", numBuf);
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "downlink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
         } else {
-          publishRetainedString(base + "/downlink_rssi_dbm", "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "downlink_rssi_dbm")) publishRetainedTopic(topic, "");
         }
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
-        publishRetainedString(base + "/last_seen_ms", numBuf);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
-        publishRetainedString(base + "/last_cmd_counter", numBuf);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_cmd_counter")) publishRetainedTopic(topic, numBuf);
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
-        publishRetainedString(base + "/poll_interval_s", numBuf);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_interval_s")) publishRetainedTopic(topic, numBuf);
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
-        publishRetainedString(base + "/last_poll_tx_ms", numBuf);
-        publishRetainedString(base + "/poll_state", node.poll_pending ? "pending" : "idle");
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
         if (node.temp_valid) {
           dtostrf(static_cast<float>(node.temp_c), 0, 1, numBuf);
-          publishRetainedString(base + "/temp_c", numBuf);
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, numBuf);
         } else {
-          publishRetainedString(base + "/temp_c", "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
         }
       };
 
-      publishRemote(baseHex);
+      publishRemote(addrHexPrefixed);
       peer_last_seen_published_[addr] = node.last_seen_ms;
       peer_last_cmd_published_[addr] = node.last_cmd_counter;
       peer_published_once_[addr] = true;
@@ -543,16 +563,17 @@ void MqttBridge::publishDiscovery() {
   }
 
   DynamicJsonDocument doc(512);
-  doc["serial"] = cfg_.factory_serial;
+  if (!settings_) return;
+  doc["serial"] = settings_->factory_serial;
   doc["chip_id"] = chip_id_hex_;
-  doc["role"] = cfg_.role_tx ? "tx" : "rx";
-  doc["addr"] = cfg_.local_address;
-  doc["remote_addr"] = cfg_.remote_address;
+  doc["role"] = runtime_.role_tx ? "tx" : "rx";
+  doc["addr"] = runtime_.local_address;
+  doc["remote_addr"] = runtime_.remote_address;
   doc["mac"] = WiFi.macAddress();
   doc["sta_ip"] = WiFi.localIP().toString();
   doc["ap_ip"] = WiFi.softAPIP().toString();
-  doc["sta_ssid"] = cfg_.wifi_sta_ssid;
-  doc["lan_mdns"] = cfg_.lan_hostname + ".local";
+  doc["sta_ssid"] = settings_->wifi_sta_ssid;
+  doc["lan_mdns"] = settings_->lan_hostname + ".local";
   doc["uptime_ms"] = millis();
   doc["fw"] = "lrs";
   doc["fw_version"] = LRS_FW_VERSION;
@@ -565,7 +586,7 @@ void MqttBridge::publishDiscovery() {
   char payload[512];
   size_t n = serializeJson(doc, payload, sizeof(payload));
   if (n > 0) {
-    if (mqtt_client_.publish(discovery_topic_.c_str(), payload, true)) {
+    if (mqtt_client_.publish(discovery_topic_, payload, true)) {
       last_discovery_publish_ms_ = millis();
     } else {
       lrslog::event("mqtt_discovery_publish_failed", 0, 0, 0);

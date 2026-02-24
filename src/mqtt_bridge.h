@@ -18,20 +18,24 @@ class MqttBridge {
   WiFiClient wifi_client_;
   PubSubClient mqtt_client_{wifi_client_};
 
-  Settings cfg_{};
+  struct RuntimeCfg {
+    bool mqtt_enabled = false;
+    bool role_tx = false;
+    uint8_t local_address = 0;
+    uint8_t remote_address = 0;
+    uint16_t mqtt_port = 1883;
+    bool tx_mqtt_remote_polling_enabled = false;
+  };
+
+  const Settings *settings_ = nullptr;
+  RuntimeCfg runtime_{};
   String chip_id_hex_;
-  String host_name_;
-  String topic_base_;
-  String relay_topic_;
-  String input_topic_;
-  String dry_contact_topic_;
-  String temp_topic_;
-  String remote_temp_topic_;
-  String node_topic_;
-  String addr_topic_;
-  String control_topic_;
-  String last_updated_topic_;
-  String discovery_topic_;
+  char host_name_[24]{};
+  char topic_base_[128]{};
+  char relay_topic_[160]{};
+  char control_topic_[160]{};
+  char remote_prefix_[160]{};
+  char discovery_topic_[192]{};
 
   NodeStateMachine *sm_ = nullptr;
 
@@ -50,7 +54,10 @@ class MqttBridge {
   static MqttBridge *instance_;
   static void staticCallback(char *topic, uint8_t *payload, unsigned int length);
 
+  void refreshRuntimeCfg(const Settings &cfg);
   void rebuildTopics();
+  bool buildLocalTopic(char *out, size_t outLen, const char *leaf) const;
+  bool buildPeerTopic(char *out, size_t outLen, const char *addrSegment, const char *leaf) const;
   void mqttCallback(char *topic, uint8_t *payload, unsigned int length);
   void clearPeerRetainedTopics(uint8_t addr);
   bool connectIfNeeded();
