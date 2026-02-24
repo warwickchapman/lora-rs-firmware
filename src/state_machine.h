@@ -303,7 +303,8 @@ class NodeStateMachine {
     bool key_commit_sent = false;
   };
   static constexpr size_t kMaxProvisioningDevices = static_cast<size_t>(LRS_PROVISIONING_MAX_DEVICES);
-  ProvisioningDevice prov_devices_[kMaxProvisioningDevices]{};
+  ProvisioningDevice *prov_devices_ = nullptr;
+  size_t prov_device_capacity_ = 0;
   size_t prov_device_count_ = 0;
 
   struct ProvisioningSessionRuntime {
@@ -369,6 +370,9 @@ class NodeStateMachine {
   bool isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const;
   ProvisioningDevice *findProvisioningDeviceByChip(uint32_t chipId);
   ProvisioningDevice *upsertProvisioningDevice(uint32_t chipId);
+  bool ensureProvisioningStorage();
+  void resetProvisioningStorage();
+  void freeProvisioningStorage();
   void recomputeProvisioningConflictsAndAssignments();
   bool sendProvisioningCoordinatorPacketFactory(const uint8_t payload[12], uint8_t dst);
   bool sendProvisioningCoordinatorPacketProd(const uint8_t payload[12], uint8_t dst);

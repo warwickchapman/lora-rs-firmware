@@ -1,6 +1,7 @@
 #include "state_machine.h"
 
 #include <ESP8266WiFi.h>
+#include <new>
 
 #include "build_info.h"
 #include "logger.h"
@@ -225,12 +226,11 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   fleet_prov_apply_key_ = "";
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
-  prov_device_count_ = 0;
-  for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  freeProvisioningStorage();
   LRS_LOGI(SYS,
-           "event=prov_capacity max_devices=%u bytes=%u",
+           "event=prov_capacity max_devices=%u bytes=%u mode=lazy",
            static_cast<unsigned>(kMaxProvisioningDevices),
-           static_cast<unsigned>(sizeof(prov_devices_)));
+           static_cast<unsigned>(sizeof(ProvisioningDevice) * kMaxProvisioningDevices));
   for (size_t i = 0; i < kReplayTrackedSources; ++i) replay_sources_[i] = ReplaySourceState{};
   replay_table_evictions_ = 0;
   replay_table_stale_evictions_ = 0;
@@ -271,8 +271,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   fleet_prov_apply_key_ = "";
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
-  prov_device_count_ = 0;
-  for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  freeProvisioningStorage();
   for (size_t i = 0; i < kReplayTrackedSources; ++i) replay_sources_[i] = ReplaySourceState{};
   replay_table_evictions_ = 0;
   replay_table_stale_evictions_ = 0;
@@ -292,6 +291,39 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.rx_push_on_change_enabled = cfg.rx_push_on_change_enabled;
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.tx_input_lora_control_enabled = cfg.tx_input_lora_control_enabled;
+}
+
+bool NodeStateMachine::ensureProvisioningStorage() {
+  if (prov_devices_ != nullptr && prov_device_capacity_ >= kMaxProvisioningDevices) {
+    return true;
+  }
+  freeProvisioningStorage();
+  prov_devices_ = new (std::nothrow) ProvisioningDevice[kMaxProvisioningDevices];
+  if (prov_devices_ == nullptr) {
+    prov_device_capacity_ = 0;
+    prov_device_count_ = 0;
+    lrslog::event("prov_storage_oom", 0, static_cast<uint32_t>(kMaxProvisioningDevices & 0xFFFFU),
+                  static_cast<uint8_t>(sizeof(ProvisioningDevice) & 0xFFU));
+    return false;
+  }
+  prov_device_capacity_ = kMaxProvisioningDevices;
+  prov_device_count_ = 0;
+  return true;
+}
+
+void NodeStateMachine::resetProvisioningStorage() {
+  prov_device_count_ = 0;
+  if (prov_devices_ == nullptr) return;
+  for (size_t i = 0; i < prov_device_capacity_; ++i) prov_devices_[i] = ProvisioningDevice{};
+}
+
+void NodeStateMachine::freeProvisioningStorage() {
+  if (prov_devices_ != nullptr) {
+    delete[] prov_devices_;
+    prov_devices_ = nullptr;
+  }
+  prov_device_capacity_ = 0;
+  prov_device_count_ = 0;
 }
 
 bool NodeStateMachine::isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const {
@@ -767,8 +799,11 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
   if (prov_.phase_deadline_ms > cap) prov_.phase_deadline_ms = cap;
   prov_.provision_all_requested = false;
   prov_.current_index = 0;
-  prov_device_count_ = 0;
-  for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  if (!ensureProvisioningStorage()) {
+    prov_ = ProvisioningSessionRuntime{};
+    return false;
+  }
+  resetProvisioningStorage();
 
   uint8_t payload[12]{};
   payload[0] = kProvOpDiscoverStart;
@@ -779,6 +814,7 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
   last_counter_++;
   if (!radio_->sendProvisioningRaw(last_counter_, runtime_.local_address, kProvBroadcastAddress, payload, true)) {
     prov_ = ProvisioningSessionRuntime{};
+    freeProvisioningStorage();
     return false;
   }
   lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
@@ -815,8 +851,7 @@ bool NodeStateMachine::provisioningStartProvisionAll() {
 void NodeStateMachine::provisioningCancel() {
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
-  prov_device_count_ = 0;
-  for (size_t i = 0; i < kMaxProvisioningDevices; ++i) prov_devices_[i] = ProvisioningDevice{};
+  freeProvisioningStorage();
 }
 
 bool NodeStateMachine::provisioningSession(ProvisioningSessionSnapshot &out) const {
@@ -892,6 +927,7 @@ bool NodeStateMachine::sendProvisioningVerify(uint16_t sessionNonce, uint8_t ass
 }
 
 NodeStateMachine::ProvisioningDevice *NodeStateMachine::findProvisioningDeviceByChip(uint32_t chipId) {
+  if (prov_devices_ == nullptr) return nullptr;
   for (size_t i = 0; i < prov_device_count_; ++i) {
     if (prov_devices_[i].in_use && prov_devices_[i].chip_id == chipId) return &prov_devices_[i];
   }
@@ -900,8 +936,9 @@ NodeStateMachine::ProvisioningDevice *NodeStateMachine::findProvisioningDeviceBy
 
 NodeStateMachine::ProvisioningDevice *NodeStateMachine::upsertProvisioningDevice(uint32_t chipId) {
   if (chipId == 0) return nullptr;
+  if (prov_devices_ == nullptr) return nullptr;
   if (ProvisioningDevice *d = findProvisioningDeviceByChip(chipId)) return d;
-  if (prov_device_count_ >= kMaxProvisioningDevices) return nullptr;
+  if (prov_device_count_ >= prov_device_capacity_) return nullptr;
   ProvisioningDevice &d = prov_devices_[prov_device_count_++];
   d = ProvisioningDevice{};
   d.in_use = true;
