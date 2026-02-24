@@ -402,7 +402,7 @@ R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sen
 <h3>Fleet</h3>
 <div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div>
 <div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div>
-<div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet.</div><div class="grid"><div><label>Estimated devices</label><input id="prov_estimated_count" type="number" min="1" max="250" value="10" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="searchMoreFleetProvisioning()" title="Search more" aria-label="Search more">↻</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div></div></div></div></div>
+<div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet in batches of up to 8 devices.</div><div class="grid"><div><label>Estimated devices (max 8)</label><input id="prov_estimated_count" type="number" min="1" max="8" value="8" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="searchMoreFleetProvisioning()" title="Search more" aria-label="Search more">↻</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div><div class="small">If more than 8 devices respond, provision this batch first, then run discovery again.</div></div></div></div></div>
 </section>
  )HTML"
 #if LRS_ENABLE_AUTOMATIONS
@@ -455,7 +455,7 @@ R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class
 <div><label>MQTT user</label><input id="mqtt_user" /></div>
 <div><label>MQTT password</label><input id="mqtt_password" /></div>
 <div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
-</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><div class="check-row"><input id="factory_reset_keep_fleet_local" type="checkbox" /><label for="factory_reset_keep_fleet_local">Keep shared fleet key</label></div><div class="small">Tick to keep this device in the LoRa fleet.</div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
+</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><label>Confirmation word</label><input id="factory_reset_confirm_word" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="RESET or REMOVE" /><div class="small">Type <code>RESET</code> to keep the fleet key, or <code>REMOVE</code> to clear it.</div></div><div><div class="check-row"><input id="factory_reset_keep_fleet_local" type="checkbox" /><label for="factory_reset_keep_fleet_local">Keep shared fleet key</label></div><div class="small">Tick to keep this device in the LoRa fleet.</div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
 <section class="card page" id="page-sensors"><h3>Sensors</h3>
 <h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
 <div class="check-row" style="margin-bottom:8px"><input id="sensor_temp_enabled" type="checkbox" /><label for="sensor_temp_enabled">Enable DS18B20 (GPIO0)</label></div>
@@ -2089,10 +2089,12 @@ async function reboot(){await fetch('/api/reboot',{method:'POST'});}
 async function factoryResetLocal(){
  const el=document.getElementById('factoryResetResult');
  const pwEl=document.getElementById('factory_reset_password');
+ const confirmEl=document.getElementById('factory_reset_confirm_word');
  const keepEl=document.getElementById('factory_reset_keep_fleet_local');
  const keepWifiEl=document.getElementById('factory_reset_keep_wifi_local');
- if(!el || !pwEl || !keepEl || !keepWifiEl) return;
+ if(!el || !pwEl || !confirmEl || !keepEl || !keepWifiEl) return;
  const password=String(pwEl.value||'');
+ const confirmWord=String(confirmEl.value||'').trim().toUpperCase();
  const keepFleet=!!keepEl.checked;
  const keepWifi=!!keepWifiEl.checked;
  if(!password.length){
@@ -2100,29 +2102,27 @@ async function factoryResetLocal(){
   el.innerText='Enter admin password to factory reset.';
   return;
  }
- if(!keepFleet){
-  alert('Warning: this will remove the device from the current LoRa fleet and require manual provisioning again.');
-  const confirmWord=prompt("Type REMOVE to confirm removing the shared fleet key:");
-  if(String(confirmWord||'').trim()!=='REMOVE'){
-   el.className='result-line show err';
-   el.innerText='Factory reset cancelled (confirmation word not entered).';
-   return;
-  }
+ if(!keepFleet && confirmWord!=='REMOVE'){
+  el.className='result-line show err';
+  el.innerText='Type REMOVE to confirm clearing the shared fleet key.';
+  return;
+ }
+ if(keepFleet && confirmWord!=='RESET'){
+  el.className='result-line show err';
+  el.innerText='Type RESET to confirm factory reset.';
+  return;
  }
  const keepBits=[];
  if(keepFleet) keepBits.push('shared fleet key');
  if(keepWifi) keepBits.push('WiFi credentials');
- const keepMsg=keepBits.length ? ` (keep ${keepBits.join(' + ')})` : '';
- if(!confirm(`Factory reset this device${keepMsg}? It will reboot.`)){
-  return;
- }
  el.className='result-line show';
- el.innerText='Factory reset requested...';
+ el.innerText=`Factory reset requested${keepBits.length ? ` (keep ${keepBits.join(' + ')})` : ''}...`;
  const out=await apiJson('/api/system/factory-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_password:password,keep_shared_fleet_key:keepFleet,keep_wifi_credentials:keepWifi}),silent:true});
  if(out && out.ok){
   el.className='result-line show ok';
   el.innerText='Factory reset started. Device is rebooting...';
   pwEl.value='';
+  confirmEl.value='';
   return;
  }
  const err=(out && out.error) ? out.error : 'request_failed';
@@ -2370,7 +2370,7 @@ async function searchMoreFleetProvisioning(){
 async function startFleetProvisioningDiscoveryWithMode(searchMore){
  const result=document.getElementById('provWizardResult');
  const estEl=document.getElementById('prov_estimated_count');
- const est=Math.max(1, Math.min(250, Number(estEl && estEl.value || 10) || 10));
+ const est=Math.max(1, Math.min(8, Number(estEl && estEl.value || 8) || 8));
  const retry=false;
  suspendGlobalPollsUntilMs = Date.now() + 5000;
  if(result){ result.className='result-line show'; result.innerText = searchMore ? 'Searching for more devices...' : 'Starting discovery...'; }

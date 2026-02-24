@@ -238,11 +238,11 @@ void WebConsole::handleProvisioningStart() {
       return;
     }
   }
-  uint16_t estimated = 10;
+  uint16_t estimated = 8;
   if (!body["estimated_count"].isNull()) {
     int v = body["estimated_count"].as<int>();
     if (v < 1) v = 1;
-    if (v > 250) v = 250;
+    if (v > 8) v = 8;
     estimated = static_cast<uint16_t>(v);
   }
   const bool retryOnce = parseBoolField(body["retry_once"], true);
