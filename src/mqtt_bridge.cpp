@@ -260,7 +260,9 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     uint8_t addr = 0;
     if (doc["addr"].is<const char *>()) {
       const char *addrStr = doc["addr"];
-      addr = static_cast<uint8_t>(strtoul(addrStr, nullptr, 16));
+      if (addrStr == nullptr || !parsePeerAddressSegment(String(addrStr), sm_, addr)) {
+        return;
+      }
     } else if (doc["addr"].is<int>()) {
       addr = static_cast<uint8_t>(doc["addr"].as<int>());
     }
