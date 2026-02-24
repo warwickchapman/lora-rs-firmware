@@ -55,7 +55,8 @@ bool isDefaultDeploymentKey(const String &v) {
 }
 
 bool RadioProtocol::begin(const Settings &cfg) {
-  cfg_ = cfg;
+  settings_ = &cfg;
+  refreshRuntimeCfg(cfg);
   if (boot_nonce_ == 0) {
     boot_nonce_ = static_cast<uint32_t>(random(1, 0x7FFFFFFF));
     boot_nonce_ ^= static_cast<uint32_t>(micros());
@@ -63,13 +64,13 @@ bool RadioProtocol::begin(const Settings &cfg) {
   }
 
   LoRa.setPins(kNss, kRst, kDio0);
-  if (!LoRa.begin(cfg_.lora_frequency_hz)) {
+  if (!LoRa.begin(runtime_.lora_frequency_hz)) {
     return false;
   }
-  LoRa.setTxPower(cfg_.lora_tx_power);
-  LoRa.setSpreadingFactor(cfg_.lora_spreading_factor);
-  LoRa.setSignalBandwidth(cfg_.lora_bandwidth_hz);
-  LoRa.setCodingRate4(cfg_.lora_coding_rate);
+  LoRa.setTxPower(runtime_.lora_tx_power);
+  LoRa.setSpreadingFactor(runtime_.lora_spreading_factor);
+  LoRa.setSignalBandwidth(runtime_.lora_bandwidth_hz);
+  LoRa.setCodingRate4(runtime_.lora_coding_rate);
   LoRa.enableCrc();
 
   deriveKeys();
@@ -78,13 +79,14 @@ bool RadioProtocol::begin(const Settings &cfg) {
 }
 
 void RadioProtocol::applyConfig(const Settings &cfg) {
-  cfg_ = cfg;
+  settings_ = &cfg;
+  refreshRuntimeCfg(cfg);
   LoRa.idle();
-  LoRa.setFrequency(cfg_.lora_frequency_hz);
-  LoRa.setTxPower(cfg_.lora_tx_power);
-  LoRa.setSpreadingFactor(cfg_.lora_spreading_factor);
-  LoRa.setSignalBandwidth(cfg_.lora_bandwidth_hz);
-  LoRa.setCodingRate4(cfg_.lora_coding_rate);
+  LoRa.setFrequency(runtime_.lora_frequency_hz);
+  LoRa.setTxPower(runtime_.lora_tx_power);
+  LoRa.setSpreadingFactor(runtime_.lora_spreading_factor);
+  LoRa.setSignalBandwidth(runtime_.lora_bandwidth_hz);
+  LoRa.setCodingRate4(runtime_.lora_coding_rate);
   deriveKeys();
   refreshRadioRuntimeState();
 }
@@ -256,16 +258,19 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
 }
 
 void RadioProtocol::deriveKeys() {
+  if (!settings_) {
+    return;
+  }
   SHA256 hash;
   uint8_t digest[32];
 
-  String encMaterial = cfg_.fleet_passphrase + ":enc";
+  String encMaterial = settings_->fleet_passphrase + ":enc";
   hash.reset();
   hash.update(reinterpret_cast<const uint8_t *>(encMaterial.c_str()), encMaterial.length());
   hash.finalize(digest, sizeof(digest));
   memcpy(enc_key_, digest, sizeof(enc_key_));
 
-  String macMaterial = cfg_.fleet_passphrase + ":mac";
+  String macMaterial = settings_->fleet_passphrase + ":mac";
   hash.reset();
   hash.update(reinterpret_cast<const uint8_t *>(macMaterial.c_str()), macMaterial.length());
   hash.finalize(digest, sizeof(digest));
@@ -284,8 +289,16 @@ void RadioProtocol::deriveKeys() {
   memcpy(factory_mac_key_, digest, sizeof(factory_mac_key_));
 }
 
+void RadioProtocol::refreshRuntimeCfg(const Settings &cfg) {
+  runtime_.lora_frequency_hz = cfg.lora_frequency_hz;
+  runtime_.lora_tx_power = cfg.lora_tx_power;
+  runtime_.lora_spreading_factor = cfg.lora_spreading_factor;
+  runtime_.lora_bandwidth_hz = cfg.lora_bandwidth_hz;
+  runtime_.lora_coding_rate = cfg.lora_coding_rate;
+}
+
 void RadioProtocol::refreshRadioRuntimeState() {
-  default_key_configured_ = isDefaultDeploymentKey(cfg_.fleet_passphrase);
+  default_key_configured_ = settings_ && isDefaultDeploymentKey(settings_->fleet_passphrase);
   lora_enabled_ = true;
   LoRa.idle();
   LoRa.receive();

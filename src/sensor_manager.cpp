@@ -22,10 +22,13 @@ bool SensorManager::begin(const Settings &cfg) {
 }
 
 void SensorManager::applyConfig(const Settings &cfg) {
-  cfg_ = cfg;
-  temp_.enabled = cfg_.sensor_temp_enabled;
-  temp_.pin = cfg_.sensor_temp_pin;
-  temp_.interval_s = deriveTempIntervalS(cfg_.heartbeat_ms);
+  settings_ = &cfg;
+  runtime_.sensor_temp_enabled = cfg.sensor_temp_enabled;
+  runtime_.sensor_temp_pin = cfg.sensor_temp_pin;
+  runtime_.temp_interval_s = deriveTempIntervalS(cfg.heartbeat_ms);
+  temp_.enabled = runtime_.sensor_temp_enabled;
+  temp_.pin = runtime_.sensor_temp_pin;
+  temp_.interval_s = runtime_.temp_interval_s;
   temp_.detected = false;
   temp_.valid = false;
   temp_.celsius = NAN;

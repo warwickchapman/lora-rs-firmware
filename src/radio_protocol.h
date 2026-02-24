@@ -45,10 +45,19 @@ class RadioProtocol {
             uint32_t unix_time_s = 0);
   bool sendRaw(MessageType type, uint32_t counter, uint8_t src, uint8_t dst, const uint8_t payload[12]);
   bool sendProvisioningRaw(uint32_t counter, uint8_t src, uint8_t dst, const uint8_t payload[12], bool useFactoryKey);
-  bool receive(ProtocolMessage &msg);
+ bool receive(ProtocolMessage &msg);
 
  private:
-  Settings cfg_{};
+  struct RuntimeCfg {
+    long lora_frequency_hz = 0;
+    uint8_t lora_tx_power = 0;
+    uint8_t lora_spreading_factor = 0;
+    long lora_bandwidth_hz = 0;
+    uint8_t lora_coding_rate = 0;
+  };
+
+  const Settings *settings_ = nullptr;
+  RuntimeCfg runtime_{};
   bool lora_enabled_ = true;
   bool default_key_configured_ = false;
   uint32_t boot_nonce_ = 0;
@@ -58,6 +67,7 @@ class RadioProtocol {
   uint8_t factory_mac_key_[32]{};
 
   void deriveKeys();
+  void refreshRuntimeCfg(const Settings &cfg);
   void refreshRadioRuntimeState();
   bool sendRawWithKeys(MessageType type, uint32_t counter, uint8_t src, uint8_t dst, const uint8_t payload[12],
                        const uint8_t encKey[16], const uint8_t macKey[32], const char *logEvent);

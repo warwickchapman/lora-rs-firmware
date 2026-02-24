@@ -21,10 +21,17 @@ class SensorManager {
   bool begin(const Settings &cfg);
   void applyConfig(const Settings &cfg);
   void tick();
-  const TempSensorStatus &tempStatus() const;
+ const TempSensorStatus &tempStatus() const;
 
  private:
-  Settings cfg_{};
+  struct RuntimeCfg {
+    bool sensor_temp_enabled = false;
+    uint8_t sensor_temp_pin = 0;
+    uint16_t temp_interval_s = 10;
+  };
+
+  const Settings *settings_ = nullptr;
+  RuntimeCfg runtime_{};
 
   class OneWire *ow_ = nullptr;
   class DallasTemperature *ds_ = nullptr;
