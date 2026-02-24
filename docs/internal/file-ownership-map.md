@@ -5,7 +5,13 @@
   - Composition root, lifecycle, runtime orchestration, apply boundary, networking/NTP/OTA/mDNS coordination.
 
 - `/Users/warwick/Code/LoRa/lora_rs/src/web_console.cpp`
-  - HTTP UI/API/auth/session/status caches/SSE/settings/fleet/provisioning/network/diagnostics/system/OTA plus embedded UI assets.
+  - `WebConsole` core/common methods: begin/tick/auth/session/request logging/common cache guards/captive probe.
+- `/Users/warwick/Code/LoRa/lora_rs/src/web_console_routes.cpp`
+  - `WebConsole::routes()` only.
+- `/Users/warwick/Code/LoRa/lora_rs/src/web_console_ui_assets.cpp`
+  - Embedded UI HTML/CSS/JS `PROGMEM` blobs only.
+- `/Users/warwick/Code/LoRa/lora_rs/src/web_console_status.cpp` ... `/Users/warwick/Code/LoRa/lora_rs/src/web_console_system.cpp`
+  - `WebConsole` feature handlers split by concern (status/pages/settings/fleet/provisioning/network/system).
 
 - `/Users/warwick/Code/LoRa/lora_rs/src/state_machine.cpp`
   - Runtime control engine, replay protection, peer state, provisioning coordinator/target, RX/TX dispatch.
@@ -23,7 +29,7 @@
 - `web_console_network.cpp`: WiFi scan/test
 - `web_console_system.cpp`: diagnostics/logging/OTA/factory reset/reboot
 
-### `NodeStateMachine` (later)
+### `NodeStateMachine` (Milestone 5 in progress)
 - `state_machine_core.cpp`
 - `state_machine_replay.cpp`
 - `state_machine_tx.cpp`
@@ -33,6 +39,11 @@
 - `state_machine_provisioning_coord.cpp`
 - `state_machine_provisioning_target.cpp`
 - `state_machine_time_led.cpp`
+
+Current Milestone 5 target (safe first moves):
+- `state_machine_replay.cpp`
+- `state_machine_time_led.cpp`
+- Keep TX/RX/provisioning dispatch in `state_machine.cpp` for now
 
 ## Split Ownership Rules
 - Each split file owns one concern and only methods/helpers for that concern.

@@ -18,6 +18,13 @@ These invariants must be preserved during monolith split phases unless an ADR or
 
 ## `NodeStateMachine` Invariants (Future split protection)
 - `tick()` ordering remains identical.
+- Current `tick()` order (as of Milestone 5 prep) must be preserved:
+  - `resetRadioTxBudgetForTick()`
+  - `tickReceive()`
+  - role branch: `tickTransmitter()` or `tickReceiver()`
+  - `tickProvisioningTarget(millis())`
+  - `tickLed()`
+  - `finishRadioTxBudgetForTick()`
 - One-radio-TX-per-tick budget semantics remain identical.
 - No reintroduction of deep `Settings` copies.
 - No new hot-path `String` config reads in TX/RX/replay/provisioning dispatch paths.
@@ -26,6 +33,9 @@ These invariants must be preserved during monolith split phases unless an ADR or
   - allocate only on provisioning start/discovery path
   - free on cancel/reset/apply-config paths as currently implemented
   - no resize/reallocation patterns introduced
+- Milestone 5 split scope guard:
+  - replay/time-LED/peer/WiFi-factory helper moves are allowed
+  - no TX/RX branch ordering or provisioning frame dispatch changes in helper-move commits
 
 ## `WebConsole` Stability/Heap Invariants (Recent wins to preserve)
 - `/api/status` legacy compat endpoint remains retired and returns `410`.
