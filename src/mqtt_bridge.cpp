@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 
 #include "build_info.h"
-#include "log_buffer.h"
+#include "logger.h"
 #include "state_machine.h"
 
 namespace {
@@ -109,11 +109,10 @@ bool parsePeerAddressSegment(const String &segment, NodeStateMachine *sm, uint8_
 
 MqttBridge *MqttBridge::instance_ = nullptr;
 
-bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm, LogBuffer *logs) {
+bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm) {
   cfg_ = cfg;
   chip_id_hex_ = chipIdHex;
   sm_ = sm;
-  logs_ = logs;
 
   rebuildTopics();
 
@@ -219,8 +218,8 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     bool targetRelay = payload[0] == '1';
     sm_->mqttSetLocalRelay(targetRelay ? 1 : 0);
 
-    if (logs_) {
-      logs_->add("mqtt_relay_topic", 0, 0, targetRelay ? 1 : 0);
+    {
+      lrslog::event("mqtt_relay_topic", 0, 0, targetRelay ? 1 : 0);
     }
     return;
   }
@@ -233,8 +232,8 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     DynamicJsonDocument doc(256);
     auto err = deserializeJson(doc, payload, length);
     if (err) {
-      if (logs_) {
-        logs_->add("mqtt_control_json_err", 0, 0, 0);
+      {
+        lrslog::event("mqtt_control_json_err", 0, 0, 0);
       }
       return;
     }
@@ -253,8 +252,8 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     }
 
     sm_->mqttSendPeerRelay(addr, relay ? 1 : 0);
-    if (logs_) {
-      logs_->add("mqtt_control_topic", 0, 0, relay ? 1 : 0);
+    {
+      lrslog::event("mqtt_control_topic", 0, 0, relay ? 1 : 0);
     }
     return;
   }
@@ -286,16 +285,16 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       if (sec > 0 && sec < 60) sec = 60;
       if (sec > 3600) sec = 3600;
       sm_->mqttSetPeerPollIntervalMs(addr, static_cast<uint32_t>(sec) * 1000U);
-      if (logs_) {
-        logs_->add("mqtt_remote_poll_interval", 0, static_cast<uint32_t>(sec), addr);
+      {
+        lrslog::event("mqtt_remote_poll_interval", 0, static_cast<uint32_t>(sec), addr);
       }
       return;
     }
 
     if (leaf == "poll_now") {
       sm_->mqttPollPeerNow(addr);
-      if (logs_) {
-        logs_->add("mqtt_remote_poll_now", 0, 0, addr);
+      {
+        lrslog::event("mqtt_remote_poll_now", 0, 0, addr);
       }
       return;
     }
@@ -305,8 +304,8 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       if (!forget) return;
       const bool removed = sm_->mqttForgetPeer(addr);
       clearPeerRetainedTopics(addr);
-      if (logs_) {
-        logs_->add(removed ? "mqtt_remote_forget_ok" : "mqtt_remote_forget_missing", 0, 0, addr);
+      {
+        lrslog::event(removed ? "mqtt_remote_forget_ok" : "mqtt_remote_forget_missing", 0, 0, addr);
       }
       return;
     }
@@ -368,8 +367,8 @@ bool MqttBridge::connectIfNeeded() {
   }
 
   if (!ok) {
-    if (logs_) {
-      logs_->add("mqtt_connect_failed", 0, 0, 0);
+    {
+      lrslog::event("mqtt_connect_failed", 0, 0, 0);
     }
     return false;
   }
@@ -380,8 +379,8 @@ bool MqttBridge::connectIfNeeded() {
   mqtt_client_.subscribe((topic_base_ + "/peer/+/poll_now").c_str());
   mqtt_client_.subscribe((topic_base_ + "/peer/+/forget").c_str());
 
-  if (logs_) {
-    logs_->add("mqtt_connected", 0, 0, 0);
+  {
+    lrslog::event("mqtt_connected", 0, 0, 0);
   }
   publishDiscovery();
   return true;
@@ -568,8 +567,8 @@ void MqttBridge::publishDiscovery() {
   if (n > 0) {
     if (mqtt_client_.publish(discovery_topic_.c_str(), payload, true)) {
       last_discovery_publish_ms_ = millis();
-    } else if (logs_) {
-      logs_->add("mqtt_discovery_publish_failed", 0, 0, 0);
+    } else {
+      lrslog::event("mqtt_discovery_publish_failed", 0, 0, 0);
     }
   }
 }

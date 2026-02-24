@@ -6,8 +6,6 @@
 #include "config_store.h"
 #include "radio_protocol.h"
 
-class LogBuffer;
-
 enum class LinkState : uint8_t {
   Boot,
   Idle,
@@ -102,7 +100,7 @@ struct ProvisioningDeviceSnapshot {
 
 class NodeStateMachine {
  public:
-  bool begin(const Settings &cfg, RadioProtocol *radio, LogBuffer *logs);
+  bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);
   void tick();
 
@@ -149,7 +147,6 @@ class NodeStateMachine {
  private:
   Settings cfg_{};
   RadioProtocol *radio_ = nullptr;
-  LogBuffer *logs_ = nullptr;
 
   LinkState link_state_ = LinkState::Boot;
   uint8_t relay_state_ = 0;

@@ -7,11 +7,10 @@
 #include "config_store.h"
 
 class NodeStateMachine;
-class LogBuffer;
 
 class MqttBridge {
  public:
-  bool begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm, LogBuffer *logs);
+  bool begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm);
   void applyConfig(const Settings &cfg, const String &chipIdHex);
   void tick(bool wifiConnected);
 
@@ -35,7 +34,6 @@ class MqttBridge {
   String discovery_topic_;
 
   NodeStateMachine *sm_ = nullptr;
-  LogBuffer *logs_ = nullptr;
 
   uint32_t last_reconnect_attempt_ms_ = 0;
   uint32_t last_publish_ms_ = 0;

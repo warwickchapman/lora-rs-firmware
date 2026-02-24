@@ -3,7 +3,6 @@
 #include <ESP8266WiFi.h>
 
 #include "build_info.h"
-#include "log_buffer.h"
 #include "logger.h"
 
 namespace {
@@ -176,10 +175,9 @@ uint8_t encodeTempCode(bool valid, float celsius) {
 }
 }
 
-bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio, LogBuffer *logs) {
+bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   cfg_ = cfg;
   radio_ = radio;
-  logs_ = logs;
 
   pinMode(kLedPin, OUTPUT);
   pinMode(kRelayPin, OUTPUT);
@@ -303,7 +301,7 @@ void NodeStateMachine::setAuthoritativeUnixTime(uint32_t unixTimeS) {
   shared_time_authoritative_ = true;
   shared_time_sync_unix_s_ = unixTimeS;
   shared_time_sync_ms_ = millis();
-  if (logs_) logs_->add("time_sync_ntp", 0, unixTimeS, 0);
+  lrslog::event("time_sync_ntp", 0, unixTimeS, 0);
 }
 bool NodeStateMachine::sharedUnixTimeValid() const { return shared_time_valid_; }
 uint32_t NodeStateMachine::sharedUnixTime() const { return currentUnixTimeS(millis()); }
@@ -335,8 +333,8 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
 void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
   relay_state_ = relayState ? 1 : 0;
   digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
-  if (logs_) {
-    logs_->add("mqtt_local_relay", 0, last_counter_, relay_state_);
+  {
+    lrslog::event("mqtt_local_relay", 0, last_counter_, relay_state_);
   }
 }
 
@@ -369,8 +367,8 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
     tx_retry_step_++;
   }
 
-  if (logs_ && logEvent != nullptr) {
-    logs_->add(logEvent, 0, last_counter_, relayState ? 1 : 0);
+  if (logEvent != nullptr) {
+    lrslog::event(logEvent, 0, last_counter_, relayState ? 1 : 0);
   }
   yield();  // LoRa send path yields too, but yield again after scheduling/logging to avoid tight retry loops.
 }
@@ -390,8 +388,8 @@ bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayStat
   if (sentCounter != nullptr) {
     *sentCounter = last_counter_;
   }
-  if (logs_) {
-    logs_->add("mqtt_remote_relay_tx", 0, last_counter_, targetRelay);
+  {
+    lrslog::event("mqtt_remote_relay_tx", 0, last_counter_, targetRelay);
   }
   return true;
 }
@@ -487,8 +485,8 @@ bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
     peer_count_--;
     peers_[peer_count_] = PeerRuntime{};
   }
-  if (logs_) {
-    logs_->add("mqtt_remote_forget", 0, 0, dstAddress);
+  {
+    lrslog::event("mqtt_remote_forget", 0, 0, dstAddress);
   }
   return true;
 }
@@ -560,7 +558,7 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
   last_tx_ms_ = sentAt;
   markRadioTxSentThisTick();
   last_wifi_prov_tx_ms_ = sentAt;
-  if (logs_) logs_->add("wifi_prov_tx", 0, last_counter_, totalChunks);
+  lrslog::event("wifi_prov_tx", 0, last_counter_, totalChunks);
   return true;
 }
 
@@ -604,7 +602,7 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
-  if (logs_) logs_->add(keepSharedFleetKey ? "factory_reset_peer_tx_keep" : "factory_reset_peer_tx_full", 0, last_counter_, dstAddress);
+  lrslog::event(keepSharedFleetKey ? "factory_reset_peer_tx_keep" : "factory_reset_peer_tx_full", 0, last_counter_, dstAddress);
   return true;
 }
 
@@ -654,7 +652,7 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
     prov_ = ProvisioningSessionRuntime{};
     return false;
   }
-  if (logs_) logs_->add("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
+  lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
   return true;
 }
 
@@ -941,8 +939,8 @@ bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter
   if (sentCounter != nullptr) {
     *sentCounter = last_counter_;
   }
-  if (logs_) {
-    logs_->add("tx_poll_request", 0, last_counter_, 0);
+  {
+    lrslog::event("tx_poll_request", 0, last_counter_, 0);
   }
   return true;
 }
@@ -956,8 +954,8 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
     if (static_cast<int32_t>(now - node.pending_deadline_ms) >= 0) {
       node.pending = false;
       node.ack_state = PeerAckState::Timeout;
-      if (logs_) {
-        logs_->add("mqtt_remote_ack_timeout", 0, node.pending_counter, node.pending_relay);
+      {
+        lrslog::event("mqtt_remote_ack_timeout", 0, node.pending_counter, node.pending_relay);
       }
       continue;
     }
@@ -981,8 +979,8 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
       node.pending_counter = sentCounter;
       node.last_cmd_counter = sentCounter;
       node.ack_state = PeerAckState::Pending;
-    } else if (logs_) {
-      logs_->add("mqtt_remote_retry_send_fail", 0, node.pending_counter, node.pending_relay);
+    } else {
+      lrslog::event("mqtt_remote_retry_send_fail", 0, node.pending_counter, node.pending_relay);
     }
   }
 }
@@ -1005,7 +1003,7 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
 
     if (node.poll_pending && static_cast<int32_t>(now - node.poll_deadline_ms) >= 0) {
       node.poll_pending = false;
-      if (logs_) logs_->add("tx_poll_timeout", 0, node.poll_counter, 0);
+      lrslog::event("tx_poll_timeout", 0, node.poll_counter, 0);
       node.next_poll_ms = now + node.poll_interval_ms;
     }
 
@@ -1106,8 +1104,8 @@ void NodeStateMachine::tickTransmitter() {
                      local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
       last_tx_ms_ = now;
       markRadioTxSentThisTick();
-      if (logs_) {
-        logs_->add("tx_heartbeat", 0, last_counter_, input_state_);
+      {
+        lrslog::event("tx_heartbeat", 0, last_counter_, input_state_);
       }
       return;
     }
@@ -1121,8 +1119,8 @@ void NodeStateMachine::tickTransmitter() {
     relay_state_ = 0;
     digitalWrite(kRelayPin, LOW);
     link_state_ = LinkState::Timeout;
-    if (logs_) {
-      logs_->add("tx_ack_timeout", 0, last_counter_, relay_state_);
+    {
+      lrslog::event("tx_ack_timeout", 0, last_counter_, relay_state_);
     }
   }
 }
@@ -1164,7 +1162,7 @@ void NodeStateMachine::tickReceiver() {
     markRadioTxSentThisTick();
     rx_last_push_ms_ = now;
     rx_push_pending_ = false;
-    if (logs_) logs_->add("rx_push_on_change", 0, last_counter_, input_state_);
+    lrslog::event("rx_push_on_change", 0, last_counter_, input_state_);
   }
 }
 
@@ -1180,11 +1178,11 @@ void NodeStateMachine::tickReceive() {
     return;
   }
   if (!isWifiProvision && msg.dst != cfg_.local_address) {
-    if (logs_) logs_->add("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
+    lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
   if (isWifiProvision && msg.dst != cfg_.local_address && msg.dst != kWifiProvisionBroadcastAddress) {
-    if (logs_) logs_->add("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
+    lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
 
@@ -1193,25 +1191,25 @@ void NodeStateMachine::tickReceive() {
     const bool mqttStatus = (msg.type == MessageType::MqttStatus);
     const bool pollResponse = (msg.type == MessageType::PollResponse);
     if (!mqttStatus && !pollResponse && !fromPaired) {
-      if (logs_) logs_->add("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
+      lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
     if (msg.type == MessageType::Ack && !fromPaired) {
-      if (logs_) logs_->add("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
+      lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
   } else if (!isWifiProvision && msg.src != cfg_.remote_address) {
-    if (logs_) logs_->add("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
+    lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
 
   if (last_seen_boot_nonce_by_src_[msg.src] == msg.boot_nonce) {
     if (msg.counter <= last_seen_counter_by_src_[msg.src]) {
-      if (logs_) logs_->add("rx_replay_drop", msg.rssi, msg.counter, msg.relay_state);
+      lrslog::event("rx_replay_drop", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
-  } else if (last_seen_boot_nonce_by_src_[msg.src] != 0 && logs_) {
-    logs_->add("rx_peer_reboot", msg.rssi, msg.counter, msg.relay_state);
+  } else if (last_seen_boot_nonce_by_src_[msg.src] != 0) {
+    lrslog::event("rx_peer_reboot", msg.rssi, msg.counter, msg.relay_state);
   }
   last_seen_boot_nonce_by_src_[msg.src] = msg.boot_nonce;
   last_seen_counter_by_src_[msg.src] = msg.counter;
@@ -1237,14 +1235,14 @@ void NodeStateMachine::tickReceive() {
       tx_retry_step_ = 0;
       tx_next_retry_ms_ = 0;
       link_state_ = LinkState::Idle;
-      if (logs_) logs_->add("tx_ack", msg.rssi, msg.counter, msg.relay_state);
+      lrslog::event("tx_ack", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
 
     if (msg.type == MessageType::MqttStatus || msg.type == MessageType::PollResponse) {
       PeerRuntime *node = findOrCreatePeer(msg.src);
       if (node == nullptr) {
-        if (logs_) logs_->add("mqtt_remote_node_limit", msg.rssi, msg.counter, msg.relay_state);
+        lrslog::event("mqtt_remote_node_limit", msg.rssi, msg.counter, msg.relay_state);
         return;
       }
       node->relay_state = msg.relay_state ? 1 : 0;
@@ -1271,15 +1269,15 @@ void NodeStateMachine::tickReceive() {
         // Any valid status from this node confirms link health and should unblock polling.
         if (node->pending) {
           node->pending = false;
-          if (logs_) logs_->add("mqtt_remote_ack_ok", msg.rssi, msg.counter, msg.relay_state);
+          lrslog::event("mqtt_remote_ack_ok", msg.rssi, msg.counter, msg.relay_state);
         }
         node->ack_state = PeerAckState::Ok;
-        if (logs_) logs_->add("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
+        lrslog::event("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
       } else {
         // Clear pending on any valid response from this node; retries can overlap counters.
         node->poll_pending = false;
         node->next_poll_ms = millis() + node->poll_interval_ms;
-        if (logs_) logs_->add("tx_poll_response", msg.rssi, msg.counter, msg.relay_state);
+        lrslog::event("tx_poll_response", msg.rssi, msg.counter, msg.relay_state);
       }
     }
     return;
@@ -1298,8 +1296,8 @@ void NodeStateMachine::tickReceive() {
                      local_temp_code_, sensorMask, 0xFF, downlinkRssiEnc, unixTimeS)) {
       last_tx_ms_ = millis();
       markRadioTxSentThisTick();
-      if (logs_) {
-        logs_->add("rx_poll_response_tx", msg.rssi, last_counter_, relay_state_);
+      {
+        lrslog::event("rx_poll_response_tx", msg.rssi, last_counter_, relay_state_);
       }
     }
     return;
@@ -1312,7 +1310,7 @@ void NodeStateMachine::tickReceive() {
     digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
     if (msg.type != MessageType::Mqtt) {
       if (!radioTxBudgetAvailable()) {
-        if (logs_) logs_->add("rx_apply_no_ack_budget", msg.rssi, msg.counter, msg.relay_state);
+        lrslog::event("rx_apply_no_ack_budget", msg.rssi, msg.counter, msg.relay_state);
         return;
       }
       const uint32_t unixTimeS = currentUnixTimeS(millis());
@@ -1325,7 +1323,7 @@ void NodeStateMachine::tickReceive() {
       }
     } else {
       if (!radioTxBudgetAvailable()) {
-        if (logs_) logs_->add("rx_apply_no_status_budget", msg.rssi, msg.counter, msg.relay_state);
+        lrslog::event("rx_apply_no_status_budget", msg.rssi, msg.counter, msg.relay_state);
         return;
       }
       const uint8_t sensorMask = 0x04;  // includes downlink RSSI in sensor_analog0
@@ -1339,8 +1337,8 @@ void NodeStateMachine::tickReceive() {
       }
     }
 
-    if (logs_) {
-      logs_->add(msg.type == MessageType::Mqtt ? "rx_apply_mqtt" : "rx_apply_and_ack", msg.rssi, msg.counter, msg.relay_state);
+    {
+      lrslog::event(msg.type == MessageType::Mqtt ? "rx_apply_mqtt" : "rx_apply_and_ack", msg.rssi, msg.counter, msg.relay_state);
     }
   }
 }
@@ -1365,7 +1363,7 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
     if (transferId == 0 || ssidLen == 0 || ssidLen > 32 || passLen > 64 || totalLen == 0 || totalLen > sizeof(wifi_prov_rx_.data) ||
         totalChunks == 0 || totalChunks > 31 || totalChunks != expectedChunks) {
       wifi_prov_rx_ = WifiProvisionRxTransfer{};
-      if (logs_) logs_->add("wifi_prov_rx_bad_start", msg.rssi, msg.counter, op);
+      lrslog::event("wifi_prov_rx_bad_start", msg.rssi, msg.counter, op);
       return false;
     }
     wifi_prov_rx_ = WifiProvisionRxTransfer{};
@@ -1376,25 +1374,25 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
     wifi_prov_rx_.ssid_len = ssidLen;
     wifi_prov_rx_.pass_len = passLen;
     wifi_prov_rx_.expected_hash = expectedHash;
-    if (logs_) logs_->add("wifi_prov_rx_start", msg.rssi, msg.counter, totalChunks);
+    lrslog::event("wifi_prov_rx_start", msg.rssi, msg.counter, totalChunks);
     return true;
   }
 
   if (!wifi_prov_rx_.active || wifi_prov_rx_.src != msg.src || wifi_prov_rx_.transfer_id != transferId ||
       wifi_prov_rx_.total_chunks != totalChunks) {
-    if (logs_) logs_->add("wifi_prov_rx_orphan", msg.rssi, msg.counter, op);
+    lrslog::event("wifi_prov_rx_orphan", msg.rssi, msg.counter, op);
     return false;
   }
 
   const size_t totalLen = static_cast<size_t>(wifi_prov_rx_.ssid_len) + static_cast<size_t>(wifi_prov_rx_.pass_len);
   if (op == kWifiProvisionOpData) {
     if (chunkIndex >= wifi_prov_rx_.total_chunks || valueLen > kWifiProvisionChunkDataBytes) {
-      if (logs_) logs_->add("wifi_prov_rx_bad_chunk", msg.rssi, msg.counter, chunkIndex);
+      lrslog::event("wifi_prov_rx_bad_chunk", msg.rssi, msg.counter, chunkIndex);
       return false;
     }
     const size_t offset = static_cast<size_t>(chunkIndex) * kWifiProvisionChunkDataBytes;
     if (offset >= totalLen || (offset + valueLen) > totalLen) {
-      if (logs_) logs_->add("wifi_prov_rx_bad_chunk", msg.rssi, msg.counter, chunkIndex);
+      lrslog::event("wifi_prov_rx_bad_chunk", msg.rssi, msg.counter, chunkIndex);
       return false;
     }
     memcpy(wifi_prov_rx_.data + offset, bytes, valueLen);
@@ -1405,13 +1403,13 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
   if (op == kWifiProvisionOpCommit) {
     const uint32_t wantBitmap = (1UL << wifi_prov_rx_.total_chunks) - 1UL;
     if ((wifi_prov_rx_.received_bitmap & wantBitmap) != wantBitmap) {
-      if (logs_) logs_->add("wifi_prov_rx_incomplete", msg.rssi, msg.counter, wifi_prov_rx_.total_chunks);
+      lrslog::event("wifi_prov_rx_incomplete", msg.rssi, msg.counter, wifi_prov_rx_.total_chunks);
       wifi_prov_rx_ = WifiProvisionRxTransfer{};
       return false;
     }
     const uint32_t gotHash = fnv1a32(wifi_prov_rx_.data, totalLen);
     if (gotHash != wifi_prov_rx_.expected_hash) {
-      if (logs_) logs_->add("wifi_prov_rx_hash_fail", msg.rssi, msg.counter, 0);
+      lrslog::event("wifi_prov_rx_hash_fail", msg.rssi, msg.counter, 0);
       wifi_prov_rx_ = WifiProvisionRxTransfer{};
       return false;
     }
@@ -1423,25 +1421,25 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
     wifi_prov_pending_password_ = String(passBuf);
     wifi_prov_pending_src_ = wifi_prov_rx_.src;
     wifi_prov_pending_ = (wifi_prov_pending_ssid_.length() > 0);
-    if (logs_) logs_->add("wifi_prov_rx_ready", msg.rssi, msg.counter, wifi_prov_rx_.total_chunks);
+    lrslog::event("wifi_prov_rx_ready", msg.rssi, msg.counter, wifi_prov_rx_.total_chunks);
     wifi_prov_rx_ = WifiProvisionRxTransfer{};
     return wifi_prov_pending_;
   }
 
-  if (logs_) logs_->add("wifi_prov_rx_unknown", msg.rssi, msg.counter, op);
+  lrslog::event("wifi_prov_rx_unknown", msg.rssi, msg.counter, op);
   return false;
 }
 
 bool NodeStateMachine::handleFactoryResetFrame(const ProtocolMessage &msg) {
   if (msg.relay_state != kFactoryResetMagic0 || msg.input_state != kFactoryResetMagic1) {
-    if (logs_) logs_->add("factory_reset_rx_bad", msg.rssi, msg.counter, 0);
+    lrslog::event("factory_reset_rx_bad", msg.rssi, msg.counter, 0);
     return false;
   }
   factory_reset_keep_fleet_pending_ = (msg.flags & kFactoryResetKeepFleetFlag) != 0U;
   factory_reset_pending_src_ = msg.src;
   factory_reset_pending_ = true;
-  if (logs_) {
-    logs_->add(factory_reset_keep_fleet_pending_ ? "factory_reset_rx_keep" : "factory_reset_rx_full",
+  {
+    lrslog::event(factory_reset_keep_fleet_pending_ ? "factory_reset_rx_keep" : "factory_reset_rx_full",
                msg.rssi, msg.counter, msg.src);
   }
   return true;
@@ -1454,7 +1452,7 @@ void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
   if (static_cast<int32_t>(now - prov_rx_.announce_at_ms) < 0) return;
   if (sendProvisioningAnnounce(prov_rx_.session_nonce)) {
     prov_rx_.discover_pending = false;
-    if (logs_) logs_->add("prov_announce_tx", 0, prov_rx_.session_nonce, cfg_.local_address);
+    lrslog::event("prov_announce_tx", 0, prov_rx_.session_nonce, cfg_.local_address);
   } else {
     prov_rx_.announce_at_ms = now + 500U;
   }
@@ -1477,7 +1475,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       encodeU16LE(payload + 3, static_cast<uint16_t>(retryWindowMs / 100U));
       payload[5] = 0;
       if (sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) {
-        if (logs_) logs_->add("prov_discover_retry", 0, prov_.session_nonce, 0);
+        lrslog::event("prov_discover_retry", 0, prov_.session_nonce, 0);
       }
       return;
     }
@@ -1527,7 +1525,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         prov_.state = ProvisioningSessionState::Error;
         prov_.active = false;
         prov_.pause_normal_tx = false;
-        if (logs_) logs_->add("prov_key_len_bad", 0, d.chip_id & 0xFFFFU, static_cast<uint8_t>(keyLen & 0xFFU));
+        lrslog::event("prov_key_len_bad", 0, d.chip_id & 0xFFFFU, static_cast<uint8_t>(keyLen & 0xFFU));
         return;
       }
       const uint8_t totalChunks = static_cast<uint8_t>((keyLen + (kProvKeyChunkBytes - 1U)) / kProvKeyChunkBytes);
@@ -1604,7 +1602,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
         d.state = ProvisioningDeviceState::AwaitVerify;
         prov_.phase_deadline_ms = now + kProvVerifyTimeoutMs;
-        if (logs_) logs_->add("prov_node_tx", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
+        lrslog::event("prov_node_tx", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
         return;
       }
     }
@@ -1677,7 +1675,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       d->last_seen_ms = now;
       if (d->state == ProvisioningDeviceState::Failed) d->state = ProvisioningDeviceState::Discovered;
       recomputeProvisioningConflictsAndAssignments();
-      if (logs_) logs_->add("prov_announce_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), d->current_address);
+      lrslog::event("prov_announce_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), d->current_address);
       return true;
     }
 
@@ -1702,7 +1700,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
         prov_.current_index++;
       }
       recomputeProvisioningConflictsAndAssignments();
-      if (logs_) logs_->add("prov_verify_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), payload[7]);
+      lrslog::event("prov_verify_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), payload[7]);
       return true;
     }
   }
@@ -1728,7 +1726,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     prov_rx_.session_nonce = sessionNonce;
     prov_rx_.discover_pending = true;
     prov_rx_.announce_at_ms = now + static_cast<uint32_t>(random(0, static_cast<long>(windowMs + 1U)));
-    if (logs_) logs_->add("prov_discover_rx", msg.rssi, sessionNonce, 0);
+    lrslog::event("prov_discover_rx", msg.rssi, sessionNonce, 0);
     return true;
   }
 
@@ -1807,7 +1805,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     fleet_prov_apply_pending_ = (fleet_prov_apply_key_.length() > 0);
     prov_rx_.key_transfer_active = false;
     prov_rx_.discover_pending = false;
-    if (logs_) logs_->add("prov_apply_rx", msg.rssi, sessionNonce, newAddr);
+    lrslog::event("prov_apply_rx", msg.rssi, sessionNonce, newAddr);
     return fleet_prov_apply_pending_;
   }
 
@@ -1834,7 +1832,7 @@ void NodeStateMachine::updateSharedTimeFromPeer(uint32_t unixTimeS, bool authori
     shared_time_authoritative_ = false;
     shared_time_sync_unix_s_ = unixTimeS;
     shared_time_sync_ms_ = now;
-    if (logs_) logs_->add("time_sync_peer", 0, unixTimeS, 0);
+    lrslog::event("time_sync_peer", 0, unixTimeS, 0);
     return;
   }
   if (shared_time_authoritative_) {
@@ -1844,7 +1842,7 @@ void NodeStateMachine::updateSharedTimeFromPeer(uint32_t unixTimeS, bool authori
   if (unixTimeS > current || (current > unixTimeS && (current - unixTimeS) > 30U)) {
     shared_time_sync_unix_s_ = unixTimeS;
     shared_time_sync_ms_ = now;
-    if (logs_) logs_->add("time_sync_peer", 0, unixTimeS, 0);
+    lrslog::event("time_sync_peer", 0, unixTimeS, 0);
   }
 }
 

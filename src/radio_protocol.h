@@ -4,8 +4,6 @@
 
 #include "config_store.h"
 
-class LogBuffer;
-
 enum class MessageType : uint8_t {
   Ack = 'A',
   Change = 'C',
@@ -39,7 +37,7 @@ struct ProtocolMessage {
 
 class RadioProtocol {
  public:
-  bool begin(const Settings &cfg, LogBuffer *logs);
+  bool begin(const Settings &cfg);
   void applyConfig(const Settings &cfg);
 
   bool send(MessageType type, uint8_t relay, uint8_t input, uint8_t flags, uint32_t counter, uint8_t src, uint8_t dst,
@@ -51,7 +49,6 @@ class RadioProtocol {
 
  private:
   Settings cfg_{};
-  LogBuffer *logs_ = nullptr;
   bool lora_enabled_ = true;
   bool default_key_configured_ = false;
   uint32_t boot_nonce_ = 0;

@@ -302,6 +302,21 @@ class LrsApiClient:
             raise RuntimeError("Unexpected /api/network/provision-fleet response")
         return out
 
+    def udp_log_start(self, host: str, port: int, ttl_s: int) -> Dict[str, Any]:
+        out = self.post_json(
+            "/api/logging/udp",
+            {"enabled": True, "host": host, "port": int(port), "ttl_s": int(ttl_s)},
+        )
+        if not isinstance(out, dict):
+            raise RuntimeError("Unexpected /api/logging/udp start response")
+        return out
+
+    def udp_log_stop(self) -> Dict[str, Any]:
+        out = self.post_json("/api/logging/udp", {"enabled": False})
+        if not isinstance(out, dict):
+            raise RuntimeError("Unexpected /api/logging/udp stop response")
+        return out
+
 
 def is_low_heap_api_error(err: ApiError) -> bool:
     return err.status == 503 and isinstance(err.body_json, dict) and err.body_json.get("error") == "low_heap"
@@ -489,6 +504,24 @@ def cmd_cancel(cfg: ProvisioningConfig) -> int:
     return 0
 
 
+def cmd_udp_log_start(cfg: ProvisioningConfig, host: str, port: int, ttl_s: int) -> int:
+    admin_password = ensure_admin_password(cfg)
+    client = LrsApiClient(f"{cfg.scheme}://{cfg.host}")
+    client.login(admin_password)
+    out = client.udp_log_start(host=host, port=port, ttl_s=ttl_s)
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_udp_log_stop(cfg: ProvisioningConfig) -> int:
+    admin_password = ensure_admin_password(cfg)
+    client = LrsApiClient(f"{cfg.scheme}://{cfg.host}")
+    client.login(admin_password)
+    out = client.udp_log_stop()
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Provision LoRa devices from one USB-powered LRS coordinator via HTTP API (no web UI required)."
@@ -532,6 +565,15 @@ def build_parser() -> argparse.ArgumentParser:
     cancelp = sub.add_parser("cancel", help="Cancel the current provisioning session")
     add_common(cancelp)
 
+    udpp = sub.add_parser("udp-log-start", help="Enable UDP log mirroring for a limited time (bench debugging)")
+    add_common(udpp)
+    udpp.add_argument("--udp-host", required=True, help="Destination host/IP for UDP logs (e.g. 192.168.4.2)")
+    udpp.add_argument("--udp-port", type=int, default=5514, help="Destination UDP port (default 5514)")
+    udpp.add_argument("--ttl-s", type=int, default=300, help="Mirror duration in seconds (default 300, max 1800)")
+
+    udps = sub.add_parser("udp-log-stop", help="Disable UDP log mirroring")
+    add_common(udps)
+
     # Default command = run (for convenience)
     p.set_defaults(command="run")
     return p
@@ -546,6 +588,10 @@ def main() -> int:
             return cmd_status(cfg)
         if args.command == "cancel":
             return cmd_cancel(cfg)
+        if args.command == "udp-log-start":
+            return cmd_udp_log_start(cfg, host=args.udp_host, port=args.udp_port, ttl_s=args.ttl_s)
+        if args.command == "udp-log-stop":
+            return cmd_udp_log_stop(cfg)
         return run_workflow(cfg)
     except ApiError as err:
         eprint(str(err))

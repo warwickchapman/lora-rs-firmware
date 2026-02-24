@@ -9,7 +9,6 @@
 #include "build_info.h"
 #include "config_store.h"
 #include "logger.h"
-#include "log_buffer.h"
 #include "sensor_manager.h"
 #include "state_machine.h"
 
@@ -239,6 +238,63 @@ bool parseBoolField(const JsonVariantConst &value, bool fallback) {
   return fallback;
 }
 
+bool parseIpField(const JsonVariantConst &value, IPAddress &out) {
+  if (value.isNull()) return false;
+  const char *raw = value.as<const char *>();
+  if (!raw) return false;
+  while (*raw == ' ' || *raw == '\t' || *raw == '\r' || *raw == '\n') raw++;
+  if (*raw == '\0') return false;
+  const char *end = raw + strlen(raw);
+  while (end > raw && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) end--;
+  char buf[32];
+  const size_t n = static_cast<size_t>(end - raw);
+  if (n == 0 || n >= sizeof(buf)) return false;
+  memcpy(buf, raw, n);
+  buf[n] = '\0';
+  IPAddress ip;
+  if (!ip.fromString(buf)) return false;
+  out = ip;
+  return true;
+}
+
+bool parseUint16Field(const JsonVariantConst &value, uint16_t &out) {
+  if (value.isNull()) return false;
+  long parsed = -1;
+  if (value.is<uint16_t>() || value.is<int>()) {
+    parsed = static_cast<long>(value.as<int>());
+  } else {
+    const char *raw = value.as<const char *>();
+    if (!raw) return false;
+    char *end = nullptr;
+    parsed = strtol(raw, &end, 10);
+    while (end && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) end++;
+    if (!end || *end != '\0') return false;
+  }
+  if (parsed < 1 || parsed > 65535) return false;
+  out = static_cast<uint16_t>(parsed);
+  return true;
+}
+
+bool parseUint32FieldRange(const JsonVariantConst &value, uint32_t minValue, uint32_t maxValue, uint32_t &out) {
+  if (value.isNull()) return false;
+  long parsed = -1;
+  if (value.is<uint32_t>() || value.is<int>()) {
+    parsed = static_cast<long>(value.as<int>());
+  } else {
+    const char *raw = value.as<const char *>();
+    if (!raw) return false;
+    char *end = nullptr;
+    parsed = strtol(raw, &end, 10);
+    while (end && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) end++;
+    if (!end || *end != '\0') return false;
+  }
+  if (parsed < 0) return false;
+  const uint32_t v = static_cast<uint32_t>(parsed);
+  if (v < minValue || v > maxValue) return false;
+  out = v;
+  return true;
+}
+
 bool softApActiveNow() {
   const IPAddress apIp = WiFi.softAPIP();
   return apIp[0] != 0;
@@ -373,9 +429,9 @@ fleet.focus();
 
 const char kIndexLowHeapHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-<title>LRS Console (Low-Memory Mode)</title>
+<title>LRS Console Unavailable (Low Memory)</title>
 <style>
-:root{--bg:#08101d;--card:#0f1a2e;--txt:#e5e7eb;--muted:#94a3b8;--border:#31435f;--btn:#005f73}
+:root{--bg:#08101d;--card:#0f1a2e;--txt:#e5e7eb;--muted:#94a3b8;--border:#31435f;--btn:#005f73;--ok:#1f8f5f;--warn:#b7791f;--crit:#b42318}
 body{margin:0;background:linear-gradient(180deg,#07111f,#0b1322);color:var(--txt);font-family:ui-sans-serif,system-ui;-webkit-text-size-adjust:100%}
 .wrap{max-width:680px;margin:0 auto;padding:14px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
@@ -387,46 +443,74 @@ h1{margin:0 0 6px;font-size:1.2rem} p{margin:0;color:var(--muted)}
 button,a.btn{background:var(--btn);color:#fff;border:0;border-radius:10px;padding:10px 12px;text-decoration:none;font-size:15px}
 a.btn.alt,button.alt{background:transparent;border:1px solid var(--border);color:var(--txt)}
 .mono{font-family:ui-monospace,monospace}
+.banner{border-left:4px solid var(--warn);background:#16131d;padding:10px 12px;border-radius:10px;color:#ffe8bf}
+.metric.ok{border-color:rgba(31,143,95,.65)} .metric.warn{border-color:rgba(183,121,31,.7)} .metric.crit{border-color:rgba(180,35,24,.8)}
+.metric.ok .v{color:#7ee0b7} .metric.warn .v{color:#ffd08a} .metric.crit .v{color:#ffb6ae}
+.small{font-size:12px;color:var(--muted)}
 </style></head><body><div class="wrap">
 <div class="card">
- <h1>LRS Console (Low-memory mode)</h1>
- <p id="notice">Full console payload was skipped to protect stability. Showing lightweight status only.</p>
+ <h1>Console Unavailable (Low Memory)</h1>
+ <div class="banner" id="notice">Full console was skipped to protect device stability. View metrics below, then retry when memory recovers.</div>
  <div class="row">
-  <button onclick="refreshLite()">Refresh</button>
-  <button class="alt" onclick="location.href='/?force_full=1'">Force full console</button>
+  <button onclick="refreshLite()">Refresh metrics</button>
+  <button class="alt" onclick="location.href='/?force_full=1'">Retry full console</button>
   <a class="btn alt" href="/login">Login</a>
  </div>
  <div class="grid">
-  <div class="tile"><div class="k">Role</div><div class="v" id="role">-</div></div>
-  <div class="tile"><div class="k">Relay</div><div class="v" id="relay">-</div></div>
+  <div class="tile"><div class="k">Unit</div><div class="v mono" id="unit">lrs-?</div><div class="small mono" id="chip">chip ?</div></div>
+  <div class="tile"><div class="k">Role / Relay</div><div class="v" id="roleRelay">-</div><div class="small" id="updated">Updated: never</div></div>
+  <div class="tile metric" id="tileHeap"><div class="k">Free Heap</div><div class="v" id="heap">-</div></div>
+  <div class="tile metric" id="tileBlock"><div class="k">Max Free Block</div><div class="v" id="maxblock">-</div></div>
+  <div class="tile metric" id="tileRatio"><div class="k">Block Ratio</div><div class="v" id="ratio">-</div></div>
+  <div class="tile metric" id="tileFrag"><div class="k">Heap Fragmentation</div><div class="v" id="frag">-</div></div>
   <div class="tile"><div class="k">WiFi</div><div class="v" id="wifi">-</div></div>
   <div class="tile"><div class="k">LoRa</div><div class="v" id="lora">-</div></div>
-  <div class="tile"><div class="k">Memory</div><div class="v" id="mem">-</div></div>
-  <div class="tile"><div class="k">Updated</div><div class="v" id="updated">never</div></div>
  </div>
- <div style="margin-top:10px" class="mono" id="raw"></div>
+ <div style="margin-top:10px" class="mono" id="raw">Loading metrics...</div>
 </div>
 <script>
-let lastOk=0;
 function setText(id,v){ const el=document.getElementById(id); if(el) el.innerText=String(v); }
-function age(ms){ if(ms<1000) return `${ms} ms`; const s=Math.round(ms/1000); return `${s}s`; }
+function classifyMetric(kind,v){
+ if(kind==='heap'){ if(v < 2000) return 'crit'; if(v < 3500) return 'warn'; return 'ok'; }
+ if(kind==='block'){ if(v < 1024) return 'crit'; if(v < 2000) return 'warn'; return 'ok'; }
+ if(kind==='ratio'){ if(v < 35) return 'crit'; if(v < 55) return 'warn'; return 'ok'; }
+ if(kind==='frag'){ if(v >= 55) return 'crit'; if(v >= 35) return 'warn'; return 'ok'; }
+ return '';
+}
+function paint(tileId, kind, value){
+ const el=document.getElementById(tileId); if(!el) return;
+ el.classList.remove('ok','warn','crit');
+ el.classList.add(classifyMetric(kind, value));
+}
+function fmtKb(v){ return `${(v/1024).toFixed(1)} KB`; }
+function fmtUptime(ms){
+ const s=Math.floor(ms/1000); const m=Math.floor(s/60); const h=Math.floor(m/60);
+ if(h>0) return `${h}h ${m%60}m`; if(m>0) return `${m}m ${s%60}s`; return `${s}s`;
+}
 async function refreshLite(){
  try{
   const res=await fetch('/api/status-lite',{cache:'no-store'});
   if(res.status===401){ location.href='/login?expired=1'; return; }
   if(!res.ok) throw new Error(`HTTP ${res.status}`);
   const st=await res.json();
-  lastOk=Date.now();
-  setText('role', String(st.role||'-').toUpperCase());
-  setText('relay', Number(st.relay_state)===1?'ON':'OFF');
+  const chip=(st.chip_id||'?').toString();
+  setText('unit', chip && chip!=='?' ? `lrs-${chip}` : 'lrs-?');
+  setText('chip', `chip ${chip}`);
+  setText('roleRelay', `${String(st.role||'-').toUpperCase()} / ${Number(st.relay_state)===1?'ON':'OFF'}`);
   setText('wifi', st.sta_connected ? `${st.sta_rssi} dBm` : 'disconnected');
   setText('lora', Number(st.lora_last_packet_ms||0)>0 ? `${st.lora_last_rssi} dBm` : 'no packets');
   const hf=Number(st.heap_free_bytes||0), mb=Number(st.max_free_block_bytes||0);
-  setText('mem', (hf&&mb) ? `${(hf/1024).toFixed(1)}k / ${(mb/1024).toFixed(1)}k` : '-');
-  setText('updated', new Date().toLocaleTimeString());
-  setText('raw', `heap=${hf} max=${mb} frag=${Number(st.heap_frag_percent||0)}% uptime=${Number(st.uptime_ms||0)}ms`);
+  const frag=Number(st.heap_frag_percent||0);
+  const ratio=(hf>0 && mb>0) ? Math.round((mb*100)/hf) : 0;
+  setText('heap', hf ? fmtKb(hf) : '-');
+  setText('maxblock', mb ? fmtKb(mb) : '-');
+  setText('ratio', (hf&&mb) ? `${ratio}%` : '-');
+  setText('frag', `${frag}%`);
+  paint('tileHeap','heap',hf); paint('tileBlock','block',mb); paint('tileRatio','ratio',ratio); paint('tileFrag','frag',frag);
+  setText('updated', `Updated: ${new Date().toLocaleTimeString()}`);
+  setText('raw', `heap=${hf} max=${mb} ratio=${ratio}% frag=${frag}% uptime=${fmtUptime(Number(st.uptime_ms||0))}`);
  }catch(e){
-  setText('notice', `Low-memory mode: ${e.message}`);
+  setText('notice', `Low-memory mode: could not refresh metrics (${e.message}).`);
  }
 }
 refreshLite();
@@ -2548,12 +2632,10 @@ const char *linkStateText(LinkState st) {
 bool WebConsole::begin(ConfigStore *config,
                        NodeStateMachine *sm,
                        SensorManager *sensors,
-                       LogBuffer *logs,
                        std::function<void(bool, bool)> onApply) {
   config_ = config;
   sm_ = sm;
   sensors_ = sensors;
-  logs_ = logs;
   on_apply_ = onApply;
   server_.collectHeaders("Cookie", "User-Agent");
   initStatusCaches();
@@ -2851,8 +2933,9 @@ bool WebConsole::buildStatusStaticCache() {
 bool WebConsole::buildStatusLiteCache() {
   if (!config_) return false;
 
-  DynamicJsonDocument doc(256);
+  DynamicJsonDocument doc(384);
   auto &cfg = config_->settings();
+  doc["chip_id"] = config_->chipIdHex();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
   doc["relay_state"] = sm_ ? sm_->relayState() : 0;
   doc["lora_last_rssi"] = sm_ ? sm_->lastPacketRssi() : 0;
@@ -3229,6 +3312,11 @@ void WebConsole::routes() {
     finishRequestLog();
   });
   server_.on("/api/mqtt/test", HTTP_POST, [this]() { handleTestMqtt(); });
+  server_.on("/api/logging/udp", HTTP_POST, [this]() {
+    beginRequestLog("/api/logging/udp", true, false, true);
+    handleUdpLogging();
+    finishRequestLog();
+  });
   server_.on("/api/settings", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
     handleGetSettings();
@@ -3954,24 +4042,6 @@ void WebConsole::handleImportSettings() { handlePostSettings(); }
 
 void WebConsole::handleDiagnostics() {
   DynamicJsonDocument doc(1024);
-  uint32_t loraTx = 0;
-  uint32_t ackOk = 0;
-  uint32_t ackTimeout = 0;
-  uint32_t replayDrop = 0;
-  uint32_t wifiConnectAttempts = 0;
-  uint32_t wifiConnectFail = 0;
-  uint32_t wifiDisconnects = 0;
-
-  logs_->forEachEntry([&](const LogItem &e) {
-    if (strcmp(e.event, "tx_packet") == 0) loraTx++;
-    if (strcmp(e.event, "tx_ack") == 0) ackOk++;
-    if (strcmp(e.event, "tx_ack_timeout") == 0) ackTimeout++;
-    if (strcmp(e.event, "rx_replay_drop") == 0) replayDrop++;
-    if (strcmp(e.event, "sta_connect_start") == 0) wifiConnectAttempts++;
-    if (strcmp(e.event, "sta_connect_failed_fallback_ap") == 0) wifiConnectFail++;
-    if (strcmp(e.event, "sta_disconnected") == 0) wifiDisconnects++;
-  });
-
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
@@ -3988,13 +4058,14 @@ void WebConsole::handleDiagnostics() {
   doc["flash_ide_size"] = ESP.getFlashChipSize();
   doc["sdk_version"] = ESP.getSdkVersion();
   doc["core_version"] = ESP.getCoreVersion();
-  doc["lora_tx_packets"] = loraTx;
-  doc["ack_ok"] = ackOk;
-  doc["ack_timeout"] = ackTimeout;
-  doc["replay_drop"] = replayDrop;
-  doc["wifi_connect_attempts"] = wifiConnectAttempts;
-  doc["wifi_connect_fail"] = wifiConnectFail;
-  doc["wifi_disconnects"] = wifiDisconnects;
+  doc["lora_tx_packets"] = nullptr;
+  doc["ack_ok"] = nullptr;
+  doc["ack_timeout"] = nullptr;
+  doc["replay_drop"] = nullptr;
+  doc["wifi_connect_attempts"] = nullptr;
+  doc["wifi_connect_fail"] = nullptr;
+  doc["wifi_disconnects"] = nullptr;
+  doc["log_history_available"] = false;
   doc["sta_status_code"] = static_cast<int>(st);
   doc["sta_status_text"] = wifiStatusText(st);
   doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
@@ -4407,6 +4478,78 @@ void WebConsole::handleTestMqtt() {
   server_.send(200, "application/json", out);
 }
 
+void WebConsole::handleUdpLogging() {
+  if (!requireAuth(true)) return;
+
+  DynamicJsonDocument body(256);
+  auto err = deserializeJson(body, server_.arg("plain"));
+  if (err) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    return;
+  }
+
+  const bool enabled = parseBoolField(body["enabled"], true);
+  if (!enabled) {
+    lrslog::disableUdpMirror();
+    const IPAddress rip = server_.client().remoteIP();
+    char ripbuf[16];
+    snprintf(ripbuf,
+             sizeof(ripbuf),
+             "%u.%u.%u.%u",
+             static_cast<unsigned>(rip[0]),
+             static_cast<unsigned>(rip[1]),
+             static_cast<unsigned>(rip[2]),
+             static_cast<unsigned>(rip[3]));
+    LRS_LOGI(API, "event=udp_log_mirror_disabled ip=%s", ripbuf);
+    sendTracked(200, "application/json", "{\"ok\":true,\"enabled\":false,\"ttl_ms\":0}");
+    return;
+  }
+
+  IPAddress target = server_.client().remoteIP();
+  if (!parseIpField(body["host"], target) && !body["host"].isNull()) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_host\"}");
+    return;
+  }
+
+  uint16_t port = 5514;
+  if (!body["port"].isNull() && !parseUint16Field(body["port"], port)) {
+      sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_port\"}");
+      return;
+  }
+
+  uint32_t ttlS = 300;
+  if (!body["ttl_s"].isNull() && !parseUint32FieldRange(body["ttl_s"], 1, 1800, ttlS)) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_ttl_s\"}");
+    return;
+  }
+
+  lrslog::setUdpMirror(target, port, ttlS * 1000UL);
+
+  char ipbuf[16];
+  snprintf(ipbuf,
+           sizeof(ipbuf),
+           "%u.%u.%u.%u",
+           static_cast<unsigned>(target[0]),
+           static_cast<unsigned>(target[1]),
+           static_cast<unsigned>(target[2]),
+           static_cast<unsigned>(target[3]));
+  LRS_LOGI(API,
+           "event=udp_log_mirror_enabled host=%s port=%u ttl_s=%lu",
+           ipbuf,
+           static_cast<unsigned>(port),
+           static_cast<unsigned long>(ttlS));
+
+  char resp[192];
+  snprintf(resp,
+           sizeof(resp),
+           "{\"ok\":true,\"enabled\":true,\"host\":\"%s\",\"port\":%u,\"ttl_ms\":%lu,\"remaining_ms\":%lu}",
+           ipbuf,
+           static_cast<unsigned>(port),
+           static_cast<unsigned long>(ttlS * 1000UL),
+           static_cast<unsigned long>(lrslog::udpMirrorRemainingMs()));
+  sendTracked(200, "application/json", resp);
+}
+
 void WebConsole::handleOtaUpload() {
   if (!requireAuth(true)) return;
   if (!ota_upload_ok_) {
@@ -4449,13 +4592,12 @@ void WebConsole::handleOtaUploadChunk() {
 
 void WebConsole::handleLogsCsv() {
   if (!requireAuth()) return;
-  server_.sendHeader("Content-Disposition", "attachment; filename=lrs-logs.csv");
-  server_.send(200, "text/csv", logs_->asCsv());
+  server_.send(410, "text/plain", "in-memory log history disabled");
 }
 
 void WebConsole::handleLogsText() {
   if (!requireAuth()) return;
-  server_.send(200, "text/plain", logs_->asText());
+  server_.send(410, "text/plain", "in-memory log history disabled");
 }
 
 void WebConsole::handleFactoryReset() {

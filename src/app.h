@@ -7,7 +7,7 @@
 #include <DNSServer.h>
 
 #include "config_store.h"
-#include "log_buffer.h"
+#include "logger.h"
 #include "mqtt_bridge.h"
 #include "radio_protocol.h"
 #include "sensor_manager.h"
@@ -21,7 +21,6 @@ class App {
 
  private:
   ConfigStore config_;
-  LogBuffer logs_;
   MqttBridge mqtt_;
   RadioProtocol radio_;
   SensorManager sensors_;

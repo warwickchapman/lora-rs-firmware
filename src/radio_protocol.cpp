@@ -6,7 +6,7 @@
 #include <LoRa.h>
 #include <SHA256.h>
 
-#include "log_buffer.h"
+#include "logger.h"
 
 namespace {
 constexpr uint8_t kNss = 15;
@@ -54,9 +54,8 @@ bool isDefaultDeploymentKey(const String &v) {
 }
 }
 
-bool RadioProtocol::begin(const Settings &cfg, LogBuffer *logs) {
+bool RadioProtocol::begin(const Settings &cfg) {
   cfg_ = cfg;
-  logs_ = logs;
   if (boot_nonce_ == 0) {
     boot_nonce_ = static_cast<uint32_t>(random(1, 0x7FFFFFFF));
     boot_nonce_ ^= static_cast<uint32_t>(micros());
@@ -164,9 +163,9 @@ bool RadioProtocol::sendRawWithKeys(MessageType type, uint32_t counter, uint8_t 
   yield();  // Long LoRa airtime can block; feed ESP8266 watchdog between burst packets.
   LoRa.receive();
 
-  if (logs_) {
+  {
     const uint8_t logState = (logEvent != nullptr && strcmp(logEvent, "tx_prov") == 0) ? dst : 0;
-    logs_->add(logEvent, 0, counter, logState);
+    lrslog::event(logEvent, 0, counter, logState);
   }
 
   return true;
@@ -186,8 +185,8 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
     while (LoRa.available()) {
       LoRa.read();
     }
-    if (logs_) {
-      logs_->add("rx_invalid_size", LoRa.packetRssi(), 0, 0);
+    {
+      lrslog::event("rx_invalid_size", LoRa.packetRssi(), 0, 0);
     }
     return false;
   }
@@ -200,7 +199,7 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
 
   const bool isProvisioning = (p.type == static_cast<uint8_t>(MessageType::Provisioning));
   if (default_key_configured_ && !isProvisioning) {
-    if (logs_) logs_->add("rx_default_key_block", LoRa.packetRssi(), p.counter, p.type);
+    lrslog::event("rx_default_key_block", LoRa.packetRssi(), p.counter, p.type);
     return false;
   }
 
@@ -217,8 +216,8 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
     viaFactoryKey = true;
   }
   if (!macOk) {
-    if (logs_) {
-      logs_->add("rx_bad_mac", LoRa.packetRssi(), p.counter, 0);
+    {
+      lrslog::event("rx_bad_mac", LoRa.packetRssi(), p.counter, 0);
     }
     return false;
   }
@@ -249,8 +248,8 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
   msg.rssi = LoRa.packetRssi();
   msg.via_factory_key = viaFactoryKey;
 
-  if (logs_) {
-    logs_->add("rx_packet", msg.rssi, msg.counter, msg.relay_state);
+  {
+    lrslog::event("rx_packet", msg.rssi, msg.counter, msg.relay_state);
   }
 
   return true;

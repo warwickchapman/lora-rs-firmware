@@ -6,7 +6,6 @@
 
 class ConfigStore;
 class NodeStateMachine;
-class LogBuffer;
 class SensorManager;
 
 class WebConsole {
@@ -14,7 +13,6 @@ class WebConsole {
   bool begin(ConfigStore *config,
              NodeStateMachine *sm,
              SensorManager *sensors,
-             LogBuffer *logs,
              std::function<void(bool, bool)> onApply);
   void tick();
 
@@ -23,7 +21,6 @@ class WebConsole {
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
   SensorManager *sensors_ = nullptr;
-  LogBuffer *logs_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
 
   uint16_t failed_auth_ = 0;
@@ -77,6 +74,7 @@ class WebConsole {
   void handleProvisioningProvisionAll();
   void handleProvisioningCancel();
   void handleTestMqtt();
+  void handleUdpLogging();
   void handleOtaUpload();
   void handleOtaUploadChunk();
   void handleLogsCsv();

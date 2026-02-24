@@ -3,7 +3,6 @@
 #include <Arduino.h>
 
 #include "config_store.h"
-#include "log_buffer.h"
 
 struct TempSensorStatus {
   bool enabled = false;
@@ -19,14 +18,13 @@ struct TempSensorStatus {
 
 class SensorManager {
  public:
-  bool begin(const Settings &cfg, LogBuffer *logs);
+  bool begin(const Settings &cfg);
   void applyConfig(const Settings &cfg);
   void tick();
   const TempSensorStatus &tempStatus() const;
 
  private:
   Settings cfg_{};
-  LogBuffer *logs_ = nullptr;
 
   class OneWire *ow_ = nullptr;
   class DallasTemperature *ds_ = nullptr;

@@ -16,8 +16,7 @@ uint16_t deriveTempIntervalS(uint32_t heartbeatMs) {
 }
 }
 
-bool SensorManager::begin(const Settings &cfg, LogBuffer *logs) {
-  logs_ = logs;
+bool SensorManager::begin(const Settings &cfg) {
   applyConfig(cfg);
   return true;
 }
@@ -59,7 +58,7 @@ void SensorManager::tick() {
     if (c == DEVICE_DISCONNECTED_C || c <= kInvalidTemp) {
       temp_.valid = false;
       temp_.error = "read_failed";
-      if (logs_) logs_->add("temp_read_failed", 0, 0, 0);
+      lrslog::event("temp_read_failed", 0, 0, 0);
       LRS_LOGW(SENSOR, "event=temp_read_failed pin=%u", static_cast<unsigned>(temp_.pin));
       return;
     }
@@ -67,7 +66,7 @@ void SensorManager::tick() {
     temp_.valid = true;
     temp_.celsius = c;
     temp_.error = "";
-    if (logs_) logs_->add("temp_read_ok", 0, 0, static_cast<uint8_t>(c));
+    lrslog::event("temp_read_ok", 0, 0, static_cast<uint8_t>(c));
     return;
   }
 
@@ -81,7 +80,7 @@ void SensorManager::tick() {
     temp_.last_read_ms = now;
     temp_.valid = false;
     temp_.error = "read_failed";
-    if (logs_) logs_->add("temp_read_failed", 0, 0, 0);
+    lrslog::event("temp_read_failed", 0, 0, 0);
     LRS_LOGW(SENSOR, "event=temp_read_failed pin=%u", static_cast<unsigned>(temp_.pin));
     return;
   }
@@ -123,7 +122,7 @@ void SensorManager::setupBus() {
     temp_.detected = false;
     temp_.error = "not_detected";
     ow_->reset_search();
-    if (logs_) logs_->add("temp_not_detected", 0, 0, temp_.pin);
+    lrslog::event("temp_not_detected", 0, 0, temp_.pin);
     LRS_LOGW(SENSOR, "event=temp_not_detected pin=%u", static_cast<unsigned>(temp_.pin));
     return;
   }
@@ -136,7 +135,7 @@ void SensorManager::setupBus() {
   temp_.error = "";
   ds_->setResolution(addr_, 12);
   temp_conversion_wait_ms_ = DallasTemperature::millisToWaitForConversion(12);
-  if (logs_) logs_->add("temp_detected", 0, 0, temp_.pin);
+  lrslog::event("temp_detected", 0, 0, temp_.pin);
   LRS_LOGI(SENSOR, "event=temp_detected pin=%u addr=%s", static_cast<unsigned>(temp_.pin), temp_.address.c_str());
 }
 

@@ -81,21 +81,20 @@ void App::begin() {
 
   startNetworking();
 
-  if (!radio_.begin(config_.settings(), &logs_)) {
-    logs_.add("radio_start_failed", 0, 0, 0);
+  if (!radio_.begin(config_.settings())) {
+    lrslog::event("radio_start_failed", 0, 0, 0);
   }
-  sensors_.begin(config_.settings(), &logs_);
+  sensors_.begin(config_.settings());
 
-  sm_.begin(config_.settings(), &radio_, &logs_);
+  sm_.begin(config_.settings(), &radio_);
   auto unixProvider = [this](uint32_t &unixTimeS) {
     if (!sm_.sharedUnixTimeValid()) return false;
     unixTimeS = sm_.sharedUnixTime();
     return (unixTimeS != 0);
   };
-  logs_.setTimeProvider(unixProvider);
-  lrslog::setUnixTimeProvider(unixProvider);
-  mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_, &logs_);
-  web_.begin(&config_, &sm_, &sensors_, &logs_, [this](bool restartNetwork, bool restartOtaAuth) {
+    lrslog::setUnixTimeProvider(unixProvider);
+  mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_);
+  web_.begin(&config_, &sm_, &sensors_, [this](bool restartNetwork, bool restartOtaAuth) {
     applyUpdatedConfig(restartNetwork, restartOtaAuth);
   });
 
@@ -106,7 +105,7 @@ void App::begin() {
   slow_phase_last_log_ms_ = 0;
   slow_phase_suppressed_count_ = 0;
 
-  logs_.add("boot", 0, 0, 0);
+  lrslog::event("boot", 0, 0, 0);
 }
 
 void App::tick() {
@@ -202,12 +201,12 @@ void App::tick() {
         cfg.audit_last_saved_by = "lora_wifi_provision";
         cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
-          logs_.add("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
+          lrslog::event("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
           if (changed) {
             applyUpdatedConfig(true, false);
           }
         } else {
-          logs_.add("wifi_prov_save_fail", 0, provSrc, 0);
+          lrslog::event("wifi_prov_save_fail", 0, provSrc, 0);
         }
       }
     }
@@ -216,13 +215,13 @@ void App::tick() {
     bool keepFleetKey = true;
     uint8_t resetSrc = 0;
     if (sm_.consumePendingFactoryReset(keepFleetKey, resetSrc)) {
-      logs_.add(keepFleetKey ? "factory_reset_exec_keep" : "factory_reset_exec_full", 0, resetSrc, 0);
+      lrslog::event(keepFleetKey ? "factory_reset_exec_keep" : "factory_reset_exec_full", 0, resetSrc, 0);
       if (config_.factoryReset(keepFleetKey)) {
         delay(100);
         ESP.restart();
         return;
       }
-      logs_.add("factory_reset_exec_save_fail", 0, resetSrc, 0);
+      lrslog::event("factory_reset_exec_save_fail", 0, resetSrc, 0);
     }
   }
   {
@@ -241,13 +240,13 @@ void App::tick() {
         cfg.audit_last_saved_by = "lora_fleet_provision";
         cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
-          logs_.add("fleet_prov_applied", 0, provSession, provAddr);
+          lrslog::event("fleet_prov_applied", 0, provSession, provAddr);
           if (changed) {
             applyUpdatedConfig(false, false);
           }
           sm_.sendProvisioningVerify(provSession, provAddr);
         } else {
-          logs_.add("fleet_prov_save_fail", 0, provSession, provAddr);
+          lrslog::event("fleet_prov_save_fail", 0, provSession, provAddr);
         }
       }
     }
@@ -334,7 +333,7 @@ void App::updateNetworking() {
       wifi_sta_connecting_ = false;
       sta_connected_since_ms_ = millis();
       const int rssi = WiFi.RSSI();
-      logs_.add("sta_connected", rssi, 0, 0);
+      lrslog::event("sta_connected", rssi, 0, 0);
       LRS_LOGI(WIFI,
                "event=sta_connected ssid=%s ip=%s rssi=%d",
                cfg.wifi_sta_ssid.c_str(),
@@ -350,7 +349,7 @@ void App::updateNetworking() {
       wifi_sta_connecting_ = false;
       WiFi.disconnect();
       wifi_sta_retry_ms_ = millis();
-      logs_.add("sta_connect_failed_fallback_ap", 0, 0, 0);
+      lrslog::event("sta_connect_failed_fallback_ap", 0, 0, 0);
       LRS_LOGW(WIFI,
                "event=sta_connect_failed ssid=%s reason=%s status=%d ap_fallback=1",
                cfg.wifi_sta_ssid.c_str(),
@@ -366,7 +365,7 @@ void App::updateNetworking() {
       sta_connected_ = true;
       sta_connected_since_ms_ = millis();
       const int rssi = WiFi.RSSI();
-      logs_.add("sta_connected", rssi, 0, 0);
+      lrslog::event("sta_connected", rssi, 0, 0);
       LRS_LOGI(WIFI,
                "event=sta_connected ssid=%s ip=%s rssi=%d",
                cfg.wifi_sta_ssid.c_str(),
@@ -380,7 +379,7 @@ void App::updateNetworking() {
 
   if (sta_connected_) {
     sta_connected_ = false;
-    logs_.add("sta_disconnected", 0, 0, 0);
+    lrslog::event("sta_disconnected", 0, 0, 0);
     LRS_LOGW(WIFI, "event=sta_disconnected");
     ensureApEnabled();
     wifi_sta_retry_ms_ = millis();
@@ -403,7 +402,7 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
   if (restartOtaAuth) {
     // ESP8266 ArduinoOTA cannot replace password once initialized in-process.
     // Reboot is required to apply new OTA credentials reliably.
-    logs_.add("ota_auth_changed_reboot", 0, 0, 0);
+    lrslog::event("ota_auth_changed_reboot", 0, 0, 0);
     LRS_LOGI(SYS, "event=config_apply restart_network=0 restart_ota_auth=1 action=reboot");
     delay(100);
     ESP.restart();
@@ -420,14 +419,14 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
   }
   refreshMdns();
 
-  logs_.add("config_reloaded", 0, 0, 0);
+  lrslog::event("config_reloaded", 0, 0, 0);
 }
 
 void App::startNtpClient() {
   configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
   ntp_started_ = true;
   ntp_last_check_ms_ = 0;
-  logs_.add("ntp_start", 0, 0, 0);
+  lrslog::event("ntp_start", 0, 0, 0);
   LRS_LOGI(NTP, "event=ntp_start servers=pool.ntp.org,time.nist.gov,time.google.com");
 }
 
@@ -530,7 +529,7 @@ void App::beginStaConnect() {
   wifi_sta_connecting_ = true;
   wifi_sta_started_ms_ = millis();
   wifi_sta_retry_ms_ = millis();
-  logs_.add("sta_connect_start", 0, 0, 0);
+  lrslog::event("sta_connect_start", 0, 0, 0);
   LRS_LOGI(WIFI, "event=sta_connect_start ssid=%s host=%s", cfg.wifi_sta_ssid.c_str(), host.c_str());
 }
 
@@ -539,7 +538,7 @@ void App::startOta() {
   const uint32_t freeHeap = lrslog::heapFree();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
   if (freeHeap < kOtaStartupMinFreeHeapBytes || maxBlock < kOtaStartupMinMaxBlockBytes) {
-    logs_.add("ota_disabled_heap", 0, 0, 0);
+    lrslog::event("ota_disabled_heap", 0, 0, 0);
     LRS_LOGW(SYS,
              "event=ota_disabled reason=low_startup_heap heap_free=%lu max_free_block=%lu min_free=%lu min_max_block=%lu",
              static_cast<unsigned long>(freeHeap),
@@ -559,7 +558,7 @@ void App::startOta() {
   // Disable ArduinoOTA's internal mDNS to avoid extra heap pressure and mDNS parsing work.
   ArduinoOTA.begin(false);
   ota_enabled_ = true;
-  logs_.add("ota_ready", 0, 0, 0);
+  lrslog::event("ota_ready", 0, 0, 0);
 }
 
 void App::refreshMdns() {
@@ -575,7 +574,7 @@ void App::refreshMdns() {
       MDNS.close();
       active_mdns_hostname_ = "";
       mdns_suspended_for_low_heap_ = true;
-      logs_.add("mdns_paused_heap", 0, 0, 0);
+      lrslog::event("mdns_paused_heap", 0, 0, 0);
       LRS_LOGW(MDNS,
                "event=mdns_paused reason=low_heap heap_free=%lu max_free_block=%lu",
                freeHeap,
@@ -588,7 +587,7 @@ void App::refreshMdns() {
       return;
     }
     mdns_suspended_for_low_heap_ = false;
-    logs_.add("mdns_resume_heap", 0, 0, 0);
+    lrslog::event("mdns_resume_heap", 0, 0, 0);
     LRS_LOGI(MDNS,
              "event=mdns_resumed reason=heap_recovered heap_free=%lu max_free_block=%lu",
              freeHeap,
@@ -603,14 +602,14 @@ void App::refreshMdns() {
         MDNS.close();
         active_mdns_hostname_ = "";
         mdns_suspended_for_provisioning_ = true;
-        logs_.add("mdns_paused_prov", 0, prov.session_nonce, 0);
+        lrslog::event("mdns_paused_prov", 0, prov.session_nonce, 0);
         LRS_LOGI(MDNS, "event=mdns_paused reason=provisioning session=%u", prov.session_nonce);
       }
       return;
     }
     if (mdns_suspended_for_provisioning_) {
       mdns_suspended_for_provisioning_ = false;
-      logs_.add("mdns_resume_prov", 0, 0, 0);
+      lrslog::event("mdns_resume_prov", 0, 0, 0);
       LRS_LOGI(MDNS, "event=mdns_resumed reason=provisioning_complete");
     }
   }
@@ -637,13 +636,13 @@ void App::refreshMdns() {
 
   MDNS.close();
   if (!MDNS.begin(desiredName)) {
-    logs_.add("mdns_failed", 0, 0, 0);
+    lrslog::event("mdns_failed", 0, 0, 0);
     LRS_LOGW(MDNS, "event=mdns_start_failed host=%s", desiredName);
     return;
   }
   MDNS.addService("http", "tcp", 80);
   active_mdns_hostname_ = desiredName;
-  logs_.add(String("mdns_ready_") + active_mdns_hostname_, 0, 0, 0);
+  lrslog::event("mdns_ready", 0, 0, 0);
   LRS_LOGI(MDNS, "event=mdns_ready host=%s", desiredName);
 #endif
 }
