@@ -64,6 +64,10 @@ constexpr uint32_t kStatusLiveSsePushSevereMs = 12000;
 constexpr uint32_t kStatusLiveSsePressureWindowMs = 12000;
 constexpr uint32_t kWebRequestPressureDurMs = 80;
 constexpr int kStaTestMaxAttempts = 40;  // 40 * 100ms = 4s max blocking window (commissioning only)
+constexpr size_t kFleetDocBaseBytes = 384;
+constexpr size_t kFleetDocPerPeerBytes = 256;
+constexpr size_t kFleetDocMinBytes = 1024;
+constexpr size_t kFleetDocMaxBytes = 4096;
 
 #ifdef REGION_US
 constexpr long kMinFrequencyHz = 902000000L;
@@ -3632,8 +3636,12 @@ void WebConsole::handleStatusLite() {
 
 void WebConsole::handleFleet() {
   if (rejectApiIfLowHeap("/api/fleet", kApiFleetLowHeapRejectFreeBytes, kApiFleetLowHeapRejectMaxBlockBytes)) return;
-  DynamicJsonDocument doc(4096);
   auto &cfg = config_->settings();
+  const size_t peerCount = (cfg.role_tx && sm_ != nullptr) ? sm_->peerCount() : 0;
+  size_t docCapacity = kFleetDocBaseBytes + (peerCount * kFleetDocPerPeerBytes);
+  if (docCapacity < kFleetDocMinBytes) docCapacity = kFleetDocMinBytes;
+  if (docCapacity > kFleetDocMaxBytes) docCapacity = kFleetDocMaxBytes;
+  DynamicJsonDocument doc(docCapacity);
   doc["role"] = cfg.role_tx ? "tx" : "rx";
   doc["tx_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
   doc["tx_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
@@ -3641,8 +3649,7 @@ void WebConsole::handleFleet() {
   doc["uptime_ms"] = now;
   JsonArray arr = doc.createNestedArray("devices");
   if (cfg.role_tx && sm_ != nullptr) {
-    const size_t n = sm_->peerCount();
-    for (size_t i = 0; i < n; ++i) {
+    for (size_t i = 0; i < peerCount; ++i) {
       PeerStatusSnapshot node{};
       if (!sm_->peerByIndex(i, node)) continue;
       JsonObject r = arr.createNestedObject();
@@ -3677,6 +3684,11 @@ void WebConsole::handleFleet() {
       r["stale_threshold_ms"] = staleAfterMs;
       r["stale"] = (node.last_seen_ms == 0) || (seenAgeMs > staleAfterMs);
     }
+  }
+  if (doc.overflowed()) {
+    LRS_LOGW(API, "event=fleet_json_overflow peers=%u cap=%u",
+             static_cast<unsigned>(peerCount),
+             static_cast<unsigned>(docCapacity));
   }
   const size_t len = measureJson(doc);
   server_.setContentLength(len);

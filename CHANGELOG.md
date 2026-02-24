@@ -17,6 +17,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Config boot loading no longer forces a config file rewrite on every boot solely to increment `audit_boot_count`, reducing avoidable flash wear and eliminating false `config_migrated` logs during normal startup.
 - Normal settings/export APIs no longer expose DS18B20 `sensor_temp_pin` / `sensor_temp_interval_s` fields that are not honored at runtime on this hardware (sensor pin is fixed and polling cadence is derived from heartbeat).
 - `/api/network/test` is now commissioning-only (setup flow) and uses a shorter bounded connect-test window to reduce control-loop stalls and prevent accidental production use.
+- `/api/fleet` now sizes its JSON document dynamically from current peer count (bounded), reducing transient heap spikes when only a small number of remotes are tracked.
 
 ## [0.2.2-alpha] - 2026-02-21
 
