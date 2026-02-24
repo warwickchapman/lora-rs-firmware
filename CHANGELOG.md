@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## [Unreleased]
+
+### Added
+- API-first provisioning helper CLI: `tools/lrs_provisioning_cli.py` for logging into a coordinator, applying local settings (role/addresses/WiFi), running LoRa provisioning discovery + provision-all, and optionally broadcasting fleet WiFi credentials without relying on the embedded web UI.
+- Example provisioning profile file: `tools/lrs_provisioning_profile.example.json`.
+
 ## [0.2.2-alpha] - 2026-02-21
 
 ### Added
