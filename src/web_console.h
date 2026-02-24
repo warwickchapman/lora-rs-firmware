@@ -102,7 +102,6 @@ class WebConsole {
   bool buildStatusLiveCache();
   bool buildStatusStaticCache();
   bool buildStatusLiteCache();
-  bool buildStatusCompatCacheFromLiveStatic();
 
   struct RequestLogState {
     bool active = false;
@@ -117,8 +116,6 @@ class WebConsole {
   RequestLogState request_log_{};
   uint32_t last_low_heap_warn_ms_ = 0;
   uint8_t last_logged_prov_state_ = 0xFF;
-  uint32_t last_status_compat_hit_log_ms_ = 0;
-  JsonResponseCache status_cache_{};
   JsonResponseCache status_live_cache_{};
   JsonResponseCache status_static_cache_{};
   JsonResponseCache status_lite_cache_{};

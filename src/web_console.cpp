@@ -47,7 +47,6 @@ constexpr uint32_t kApiProvStatusCompactFreeBytes = 3500;
 constexpr uint32_t kApiProvStatusCompactMaxBlockBytes = 1400;
 constexpr uint32_t kIndexLowHeapRejectFreeBytes = 3800;
 constexpr uint32_t kIndexLowHeapRejectMaxBlockBytes = 2400;
-constexpr uint32_t kStatusCacheTtlMs = 3000;
 constexpr uint32_t kStatusLiveCacheTtlMs = 1500;
 constexpr uint32_t kStatusStaticCacheTtlMs = 15000;
 constexpr uint32_t kStatusLiteCacheTtlMs = 1000;
@@ -55,7 +54,6 @@ constexpr size_t kStatusCacheReserveBytes = 1600;
 constexpr size_t kStatusLiveCacheReserveBytes = 1024;
 constexpr size_t kStatusStaticCacheReserveBytes = 1024;
 constexpr size_t kStatusLiteCacheReserveBytes = 384;
-constexpr uint32_t kStatusCompatHitLogMinIntervalMs = 5000;
 constexpr uint32_t kStatusLiveSseKeepAliveMs = 15000;
 constexpr uint32_t kStatusLiveSseConnectMinFreeBytes = 5000;
 constexpr uint32_t kStatusLiveSseConnectMinMaxBlockBytes = 2000;
@@ -2734,7 +2732,6 @@ void WebConsole::sendTracked(int code, const char *contentType, const String &bo
 
 void WebConsole::initStatusCaches() {
   // Keep cache allocation lazy on low-RAM boards; reserve() here can OOM during boot.
-  status_cache_.built_ms = 0;
   status_live_cache_.built_ms = 0;
   status_static_cache_.built_ms = 0;
   status_lite_cache_.built_ms = 0;
@@ -2952,33 +2949,6 @@ bool WebConsole::buildStatusLiteCache() {
   serializeJson(doc, status_lite_cache_.body);
   status_lite_cache_.built_ms = millis();
   return status_lite_cache_.body.length() > 0;
-}
-
-bool WebConsole::buildStatusCompatCacheFromLiveStatic() {
-  if (status_live_cache_.body.length() == 0 || status_static_cache_.body.length() == 0) {
-    return false;
-  }
-
-  DynamicJsonDocument liveDoc(768);
-  DynamicJsonDocument staticDoc(768);
-  if (deserializeJson(staticDoc, status_static_cache_.body)) return false;
-  if (deserializeJson(liveDoc, status_live_cache_.body)) return false;
-
-  DynamicJsonDocument merged(1536);
-  JsonObject dst = merged.to<JsonObject>();
-  JsonObject staticObj = staticDoc.as<JsonObject>();
-  for (JsonPair kv : staticObj) {
-    dst[kv.key()] = kv.value();
-  }
-  JsonObject liveObj = liveDoc.as<JsonObject>();
-  for (JsonPair kv : liveObj) {
-    dst[kv.key()] = kv.value();
-  }
-
-  status_cache_.body = "";
-  serializeJson(merged, status_cache_.body);
-  status_cache_.built_ms = millis();
-  return status_cache_.body.length() > 0;
 }
 
 void WebConsole::tickStatusLiveSse() {
@@ -3526,51 +3496,12 @@ void WebConsole::handleSessionApi() {
 }
 
 void WebConsole::handleStatus() {
-  if (tryServeCachedJson("/api/status",
-                         kApiLowHeapRejectFreeBytes,
-                         kApiLowHeapRejectMaxBlockBytes,
-                         kStatusCacheTtlMs,
-                         status_cache_)) {
-    return;
-  }
-
-  const uint32_t now = millis();
-  if (last_status_compat_hit_log_ms_ == 0 || (now - last_status_compat_hit_log_ms_) >= kStatusCompatHitLogMinIntervalMs) {
-    last_status_compat_hit_log_ms_ = now;
-    String ua = server_.header("User-Agent");
-    if (ua.length() > 96) ua = ua.substring(0, 96);
-    const String clientTag = server_.arg("client");
-    LRS_LOGW(API,
-             "event=status_compat_hit ip=%s client=%s ua=%s",
-             server_.client().remoteIP().toString().c_str(),
-             clientTag.length() ? clientTag.c_str() : "-",
-             ua.length() ? ua.c_str() : "-");
-  }
-
-  if ((status_live_cache_.body.length() == 0 || (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) &&
-      apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes, kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
-    buildStatusLiveCache();
-  }
-  if ((status_static_cache_.body.length() == 0 || (now - status_static_cache_.built_ms) >= kStatusStaticCacheTtlMs) &&
-      apiHeapHealthy(kApiStatusStaticLowHeapRejectFreeBytes, kApiStatusStaticLowHeapRejectMaxBlockBytes)) {
-    buildStatusStaticCache();
-  }
-
-  if (!buildStatusCompatCacheFromLiveStatic()) {
-    if (status_cache_.body.length() > 0) {
-      LRS_LOGW(API,
-               "event=status_compat_stale_fallback heap_free=%lu heap_frag=%u max_free_block=%lu",
-               static_cast<unsigned long>(lrslog::heapFree()),
-               static_cast<unsigned>(lrslog::heapFragPercent()),
-               static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
-      sendTracked(200, "application/json", status_cache_.body);
-      return;
-    }
-    sendTracked(503, "application/json", "{\"ok\":false,\"error\":\"compat_cache_unavailable\"}");
-    return;
-  }
-
-  sendTracked(200, "application/json", status_cache_.body);
+  LRS_LOGW(API,
+           "event=status_compat_removed ip=%s",
+           server_.client().remoteIP().toString().c_str());
+  sendTracked(410,
+              "application/json",
+              "{\"ok\":false,\"error\":\"deprecated\",\"use\":[\"/api/status-live\",\"/api/status-static\"]}");
 }
 
 void WebConsole::handleStatusLive() {
