@@ -129,13 +129,16 @@ button.alt{background:rgba(255,255,255,.1)}
 <div class="section grid">
 <div><label for="mode">Mode</label><select id="mode" onchange="syncRoleOptions()"><option value="standalone">Standalone</option><option value="paired" selected>Paired</option><option value="mesh">Mesh</option></select></div>
 <div><label for="role">Role</label><select id="role"></select></div>
+<div id="paired_input_row" style="grid-column:1/-1">
+<div class="check"><input id="input_control_paired_lora_enabled" type="checkbox" checked /><span>Local input drives LoRa control of paired relay</span></div>
+<div class="hint" id="paired_input_hint">TX only in paired mode. Disabled when role is Receiver.</div>
+</div>
 </div>
 
 <div class="section">
 <label>Capabilities</label>
 <div class="check"><input id="mqtt_client_enabled" type="checkbox" /><span>MQTT client enabled</span></div>
 <div class="check"><input id="mqtt_control_enabled" type="checkbox" /><span>MQTT control enabled</span></div>
-<div class="check" id="paired_input_row"><input id="input_control_paired_lora_enabled" type="checkbox" /><span>Local input drives LoRa control of paired relay</span></div>
 <div class="hint">When MQTT control is enabled, local automations are disabled.</div>
 </div>
 
@@ -219,10 +222,16 @@ function syncRoleOptions(){
  roleEl.innerHTML = opts.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('');
  roleEl.value = opts.some(o=>o[0]===prev) ? prev : opts[0][0];
  const pairedInputRow = document.getElementById('paired_input_row');
+ const pairedInputEl = document.getElementById('input_control_paired_lora_enabled');
+ const pairedInputHint = document.getElementById('paired_input_hint');
  if(pairedInputRow){
-  const show = mode === 'paired' && roleEl.value === 'transmitter';
-  pairedInputRow.style.display = show ? '' : 'none';
-  if(!show){ document.getElementById('input_control_paired_lora_enabled').checked = false; }
+  const pairedMode = mode === 'paired';
+  const txRole = roleEl.value === 'transmitter';
+  pairedInputRow.style.display = pairedMode ? '' : 'none';
+  if(!pairedMode && pairedInputEl){ pairedInputEl.checked = false; }
+  if(pairedInputEl){ pairedInputEl.disabled = !(pairedMode && txRole); }
+  if(pairedInputHint){ pairedInputHint.style.display = (pairedMode && !txRole) ? '' : 'none'; }
+  if(pairedMode && !txRole && pairedInputEl){ pairedInputEl.checked = false; }
  }
 }
 roleEl.addEventListener('change', syncRoleOptions);
