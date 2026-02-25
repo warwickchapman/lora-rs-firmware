@@ -263,28 +263,37 @@ void RadioProtocol::deriveKeys() {
   }
   SHA256 hash;
   uint8_t digest[32];
+  const char *fleet = settings_->fleet_passphrase.c_str();
+  const size_t fleetLen = settings_->fleet_passphrase.length();
+  const char *factory = kDefaultDeploymentKey;
+  const size_t factoryLen = strlen(kDefaultDeploymentKey);
+  const uint8_t sep = ':';
 
-  String encMaterial = settings_->fleet_passphrase + ":enc";
   hash.reset();
-  hash.update(reinterpret_cast<const uint8_t *>(encMaterial.c_str()), encMaterial.length());
+  hash.update(reinterpret_cast<const uint8_t *>(fleet), fleetLen);
+  hash.update(&sep, 1);
+  hash.update(reinterpret_cast<const uint8_t *>("enc"), 3);
   hash.finalize(digest, sizeof(digest));
   memcpy(enc_key_, digest, sizeof(enc_key_));
 
-  String macMaterial = settings_->fleet_passphrase + ":mac";
   hash.reset();
-  hash.update(reinterpret_cast<const uint8_t *>(macMaterial.c_str()), macMaterial.length());
+  hash.update(reinterpret_cast<const uint8_t *>(fleet), fleetLen);
+  hash.update(&sep, 1);
+  hash.update(reinterpret_cast<const uint8_t *>("mac"), 3);
   hash.finalize(digest, sizeof(digest));
   memcpy(mac_key_, digest, sizeof(mac_key_));
 
-  String factoryEncMaterial = String(kDefaultDeploymentKey) + ":enc";
   hash.reset();
-  hash.update(reinterpret_cast<const uint8_t *>(factoryEncMaterial.c_str()), factoryEncMaterial.length());
+  hash.update(reinterpret_cast<const uint8_t *>(factory), factoryLen);
+  hash.update(&sep, 1);
+  hash.update(reinterpret_cast<const uint8_t *>("enc"), 3);
   hash.finalize(digest, sizeof(digest));
   memcpy(factory_enc_key_, digest, sizeof(factory_enc_key_));
 
-  String factoryMacMaterial = String(kDefaultDeploymentKey) + ":mac";
   hash.reset();
-  hash.update(reinterpret_cast<const uint8_t *>(factoryMacMaterial.c_str()), factoryMacMaterial.length());
+  hash.update(reinterpret_cast<const uint8_t *>(factory), factoryLen);
+  hash.update(&sep, 1);
+  hash.update(reinterpret_cast<const uint8_t *>("mac"), 3);
   hash.finalize(digest, sizeof(digest));
   memcpy(factory_mac_key_, digest, sizeof(factory_mac_key_));
 }
