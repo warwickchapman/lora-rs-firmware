@@ -42,6 +42,34 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
   }
   return false;
 }
+
+constexpr size_t kProgmemHtmlChunkBytes = 768;
+
+bool sendProgmemHtml(ESP8266WebServer &server, int code, const char *contentType, PGM_P html) {
+  const size_t len = strlen_P(html);
+  server.setContentLength(len);
+  server.send(code, contentType, "");
+
+  char chunk[kProgmemHtmlChunkBytes];
+  size_t sent = 0;
+  while (sent < len) {
+    const size_t n = (len - sent > kProgmemHtmlChunkBytes) ? kProgmemHtmlChunkBytes : (len - sent);
+    memcpy_P(chunk, html + sent, n);
+
+    size_t writtenTotal = 0;
+    while (writtenTotal < n) {
+      const size_t written =
+          server.client().write(reinterpret_cast<const uint8_t *>(chunk + writtenTotal), n - writtenTotal);
+      if (written == 0) break;
+      writtenTotal += written;
+    }
+    if (writtenTotal < n) break;
+
+    sent += writtenTotal;
+    if ((sent % (kProgmemHtmlChunkBytes * 4)) == 0) delay(0);
+  }
+  return sent == len;
+}
 }  // namespace
 
 void WebConsole::handleIndex() {
@@ -55,13 +83,15 @@ void WebConsole::handleIndex() {
   const uint32_t heapBefore = lrslog::heapFree();
   const uint32_t maxBlockBefore = lrslog::heapMaxFreeBlock();
   const uint8_t fragBefore = lrslog::heapFragPercent();
+  const bool heapTight = (heapBefore < kIndexLowHeapRejectFreeBytes) || (maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes) ||
+                         (fragBefore > 45U);
   const bool forceFull = server_.hasArg("force_full") && server_.arg("force_full") != "0";
   LRS_LOGI(WEB,
            "event=index_send_start heap_free=%lu heap_frag=%u max_free_block=%lu",
            static_cast<unsigned long>(heapBefore),
            static_cast<unsigned>(fragBefore),
            static_cast<unsigned long>(maxBlockBefore));
-  if (!forceFull && (heapBefore < kIndexLowHeapRejectFreeBytes || maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes)) {
+  if (!forceFull && heapTight) {
     LRS_LOGW(WEB,
              "event=index_send_reject_low_heap heap_free=%lu heap_frag=%u max_free_block=%lu",
              static_cast<unsigned long>(heapBefore),
@@ -70,10 +100,12 @@ void WebConsole::handleIndex() {
     LRS_LOGI(WEB, "event=index_send_low_heap_fallback");
     markResponseStatus(200);
     setUiNoStoreHeaders();
-    server_.send_P(200, "text/html", kIndexLowHeapHtml);
+    if (!sendProgmemHtml(server_, 200, "text/html", kIndexLowHeapHtml)) {
+      LRS_LOGW(WEB, "event=index_low_heap_html_partial");
+    }
     return;
   }
-  if (forceFull && (heapBefore < kIndexLowHeapRejectFreeBytes || maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes)) {
+  if (forceFull && heapTight) {
     LRS_LOGW(WEB,
              "event=index_send_force_low_heap heap_free=%lu heap_frag=%u max_free_block=%lu",
              static_cast<unsigned long>(heapBefore),
@@ -82,7 +114,9 @@ void WebConsole::handleIndex() {
   }
   markResponseStatus(200);
   setUiNoStoreHeaders();
-  server_.send_P(200, "text/html", kIndexHtml);
+  if (!sendProgmemHtml(server_, 200, "text/html", kIndexHtml)) {
+    LRS_LOGW(WEB, "event=index_html_partial");
+  }
   LRS_LOGI(WEB,
            "event=index_send_done heap_free=%lu heap_frag=%u max_free_block=%lu",
            static_cast<unsigned long>(lrslog::heapFree()),
@@ -99,7 +133,9 @@ void WebConsole::handleLoginPage() {
   }
   markResponseStatus(200);
   setUiNoStoreHeaders();
-  server_.send_P(200, "text/html", kLoginHtml);
+  if (!sendProgmemHtml(server_, 200, "text/html", kLoginHtml)) {
+    LRS_LOGW(WEB, "event=login_html_partial");
+  }
 }
 
 void WebConsole::handleFleetSetupPage() {
@@ -112,7 +148,9 @@ void WebConsole::handleFleetSetupPage() {
   }
   markResponseStatus(200);
   setUiNoStoreHeaders();
-  server_.send_P(200, "text/html", kFleetSetupHtml);
+  if (!sendProgmemHtml(server_, 200, "text/html", kFleetSetupHtml)) {
+    LRS_LOGW(WEB, "event=setup_html_partial");
+  }
 }
 
 void WebConsole::handleLoginApi() {

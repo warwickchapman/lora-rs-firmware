@@ -32,8 +32,10 @@ const uint32_t kApiFleetLowHeapRejectFreeBytes = 4500;
 const uint32_t kApiFleetLowHeapRejectMaxBlockBytes = 1800;
 const uint32_t kApiProvStatusCompactFreeBytes = 3500;
 const uint32_t kApiProvStatusCompactMaxBlockBytes = 1400;
-const uint32_t kIndexLowHeapRejectFreeBytes = 3800;
-const uint32_t kIndexLowHeapRejectMaxBlockBytes = 2400;
+// Full index HTML is large; use conservative gates so we prefer the low-heap page
+// over risking partial/truncated HTML delivery.
+const uint32_t kIndexLowHeapRejectFreeBytes = 7000;
+const uint32_t kIndexLowHeapRejectMaxBlockBytes = 3200;
 const uint32_t kStatusLiveCacheTtlMs = 1500;
 const uint32_t kStatusStaticCacheTtlMs = 15000;
 // Non-status pages poll status-lite for header badges; a longer TTL reduces JSON rebuild churn.
