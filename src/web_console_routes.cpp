@@ -131,10 +131,6 @@ void WebConsole::routes() {
     if (!requireAuth(true)) return;
     handleFactory();
   });
-  server_.on("/api/diagnostics", HTTP_GET, [this]() {
-    if (!requireAuth(true)) return;
-    handleDiagnostics();
-  });
   server_.on("/api/wifi/scan", HTTP_GET, [this]() { handleWifiScan(); });
   server_.on("/api/network/test", HTTP_POST, [this]() { handleTestSta(); });
   server_.on("/api/network/provision-fleet", HTTP_POST, [this]() {

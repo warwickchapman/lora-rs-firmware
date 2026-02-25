@@ -310,7 +310,7 @@ void WebConsole::handleLogoutApi() {
 }
 
 void WebConsole::handleSessionApi() {
-  DynamicJsonDocument doc(128);
+  StaticJsonDocument<128> doc;
   const bool ok = hasSession() && cookieValue("lrs_session") == session_token_;
   doc["ok"] = ok;
   doc["remaining_s"] = ok ? sessionRemainingS() : 0;

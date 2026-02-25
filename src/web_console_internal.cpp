@@ -36,7 +36,8 @@ const uint32_t kIndexLowHeapRejectFreeBytes = 3800;
 const uint32_t kIndexLowHeapRejectMaxBlockBytes = 2400;
 const uint32_t kStatusLiveCacheTtlMs = 1500;
 const uint32_t kStatusStaticCacheTtlMs = 15000;
-const uint32_t kStatusLiteCacheTtlMs = 1000;
+// Non-status pages poll status-lite for header badges; a longer TTL reduces JSON rebuild churn.
+const uint32_t kStatusLiteCacheTtlMs = 5000;
 const size_t kStatusCacheReserveBytes = 1600;
 const size_t kStatusLiveCacheReserveBytes = 1024;
 const size_t kStatusStaticCacheReserveBytes = 1024;

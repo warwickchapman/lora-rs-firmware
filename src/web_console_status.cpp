@@ -148,7 +148,7 @@ bool WebConsole::buildStatusStaticCache() {
 bool WebConsole::buildStatusLiteCache() {
   if (!config_) return false;
 
-  DynamicJsonDocument doc(384);
+  StaticJsonDocument<384> doc;
   auto &cfg = config_->settings();
   doc["chip_id"] = config_->chipIdHex();
   doc["factory_serial"] = cfg.factory_serial;

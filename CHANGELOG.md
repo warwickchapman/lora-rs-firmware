@@ -32,6 +32,10 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Main web console header now shows device identity (serial/chip) with one-click copy and mode-aware role title.
 - Default `input_control_paired_lora_enabled` is now `false` to avoid unintentionally blocking automation control on fresh configs.
 - Documentation now reflects commissioning-first setup, canonical mode/role terms, and current control-authority precedence.
+- Web UI heap-pressure pass: removed Diagnostics/Logs pages from the embedded UI shell, removed stale diagnostics/log JS handlers, slowed header/status-lite polling cadence, and increased status-lite cache TTL to reduce repeated JSON rebuild churn.
+- Provisioning status endpoint now uses compact payload responses to avoid large dynamic JSON allocations during active provisioning and low-memory periods.
+- Request logging now avoids per-request `String` allocations for path/IP, reducing allocator churn in high-frequency API polling paths.
+- Bounded polling endpoints now use stack-backed JSON docs where safe (`/api/status-lite`, `/api/session`) to reduce transient heap pressure.
 
 ## [0.2.2-alpha] - 2026-02-21
 

@@ -118,8 +118,8 @@ class WebConsole {
     bool heap_diag = false;
     uint32_t started_ms = 0;
     int status = 0;
-    String path;
-    String client_ip;
+    const char *path = nullptr;
+    uint8_t client_ip[4] = {0, 0, 0, 0};
   };
   RequestLogState request_log_{};
   uint32_t last_low_heap_warn_ms_ = 0;

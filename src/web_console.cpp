@@ -50,8 +50,12 @@ void WebConsole::beginRequestLog(const char *path, bool api, bool poll, bool hea
   request_log_.heap_diag = heapDiag;
   request_log_.started_ms = millis();
   request_log_.status = 0;
-  request_log_.path = path ? String(path) : server_.uri();
-  request_log_.client_ip = server_.client().remoteIP().toString();
+  request_log_.path = path;
+  const IPAddress remote = server_.client().remoteIP();
+  request_log_.client_ip[0] = remote[0];
+  request_log_.client_ip[1] = remote[1];
+  request_log_.client_ip[2] = remote[2];
+  request_log_.client_ip[3] = remote[3];
 }
 
 void WebConsole::finishRequestLog() {
@@ -60,8 +64,15 @@ void WebConsole::finishRequestLog() {
   const uint32_t endMs = millis();
   const uint32_t durMs = endMs - request_log_.started_ms;
   const int status = request_log_.status;
-  const String path = request_log_.path.length() ? request_log_.path : server_.uri();
-  const String ip = request_log_.client_ip;
+  const char *path = request_log_.path ? request_log_.path : "(unknown)";
+  char ip[16];
+  snprintf(ip,
+           sizeof(ip),
+           "%u.%u.%u.%u",
+           static_cast<unsigned>(request_log_.client_ip[0]),
+           static_cast<unsigned>(request_log_.client_ip[1]),
+           static_cast<unsigned>(request_log_.client_ip[2]),
+           static_cast<unsigned>(request_log_.client_ip[3]));
   const uint32_t freeHeap = lrslog::heapFree();
   const uint8_t heapFrag = lrslog::heapFragPercent();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
@@ -73,10 +84,10 @@ void WebConsole::finishRequestLog() {
                  cat,
                  "event=request method=%s path=%s status=%d dur_ms=%lu ip=%s heap_free=%lu heap_frag=%u max_free_block=%lu",
                  httpMethodText(server_.method()),
-                 path.c_str(),
+                 path,
                  status,
                  static_cast<unsigned long>(durMs),
-                 ip.c_str(),
+                 ip,
                  static_cast<unsigned long>(freeHeap),
                  static_cast<unsigned>(heapFrag),
                  static_cast<unsigned long>(maxBlock));
@@ -85,7 +96,7 @@ void WebConsole::finishRequestLog() {
       last_low_heap_warn_ms_ = endMs;
       LRS_LOGW(API,
                "event=low_heap path=%s heap_free=%lu heap_frag=%u max_free_block=%lu dur_ms=%lu",
-               path.c_str(),
+               path,
                static_cast<unsigned long>(freeHeap),
                static_cast<unsigned>(heapFrag),
                static_cast<unsigned long>(maxBlock),
@@ -96,10 +107,10 @@ void WebConsole::finishRequestLog() {
                  cat,
                  "event=request method=%s path=%s status=%d dur_ms=%lu ip=%s",
                  httpMethodText(server_.method()),
-                 path.c_str(),
+                 path,
                  status,
                  static_cast<unsigned long>(durMs),
-                 ip.c_str());
+                 ip);
   }
 
   if (durMs >= kWebRequestPressureDurMs) {

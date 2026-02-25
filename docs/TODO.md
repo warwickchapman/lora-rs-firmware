@@ -60,6 +60,7 @@
 - If DS18B20 is enabled but not detected, report `missing` / `not present`, skip readings/publish, and retry detection periodically.
 - If DS18B20 is detected later, activate automatically without requiring a reboot or config rewrite.
 - Do not auto-disable DS18B20 config on failed detection (avoid boot-time false negatives becoming sticky state).
+- Consider configurable RX fail-safe in paired-input mode: latch last state indefinitely if TX stream disappears.
 
 ## Observability / Logging
 - Implement structured logging with levels: `ERROR`, `WARN`, `INFO` (default), `DEBUG`, `TRACE`.

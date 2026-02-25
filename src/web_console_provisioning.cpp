@@ -76,97 +76,24 @@ void WebConsole::handleProvisioningStatus() {
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
+  ProvisioningSessionSnapshot sess{};
+  sm_->provisioningSession(sess);
+  const size_t totalDevices = sm_->provisioningDeviceCount();
+
   const uint32_t heapFree = lrslog::heapFree();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
   const bool veryLowHeap =
       (heapFree < kApiProvStatusCompactFreeBytes || maxBlock < kApiProvStatusCompactMaxBlockBytes);
-  const bool lowHeapForFull =
-      (heapFree < kApiLowHeapRejectFreeBytes || maxBlock < kApiLowHeapRejectMaxBlockBytes);
-  if (lowHeapForFull) {
-    if (veryLowHeap &&
-        rejectApiIfLowHeap("/api/provisioning/status",
-                           kApiProvStatusCompactFreeBytes,
-                           kApiProvStatusCompactMaxBlockBytes)) {
-      return;
-    }
-    StaticJsonDocument<1536> doc;
-    doc["ok"] = true;
-    ProvisioningSessionSnapshot sess{};
-    sm_->provisioningSession(sess);
-    const size_t totalDevices = sm_->provisioningDeviceCount();
-    const size_t maxCompactRows = 8;
-    const size_t returnedDevices = (totalDevices < maxCompactRows) ? totalDevices : maxCompactRows;
-    JsonObject s = doc.createNestedObject("session");
-    s["active"] = sess.active;
-    s["state"] = provisioningSessionStateText(sess.state);
-    s["session_nonce"] = sess.session_nonce;
-    s["estimated_count"] = sess.estimated_count;
-    s["started_ms"] = sess.started_ms;
-    s["phase_deadline_ms"] = sess.phase_deadline_ms;
-    s["retry_enabled"] = sess.retry_enabled;
-    s["retry_used"] = sess.retry_used;
-    s["paused_normal_tx"] = sess.paused_normal_tx;
-    s["discovered_count"] = sess.discovered_count;
-    s["selected_count"] = sess.selected_count;
-    s["conflict_count"] = sess.conflict_count;
-    s["verified_count"] = sess.verified_count;
-    s["failed_count"] = sess.failed_count;
-    s["now_ms"] = millis();
-    s["devices_total"] = totalDevices;
-    s["devices_returned"] = returnedDevices;
-    s["devices_truncated"] = (returnedDevices < totalDevices);
-    s["compact"] = true;
-    JsonArray arr = doc.createNestedArray("devices");
-    for (size_t i = 0; i < returnedDevices; ++i) {
-      ProvisioningDeviceSnapshot d{};
-      if (!sm_->provisioningDeviceByIndex(i, d)) continue;
-      JsonObject o = arr.createNestedObject();
-      char chipHex[11];
-      snprintf(chipHex, sizeof(chipHex), "0x%08lX", static_cast<unsigned long>(d.chip_id));
-      o["chip_id_hex"] = chipHex;
-      o["current_address"] = d.current_address;
-      o["assigned_address"] = d.assigned_address;
-      o["fw_major"] = d.fw_major;
-      o["fw_minor"] = d.fw_minor;
-      o["fw_patch"] = d.fw_patch;
-      o["rssi"] = d.rssi;
-      o["state"] = provisioningDeviceStateText(d.state);
-      o["address_conflict"] = d.address_conflict;
-    }
-
-    if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
-      last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
-      LRS_LOGI(API,
-               "event=provisioning_phase state=%s discovered=%u conflicts=%u verified=%u failed=%u",
-               provisioningSessionStateText(sess.state),
-               static_cast<unsigned>(sess.discovered_count),
-               static_cast<unsigned>(sess.conflict_count),
-               static_cast<unsigned>(sess.verified_count),
-               static_cast<unsigned>(sess.failed_count));
-    }
-
-    const size_t len = measureJson(doc);
-    server_.setContentLength(len);
-    markResponseStatus(200);
-    server_.send(200, "application/json", "");
-    serializeJson(doc, server_.client());
-    LRS_LOGW(API,
-             "event=provisioning_status_compact heap_free=%lu heap_frag=%u max_free_block=%lu",
-             static_cast<unsigned long>(heapFree),
-             static_cast<unsigned>(lrslog::heapFragPercent()),
-             static_cast<unsigned long>(maxBlock));
+  if (veryLowHeap &&
+      rejectApiIfLowHeap("/api/provisioning/status",
+                         kApiProvStatusCompactFreeBytes,
+                         kApiProvStatusCompactMaxBlockBytes)) {
     return;
   }
-  const size_t totalDevices = sm_->provisioningDeviceCount();
-  const size_t maxDevicesReturned = 64;
-  const size_t returnedDevices = (totalDevices < maxDevicesReturned) ? totalDevices : maxDevicesReturned;
-  size_t docCap = 1024U + (returnedDevices * 192U);
-  if (docCap < 2048U) docCap = 2048U;
-  if (docCap > 12288U) docCap = 12288U;
-  DynamicJsonDocument doc(docCap);
+  StaticJsonDocument<1536> doc;
   doc["ok"] = true;
-  ProvisioningSessionSnapshot sess{};
-  sm_->provisioningSession(sess);
+  const size_t maxCompactRows = 8;
+  const size_t returnedDevices = (totalDevices < maxCompactRows) ? totalDevices : maxCompactRows;
   JsonObject s = doc.createNestedObject("session");
   s["active"] = sess.active;
   s["state"] = provisioningSessionStateText(sess.state);
@@ -186,6 +113,7 @@ void WebConsole::handleProvisioningStatus() {
   s["devices_total"] = totalDevices;
   s["devices_returned"] = returnedDevices;
   s["devices_truncated"] = (returnedDevices < totalDevices);
+  s["compact"] = true;
   if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
     last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
     LRS_LOGI(API,
@@ -202,26 +130,28 @@ void WebConsole::handleProvisioningStatus() {
     ProvisioningDeviceSnapshot d{};
     if (!sm_->provisioningDeviceByIndex(i, d)) continue;
     JsonObject o = arr.createNestedObject();
-    o["chip_id"] = d.chip_id;
     char chipHex[11];
     snprintf(chipHex, sizeof(chipHex), "0x%08lX", static_cast<unsigned long>(d.chip_id));
     o["chip_id_hex"] = chipHex;
     o["current_address"] = d.current_address;
     o["assigned_address"] = d.assigned_address;
-    o["role"] = d.role_tx ? "tx" : "rx";
     o["fw_major"] = d.fw_major;
     o["fw_minor"] = d.fw_minor;
     o["fw_patch"] = d.fw_patch;
     o["rssi"] = d.rssi;
-    o["selected"] = d.selected;
-    o["address_conflict"] = d.address_conflict;
     o["state"] = provisioningDeviceStateText(d.state);
+    o["address_conflict"] = d.address_conflict;
   }
   const size_t len = measureJson(doc);
   server_.setContentLength(len);
   markResponseStatus(200);
   server_.send(200, "application/json", "");
   serializeJson(doc, server_.client());
+  LRS_LOGW(API,
+           "event=provisioning_status_compact heap_free=%lu heap_frag=%u max_free_block=%lu",
+           static_cast<unsigned long>(heapFree),
+           static_cast<unsigned>(lrslog::heapFragPercent()),
+           static_cast<unsigned long>(maxBlock));
 }
 
 void WebConsole::handleProvisioningStart() {
