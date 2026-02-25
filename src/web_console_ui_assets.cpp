@@ -574,7 +574,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
     R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automations')">Automations</button>
 )HTML"
 #endif
-    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="deviceBadge" class="id-badge"><span id="deviceBadgeText">Device: -</span><button id="deviceBadgeCopy" type="button" class="id-copy" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="deviceBadge" class="id-badge"><span id="deviceBadgeText">Device: -</span><button id="deviceBadgeCopy" type="button" class="id-copy" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
@@ -646,7 +646,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
 <div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="input_control_paired_lora_enabled" type="checkbox" /><label for="input_control_paired_lora_enabled">Local input drives LoRa control of paired relay</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
 </div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
-<div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
+<div style="grid-column:1/-1"><div class="inline-row"><button id="wifiScanBtn" type="button" onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)" title="Show password" aria-label="Show password">👁</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label id="lan_hostname_label">LAN hostname</label><input id="lan_hostname" /><div class="hint" id="lan_hostname_hint">Used as the device hostname for WiFi and OTA.</div><div class="hint" id="lan_hostname_preview_wrap" style="display:none">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
@@ -670,8 +670,6 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div class="sensor-tile" id="sensorDiagLast">Last read: n/a</div>
 </div>
 <div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions"><button onclick="saveSensors()">Save</button></div></section>
-<section class="card page" id="page-diagnostics"><h3>Diagnostics</h3><div id="diagGrid" class="sensor-grid"></div><h4 style="margin:10px 0 6px 0">System Information</h4><div id="diagSystem" class="status-table"></div><div id="diagText" class="small"></div></section>
-<section class="card page" id="page-logs"><h3>Logs</h3><div class="actions"><button onclick="refreshLogs()">Refresh</button><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button></div><pre id="logView" style="max-height:320px;overflow:auto"></pre></section>
 </main>
 <footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101 | <span id="footerFw">FW: -</span></div></footer>
 <div id="toast" class="toast"></div>
@@ -967,6 +965,9 @@ function humanAgeMsShort(ms){
  if(m < 60) return `${m}m`;
  const h=Math.floor(m/60);
  return `${h}h`;
+}
+function sleep(ms){
+ return new Promise((resolve)=>setTimeout(resolve, ms));
 }
 function fleetDeviceStaleThresholdMs(r){
  const staleAfterMs=Math.max(0, Number(r.stale_after_ms||0));
@@ -1562,8 +1563,8 @@ async function copyAutomationJsonPreview(){
 }
 function showPage(page){
  const allowed = UI_AUTOMATIONS_ENABLED
-  ? ['status','fleet','automations','sensors','diagnostics','logs','settings']
-  : ['status','fleet','sensors','diagnostics','logs','settings'];
+  ? ['status','fleet','automations','sensors','settings']
+  : ['status','fleet','sensors','settings'];
  activePage = allowed.includes(page) ? page : 'status';
  allowed.forEach(p=>{
   const sec=document.getElementById(`page-${p}`);
@@ -1582,8 +1583,6 @@ function showPage(page){
   ensureStatusStatic(true).catch(()=>{});
   refreshStatusLiveNotice();
  }
- if(activePage==='logs'){ refreshLogs(); }
- if(activePage==='diagnostics'){ refreshDiagnostics(); }
  if(activePage==='fleet'){ showFleetTab(activeFleetTab); }
  applyAutomationsFeatureVisibility();
  toggleDrawer(false);
@@ -2166,50 +2165,51 @@ async function loadSettingsPageData(force){
   settingsPageLoadInFlight = false;
  }
 }
-async function refreshLogs(){
- const lv=document.getElementById('logView');
- if(!lv) return;
- try{
-  const res=await fetch('/api/logs.txt',{cache:'no-store'});
-  if(res.status===401){ location.href='/login?expired=1'; return; }
-  if(!res.ok){ throw new Error(`HTTP ${res.status}`); }
-  lv.innerText=await res.text();
-  lv.scrollTop=lv.scrollHeight;
- }catch(e){
-  lv.innerText=`Log fetch failed: ${e.message}`;
- }
-}
 async function scanWifi(){
  if(wifiScanInFlight) return;
+ const btn=document.getElementById('wifiScanBtn');
  const host=document.getElementById('wifi_scan_list');
  if(!host) return;
  wifiScanInFlight = true;
+ if(btn){ btn.disabled=true; btn.innerText='Scanning...'; }
  host.innerHTML='Scanning...';
  try{
-  const out=await apiJson('/api/wifi/scan');
-  if(!out){ host.innerHTML='Scan failed'; return; }
+  const start=Date.now();
+  const timeoutMs=15000;
+  let out=null;
+  while((Date.now()-start) < timeoutMs){
+   out=await apiJson('/api/wifi/scan',{silent:true,timeoutMs:5000});
+   if(!out){ host.innerHTML='Scan failed'; return; }
+   if(String(out.status||'')==='ready'){ break; }
+   await sleep(500);
+  }
+  if(!out || String(out.status||'')!=='ready'){
+   host.innerHTML='Scan timed out';
+   return;
+  }
   if(!out.networks || !out.networks.length){
-    host.innerHTML='No SSIDs found';
-    return;
+   host.innerHTML='No SSIDs found';
+   return;
   }
   out.networks.sort((a,b)=>Number(b.rssi)-Number(a.rssi));
   host.innerHTML='<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table>';
   const tbody=host.querySelector('tbody');
   out.networks.forEach(n=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi,'scan')}${escapeHtml(n.rssi)} dBm</td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
-    tbody.appendChild(tr);
+   const tr=document.createElement('tr');
+   tr.innerHTML=`<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi,'scan')}${escapeHtml(n.rssi)} dBm</td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
+   tbody.appendChild(tr);
   });
-  host.querySelectorAll('button[data-ssid]').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      document.getElementById('wifi_sta_ssid').value=btn.getAttribute('data-ssid');
-      updateStaTestButtonState();
-    });
- });
+  host.querySelectorAll('button[data-ssid]').forEach(useBtn=>{
+   useBtn.addEventListener('click',()=>{
+    document.getElementById('wifi_sta_ssid').value=useBtn.getAttribute('data-ssid');
+    updateStaTestButtonState();
+   });
+  });
  }catch(e){
   host.innerHTML='Scan failed';
  } finally {
   wifiScanInFlight = false;
+  if(btn){ btn.disabled=false; btn.innerText='Rescan SSIDs'; }
  }
 }
 async function save(){
@@ -2594,13 +2594,12 @@ function stopHeaderPolling(){
 function pagePollDelayMs(){
  if(document.hidden) return 5000;
  if(activePage==='fleet' && activeFleetTab==='devices') return 2000;
- if(activePage==='logs') return 3000;
  return 1500;
 }
 function headerPollDelayMs(){
  if(document.hidden) return 8000;
- if(activePage==='fleet' && activeFleetTab==='manage' && activeFleetManageTab==='lora') return 5000;
- return 3000;
+ if(activePage==='fleet' && activeFleetTab==='manage' && activeFleetManageTab==='lora') return 8000;
+ return 6000;
 }
 function scheduleHeaderPolling(){
  stopHeaderPolling();
@@ -2622,14 +2621,12 @@ function schedulePagePoll(){
  let delayFn=pagePollDelayMs;
  if(activePage==='fleet' && lastRoleIsTx && activeFleetTab==='devices'){
   fn=refreshFleet;
- }else if(activePage==='logs'){
-  fn=refreshLogs;
  }else{
   return;
  }
  const loop=async()=>{
   if(generation !== pagePollGeneration) return;
-  if(document.hidden && activePage!=='logs'){
+  if(document.hidden){
    if(generation !== pagePollGeneration) return;
    pagePollTimer=setTimeout(loop, delayFn());
    return;
@@ -2974,35 +2971,6 @@ async function refreshFleet(){
  host.innerHTML=`<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
  renderFleetDeviceDetail();
  fleetRefreshInFlight = false;
-}
-async function refreshDiagnostics(){
- const d=await apiJson('/api/diagnostics',{silent:true});
- const host=document.getElementById('diagGrid');
- const sys=document.getElementById('diagSystem');
- const txt=document.getElementById('diagText');
- if(!host||!sys||!txt) return;
- if(!d){ host.innerHTML='Diagnostics unavailable'; sys.innerHTML=''; return; }
- host.innerHTML = `
-  <div class="sensor-tile">LoRa TX: ${d.lora_tx_packets}</div>
-  <div class="sensor-tile">ACK OK: ${d.ack_ok}</div>
-  <div class="sensor-tile">ACK Timeout: ${d.ack_timeout}</div>
-  <div class="sensor-tile">Replay Drops: ${d.replay_drop}</div>
-  <div class="sensor-tile">STA Connect Attempts: ${d.wifi_connect_attempts}</div>
-  <div class="sensor-tile">STA Connect Failures: ${d.wifi_connect_fail}</div>
-  <div class="sensor-tile">STA Disconnects: ${d.wifi_disconnects}</div>
-  <div class="sensor-tile">STA State: ${d.sta_status_text} [${d.sta_status_code}]</div>`;
- sys.innerHTML = `
-  <div class="k">Role</div><div class="v">${escapeHtml(String(d.role||'').toUpperCase())}</div>
-  <div class="k">Addresses</div><div class="v">${escapeHtml(`${d.local_address} -> ${d.remote_address}`)}</div>
-  <div class="k">Firmware</div><div class="v">${escapeHtml(d.fw_display || 'n/a')}</div>
-  <div class="k">Build</div><div class="v">${escapeHtml(`${d.build_date || 'n/a'} ${d.build_time || ''}`)}</div>
-  <div class="k">Uptime</div><div class="v">${escapeHtml(humanAgeMs(Number(d.uptime_ms || 0)))}</div>
-  <div class="k">Free Heap</div><div class="v">${escapeHtml(String(d.free_heap_bytes || 0))} B</div>
-  <div class="k">CPU Freq</div><div class="v">${escapeHtml(String(d.cpu_freq_mhz || 0))} MHz</div>
-  <div class="k">Chip ID</div><div class="v">${escapeHtml(String(d.chip_id || 'n/a'))}</div>
-  <div class="k">Flash (real/ide)</div><div class="v">${escapeHtml(String(d.flash_real_size || 0))} / ${escapeHtml(String(d.flash_ide_size || 0))} B</div>
-  <div class="k">SDK/Core</div><div class="v">${escapeHtml(String(d.sdk_schema_version || 'n/a'))} / ${escapeHtml(String(d.core_schema_version || 'n/a'))}</div>`;
- txt.innerText=`Last save: ${d.audit_last_saved_by} at ${d.audit_last_saved_ms} ms | Last reboot: ${d.audit_last_reboot_reason} at ${d.audit_last_reboot_ms} ms | Boot count: ${d.audit_boot_count}`;
 }
 async function importConfig(file){
  if(!file) return;

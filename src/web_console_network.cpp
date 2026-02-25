@@ -10,9 +10,23 @@ using namespace webconsole_internal;
 
 void WebConsole::handleWifiScan() {
   if (!requireAuth(true)) return;
+  const int scanState = WiFi.scanComplete();
+  if (scanState == WIFI_SCAN_RUNNING) {
+    sendTracked(200, "application/json", "{\"ok\":true,\"status\":\"scanning\"}");
+    return;
+  }
+  if (scanState == WIFI_SCAN_FAILED) {
+    WiFi.scanDelete();
+    WiFi.scanNetworks(true, true);
+    sendTracked(200, "application/json", "{\"ok\":true,\"status\":\"scanning\"}");
+    return;
+  }
+
   DynamicJsonDocument doc(2048);
+  doc["ok"] = true;
+  doc["status"] = "ready";
   JsonArray arr = doc.createNestedArray("networks");
-  const int count = WiFi.scanNetworks(false, true);
+  const int count = scanState;
   for (int i = 0; i < count; i++) {
     const String ssid = WiFi.SSID(i);
     if (ssid.length() == 0) continue;
@@ -23,9 +37,10 @@ void WebConsole::handleWifiScan() {
     n["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
   }
   WiFi.scanDelete();
+  WiFi.scanNetworks(true, true);
   String out;
   serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  sendTracked(200, "application/json", out);
 }
 
 void WebConsole::handleTestSta() {
