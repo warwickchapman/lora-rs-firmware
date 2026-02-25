@@ -115,6 +115,12 @@ button.alt{background:rgba(255,255,255,.1)}
 .section{margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.12)}
 .check{display:flex;gap:8px;align-items:center;margin-top:8px}
 .check input{width:18px;height:18px}
+.wifi-list{margin-top:10px;border:1px solid rgba(255,255,255,.12);border-radius:10px;overflow:auto;background:rgba(255,255,255,.03)}
+.wifi-table{width:100%;border-collapse:collapse;font-size:.9rem}
+.wifi-table th,.wifi-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.1);text-align:left}
+.wifi-table th:last-child,.wifi-table td:last-child{text-align:right;white-space:nowrap}
+.wifi-table td:first-child{max-width:46vw;overflow-wrap:anywhere}
+.wifi-table button{margin:0;padding:6px 10px;border-radius:8px}
 @media(max-width:680px){.grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap"><div class="card">
 <h1>Commission device</h1>
@@ -136,15 +142,18 @@ button.alt{background:rgba(255,255,255,.1)}
 </div>
 
 <div class="section">
-<label>Capabilities</label>
+<label>MQTT</label>
 <div class="check"><input id="mqtt_client_enabled" type="checkbox" /><span>MQTT client enabled</span></div>
+<div class="hint" style="margin-top:2px;margin-left:26px">Connects to the MQTT broker and publishes this device state.</div>
 <div class="check"><input id="mqtt_control_enabled" type="checkbox" /><span>MQTT control enabled</span></div>
+<div class="hint" style="margin-top:2px;margin-left:26px">Enables MQTT command topics so remote systems can control this device.</div>
 <div class="hint">When MQTT control is enabled, local automations are disabled.</div>
 </div>
 
 <div class="section grid">
 <div><label for="wifi_sta_ssid">WiFi SSID (optional)</label><input id="wifi_sta_ssid" /></div>
 <div><label for="wifi_sta_password">WiFi password (optional)</label><input id="wifi_sta_password" type="password" /></div>
+<div style="grid-column:1/-1"><div class="row" style="margin-top:6px"><button id="wifiScanBtn" class="alt" type="button" onclick="scanSetupWifi()">Scan SSIDs</button></div><div id="wifi_scan_list_setup" class="wifi-list" style="display:none"></div></div>
 </div>
 
 <div class="row">
@@ -156,16 +165,83 @@ button.alt{background:rgba(255,255,255,.1)}
 const msg=document.getElementById('msg');
 const saveBtn=document.getElementById('saveBtn');
 const skipBtn=document.getElementById('skipBtn');
+const setupWifiScanBtn=document.getElementById('wifiScanBtn');
+const setupWifiScanHost=document.getElementById('wifi_scan_list_setup');
 const modeEl=document.getElementById('mode');
 const roleEl=document.getElementById('role');
 const installTypeEl=document.getElementById('install_type');
 const fleetKeyEl=document.getElementById('fleet');
+let setupWifiScanInFlight=false;
 const READABLE_KEY_CONSONANTS='bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS='aeiou';
 function setBusy(b){ saveBtn.disabled=b; skipBtn.disabled=b; }
 function showMsg(text, ok){
  msg.className = `msg show ${ok ? 'ok' : 'err'}`;
  msg.innerText = text || '';
+}
+function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
+function escapeHtml(v){
+ return String(v==null?'':v)
+  .replace(/&/g,'&amp;')
+  .replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;')
+  .replace(/\"/g,'&quot;')
+  .replace(/'/g,'&#39;');
+}
+function wifiBarsHtml(rssi){
+ const dbm=Number(rssi||-120);
+ const lv = dbm >= -60 ? 4 : dbm >= -70 ? 3 : dbm >= -80 ? 2 : dbm >= -90 ? 1 : 0;
+ let bars='';
+ for(let i=1;i<=4;i++){
+  const on=i<=lv;
+  const h=(3+i*2);
+  bars += `<i style="display:inline-block;width:3px;height:${h}px;margin-right:2px;border-radius:2px;background:${on?'#4ade80':'rgba(255,255,255,.22)'}"></i>`;
+ }
+ return `<span aria-hidden="true" style="display:inline-flex;align-items:flex-end;vertical-align:-2px;margin-right:6px;height:14px">${bars}</span>`;
+}
+async function scanSetupWifi(){
+ if(setupWifiScanInFlight || !setupWifiScanHost) return;
+ setupWifiScanInFlight=true;
+ setupWifiScanHost.style.display='';
+ setupWifiScanHost.innerHTML='Scanning...';
+ if(setupWifiScanBtn){ setupWifiScanBtn.disabled=true; setupWifiScanBtn.innerText='Scanning...'; }
+ try{
+  const start=Date.now();
+  const timeoutMs=15000;
+  let out=null;
+  while((Date.now()-start) < timeoutMs){
+   const res=await fetch('/api/wifi/scan',{cache:'no-store'});
+   out=await res.json().catch(()=>null);
+   if(!out || !res.ok){ setupWifiScanHost.innerHTML='Scan failed'; return; }
+   if(String(out.status||'')==='ready') break;
+   await sleep(500);
+  }
+  if(!out || String(out.status||'')!=='ready'){ setupWifiScanHost.innerHTML='Scan timed out'; return; }
+  const nets=Array.isArray(out.networks) ? out.networks.slice() : [];
+  if(!nets.length){ setupWifiScanHost.innerHTML='No SSIDs found'; return; }
+  nets.sort((a,b)=>Number(b.rssi||-999)-Number(a.rssi||-999));
+  setupWifiScanHost.innerHTML='<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table>';
+  const tbody=setupWifiScanHost.querySelector('tbody');
+  nets.forEach(n=>{
+   const tr=document.createElement('tr');
+   tr.innerHTML=`<td>${escapeHtml(n.ssid)}</td><td>${wifiBarsHtml(n.rssi)}${escapeHtml(n.rssi)} dBm</td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
+   tbody.appendChild(tr);
+  });
+  setupWifiScanHost.querySelectorAll('button[data-ssid]').forEach(btn=>{
+   btn.addEventListener('click',()=>{
+    const ssid=btn.getAttribute('data-ssid') || '';
+    const ssidEl=document.getElementById('wifi_sta_ssid');
+    const passEl=document.getElementById('wifi_sta_password');
+    if(ssidEl) ssidEl.value=ssid;
+    if(passEl){ passEl.focus(); passEl.select(); }
+   });
+  });
+ }catch(e){
+  setupWifiScanHost.innerHTML='Scan failed';
+ }finally{
+  setupWifiScanInFlight=false;
+  if(setupWifiScanBtn){ setupWifiScanBtn.disabled=false; setupWifiScanBtn.innerText='Scan SSIDs'; }
+ }
 }
 function randomIndex(max){
  if(max <= 1) return 0;
