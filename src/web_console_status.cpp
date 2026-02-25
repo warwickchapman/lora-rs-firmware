@@ -14,6 +14,8 @@ using namespace webconsole_internal;
 
 bool WebConsole::buildStatusLiveCache() {
   if (!config_ || !sm_) return false;
+  if (status_live_cache_building_) return status_live_cache_.body.length() > 0;
+  status_live_cache_building_ = true;
 
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
@@ -91,16 +93,18 @@ bool WebConsole::buildStatusLiveCache() {
     doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
   }
 
-  status_live_cache_.body = "";
   serializeJson(doc, status_live_cache_.body);
   status_live_cache_.built_ms = millis();
+  status_live_cache_building_ = false;
   return status_live_cache_.body.length() > 0;
 }
 
 bool WebConsole::buildStatusStaticCache() {
   if (!config_) return false;
+  if (status_static_cache_building_) return status_static_cache_.body.length() > 0;
+  status_static_cache_building_ = true;
 
-  DynamicJsonDocument doc(512);
+  StaticJsonDocument<768> doc;
   auto &cfg = config_->settings();
   doc["chip_id"] = config_->chipIdHex();
   doc["factory_serial"] = cfg.factory_serial;
@@ -124,12 +128,13 @@ bool WebConsole::buildStatusStaticCache() {
   doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);
   doc["fw_build_id"] = LRS_BUILD_ID;
   doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
-  const String fwVersion = String(LRS_FW_VERSION);
+  char fwDisplay[96];
   if (LRS_GIT_DIRTY == 0) {
-    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ")";
+    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s)", LRS_FW_VERSION, LRS_GIT_SHA);
   } else {
-    doc["fw_display"] = fwVersion + " (" + String(LRS_GIT_SHA) + ", dirty)";
+    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s, dirty)", LRS_FW_VERSION, LRS_GIT_SHA);
   }
+  doc["fw_display"] = fwDisplay;
   doc["build_date"] = __DATE__;
   doc["build_time"] = __TIME__;
   doc["session_remaining_s"] = sessionRemainingS();
@@ -139,14 +144,16 @@ bool WebConsole::buildStatusStaticCache() {
   doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
   doc["audit_boot_count"] = cfg.audit_boot_count;
 
-  status_static_cache_.body = "";
   serializeJson(doc, status_static_cache_.body);
   status_static_cache_.built_ms = millis();
+  status_static_cache_building_ = false;
   return status_static_cache_.body.length() > 0;
 }
 
 bool WebConsole::buildStatusLiteCache() {
   if (!config_) return false;
+  if (status_lite_cache_building_) return status_lite_cache_.body.length() > 0;
+  status_lite_cache_building_ = true;
 
   StaticJsonDocument<384> doc;
   auto &cfg = config_->settings();
@@ -166,9 +173,9 @@ bool WebConsole::buildStatusLiteCache() {
   doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
   doc["uptime_ms"] = millis();
 
-  status_lite_cache_.body = "";
   serializeJson(doc, status_lite_cache_.body);
   status_lite_cache_.built_ms = millis();
+  status_lite_cache_building_ = false;
   return status_lite_cache_.body.length() > 0;
 }
 
@@ -240,6 +247,10 @@ void WebConsole::handleStatusLive() {
                          status_live_cache_))
     return;
   if (!buildStatusLiveCache()) {
+    if (status_live_cache_.body.length() > 0) {
+      sendTracked(200, "application/json", status_live_cache_.body);
+      return;
+    }
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_live_build_failed\"}");
     return;
   }
@@ -307,6 +318,10 @@ void WebConsole::handleStatusStatic() {
                          status_static_cache_))
     return;
   if (!buildStatusStaticCache()) {
+    if (status_static_cache_.body.length() > 0) {
+      sendTracked(200, "application/json", status_static_cache_.body);
+      return;
+    }
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_static_build_failed\"}");
     return;
   }
@@ -322,6 +337,10 @@ void WebConsole::handleStatusLite() {
                          status_lite_cache_))
     return;
   if (!buildStatusLiteCache()) {
+    if (status_lite_cache_.body.length() > 0) {
+      sendTracked(200, "application/json", status_lite_cache_.body);
+      return;
+    }
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_lite_build_failed\"}");
     return;
   }

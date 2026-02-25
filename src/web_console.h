@@ -159,4 +159,7 @@ class WebConsole {
   uint32_t status_live_sse_last_sent_cache_ms_ = 0;
   uint32_t status_live_sse_last_interval_ms_ = 0;
   uint32_t last_web_pressure_ms_ = 0;
+  bool status_live_cache_building_ = false;
+  bool status_static_cache_building_ = false;
+  bool status_lite_cache_building_ = false;
 };

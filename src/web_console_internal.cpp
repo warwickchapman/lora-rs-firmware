@@ -54,10 +54,10 @@ const uint32_t kStatusLiveSsePushSevereMs = 12000;
 const uint32_t kStatusLiveSsePressureWindowMs = 12000;
 const uint32_t kWebRequestPressureDurMs = 80;
 const int kStaTestMaxAttempts = 40;
-const size_t kFleetDocBaseBytes = 384;
-const size_t kFleetDocPerPeerBytes = 256;
-const size_t kFleetDocMinBytes = 1024;
-const size_t kFleetDocMaxBytes = 4096;
+const size_t kFleetDocBaseBytes = 320;
+const size_t kFleetDocPerPeerBytes = 192;
+const size_t kFleetDocMinBytes = 768;
+const size_t kFleetDocMaxBytes = 3072;
 
 #ifdef REGION_US
 const long kMinFrequencyHz = 902000000L;
