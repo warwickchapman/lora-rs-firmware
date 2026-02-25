@@ -31,6 +31,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Setup flow now supports full commissioning on first login instead of Fleet-key-only setup.
 - Main web console header now shows device identity (serial/chip) with one-click copy and mode-aware role title.
 - Default `input_control_paired_lora_enabled` is now `false` to avoid unintentionally blocking automation control on fresh configs.
+- Documentation now reflects commissioning-first setup, canonical mode/role terms, and current control-authority precedence.
 
 ## [0.2.2-alpha] - 2026-02-21
 

@@ -3,9 +3,9 @@
 ## What the Device Does
 LRS extends a dry-contact control signal over LoRa.
 
-- TX reads local dry-contact input and sends LoRa updates.
-- RX applies relay state and returns ACK.
-- TX relay mirrors ACK-confirmed remote state (500 ms delayed).
+- In `Paired` mode, `Transmitter` reads local dry-contact input and sends LoRa updates.
+- In `Paired` mode, `Receiver` applies relay state and returns ACK.
+- Transmitter relay mirrors ACK-confirmed remote state (500 ms delayed).
 
 ## First Access
 1. Power device.
@@ -16,14 +16,20 @@ LRS extends a dry-contact control signal over LoRa.
 SoftAP captive portal is enabled. On most phones/laptops, joining the device AP will auto-open the login/console page.
 
 ## Required Setup
-Set these in `LoRa` tab:
-- Role (`Transmitter` / `Receiver`)
+On first login, complete `Commission device`:
+- Installation type (`New installation` or `Join existing installation`)
+- Fleet key
+- Mode (`Standalone`, `Paired`, or `Mesh`)
+- Role (mode-aware)
+- Optional capability toggles (`MQTT client enabled`, `MQTT control enabled`, `Local input drives LoRa control of paired relay`)
+
+In `Settings > LoRa`, confirm:
+- Mode and role
 - Local address
 - Remote address
-- Deployment Key (Encryption)
-- `Input drives LoRa relay control` (shown when role is TX, in Advanced)
+- Fleet key (encryption)
 
-`Deployment Key (Encryption)` must be unique per installation to prevent cross-control with nearby systems.
+`Fleet key (encryption)` must be unique per installation to prevent cross-control with nearby systems.
 Use at least 16 characters.
 Examples:
 - `fairview-generator-start-line-alpha42`
@@ -37,7 +43,7 @@ Recommended defaults:
 - Scheduled remote polling (TX): disabled
 - Default remote poll interval (TX): 60 s minimum
 - RX push-on-change: optional, with minimum interval 60 s
-- `Input drives LoRa relay control`: enabled for classic paired dry-contact mode
+- `Local input drives LoRa control of paired relay`: enabled only when using classic paired dry-contact behavior
 
 ## Network Setup
 In `Network` tab:
@@ -107,11 +113,19 @@ Header badges show:
 
 ## MQTT (Optional)
 In `MQTT` tab:
-- Enable MQTT
+- Enable `MQTT client enabled`
+- Optionally enable `MQTT control enabled`
 - Set broker host/port/user/pass/topic root
 
 MQTT is active only when STA is connected and MQTT is enabled.
 MQTT host must also be set.
+
+### Control Authority
+Control authority is enforced as follows:
+- If `Local input drives LoRa control of paired relay` is enabled on paired TX, local automation and MQTT relay writes are blocked on that TX.
+- RX slave mode (set by paired TX over LoRa flags) blocks manual/API, MQTT, automation writes, and LoRa control writes from peers other than the paired TX address.
+- If `MQTT control enabled` is active, local automations are disabled.
+- MQTT-over-LoRa control from shared-fleet peers is accepted only from addresses listed in `MQTT controller addresses`.
 
 Per-device topics:
 - `<root>/lrs-<chipid>/input`
@@ -206,11 +220,11 @@ Minimal Node-RED flow example (TX control topic):
 ```
 
 MQTT control vs paired LoRa address:
-- If TX `Input drives LoRa relay control` is enabled, heartbeat and input-driven LoRa traffic control the TX-paired `remote_address`.
+- If TX `Local input drives LoRa control of paired relay` is enabled, heartbeat and input-driven LoRa traffic control the TX-paired `remote_address`.
 - In that mode, avoid using MQTT `control` for RX nodes that share the TX-paired `remote_address`, or heartbeat can overwrite MQTT state.
-- If you need MQTT control on the TX-paired address, disable `Input drives LoRa relay control` on TX.
+- If you need MQTT control on the TX-paired address, disable `Local input drives LoRa control of paired relay` on TX.
 
-When `Input drives LoRa relay control` is disabled on TX:
+When `Local input drives LoRa control of paired relay` is disabled on TX:
 - TX no longer sends paired heartbeat/change traffic.
 - TX still processes MQTT `control` commands and publishes remote RX status tree.
 
