@@ -10,6 +10,7 @@
 
 namespace {
 constexpr char kConfigPath[] = "/config.json";
+constexpr size_t kConfigMaxBytes = 8192;
 constexpr uint16_t kConfigSchemaVersion = 2;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
@@ -187,19 +188,23 @@ bool ConfigStore::begin() {
   }
 
   const size_t fileSize = static_cast<size_t>(f.size());
-  String raw;
-  raw.reserve(fileSize + 1);
-  while (f.available()) {
-    raw += static_cast<char>(f.read());
+  if (fileSize == 0 || fileSize > kConfigMaxBytes) {
+    f.close();
+    LRS_LOGW(FS,
+             "event=config_invalid path=%s reason=size_invalid bytes=%lu action=reset_defaults",
+             kConfigPath,
+             static_cast<unsigned long>(fileSize));
+    ensureProvisionedDefaults();
+    return save();
   }
-  f.close();
 
   size_t docCapacity = fileSize + 512;
-  if (docCapacity < 4096) {
-    docCapacity = 4096;
+  if (docCapacity < 2048) {
+    docCapacity = 2048;
   }
   DynamicJsonDocument doc(docCapacity);
-  auto err = deserializeJson(doc, raw);
+  auto err = deserializeJson(doc, f);
+  f.close();
   if (err) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=parse_failed err=%s bytes=%lu action=reset_defaults", kConfigPath, err.c_str(),
              static_cast<unsigned long>(fileSize));
