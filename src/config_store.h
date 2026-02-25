@@ -3,8 +3,10 @@
 #include <Arduino.h>
 
 struct Settings {
-  uint16_t version;
-  bool provisioned;
+  uint16_t schema_version;
+  bool commissioned;
+  String mode;
+  String role;
 
   bool role_tx;
   uint8_t local_address;
@@ -23,14 +25,16 @@ struct Settings {
   uint32_t tx_mqtt_remote_default_poll_interval_ms;
   bool rx_push_on_change_enabled;
   uint32_t rx_push_min_interval_ms;
-  bool tx_input_lora_control_enabled;
+  bool input_control_paired_lora_enabled;
 
   String wifi_sta_ssid;
   String wifi_sta_password;
   String lan_hostname;
   bool ap_always_on;
 
-  bool mqtt_enabled;
+  bool mqtt_client_enabled;
+  bool mqtt_control_enabled;
+  String mqtt_controller_addresses;
   String mqtt_host;
   uint16_t mqtt_port;
   String mqtt_user;

@@ -289,20 +289,20 @@ body.light .radio-row input[type=radio]{accent-color:#6366f1}
 .freq-wrap{display:flex;flex-direction:column;gap:8px}
 .freq-wrap input[readonly]{opacity:.7}
 .check-row label{margin:0}
-button{margin-top:16px;padding:12px 20px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-weight:700;font-size:1rem;letter-spacing:0.02em;cursor:pointer;transition:all 0.3s ease;box-shadow:0 8px 20px rgba(99,102,241,0.4)}
-button:hover{background:var(--accent-hover);transform:translateY(-2px);box-shadow:0 12px 24px rgba(99,102,241,0.6)}
+button{margin-top:16px;padding:10px 16px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-weight:700;font-size:0.95rem;letter-spacing:0.01em;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(99,102,241,0.2)}
+button:hover{background:var(--accent-hover);transform:translateY(-1px);box-shadow:0 6px 16px rgba(99,102,241,0.3)}
 button:active{transform:translateY(1px)}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
-.small{font-size:0.85rem;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
-.key-strength{margin-top:8px;font-size:0.85rem;font-weight:800}
+.small{font-size:0.85rem;color:var(--muted);line-height:1.4;overflow-wrap:anywhere}
+.key-strength{margin-top:8px;font-size:0.85rem;font-weight:700}
 .key-strength.weak{color:#fca5a5}
 .key-strength.ok{color:#fde047}
 .key-strength.strong{color:#86efac}
 .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
-#status{overflow-wrap:anywhere;line-height:1.6}
+#status{overflow-wrap:anywhere;line-height:1.5}
 .inline-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .hint{font-size:0.8rem;opacity:.9;margin-top:6px;color:var(--muted)}
-details summary{cursor:pointer;font-weight:800;margin:10px 0;padding:10px 0;outline:none;font-size:1.05rem}
+details summary{cursor:pointer;font-weight:700;margin:8px 0;padding:8px 0;outline:none;font-size:1.05rem}
 .wifi-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:16px}
 .wifi-icon svg{width:20px;height:16px;display:block}
 .wifi-icon .arc,.wifi-icon .dot{stroke:rgba(255,255,255,.4);fill:none;stroke-width:2.5;stroke-linecap:round;transition:stroke 0.3s}
@@ -315,10 +315,10 @@ body.light .wifi-icon .dot{fill:rgba(0,0,0,.3)}
 .wifi-icon.lv3 .a2,.wifi-icon.lv4 .a2{stroke:#4ade80}
 .wifi-icon.lv4 .a1{stroke:#4ade80}
 .wifi-icon.lv0 .x{display:block}
-.wifi-list{margin-top:16px;background:rgba(255,255,255,0.05);border-radius:12px;overflow:hidden;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:var(--glass-border);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+.wifi-list{margin-top:16px;background:rgba(255,255,255,0.05);border-radius:12px;overflow:hidden;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
 body.light .wifi-list{background:rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(31,38,135,0.05)}
-.wifi-table{width:100%;border-collapse:collapse;font-size:0.95rem}
-.wifi-table th,.wifi-table td{padding:12px 16px;border-bottom:var(--glass-border);text-align:left}
+.wifi-table{width:100%;border-collapse:collapse;font-size:0.9rem}
+.wifi-table th,.wifi-table td{padding:10px 14px;border-bottom:var(--glass-border);text-align:left}
 .wifi-table th{font-weight:700;color:var(--muted);background:rgba(0,0,0,0.2)}
 body.light .wifi-table th{background:rgba(0,0,0,0.05)}
 .wifi-table th:last-child,.wifi-table td:last-child{text-align:right}
@@ -340,22 +340,22 @@ body.light .sig.lora.lv1 i:nth-child(1),
 body.light .sig.lora.lv2 i:nth-child(-n+2),
 body.light .sig.lora.lv3 i:nth-child(-n+3),
 body.light .sig.lora.lv4 i:nth-child(-n+4){background:#3b82f6}
-.sec-chip{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:999px;font-size:0.7rem;font-weight:800;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.sec-chip{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;font-size:0.7rem;font-weight:700;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .sec-chip.y{background:rgba(74,222,128,0.2);color:#86efac;border:1px solid rgba(74,222,128,0.3)}
 .sec-chip.n{background:rgba(255,255,255,0.1);color:var(--muted);border:var(--glass-border)}
 body.light .sec-chip.y{background:rgba(74,222,128,0.2);color:#15803d;border:1px solid rgba(74,222,128,0.4)}
 body.light .sec-chip.n{background:rgba(255,255,255,0.4);border:var(--glass-border)}
-.link{color:var(--link);text-decoration:none;font-weight:700;transition:all 0.3s}
+.link{color:var(--link);text-decoration:none;font-weight:600;transition:all 0.2s}
 .link:hover{color:#c4b5fd;text-decoration:none;text-shadow:0 0 8px rgba(196,181,253,0.5)}
 body.light .link:hover{color:#6366f1;text-shadow:none}
-.menu-btn{margin-top:0;padding:6px 14px;min-width:44px;border:var(--glass-border);background:rgba(255,255,255,0.05);border-radius:12px;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.1);transition:all 0.3s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.menu-btn{margin-top:0;padding:6px 12px;min-width:40px;border:var(--glass-border);background:rgba(255,255,255,0.05);border-radius:10px;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.1);transition:all 0.2s ease;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .menu-btn:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
 body.light .menu-btn:hover{background:rgba(255,255,255,0.8)}
-.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);opacity:0;pointer-events:none;transition:opacity .4s ease;z-index:20}
-.drawer{position:fixed;left:0;top:-10px;bottom:-10px;width:min(85vw,320px);padding:32px 20px;background:rgba(15,23,42,0.6);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);border-right:var(--glass-border);transform:translateX(-100%);transition:transform .4s cubic-bezier(0.19, 1, 0.22, 1);z-index:21;overflow-y:auto;box-shadow:20px 0 40px rgba(0,0,0,0.4)}
-body.light .drawer{background:rgba(255,255,255,0.6);box-shadow:20px 0 40px rgba(31,38,135,0.1)}
-.drawer h4{margin:10px 12px 24px 12px;font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:800}
-.navbtn{display:flex;align-items:center;gap:16px;width:100%;margin-top:0;margin-bottom:8px;padding:14px 18px;border:var(--glass-border);border-color:transparent;border-radius:14px;background:transparent;color:var(--txt);text-align:left;font-weight:700;font-size:1rem;transition:all 0.3s;box-shadow:none}
+.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:20}
+.drawer{position:fixed;left:0;top:-10px;bottom:-10px;width:min(85vw,300px);padding:24px 16px;background:rgba(15,23,42,0.6);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-right:var(--glass-border);transform:translateX(-100%);transition:transform .3s cubic-bezier(0.19, 1, 0.22, 1);z-index:21;overflow-y:auto;box-shadow:12px 0 32px rgba(0,0,0,0.3)}
+body.light .drawer{background:rgba(255,255,255,0.6);box-shadow:12px 0 32px rgba(31,38,135,0.1)}
+.drawer h4{margin:8px 12px 20px 12px;font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:700}
+.navbtn{display:flex;align-items:center;gap:12px;width:100%;margin-top:0;margin-bottom:6px;padding:12px 16px;border:var(--glass-border);border-color:transparent;border-radius:12px;background:transparent;color:var(--txt);text-align:left;font-weight:600;font-size:0.95rem;transition:all 0.2s;box-shadow:none}
 .navbtn:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.1)}
 body.light .navbtn:hover{background:rgba(255,255,255,0.5);border-color:rgba(255,255,255,0.4)}
 .navbtn.active{background:rgba(99,102,241,0.2);color:#a78bfa;border-color:rgba(99,102,241,0.3);box-shadow:inset 0 0 12px rgba(99,102,241,0.2)}
@@ -364,43 +364,43 @@ body.light .navbtn.active{background:rgba(99,102,241,0.15);color:#4f46e5;border-
 body.nav-open .drawer{transform:translateX(0)}
 body.nav-open .drawer-backdrop{opacity:1;pointer-events:auto}
 body.nav-open{overflow:hidden}
-.tabbtn{background:rgba(255,255,255,0.05);color:var(--muted);border:var(--glass-border);border-radius:12px;padding:12px 20px;font-weight:700;cursor:pointer;transition:all 0.3s;box-shadow:none;margin-top:0;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.tabbtn{background:rgba(255,255,255,0.05);color:var(--muted);border:var(--glass-border);border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:none;margin-top:0;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .tabbtn:hover{background:rgba(255,255,255,0.15);color:var(--txt);transform:translateY(-1px)}
 body.light .tabbtn:hover{background:rgba(255,255,255,0.8);color:var(--txt)}
-.tabbtn.active{background:var(--accent);color:#fff;border-color:transparent;box-shadow:0 6px 16px rgba(99,102,241,0.3)}
+.tabbtn.active{background:var(--accent);color:#fff;border-color:transparent;box-shadow:0 4px 12px rgba(99,102,241,0.2)}
 body.light .tabbtn.active{color:#fff}
 .page{display:none}
-.page.active{display:block;animation:fadeIn 0.4s cubic-bezier(0.19, 1, 0.22, 1)}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.page.active{display:block;animation:fadeIn 0.3s cubic-bezier(0.19, 1, 0.22, 1)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .settings-tabs{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
 .settings-pane{display:none}
-.settings-pane.active{display:block;animation:fadeIn 0.4s ease}
+.settings-pane.active{display:block;animation:fadeIn 0.3s ease}
 .fleet-pane{display:none}
-.fleet-pane.active{display:block;animation:fadeIn 0.4s ease}
+.fleet-pane.active{display:block;animation:fadeIn 0.3s ease}
 .system-tabs{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 20px 0}
 .system-pane{display:none}
-.system-pane.active{display:block;animation:fadeIn 0.4s ease}
+.system-pane.active{display:block;animation:fadeIn 0.3s ease}
 .fleet-table{width:100%;border-collapse:separate;border-spacing:0 8px;font-size:0.95rem;margin-top:16px}
-.fleet-table th{color:var(--muted);font-weight:700;padding:14px 16px;text-align:left;background:transparent;border:none}
+.fleet-table th{color:var(--muted);font-weight:700;padding:12px 16px;text-align:left;background:transparent;border:none}
 body.light .fleet-table th{background:transparent}
-.fleet-table td{padding:16px;border-top:var(--glass-border);border-bottom:var(--glass-border);vertical-align:middle;background:rgba(255,255,255,0.03);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:all 0.3s}
+.fleet-table td{padding:14px 16px;border-top:var(--glass-border);border-bottom:var(--glass-border);vertical-align:middle;background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:all 0.2s}
 body.light .fleet-table td{background:rgba(255,255,255,0.4)}
 .fleet-table tr:hover td{background:rgba(255,255,255,0.08);cursor:pointer;transform:scale(1.01)}
 body.light .fleet-table tr:hover td{background:rgba(255,255,255,0.7)}
-.fleet-table tr td:first-child{border-left:var(--glass-border);border-top-left-radius:16px;border-bottom-left-radius:16px}
-.fleet-table tr td:last-child{border-right:var(--glass-border);border-top-right-radius:16px;border-bottom-right-radius:16px}
+.fleet-table tr td:first-child{border-left:var(--glass-border);border-top-left-radius:12px;border-bottom-left-radius:12px}
+.fleet-table tr td:last-child{border-right:var(--glass-border);border-top-right-radius:12px;border-bottom-right-radius:12px}
 .fleet-table tr.selected td{background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.3)}
 body.light .fleet-table tr.selected td{background:rgba(99,102,241,0.1);border-color:rgba(99,102,241,0.2)}
 .fleet-row-actions{display:flex;gap:10px;flex-wrap:wrap}
-.fleet-row-actions button{margin-top:0;padding:10px 14px;font-size:0.85rem;border-radius:10px}
-.fleet-detail{margin-top:20px;border:var(--glass-border);border-radius:16px;padding:20px;background:rgba(255,255,255,0.03);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:inset 0 0 20px rgba(0,0,0,0.1)}
-body.light .fleet-detail{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 20px rgba(31,38,135,0.02)}
+.fleet-row-actions button{margin-top:0;padding:8px 12px;font-size:0.85rem;border-radius:8px}
+.fleet-detail{margin-top:20px;border:var(--glass-border);border-radius:12px;padding:20px;background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:inset 0 0 16px rgba(0,0,0,0.1)}
+body.light .fleet-detail{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 16px rgba(31,38,135,0.02)}
 .fleet-detail-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
-.fleet-detail-tabs .tabbtn{margin-top:0;padding:10px 16px;font-size:0.9rem}
-.fleet-detail-grid{display:grid;grid-template-columns:180px 1fr;gap:12px 20px;font-size:0.95rem}
+.fleet-detail-tabs .tabbtn{margin-top:0;padding:8px 14px;font-size:0.9rem}
+.fleet-detail-grid{display:grid;grid-template-columns:160px 1fr;gap:12px 16px;font-size:0.95rem}
 .fleet-detail-grid .k{color:var(--muted);font-weight:600}
 .fleet-detail-grid .v{font-weight:700;overflow-wrap:anywhere}
-.chip{display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;border-radius:999px;font-size:0.75rem;font-weight:800;letter-spacing:0.02em;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.chip{display:inline-flex;align-items:center;justify-content:center;padding:4px 10px;border-radius:999px;font-size:0.75rem;font-weight:700;letter-spacing:0.02em;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .chip.ok{background:rgba(74,222,128,0.2);color:#86efac;border:1px solid rgba(74,222,128,0.3)}
 body.light .chip.ok{color:#15803d;background:rgba(74,222,128,0.2)}
 .chip.warn{background:rgba(251,191,36,0.2);color:#fde047;border:1px solid rgba(251,191,36,0.3)}
@@ -409,35 +409,35 @@ body.light .chip.warn{color:#b45309;background:rgba(251,191,36,0.2)}
 body.light .chip.err{color:#b91c1c;background:rgba(248,113,113,0.2)}
 .chip.neutral{background:rgba(255,255,255,0.1);color:var(--txt);border:var(--glass-border)}
 body.light .chip.neutral{background:rgba(255,255,255,0.4);border:var(--glass-border)}
-.status-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:start}
-.deploy-note{padding:18px;border:var(--glass-border);border-radius:16px;background:rgba(255,255,255,0.05);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);margin-bottom:20px;line-height:1.6}
+.status-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start}
+.deploy-note{padding:16px;border:var(--glass-border);border-radius:12px;background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);margin-bottom:20px;line-height:1.5}
 .deploy-note.warn{border-color:rgba(251,191,36,0.4);background:rgba(251,191,36,0.1);color:#fde047}
 body.light .deploy-note.warn{color:#b45309;background:rgba(251,191,36,0.1)}
-.status-table{display:grid;grid-template-columns:180px 1fr;gap:12px 20px;font-size:0.95rem;background:rgba(255,255,255,0.03);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:20px;border-radius:16px;border:var(--glass-border);box-shadow:inset 0 0 20px rgba(0,0,0,0.1)}
-body.light .status-table{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 20px rgba(31,38,135,0.02)}
+.status-table{display:grid;grid-template-columns:160px 1fr;gap:12px 16px;font-size:0.95rem;background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:20px;border-radius:12px;border:var(--glass-border);box-shadow:inset 0 0 16px rgba(0,0,0,0.1)}
+body.light .status-table{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 16px rgba(31,38,135,0.02)}
 .status-table .k{color:var(--muted);font-weight:600}
-.status-table .v{font-weight:800;overflow-wrap:anywhere}
-.status-table .v.copyable{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.status-table .section{grid-column:1/-1;font-weight:800;margin-top:12px;padding-top:16px;border-top:var(--glass-border);color:var(--txt);font-size:1.05rem}
-.copy-btn{margin:0;padding:8px 14px;font-size:0.8rem;border-radius:10px;background:rgba(255,255,255,0.05);color:var(--txt);border:var(--glass-border);box-shadow:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-weight:700}
+.status-table .v{font-weight:700;overflow-wrap:anywhere}
+.status-table .v.copyable{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.status-table .section{grid-column:1/-1;font-weight:800;margin-top:12px;padding-top:12px;border-top:var(--glass-border);color:var(--txt);font-size:1.05rem}
+.copy-btn{margin:0;padding:6px 12px;font-size:0.8rem;border-radius:8px;background:rgba(255,255,255,0.05);color:var(--txt);border:var(--glass-border);box-shadow:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-weight:700}
 .copy-btn:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
 body.light .copy-btn:hover{background:rgba(255,255,255,0.8)}
-.relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(255,255,255,0.03);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:var(--glass-border);border-radius:24px;padding:40px 24px;box-shadow:inset 0 0 30px rgba(0,0,0,0.2)}
-body.light .relay-card{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 30px rgba(31,38,135,0.05)}
-.relay-badge{width:130px;height:130px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.95rem;font-weight:800;letter-spacing:0.05em;transition:all 0.5s cubic-bezier(0.19, 1, 0.22, 1);position:relative}
-.relay-badge::before{content:'';position:absolute;inset:-6px;border-radius:50%;border:2px solid transparent;transition:all 0.5s ease}
-.relay-badge.on{background:rgba(74,222,128,0.2);color:#86efac;box-shadow:0 0 40px rgba(74,222,128,0.4), inset 0 0 20px rgba(74,222,128,0.3);text-shadow:0 0 10px rgba(134,239,172,0.5)}
-.relay-badge.on::before{border-color:rgba(74,222,128,0.6);transform:scale(1.05)}
-body.light .relay-badge.on{color:#15803d;box-shadow:0 0 40px rgba(74,222,128,0.3), inset 0 0 20px rgba(74,222,128,0.2)}
-.relay-badge.off{background:rgba(255,255,255,0.05);color:var(--muted);box-shadow:inset 0 0 20px rgba(0,0,0,0.3);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-.relay-badge.off::before{border-color:rgba(255,255,255,0.15)}
-body.light .relay-badge.off{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 20px rgba(31,38,135,0.1)}
-body.light .relay-badge.off::before{border-color:rgba(255,255,255,0.4)}
-.sensor-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:16px;margin-top:16px}
-.sensor-tile{background:rgba(255,255,255,0.03);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:var(--glass-border);border-radius:16px;padding:20px;font-size:0.95rem;transition:all 0.3s;box-shadow:inset 0 0 20px rgba(0,0,0,0.1);font-weight:600}
-body.light .sensor-tile{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 20px rgba(31,38,135,0.02)}
-.sensor-tile:hover{transform:translateY(-3px);background:rgba(255,255,255,0.08);box-shadow:0 10px 20px rgba(0,0,0,0.2)}
-.sensor-state{display:inline-flex;align-items:center;justify-content:center;min-width:76px;padding:6px 14px;border-radius:999px;font-size:0.8rem;font-weight:800;letter-spacing:0.05em;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);border-radius:16px;padding:32px 24px;box-shadow:inset 0 0 20px rgba(0,0,0,0.1)}
+body.light .relay-card{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 20px rgba(31,38,135,0.05)}
+.relay-badge{width:120px;height:120px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.95rem;font-weight:800;letter-spacing:0.05em;transition:all 0.4s cubic-bezier(0.19, 1, 0.22, 1);position:relative}
+.relay-badge::before{content:'';position:absolute;inset:-6px;border-radius:50%;border:2px solid transparent;transition:all 0.4s ease}
+.relay-badge.on{background:rgba(74,222,128,0.2);color:#86efac;box-shadow:0 0 32px rgba(74,222,128,0.3), inset 0 0 16px rgba(74,222,128,0.2);text-shadow:0 0 8px rgba(134,239,172,0.5)}
+.relay-badge.on::before{border-color:rgba(74,222,128,0.5);transform:scale(1.05)}
+body.light .relay-badge.on{color:#15803d;box-shadow:0 0 32px rgba(74,222,128,0.2), inset 0 0 16px rgba(74,222,128,0.1)}
+.relay-badge.off{background:rgba(255,255,255,0.05);color:var(--muted);box-shadow:inset 0 0 16px rgba(0,0,0,0.2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.relay-badge.off::before{border-color:rgba(255,255,255,0.1)}
+body.light .relay-badge.off{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 16px rgba(31,38,135,0.1)}
+body.light .relay-badge.off::before{border-color:rgba(255,255,255,0.3)}
+.sensor-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:16px;margin-top:16px}
+.sensor-tile{background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);border-radius:12px;padding:20px;font-size:0.95rem;transition:all 0.2s;box-shadow:inset 0 0 16px rgba(0,0,0,0.1);font-weight:600}
+body.light .sensor-tile{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 16px rgba(31,38,135,0.02)}
+.sensor-tile:hover{transform:translateY(-2px);background:rgba(255,255,255,0.08);box-shadow:0 8px 16px rgba(0,0,0,0.2)}
+.sensor-state{display:inline-flex;align-items:center;justify-content:center;min-width:70px;padding:4px 12px;border-radius:999px;font-size:0.8rem;font-weight:700;letter-spacing:0.02em;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .sensor-state.open{background:rgba(255,255,255,0.1);color:var(--muted);border:var(--glass-border)}
 body.light .sensor-state.open{background:rgba(255,255,255,0.5);color:var(--muted)}
 .sensor-state.closed{background:rgba(74,222,128,0.2);color:#86efac;border:1px solid rgba(74,222,128,0.3)}
@@ -514,9 +514,10 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div><label>Peer display</label><select id="auto_peer_display" onchange="automationTopChanged()"><option value="addresses">Addresses</option><option value="names">Names</option></select></div>
 <div><label>Action target (v1)</label><input id="auto_action_target" value="self" oninput="automationTopChanged()" /><div class="small">Use <code>self</code> or an address like <code>82</code> / <code>0x52</code>.</div></div>
 </div>
-<div class="actions"><button type="button" onclick="reloadAutomations()">Reload</button><button type="button" onclick="addAutomationRule()">Add Rule</button><button type="button" onclick="saveAutomations()">Save Rules</button></div>
+<div class="actions"><button type="button" onclick="reloadAutomations()">Reload</button><button type="button" onclick="addAutomationRule()">Add Rule</button></div>
 <div id="autoResult" class="result-line"></div>
 <div id="automationsRulesHost" style="margin-top:8px">Open this page to load automations.</div>
+<div class="actions" style="margin-top:20px;margin-bottom:20px"><button type="button" onclick="saveAutomations()">Save Rules</button></div>
 <details style="margin-top:8px"><summary>JSON Preview</summary><div class="small" style="margin:6px 0">Generated from the form builder. You can paste JSON here and apply it back to the form.</div><textarea id="auto_json_preview" rows="14" style="width:100%;font-family:monospace" spellcheck="false"></textarea><div class="actions"><button type="button" onclick="applyAutomationsJsonFromPreview()">Apply JSON</button><button type="button" onclick="copyAutomationJsonPreview()">Copy JSON</button></div></details>
 </section>
 )HTML"
@@ -540,19 +541,21 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div id="tx_polling_default_row"><label>Default remote poll interval (seconds)</label><input id="tx_mqtt_remote_default_poll_interval_s" type="number" min="60" max="3600" /><div class="small">TX only. Applied to newly discovered remote nodes. Minimum 60s to reduce LoRa duty-cycle risk.</div></div>
 <div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
-<div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_input_lora_control_enabled" type="checkbox" /><label for="tx_input_lora_control_enabled">Input drives LoRa relay control</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
+<div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="input_control_paired_lora_enabled" type="checkbox" /><label for="input_control_paired_lora_enabled">Local input drives LoRa control of paired relay</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
 </div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)">Show</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label id="lan_hostname_label">LAN hostname</label><input id="lan_hostname" /><div class="hint" id="lan_hostname_hint">Used as the device hostname for WiFi and OTA.</div><div class="hint" id="lan_hostname_preview_wrap" style="display:none">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
 </div><div class="actions"><button onclick="saveNetwork()">Save</button></div><div class="small">STA connection test is available during setup only.</div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
-<div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_enabled" type="checkbox" /><label for="mqtt_enabled">Enable MQTT</label></div></div>
+<div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_client_enabled" type="checkbox" /><label for="mqtt_client_enabled">MQTT client enabled</label></div></div>
+<div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_control_enabled" type="checkbox" /><label for="mqtt_control_enabled">MQTT control enabled</label></div><div class="small">When enabled, inbound MQTT control commands are accepted and local automations are disabled.</div></div>
 <div><label>Broker host</label><input id="mqtt_host" /></div>
 <div><label>Broker port</label><input id="mqtt_port" type="number" min="1" max="65535" /></div>
 <div><label>MQTT user</label><input id="mqtt_user" /></div>
 <div><label>MQTT password</label><input id="mqtt_password" /></div>
 <div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
+<div style="grid-column:1/-1"><label>MQTT controller addresses</label><input id="mqtt_controller_addresses" placeholder="e.g. 1,84" /></div>
 </div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><label>Confirmation word</label><input id="factory_reset_confirm_word" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="RESET or REMOVE" /><div class="small">Type <code>RESET</code> to keep the LoRa fleet key, or <code>REMOVE</code> to clear it.</div></div><div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
 <section class="card page" id="page-sensors"><h3>Sensors</h3>
 <h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
@@ -1143,7 +1146,7 @@ function automationFriendlyApiError(out){
   empty_body:'Automation rules payload was empty.',
   invalid_json:'Automation JSON is invalid.',
   bad_root:'Top-level JSON must be an object.',
-  bad_schema:'Unsupported automation schema version.',
+  bad_schema:'Unsupported automation schema schema_version.',
   bad_mode:'Execution mode must be standalone or paired+rules.',
   bad_peer_display:'Peer display must be addresses or names.',
   bad_action_target:'Action target must be self or an address (1..254).',
@@ -1963,7 +1966,8 @@ async function loadSettingsPageData(force){
   document.getElementById('role_tx_true').checked = !!s.role_tx;
   document.getElementById('role_tx_false').checked = !s.role_tx;
   document.getElementById('ap_always_on').checked = !!s.ap_always_on;
-  document.getElementById('mqtt_enabled').checked = !!s.mqtt_enabled;
+  document.getElementById('mqtt_client_enabled').checked = !!s.mqtt_client_enabled;
+  document.getElementById('mqtt_control_enabled').checked = !!s.mqtt_control_enabled;
   document.getElementById('sensor_temp_enabled').checked = !!s.sensor_temp_enabled;
   document.getElementById('lora_frequency_mhz').value=(Number(s.lora_frequency_hz)/1000000).toFixed(3);
   refreshFreqPreset();
@@ -2098,7 +2102,7 @@ function collectLoraBody(){
  body.role_tx=document.getElementById('role_tx_true').checked;
  body.local_address=local;
  body.remote_address=remote;
- body.tx_input_lora_control_enabled=document.getElementById('tx_input_lora_control_enabled').checked;
+ body.input_control_paired_lora_enabled=document.getElementById('input_control_paired_lora_enabled').checked;
  body.tx_mqtt_remote_polling_enabled=document.getElementById('tx_mqtt_remote_polling_enabled').checked;
  body.rx_push_on_change_enabled=document.getElementById('rx_push_on_change_enabled').checked;
  body.lora_frequency_hz=Math.round(mhz*1000000);
@@ -2124,7 +2128,7 @@ function collectSystemBody(){
  return body;
 }
 function collectMqttBody(){
- const ids=['mqtt_host','mqtt_user','mqtt_topic_root'];
+ const ids=['mqtt_host','mqtt_user','mqtt_topic_root','mqtt_controller_addresses'];
  const body={}; ids.forEach(id=>body[id]=document.getElementById(id).value);
  const mqttPass=String(document.getElementById('mqtt_password').value||'');
  if(mqttPass.length){ body.mqtt_password=mqttPass; }
@@ -2135,7 +2139,12 @@ function collectMqttBody(){
   return null;
  }
  body.mqtt_port=Math.floor(port);
- body.mqtt_enabled=document.getElementById('mqtt_enabled').checked;
+ body.mqtt_client_enabled=document.getElementById('mqtt_client_enabled').checked;
+ body.mqtt_control_enabled=document.getElementById('mqtt_control_enabled').checked;
+ if(body.mqtt_control_enabled && !body.mqtt_client_enabled){
+  alert('MQTT control enabled requires MQTT client enabled.');
+  return null;
+ }
  return body;
 }
 function collectSensorsBody(){
@@ -2812,7 +2821,7 @@ async function refreshDiagnostics(){
   <div class="k">CPU Freq</div><div class="v">${escapeHtml(String(d.cpu_freq_mhz || 0))} MHz</div>
   <div class="k">Chip ID</div><div class="v">${escapeHtml(String(d.chip_id || 'n/a'))}</div>
   <div class="k">Flash (real/ide)</div><div class="v">${escapeHtml(String(d.flash_real_size || 0))} / ${escapeHtml(String(d.flash_ide_size || 0))} B</div>
-  <div class="k">SDK/Core</div><div class="v">${escapeHtml(String(d.sdk_version || 'n/a'))} / ${escapeHtml(String(d.core_version || 'n/a'))}</div>`;
+  <div class="k">SDK/Core</div><div class="v">${escapeHtml(String(d.sdk_schema_version || 'n/a'))} / ${escapeHtml(String(d.core_schema_version || 'n/a'))}</div>`;
  txt.innerText=`Last save: ${d.audit_last_saved_by} at ${d.audit_last_saved_ms} ms | Last reboot: ${d.audit_last_reboot_reason} at ${d.audit_last_reboot_ms} ms | Boot count: ${d.audit_boot_count}`;
 }
 async function importConfig(file){

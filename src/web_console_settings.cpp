@@ -10,6 +10,8 @@ using namespace webconsole_internal;
 void WebConsole::handleGetSettings() {
   DynamicJsonDocument doc(1024);
   auto &cfg = config_->settings();
+  doc["mode"] = cfg.mode;
+  doc["role"] = cfg.role;
   doc["role_tx"] = cfg.role_tx;
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
@@ -25,7 +27,7 @@ void WebConsole::handleGetSettings() {
   doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
   doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
-  doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
+  doc["input_control_paired_lora_enabled"] = cfg.input_control_paired_lora_enabled;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = "";
   doc["wifi_sta_password_set"] = (cfg.wifi_sta_password.length() > 0);
@@ -37,7 +39,9 @@ void WebConsole::handleGetSettings() {
   doc["admin_password"] = "";
   doc["admin_password_set"] = (cfg.admin_password.length() > 0);
   doc["ap_always_on"] = cfg.ap_always_on;
-  doc["mqtt_enabled"] = cfg.mqtt_enabled;
+  doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
+  doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
+  doc["mqtt_controller_addresses"] = cfg.mqtt_controller_addresses;
   doc["mqtt_host"] = cfg.mqtt_host;
   doc["mqtt_port"] = cfg.mqtt_port;
   doc["mqtt_user"] = cfg.mqtt_user;
@@ -74,7 +78,15 @@ void WebConsole::handlePostSettings() {
   const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
   const String oldLegacyRoleTxHost = oldLegacyDefaultHost + "-tx";
   const String oldLegacyRoleRxHost = oldLegacyDefaultHost + "-rx";
+  next.mode = String(static_cast<const char *>(doc["mode"] | next.mode.c_str()));
+  next.role = String(static_cast<const char *>(doc["role"] | next.role.c_str()));
   next.role_tx = parseBoolField(doc["role_tx"], next.role_tx);
+  if (next.mode == "paired") {
+    next.role = next.role_tx ? "transmitter" : "receiver";
+  } else if (next.mode.length() == 0) {
+    next.mode = "paired";
+    next.role = next.role_tx ? "transmitter" : "receiver";
+  }
   next.local_address = parseAddressField(doc["local_address"], next.local_address);
   next.remote_address = parseAddressField(doc["remote_address"], next.remote_address);
   next.lora_frequency_hz = doc["lora_frequency_hz"] | next.lora_frequency_hz;
@@ -90,7 +102,7 @@ void WebConsole::handlePostSettings() {
       doc["tx_mqtt_remote_default_poll_interval_ms"] | next.tx_mqtt_remote_default_poll_interval_ms;
   next.rx_push_on_change_enabled = parseBoolField(doc["rx_push_on_change_enabled"], next.rx_push_on_change_enabled);
   next.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | next.rx_push_min_interval_ms;
-  next.tx_input_lora_control_enabled = parseBoolField(doc["tx_input_lora_control_enabled"], next.tx_input_lora_control_enabled);
+  next.input_control_paired_lora_enabled = parseBoolField(doc["input_control_paired_lora_enabled"], next.input_control_paired_lora_enabled);
   next.wifi_sta_ssid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | next.wifi_sta_ssid.c_str()));
   next.wifi_sta_password = String(static_cast<const char *>(doc["wifi_sta_password"] | next.wifi_sta_password.c_str()));
   const String postedLanHost = String(static_cast<const char *>(doc["lan_hostname"] | next.lan_hostname.c_str()));
@@ -104,7 +116,10 @@ void WebConsole::handlePostSettings() {
   }
   next.fleet_passphrase = String(static_cast<const char *>(doc["fleet_passphrase"] | next.fleet_passphrase.c_str()));
   next.ap_always_on = parseBoolField(doc["ap_always_on"], next.ap_always_on);
-  next.mqtt_enabled = parseBoolField(doc["mqtt_enabled"], next.mqtt_enabled);
+  next.mqtt_client_enabled = parseBoolField(doc["mqtt_client_enabled"], next.mqtt_client_enabled);
+  next.mqtt_control_enabled = parseBoolField(doc["mqtt_control_enabled"], next.mqtt_control_enabled);
+  next.mqtt_controller_addresses =
+      String(static_cast<const char *>(doc["mqtt_controller_addresses"] | next.mqtt_controller_addresses.c_str()));
   next.mqtt_host = String(static_cast<const char *>(doc["mqtt_host"] | next.mqtt_host.c_str()));
   next.mqtt_port = static_cast<uint16_t>(doc["mqtt_port"] | next.mqtt_port);
   next.mqtt_user = String(static_cast<const char *>(doc["mqtt_user"] | next.mqtt_user.c_str()));
@@ -156,6 +171,10 @@ void WebConsole::handlePostSettings() {
   if (next.rx_push_min_interval_ms > kMaxRxPushIntervalMs) next.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
   if (next.mqtt_port == 0) next.mqtt_port = 1883;
   if (next.mqtt_topic_root.length() == 0) next.mqtt_topic_root = "lora";
+  if (next.mqtt_control_enabled && !next.mqtt_client_enabled) {
+    server_.send(400, "text/plain", "mqtt_control_enabled requires mqtt_client_enabled");
+    return;
+  }
   next.audit_last_saved_by = "admin";
   next.audit_last_saved_ms = millis();
 
@@ -181,6 +200,8 @@ void WebConsole::handleExportSettings() {
   server_.sendHeader("Content-Disposition", "attachment; filename=lrs-config.json");
   DynamicJsonDocument doc(2048);
   auto &cfg = config_->settings();
+  doc["mode"] = cfg.mode;
+  doc["role"] = cfg.role;
   doc["role_tx"] = cfg.role_tx;
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
@@ -196,14 +217,16 @@ void WebConsole::handleExportSettings() {
   doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
   doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
-  doc["tx_input_lora_control_enabled"] = cfg.tx_input_lora_control_enabled;
+  doc["input_control_paired_lora_enabled"] = cfg.input_control_paired_lora_enabled;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg.wifi_sta_password;
   doc["lan_hostname"] = cfg.lan_hostname;
   doc["fleet_passphrase"] = cfg.fleet_passphrase;
   doc["admin_password"] = cfg.admin_password;
   doc["ap_always_on"] = cfg.ap_always_on;
-  doc["mqtt_enabled"] = cfg.mqtt_enabled;
+  doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
+  doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
+  doc["mqtt_controller_addresses"] = cfg.mqtt_controller_addresses;
   doc["mqtt_host"] = cfg.mqtt_host;
   doc["mqtt_port"] = cfg.mqtt_port;
   doc["mqtt_user"] = cfg.mqtt_user;

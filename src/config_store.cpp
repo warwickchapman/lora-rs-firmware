@@ -4,14 +4,70 @@
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
 #include <SHA256.h>
+#include <string.h>
 
 #include "logger.h"
 
 namespace {
 constexpr char kConfigPath[] = "/config.json";
-constexpr uint16_t kConfigVersion = 1;
+constexpr uint16_t kConfigSchemaVersion = 2;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
+constexpr char kModeStandalone[] = "standalone";
+constexpr char kModePaired[] = "paired";
+constexpr char kModeMesh[] = "mesh";
+constexpr char kRoleNone[] = "none";
+constexpr char kRoleTransmitter[] = "transmitter";
+constexpr char kRoleReceiver[] = "receiver";
+constexpr char kRoleCoordinator[] = "coordinator";
+constexpr char kRoleNode[] = "node";
+
+constexpr const char *kAllowedFields[] = {
+    "schema_version",
+    "commissioned",
+    "mode",
+    "role",
+    "local_address",
+    "remote_address",
+    "lora_frequency_hz",
+    "lora_tx_power",
+    "lora_spreading_factor",
+    "lora_bandwidth_hz",
+    "lora_coding_rate",
+    "heartbeat_ms",
+    "ack_timeout_ms",
+    "mqtt_remote_retry_timeout_ms",
+    "tx_mqtt_remote_polling_enabled",
+    "tx_mqtt_remote_default_poll_interval_ms",
+    "rx_push_on_change_enabled",
+    "rx_push_min_interval_ms",
+    "input_control_paired_lora_enabled",
+    "wifi_sta_ssid",
+    "wifi_sta_password",
+    "lan_hostname",
+    "ap_always_on",
+    "mqtt_client_enabled",
+    "mqtt_control_enabled",
+    "mqtt_controller_addresses",
+    "mqtt_host",
+    "mqtt_port",
+    "mqtt_user",
+    "mqtt_password",
+    "mqtt_topic_root",
+    "sensor_temp_enabled",
+    "sensor_temp_pin",
+    "sensor_temp_interval_s",
+    "fleet_passphrase",
+    "fleet_setup_prompt_dismissed",
+    "admin_password",
+    "factory_serial",
+    "audit_last_saved_by",
+    "audit_last_saved_ms",
+    "audit_last_reboot_reason",
+    "audit_last_reboot_ms",
+    "audit_boot_count",
+};
+constexpr size_t kAllowedFieldCount = sizeof(kAllowedFields) / sizeof(kAllowedFields[0]);
 
 int monthFromShort(const String &m) {
   if (m == "Jan") return 1;
@@ -69,32 +125,42 @@ String deriveShortPassword(const String &chip) {
   return String(hexbuf).substring(0, 8);
 }
 
-String extractJsonStringField(const String &json, const char *key) {
-  if (key == nullptr || key[0] == '\0') return "";
-  const String needle = String("\"") + key + "\":\"";
-  const int start = json.indexOf(needle);
-  if (start < 0) return "";
-  const int valueStart = start + needle.length();
-  int i = valueStart;
-  bool escape = false;
-  String out;
-  while (i < json.length()) {
-    const char c = json.charAt(i++);
-    if (escape) {
-      out += c;
-      escape = false;
-      continue;
-    }
-    if (c == '\\') {
-      escape = true;
-      continue;
-    }
-    if (c == '"') {
-      return out;
-    }
-    out += c;
+bool isAllowedConfigKey(const char *key) {
+  if (key == nullptr || key[0] == '\0') return false;
+  for (size_t i = 0; i < kAllowedFieldCount; ++i) {
+    if (strcmp(key, kAllowedFields[i]) == 0) return true;
   }
-  return "";
+  return false;
+}
+
+bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleTx) {
+  if (mode == kModePaired) {
+    if (role == kRoleTransmitter) {
+      roleTx = true;
+      return true;
+    }
+    if (role == kRoleReceiver) {
+      roleTx = false;
+      return true;
+    }
+    return false;
+  }
+  if (mode == kModeMesh) {
+    if (role == kRoleCoordinator) {
+      roleTx = true;
+      return true;
+    }
+    if (role == kRoleNode) {
+      roleTx = false;
+      return true;
+    }
+    return false;
+  }
+  if (mode == kModeStandalone && role == kRoleNone) {
+    roleTx = true;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -135,139 +201,115 @@ bool ConfigStore::begin() {
   DynamicJsonDocument doc(docCapacity);
   auto err = deserializeJson(doc, raw);
   if (err) {
-    // Keep config file intact on parse failure to avoid destructive resets.
-    LRS_LOGW(FS, "event=config_parse_failed path=%s err=%s bytes=%lu", kConfigPath, err.c_str(), static_cast<unsigned long>(fileSize));
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=parse_failed err=%s bytes=%lu action=reset_defaults", kConfigPath, err.c_str(),
+             static_cast<unsigned long>(fileSize));
     ensureProvisionedDefaults();
-    const String recoveredAdmin = extractJsonStringField(raw, "admin_password");
-    if (recoveredAdmin.length() >= 8) {
-      cfg_.admin_password = recoveredAdmin;
+    return save();
+  }
+
+  JsonObject root = doc.as<JsonObject>();
+  if (root.isNull()) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=root_not_object action=reset_defaults", kConfigPath);
+    ensureProvisionedDefaults();
+    return save();
+  }
+  for (JsonPair kv : root) {
+    if (!isAllowedConfigKey(kv.key().c_str())) {
+      LRS_LOGW(FS, "event=config_invalid path=%s reason=unknown_field field=%s action=reset_defaults", kConfigPath, kv.key().c_str());
+      ensureProvisionedDefaults();
+      return save();
     }
-    return false;
   }
 
-  cfg_.version = doc["version"] | kConfigVersion;
-  cfg_.provisioned = doc["provisioned"] | false;
-
-  cfg_.role_tx = doc["role_tx"] | true;
-  cfg_.local_address = doc["local_address"] | 1;
-  cfg_.remote_address = doc["remote_address"] | 2;
-
-  cfg_.lora_frequency_hz = doc["lora_frequency_hz"] | 433000000L;
-  cfg_.lora_tx_power = doc["lora_tx_power"] | 17;
-  cfg_.lora_spreading_factor = doc["lora_spreading_factor"] | 7;
-  cfg_.lora_bandwidth_hz = doc["lora_bandwidth_hz"] | 125000L;
-  cfg_.lora_coding_rate = doc["lora_coding_rate"] | 5;
-
-  cfg_.heartbeat_ms = doc["heartbeat_ms"] | 60000;
-  cfg_.ack_timeout_ms = doc["ack_timeout_ms"] | 5000;
-  cfg_.mqtt_remote_retry_timeout_ms = doc["mqtt_remote_retry_timeout_ms"] | 300000;
-  cfg_.tx_mqtt_remote_polling_enabled = doc["tx_mqtt_remote_polling_enabled"] | false;
-  cfg_.tx_mqtt_remote_default_poll_interval_ms = doc["tx_mqtt_remote_default_poll_interval_ms"] | 60000;
-  cfg_.rx_push_on_change_enabled = doc["rx_push_on_change_enabled"] | false;
-  cfg_.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | 60000;
-  cfg_.tx_input_lora_control_enabled = doc["tx_input_lora_control_enabled"] | true;
-
-  cfg_.wifi_sta_ssid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | ""));
-  cfg_.wifi_sta_password = String(static_cast<const char *>(doc["wifi_sta_password"] | ""));
-  cfg_.lan_hostname = String(static_cast<const char *>(doc["lan_hostname"] | ""));
-  cfg_.ap_always_on = doc["ap_always_on"] | true;
-  cfg_.mqtt_enabled = doc["mqtt_enabled"] | false;
-  cfg_.mqtt_host = String(static_cast<const char *>(doc["mqtt_host"] | "venus.local"));
-  cfg_.mqtt_port = doc["mqtt_port"] | 1883;
-  cfg_.mqtt_user = String(static_cast<const char *>(doc["mqtt_user"] | ""));
-  cfg_.mqtt_password = String(static_cast<const char *>(doc["mqtt_password"] | ""));
-  cfg_.mqtt_topic_root = String(static_cast<const char *>(doc["mqtt_topic_root"] | "lora"));
-  cfg_.sensor_temp_enabled = doc["sensor_temp_enabled"] | true;
-  cfg_.sensor_temp_pin = doc["sensor_temp_pin"] | 0;
-  cfg_.sensor_temp_interval_s = doc["sensor_temp_interval_s"] | 10;
-
-  cfg_.fleet_passphrase = String(static_cast<const char *>(doc["fleet_passphrase"] | "lora-default-passphrase"));
-  cfg_.fleet_setup_prompt_dismissed = doc["fleet_setup_prompt_dismissed"] | false;
-  cfg_.admin_password = String(static_cast<const char *>(doc["admin_password"] | ""));
-  cfg_.factory_serial = String(static_cast<const char *>(doc["factory_serial"] | ""));
-  cfg_.audit_last_saved_by = String(static_cast<const char *>(doc["audit_last_saved_by"] | "factory"));
-  cfg_.audit_last_saved_ms = doc["audit_last_saved_ms"] | 0;
-  cfg_.audit_last_reboot_reason = String(static_cast<const char *>(doc["audit_last_reboot_reason"] | "power_on"));
-  cfg_.audit_last_reboot_ms = doc["audit_last_reboot_ms"] | 0;
-  cfg_.audit_boot_count = doc["audit_boot_count"] | 0;
-
-  bool changed = false;
-  const String chipHex = chipIdHex();
-
-  // Legacy config migration: never reprovision/reset role/addresses if config file exists.
-  if (!cfg_.provisioned) {
-    cfg_.provisioned = true;
-    changed = true;
+  cfg_.schema_version = root["schema_version"] | 0;
+  if (cfg_.schema_version != kConfigSchemaVersion) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=schema_mismatch got=%u expected=%u action=reset_defaults", kConfigPath,
+             static_cast<unsigned>(cfg_.schema_version), static_cast<unsigned>(kConfigSchemaVersion));
+    ensureProvisionedDefaults();
+    return save();
+  }
+  cfg_.commissioned = root["commissioned"] | false;
+  cfg_.mode = String(static_cast<const char *>(root["mode"] | ""));
+  cfg_.role = String(static_cast<const char *>(root["role"] | ""));
+  if (!parseRoleTxFromModeRole(cfg_.mode, cfg_.role, cfg_.role_tx)) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=mode_role_invalid mode=%s role=%s action=reset_defaults", kConfigPath,
+             cfg_.mode.c_str(), cfg_.role.c_str());
+    ensureProvisionedDefaults();
+    return save();
   }
 
-  if (cfg_.admin_password.length() < 8) {
-    cfg_.admin_password = deriveShortPassword(chipHex);
-    changed = true;
-  }
-  if (cfg_.factory_serial.length() < 4) {
-    cfg_.factory_serial = String("lrs") + compileWeekStamp() + "-" + chipHex;
-    changed = true;
-  }
-  if (cfg_.local_address < 1 || cfg_.local_address > 254) {
-    cfg_.local_address = static_cast<uint8_t>((ESP.getChipId() & 0xFF) % 254) + 1;
-    changed = true;
-  }
-  if (cfg_.remote_address < 1 || cfg_.remote_address > 254 || cfg_.remote_address == cfg_.local_address) {
-    cfg_.remote_address = static_cast<uint8_t>(((ESP.getChipId() >> 8) & 0xFF) % 254) + 1;
-    if (cfg_.remote_address == cfg_.local_address) {
-      cfg_.remote_address = (cfg_.local_address % 254) + 1;
-    }
-    changed = true;
-  }
+  cfg_.local_address = root["local_address"] | 1;
+  cfg_.remote_address = root["remote_address"] | 2;
 
-  if (cfg_.lan_hostname.length() == 0) {
-    cfg_.lan_hostname = defaultLanHostnameForRole(cfg_.role_tx);
-    changed = true;
-  }
+  cfg_.lora_frequency_hz = root["lora_frequency_hz"] | 433000000L;
+  cfg_.lora_tx_power = root["lora_tx_power"] | 17;
+  cfg_.lora_spreading_factor = root["lora_spreading_factor"] | 7;
+  cfg_.lora_bandwidth_hz = root["lora_bandwidth_hz"] | 125000L;
+  cfg_.lora_coding_rate = root["lora_coding_rate"] | 5;
 
-  const String defaultHost = String("lrs-") + chipHex;
-  const String legacyRoleHostTx = defaultHost + "-tx";
-  const String legacyRoleHostRx = defaultHost + "-rx";
-  if (cfg_.lan_hostname == legacyRoleHostTx || cfg_.lan_hostname == legacyRoleHostRx) {
-    cfg_.lan_hostname = defaultHost;
-    changed = true;
-  }
+  cfg_.heartbeat_ms = root["heartbeat_ms"] | 60000;
+  cfg_.ack_timeout_ms = root["ack_timeout_ms"] | 5000;
+  cfg_.mqtt_remote_retry_timeout_ms = root["mqtt_remote_retry_timeout_ms"] | 300000;
+  cfg_.tx_mqtt_remote_polling_enabled = root["tx_mqtt_remote_polling_enabled"] | false;
+  cfg_.tx_mqtt_remote_default_poll_interval_ms = root["tx_mqtt_remote_default_poll_interval_ms"] | 60000;
+  cfg_.rx_push_on_change_enabled = root["rx_push_on_change_enabled"] | false;
+  cfg_.rx_push_min_interval_ms = root["rx_push_min_interval_ms"] | 60000;
+  cfg_.input_control_paired_lora_enabled = root["input_control_paired_lora_enabled"] | false;
 
-  if (cfg_.mqtt_host.length() == 0) {
-    cfg_.mqtt_host = "venus.local";
-    changed = true;
+  cfg_.wifi_sta_ssid = String(static_cast<const char *>(root["wifi_sta_ssid"] | ""));
+  cfg_.wifi_sta_password = String(static_cast<const char *>(root["wifi_sta_password"] | ""));
+  cfg_.lan_hostname = String(static_cast<const char *>(root["lan_hostname"] | ""));
+  cfg_.ap_always_on = root["ap_always_on"] | true;
+  cfg_.mqtt_client_enabled = root["mqtt_client_enabled"] | false;
+  cfg_.mqtt_control_enabled = root["mqtt_control_enabled"] | false;
+  cfg_.mqtt_controller_addresses = String(static_cast<const char *>(root["mqtt_controller_addresses"] | ""));
+  cfg_.mqtt_host = String(static_cast<const char *>(root["mqtt_host"] | "venus.local"));
+  cfg_.mqtt_port = root["mqtt_port"] | 1883;
+  cfg_.mqtt_user = String(static_cast<const char *>(root["mqtt_user"] | ""));
+  cfg_.mqtt_password = String(static_cast<const char *>(root["mqtt_password"] | ""));
+  cfg_.mqtt_topic_root = String(static_cast<const char *>(root["mqtt_topic_root"] | "lora"));
+  cfg_.sensor_temp_enabled = root["sensor_temp_enabled"] | true;
+  cfg_.sensor_temp_pin = root["sensor_temp_pin"] | 0;
+  cfg_.sensor_temp_interval_s = root["sensor_temp_interval_s"] | 10;
+
+  cfg_.fleet_passphrase = String(static_cast<const char *>(root["fleet_passphrase"] | "lora-default-passphrase"));
+  cfg_.fleet_setup_prompt_dismissed = root["fleet_setup_prompt_dismissed"] | false;
+  cfg_.admin_password = String(static_cast<const char *>(root["admin_password"] | ""));
+  cfg_.factory_serial = String(static_cast<const char *>(root["factory_serial"] | ""));
+  cfg_.audit_last_saved_by = String(static_cast<const char *>(root["audit_last_saved_by"] | "factory"));
+  cfg_.audit_last_saved_ms = root["audit_last_saved_ms"] | 0;
+  cfg_.audit_last_reboot_reason = String(static_cast<const char *>(root["audit_last_reboot_reason"] | "power_on"));
+  cfg_.audit_last_reboot_ms = root["audit_last_reboot_ms"] | 0;
+  cfg_.audit_boot_count = root["audit_boot_count"] | 0;
+
+  if (cfg_.local_address < 1 || cfg_.local_address > 254 || cfg_.remote_address < 1 || cfg_.remote_address > 254 ||
+      cfg_.local_address == cfg_.remote_address) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=address_range action=reset_defaults", kConfigPath);
+    ensureProvisionedDefaults();
+    return save();
   }
-  if (cfg_.fleet_passphrase.length() == 0) {
-    cfg_.fleet_passphrase = "lora-default-passphrase";
-    changed = true;
+  if (cfg_.mqtt_control_enabled && !cfg_.mqtt_client_enabled) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=mqtt_control_requires_client action=reset_defaults", kConfigPath);
+    ensureProvisionedDefaults();
+    return save();
   }
-  if (cfg_.tx_mqtt_remote_default_poll_interval_ms < 60000) {
-    cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
-    changed = true;
+  if (cfg_.input_control_paired_lora_enabled && (cfg_.mode != kModePaired || !cfg_.role_tx)) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=paired_input_requires_paired_tx action=reset_defaults", kConfigPath);
+    ensureProvisionedDefaults();
+    return save();
   }
-  if (cfg_.tx_mqtt_remote_default_poll_interval_ms > 3600000) {
-    cfg_.tx_mqtt_remote_default_poll_interval_ms = 3600000;
-    changed = true;
-  }
-  if (cfg_.rx_push_min_interval_ms < 60000) {
-    cfg_.rx_push_min_interval_ms = 60000;
-    changed = true;
-  }
-  if (cfg_.rx_push_min_interval_ms > 3600000) {
-    cfg_.rx_push_min_interval_ms = 3600000;
-    changed = true;
+  if (cfg_.admin_password.length() < 8 || cfg_.factory_serial.length() < 4) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=identity_fields_invalid action=reset_defaults", kConfigPath);
+    ensureProvisionedDefaults();
+    return save();
   }
 
   cfg_.audit_boot_count += 1;
-  if (changed) {
-    LRS_LOGI(FS, "event=config_migrated path=%s write_back=1", kConfigPath);
-    return save();
-  }
   LRS_LOGI(FS,
-           "event=config_loaded path=%s version=%u provisioned=%u role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
+           "event=config_loaded path=%s schema_version=%u commissioned=%u role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
-           static_cast<unsigned>(cfg_.version),
-           cfg_.provisioned ? 1U : 0U,
+           static_cast<unsigned>(cfg_.schema_version),
+           cfg_.commissioned ? 1U : 0U,
            cfg_.role_tx ? "tx" : "rx",
            static_cast<unsigned>(cfg_.local_address),
            static_cast<unsigned>(cfg_.remote_address),
@@ -280,10 +322,10 @@ Settings &ConfigStore::settings() { return cfg_; }
 
 bool ConfigStore::save() {
   DynamicJsonDocument doc(4096);
-  doc["version"] = cfg_.version;
-  doc["provisioned"] = cfg_.provisioned;
-
-  doc["role_tx"] = cfg_.role_tx;
+  doc["schema_version"] = cfg_.schema_version;
+  doc["commissioned"] = cfg_.commissioned;
+  doc["mode"] = cfg_.mode;
+  doc["role"] = cfg_.role;
   doc["local_address"] = cfg_.local_address;
   doc["remote_address"] = cfg_.remote_address;
 
@@ -300,13 +342,15 @@ bool ConfigStore::save() {
   doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg_.tx_mqtt_remote_default_poll_interval_ms;
   doc["rx_push_on_change_enabled"] = cfg_.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg_.rx_push_min_interval_ms;
-  doc["tx_input_lora_control_enabled"] = cfg_.tx_input_lora_control_enabled;
+  doc["input_control_paired_lora_enabled"] = cfg_.input_control_paired_lora_enabled;
 
   doc["wifi_sta_ssid"] = cfg_.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg_.wifi_sta_password;
   doc["lan_hostname"] = cfg_.lan_hostname;
   doc["ap_always_on"] = cfg_.ap_always_on;
-  doc["mqtt_enabled"] = cfg_.mqtt_enabled;
+  doc["mqtt_client_enabled"] = cfg_.mqtt_client_enabled;
+  doc["mqtt_control_enabled"] = cfg_.mqtt_control_enabled;
+  doc["mqtt_controller_addresses"] = cfg_.mqtt_controller_addresses;
   doc["mqtt_host"] = cfg_.mqtt_host;
   doc["mqtt_port"] = cfg_.mqtt_port;
   doc["mqtt_user"] = cfg_.mqtt_user;
@@ -411,8 +455,10 @@ String ConfigStore::apPassword() const {
 }
 
 void ConfigStore::setDefaults() {
-  cfg_.version = kConfigVersion;
-  cfg_.provisioned = false;
+  cfg_.schema_version = kConfigSchemaVersion;
+  cfg_.commissioned = false;
+  cfg_.mode = kModePaired;
+  cfg_.role = kRoleTransmitter;
 
   cfg_.role_tx = true;
   cfg_.local_address = 1;
@@ -431,13 +477,15 @@ void ConfigStore::setDefaults() {
   cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
   cfg_.rx_push_on_change_enabled = false;
   cfg_.rx_push_min_interval_ms = 60000;
-  cfg_.tx_input_lora_control_enabled = true;
+  cfg_.input_control_paired_lora_enabled = true;
 
   cfg_.wifi_sta_ssid = "";
   cfg_.wifi_sta_password = "";
   cfg_.lan_hostname = "";
   cfg_.ap_always_on = true;
-  cfg_.mqtt_enabled = false;
+  cfg_.mqtt_client_enabled = false;
+  cfg_.mqtt_control_enabled = false;
+  cfg_.mqtt_controller_addresses = "";
   cfg_.mqtt_host = "venus.local";
   cfg_.mqtt_port = 1883;
   cfg_.mqtt_user = "";
@@ -481,5 +529,7 @@ void ConfigStore::ensureProvisionedDefaults() {
   cfg_.audit_last_reboot_reason = "power_on";
   cfg_.audit_last_reboot_ms = 0;
   cfg_.audit_boot_count = 1;
-  cfg_.provisioned = true;
+  cfg_.commissioned = true;
+  cfg_.mode = kModePaired;
+  cfg_.role = cfg_.role_tx ? kRoleTransmitter : kRoleReceiver;
 }

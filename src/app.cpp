@@ -252,6 +252,8 @@ void App::tick() {
         const bool changed = (cfg.local_address != provAddr) || (cfg.role_tx != provRoleTx) || (cfg.fleet_passphrase != provFleetKey);
         cfg.local_address = provAddr;
         cfg.role_tx = provRoleTx;
+        cfg.mode = "paired";
+        cfg.role = provRoleTx ? "transmitter" : "receiver";
         cfg.fleet_passphrase = provFleetKey;
         cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
         cfg.audit_last_saved_by = "lora_fleet_provision";

@@ -187,7 +187,7 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
 }
 
 void MqttBridge::tick(bool wifiConnected) {
-  if (!settings_ || !runtime_.mqtt_enabled || settings_->mqtt_host.length() == 0) {
+  if (!settings_ || !runtime_.mqtt_client_enabled || settings_->mqtt_host.length() == 0) {
     status_publish_in_progress_ = false;
     status_publish_locals_done_ = false;
     status_publish_peer_index_ = 0;
@@ -230,7 +230,7 @@ void MqttBridge::staticCallback(char *topic, uint8_t *payload, unsigned int leng
 }
 
 void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
-  runtime_.mqtt_enabled = cfg.mqtt_enabled;
+  runtime_.mqtt_client_enabled = cfg.mqtt_client_enabled;
   runtime_.role_tx = cfg.role_tx;
   runtime_.local_address = cfg.local_address;
   runtime_.remote_address = cfg.remote_address;

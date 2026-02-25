@@ -19,7 +19,7 @@ class MqttBridge {
   PubSubClient mqtt_client_{wifi_client_};
 
   struct RuntimeCfg {
-    bool mqtt_enabled = false;
+    bool mqtt_client_enabled = false;
     bool role_tx = false;
     uint8_t local_address = 0;
     uint8_t remote_address = 0;

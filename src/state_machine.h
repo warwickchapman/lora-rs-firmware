@@ -162,7 +162,7 @@ class NodeStateMachine {
     uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
     bool rx_push_on_change_enabled = false;
     uint32_t rx_push_min_interval_ms = 60000;
-    bool tx_input_lora_control_enabled = false;
+    bool input_control_paired_lora_enabled = false;
   };
   static constexpr uint8_t kLedPin = 2;
 

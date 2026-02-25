@@ -565,7 +565,7 @@ AutomationRulesEngine::GuardBlock AutomationRulesEngine::guardBlockForRuntime(co
   if (!program_.enabled) return GuardBlock::DisabledConfig;
   if (!program_.standalone_mode) return GuardBlock::NonStandaloneMode;
   if (!program_.action_target_is_self) return GuardBlock::ActionTargetNotSelf;
-  if (cfg.role_tx && cfg.tx_input_lora_control_enabled) return GuardBlock::TxInputLoRaControlOwnsRelay;
+  if (cfg.role_tx && cfg.input_control_paired_lora_enabled) return GuardBlock::TxInputLoRaControlOwnsRelay;
   return GuardBlock::None;
 #endif
 }
@@ -584,7 +584,7 @@ void AutomationRulesEngine::logGuardTransition(GuardBlock block) {
       LRS_LOGI(SYS, "event=automations_runtime_blocked reason=mode_not_standalone");
       break;
     case GuardBlock::TxInputLoRaControlOwnsRelay:
-      LRS_LOGI(SYS, "event=automations_runtime_blocked reason=tx_input_lora_control_enabled");
+      LRS_LOGI(SYS, "event=automations_runtime_blocked reason=input_control_paired_lora_enabled");
       break;
     case GuardBlock::ActionTargetNotSelf:
       LRS_LOGI(SYS, "event=automations_runtime_blocked reason=action_target_not_self");

@@ -193,7 +193,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   last_packet_ms_ = 0;
   last_packet_rssi_ = -127;
   last_wifi_prov_tx_ms_ = 0;
-  tx_state_sync_pending_ = runtime_.role_tx && runtime_.tx_input_lora_control_enabled;
+  tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled;
   tx_command_pending_ = false;
   tx_retry_step_ = 0;
   tx_next_retry_ms_ = 0;
@@ -239,7 +239,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   wait_ack_since_ms_ = millis();
   last_heartbeat_ms_ = millis();
   tx_ack_pending_ = false;
-  tx_state_sync_pending_ = runtime_.role_tx && runtime_.tx_input_lora_control_enabled;
+  tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled;
   tx_command_pending_ = false;
   tx_retry_step_ = 0;
   tx_next_retry_ms_ = 0;
@@ -283,7 +283,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.tx_mqtt_remote_default_poll_interval_ms = cfg.tx_mqtt_remote_default_poll_interval_ms;
   runtime_.rx_push_on_change_enabled = cfg.rx_push_on_change_enabled;
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
-  runtime_.tx_input_lora_control_enabled = cfg.tx_input_lora_control_enabled;
+  runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
 }
 
 bool NodeStateMachine::ensureProvisioningStorage() {
@@ -1138,7 +1138,7 @@ void NodeStateMachine::tickTransmitter() {
 
   if ((now - last_debounce_ms_) > kDebounceMs && inputLogical != input_state_) {
     input_state_ = static_cast<uint8_t>(inputLogical);
-    if (runtime_.tx_input_lora_control_enabled) {
+    if (runtime_.input_control_paired_lora_enabled) {
       if (!radioTxBudgetAvailable()) {
         tx_state_sync_pending_ = true;  // Defer change sync to next tick when a radio TX budget slot is available.
         return;
@@ -1150,7 +1150,7 @@ void NodeStateMachine::tickTransmitter() {
     }
   }
 
-  if (runtime_.tx_input_lora_control_enabled && tx_state_sync_pending_ && !tx_command_pending_) {
+  if (runtime_.input_control_paired_lora_enabled && tx_state_sync_pending_ && !tx_command_pending_) {
     if (!radioTxBudgetAvailable()) {
       return;
     }
@@ -1163,7 +1163,7 @@ void NodeStateMachine::tickTransmitter() {
     return;
   }
 
-  if (runtime_.tx_input_lora_control_enabled && tx_command_pending_ && static_cast<int32_t>(now - tx_next_retry_ms_) >= 0) {
+  if (runtime_.input_control_paired_lora_enabled && tx_command_pending_ && static_cast<int32_t>(now - tx_next_retry_ms_) >= 0) {
     if (!radioTxBudgetAvailable()) {
       return;
     }
@@ -1174,7 +1174,7 @@ void NodeStateMachine::tickTransmitter() {
     return;
   }
 
-  if (runtime_.tx_input_lora_control_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
+  if (runtime_.input_control_paired_lora_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
     if (!radioTxBudgetAvailable()) {
       return;
     }
