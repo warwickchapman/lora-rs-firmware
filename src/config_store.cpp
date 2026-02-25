@@ -477,7 +477,7 @@ void ConfigStore::setDefaults() {
   cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
   cfg_.rx_push_on_change_enabled = false;
   cfg_.rx_push_min_interval_ms = 60000;
-  cfg_.input_control_paired_lora_enabled = true;
+  cfg_.input_control_paired_lora_enabled = false;
 
   cfg_.wifi_sta_ssid = "";
   cfg_.wifi_sta_password = "";

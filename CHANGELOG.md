@@ -16,6 +16,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Automations Phase 3b self-relay actuation (`set_relay(self, ...)`) with first-match execution, no-repeat behavior when already in the desired state, and dedicated automation relay ownership logging/status reason on RX.
 - Automations Phase 3c timing semantics (`for_ms`, predicate `for_ms`, `cooldown_ms`) with fixed-size per-rule runtime state and transition-based hold/cooldown logging to avoid tick spam.
 - Automations Phase 4 instrumentation pass: targeted heap/duration logs for `GET/POST /api/automation-rules` and rules compile/reload success/failure metrics (heap/max-block before/after, duration, doc capacity).
+- Commissioning setup API (`POST /api/setup/commissioning`) and first-login commissioning page with mode/role selection, Fleet key validation, and capability toggles.
+- Status payload fields for mode-aware UI identity: `mode`, `role_name`, `chip_id`, and `factory_serial`.
 
 ### Changed
 - LoRa replay protection now tracks a per-sender boot/session nonce in addition to the monotonic counter, so a peer reboot no longer gets permanently dropped as replay traffic.
@@ -26,6 +28,9 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - `/api/fleet` now sizes its JSON document dynamically from current peer count (bounded), reducing transient heap spikes when only a small number of remotes are tracked.
 - Automations builder now surfaces v1 limits in the UI and maps backend validation errors to clearer installer-facing messages before/after save.
 - WiFi STA reconnect now defers active reconnect/scan attempts when free heap or max free block is below safety thresholds, reducing low-memory reconnect pressure that can destabilize ESP8266 under heavy UI/API load.
+- Setup flow now supports full commissioning on first login instead of Fleet-key-only setup.
+- Main web console header now shows device identity (serial/chip) with one-click copy and mode-aware role title.
+- Default `input_control_paired_lora_enabled` is now `false` to avoid unintentionally blocking automation control on fresh configs.
 
 ## [0.2.2-alpha] - 2026-02-21
 

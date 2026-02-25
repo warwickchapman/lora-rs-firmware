@@ -17,6 +17,10 @@ bool WebConsole::buildStatusLiveCache() {
 
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
+  doc["chip_id"] = config_->chipIdHex();
+  doc["factory_serial"] = cfg.factory_serial;
+  doc["mode"] = cfg.mode;
+  doc["role_name"] = cfg.role;
   const wl_status_t st = WiFi.status();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
   doc["local_address"] = cfg.local_address;
@@ -98,6 +102,10 @@ bool WebConsole::buildStatusStaticCache() {
 
   DynamicJsonDocument doc(512);
   auto &cfg = config_->settings();
+  doc["chip_id"] = config_->chipIdHex();
+  doc["factory_serial"] = cfg.factory_serial;
+  doc["mode"] = cfg.mode;
+  doc["role_name"] = cfg.role;
   doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
   doc["deployment_key"] = cfg.fleet_passphrase.length() ? lrslog::maskSecret(cfg.fleet_passphrase) : String("");
   doc["deployment_key_set"] = (cfg.fleet_passphrase.length() > 0);
@@ -143,6 +151,9 @@ bool WebConsole::buildStatusLiteCache() {
   DynamicJsonDocument doc(384);
   auto &cfg = config_->settings();
   doc["chip_id"] = config_->chipIdHex();
+  doc["factory_serial"] = cfg.factory_serial;
+  doc["mode"] = cfg.mode;
+  doc["role_name"] = cfg.role;
   doc["role"] = cfg.role_tx ? "tx" : "rx";
   doc["relay_state"] = sm_ ? sm_->relayState() : 0;
   doc["lora_last_rssi"] = sm_ ? sm_->lastPacketRssi() : 0;

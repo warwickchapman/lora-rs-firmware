@@ -16,7 +16,7 @@ input{box-sizing:border-box;width:100%;padding:10px 14px;border:var(--glass-bord
 input:focus{border-color:rgba(255,255,255,0.3);box-shadow:0 0 0 3px var(--focus), inset 0 0 0 1px rgba(255,255,255,0.1)}
 .pass-field{display:flex;align-items:center;gap:10px}
 .pass-field input{flex:1 1 auto}
-.pass-toggle{width:auto;margin:0;padding:10px 14px;border:var(--glass-border);border-radius:8px;background:var(--field);color:var(--txt);font-size:0.85rem;font-weight:600;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:all 0.2s ease}
+.pass-toggle{width:40px;height:40px;min-width:40px;margin:0;padding:0;border:var(--glass-border);border-radius:10px;background:var(--field);color:var(--txt);font-size:1rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:all 0.2s ease}
 .pass-toggle:hover{background:rgba(255,255,255,0.1);transform:translateY(-1px)}
 body.light .pass-toggle:hover{background:rgba(255,255,255,0.6)}
 button{margin-top:20px;width:100%;padding:12px;border:0;border-radius:8px;background:var(--btn);color:#fff;font-size:0.95rem;font-weight:600;letter-spacing:0.01em;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(99,102,241,0.2)}
@@ -37,7 +37,7 @@ body.light .theme-btn:hover{background:rgba(255,255,255,0.6)}
 <form id="loginForm" autocomplete="on">
 <input id="uname" name="username" type="text" autocomplete="username" value="admin" aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" />
 <label for="pw">Admin password</label>
-<div class="pass-field"><input id="pw" name="password" type="password" autocomplete="current-password" placeholder="Enter admin password" /><button class="pass-toggle" type="button" onclick="togglePasswordField('pw',this)">Show</button></div>
+<div class="pass-field"><input id="pw" name="password" type="password" autocomplete="current-password" placeholder="Enter admin password" /><button class="pass-toggle" type="button" onclick="togglePasswordField('pw',this)" title="Show password" aria-label="Show password">👁</button></div>
 <button id="btn" type="submit">Login</button>
 </form>
 <div id="msg" class="msg"></div>
@@ -64,7 +64,11 @@ function togglePasswordField(id,btn){
  if(!el) return;
  const show=el.type==='password';
  el.type=show?'text':'password';
- if(btn){ btn.innerText=show?'Hide':'Show'; }
+ if(btn){
+  btn.innerText=show?'🙈':'👁';
+  btn.title=show?'Hide password':'Show password';
+  btn.setAttribute('aria-label', btn.title);
+ }
 }
 async function login(){
  btn.disabled=true; msg.className='msg'; msg.innerText='Signing in...';
@@ -90,55 +94,145 @@ pw.focus();
 
 const char kFleetSetupHtml[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
-<title>LRS Fleet Key Setup</title>
+<title>LRS Commissioning</title>
 <style>
-:root{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%230f172a"/><circle cx="80" cy="20" r="50" fill="%234c1d95" opacity="0.4" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%231e3a8a" opacity="0.4" filter="blur(30px)"/></svg>');--card:rgba(15,23,42,0.4);--txt:#f8fafc;--muted:#cbd5e1;--border:rgba(255,255,255,0.1);--field:rgba(255,255,255,0.03);--btn:linear-gradient(135deg,#6366f1,#8b5cf6);--btn-hover:linear-gradient(135deg,#4f46e5,#7c3aed);--btn2:rgba(255,255,255,0.05);--focus:rgba(139,92,246,0.5);--glass-shadow:0 4px 16px 0 rgba(0,0,0,0.2);--glass-border:1px solid rgba(255,255,255,0.1)}
-body.light{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%23f8fafc"/><circle cx="80" cy="20" r="50" fill="%23c4b5fd" opacity="0.5" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%2393c5fd" opacity="0.5" filter="blur(30px)"/></svg>');--card:rgba(255,255,255,0.4);--txt:#0f172a;--muted:#475569;--border:rgba(255,255,255,0.3);--field:rgba(255,255,255,0.4);--btn:linear-gradient(135deg,#3b82f6,#6366f1);--btn-hover:linear-gradient(135deg,#2563eb,#4f46e5);--btn2:rgba(0,0,0,0.03);--focus:rgba(99,102,241,0.5);--glass-shadow:0 4px 16px 0 rgba(31,38,135,0.1);--glass-border:1px solid rgba(255,255,255,0.4)}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);background-size:cover;background-position:center;background-attachment:fixed;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--txt);-webkit-text-size-adjust:100%}
-.card{width:min(90vw,440px);background:var(--card);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:var(--glass-border);border-radius:16px;padding:28px;box-shadow:var(--glass-shadow)}
-h1{margin:0 0 6px;font-size:1.5rem;font-weight:700;letter-spacing:-0.025em;background:linear-gradient(to right,var(--txt),var(--muted));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-p{margin:0 0 20px;color:var(--muted);font-size:0.9rem;line-height:1.4}
-label{display:block;margin:0 0 6px;color:var(--txt);font-size:0.85rem;font-weight:600;letter-spacing:0.01em}
-input{box-sizing:border-box;width:100%;padding:10px 14px;border:var(--glass-border);border-radius:8px;font-size:0.95rem;background:var(--field);color:var(--txt);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:all 0.2s ease;outline:none}
-input:focus{border-color:rgba(255,255,255,0.3);box-shadow:0 0 0 3px var(--focus), inset 0 0 0 1px rgba(255,255,255,0.1)}
-.row{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}
-.row button{flex:1 1 0}
-button{padding:12px 16px;border:0;border-radius:8px;background:var(--btn);color:#fff;font-size:0.95rem;font-weight:600;letter-spacing:0.01em;cursor:pointer;transition:all 0.2s ease;box-shadow:0 4px 12px rgba(99,102,241,0.2)}
-button:hover{background:var(--btn-hover);transform:translateY(-1px);box-shadow:0 6px 16px rgba(99,102,241,0.3)}
-button:active{transform:translateY(1px)}
-button.secondary{background:var(--btn2);color:var(--txt);border:var(--glass-border);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:none}
-button.secondary:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
-body.light button.secondary:hover{background:rgba(255,255,255,0.6);box-shadow:0 4px 12px rgba(31,38,135,0.05)}
-.msg{margin-top:16px;font-size:0.85rem;min-height:1.2em;text-align:center;font-weight:600;padding:8px;border-radius:6px;transition:all 0.2s;opacity:0}
-.msg:not(:empty){opacity:1}
-.err{background:rgba(239,68,68,0.1);color:#fca5a5;border:1px solid rgba(239,68,68,0.2)}
-.ok{background:rgba(34,197,94,0.1);color:#86efac;border:1px solid rgba(34,197,94,0.2)}
-.small{font-size:0.85rem;color:var(--muted);line-height:1.4;margin-top:6px}
-</style></head><body><div class="card">
-<h1>Set Fleet Key (Optional)</h1>
-<p>This is shown once on first login. Set a shared Fleet key now to enable LoRa communication and fleet provisioning, or skip and configure later.</p>
-<label for="fleet">Fleet key</label>
-<input id="fleet" type="text" placeholder="Enter unique fleet key (min 16 chars)" />
-<div class="small">Default key is blocked here. Use a unique key for this installation.</div>
-<div class="row"><button id="saveBtn" type="button" onclick="saveKey()">Save Fleet Key</button><button id="skipBtn" class="secondary" type="button" onclick="skipKey()">Skip for Now</button></div>
+body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:20px}
+.card{background:rgba(15,23,42,.82);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:18px}
+h1{margin:0 0 8px;font-size:1.45rem}
+p{margin:0 0 16px;color:#94a3b8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px}
+input,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:rgba(255,255,255,.04);color:#e2e8f0}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+button{border:0;border-radius:10px;padding:10px 14px;background:#4f46e5;color:white;font-weight:700;cursor:pointer}
+button.alt{background:rgba(255,255,255,.1)}
+.hint{font-size:.82rem;color:#94a3b8;margin-top:4px}
+.msg{margin-top:14px;padding:10px;border-radius:10px;display:none}
+.msg.show{display:block}
+.msg.ok{background:rgba(34,197,94,.14);color:#86efac}
+.msg.err{background:rgba(239,68,68,.14);color:#fca5a5}
+.section{margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.12)}
+.check{display:flex;gap:8px;align-items:center;margin-top:8px}
+.check input{width:18px;height:18px}
+@media(max-width:680px){.grid{grid-template-columns:1fr}}
+</style></head><body><div class="wrap"><div class="card">
+<h1>Commission device</h1>
+<p>Set the installation mode, role, and control settings for first use.</p>
+
+<div class="grid">
+<div><label for="install_type">Installation type</label><select id="install_type"><option value="new">New installation</option><option value="join">Join existing installation</option></select></div>
+<div><label for="fleet">Fleet key</label><input id="fleet" type="text" placeholder="At least 16 characters" /></div>
+</div>
+<div class="hint">Use the same Fleet key on all devices in the installation.</div>
+
+<div class="section grid">
+<div><label for="mode">Mode</label><select id="mode" onchange="syncRoleOptions()"><option value="standalone">Standalone</option><option value="paired" selected>Paired</option><option value="mesh">Mesh</option></select></div>
+<div><label for="role">Role</label><select id="role"></select></div>
+</div>
+
+<div class="section">
+<label>Capabilities</label>
+<div class="check"><input id="mqtt_client_enabled" type="checkbox" /><span>MQTT client enabled</span></div>
+<div class="check"><input id="mqtt_control_enabled" type="checkbox" /><span>MQTT control enabled</span></div>
+<div class="check" id="paired_input_row"><input id="input_control_paired_lora_enabled" type="checkbox" /><span>Local input drives LoRa control of paired relay</span></div>
+<div class="hint">When MQTT control is enabled, local automations are disabled.</div>
+</div>
+
+<div class="section grid">
+<div><label for="wifi_sta_ssid">WiFi SSID (optional)</label><input id="wifi_sta_ssid" /></div>
+<div><label for="wifi_sta_password">WiFi password (optional)</label><input id="wifi_sta_password" type="password" /></div>
+</div>
+
+<div class="row">
+<button id="saveBtn" type="button" onclick="saveCommissioning()">Save commissioning</button>
+<button id="skipBtn" class="alt" type="button" onclick="skipForNow()">Skip for now</button>
+</div>
 <div id="msg" class="msg"></div>
-</div><script>
-const msg=document.getElementById('msg'); const fleet=document.getElementById('fleet'); const saveBtn=document.getElementById('saveBtn'); const skipBtn=document.getElementById('skipBtn');
+</div></div><script>
+const msg=document.getElementById('msg');
+const saveBtn=document.getElementById('saveBtn');
+const skipBtn=document.getElementById('skipBtn');
+const modeEl=document.getElementById('mode');
+const roleEl=document.getElementById('role');
 function setBusy(b){ saveBtn.disabled=b; skipBtn.disabled=b; }
-async function submit(body){
- setBusy(true); msg.className='msg'; msg.innerText='Saving...';
- try{
-  const res=await fetch('/api/setup/fleet-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const out=await res.json().catch(()=>({}));
-  if(!res.ok){ msg.className='msg err'; msg.innerText=out.error||'Failed'; return; }
-  msg.className='msg ok'; msg.innerText='Saved';
-  location.href='/';
- }catch(e){ msg.className='msg err'; msg.innerText=`Failed: ${e.message}`; }
- finally{ setBusy(false); }
+function showMsg(text, ok){
+ msg.className = `msg show ${ok ? 'ok' : 'err'}`;
+ msg.innerText = text || '';
 }
-function saveKey(){ submit({fleet_passphrase:fleet.value||''}); }
-function skipKey(){ submit({skip:true}); }
-fleet.focus();
+function syncRoleOptions(){
+ const mode = String(modeEl.value || 'paired');
+ const opts = [];
+ if(mode === 'paired'){
+  opts.push(['transmitter','Transmitter'], ['receiver','Receiver']);
+ }else if(mode === 'mesh'){
+  opts.push(['coordinator','Coordinator'], ['node','Node']);
+ }else{
+  opts.push(['none','None']);
+ }
+ const prev = roleEl.value;
+ roleEl.innerHTML = opts.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join('');
+ roleEl.value = opts.some(o=>o[0]===prev) ? prev : opts[0][0];
+ const pairedInputRow = document.getElementById('paired_input_row');
+ if(pairedInputRow){
+  const show = mode === 'paired' && roleEl.value === 'transmitter';
+  pairedInputRow.style.display = show ? '' : 'none';
+  if(!show){ document.getElementById('input_control_paired_lora_enabled').checked = false; }
+ }
+}
+roleEl.addEventListener('change', syncRoleOptions);
+document.getElementById('mqtt_control_enabled').addEventListener('change', ()=>{
+ const control = document.getElementById('mqtt_control_enabled').checked;
+ if(control){ document.getElementById('mqtt_client_enabled').checked = true; }
+});
+async function saveCommissioning(){
+ const fleetKey = String(document.getElementById('fleet').value || '').trim();
+ if(fleetKey.length < 16){ showMsg('Fleet key must be at least 16 characters.', false); return; }
+ if(fleetKey === 'lora-default-passphrase'){ showMsg('Default Fleet key is blocked.', false); return; }
+ const body = {
+  fleet_passphrase: fleetKey,
+  mode: String(modeEl.value || 'paired'),
+  role: String(roleEl.value || 'transmitter'),
+  mqtt_client_enabled: !!document.getElementById('mqtt_client_enabled').checked,
+  mqtt_control_enabled: !!document.getElementById('mqtt_control_enabled').checked,
+  input_control_paired_lora_enabled: !!document.getElementById('input_control_paired_lora_enabled').checked,
+  wifi_sta_ssid: String(document.getElementById('wifi_sta_ssid').value || ''),
+  wifi_sta_password: String(document.getElementById('wifi_sta_password').value || ''),
+ };
+ if(body.mqtt_control_enabled && !body.mqtt_client_enabled){
+  showMsg('MQTT control requires MQTT client enabled.', false);
+  return;
+ }
+ setBusy(true);
+ showMsg('Saving...', true);
+ try{
+  const res=await fetch('/api/setup/commissioning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const out=await res.json().catch(()=>({}));
+  if(!res.ok){ showMsg(out.error || 'Save failed.', false); return; }
+  showMsg('Commissioning saved.', true);
+  location.href='/';
+ }catch(e){
+  showMsg(`Save failed: ${e.message}`, false);
+ }finally{
+  setBusy(false);
+ }
+}
+async function skipForNow(){
+ setBusy(true);
+ showMsg('Skipping...', true);
+ try{
+  const res=await fetch('/api/setup/fleet-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skip:true})});
+  const out=await res.json().catch(()=>({}));
+  if(!res.ok){ showMsg(out.error || 'Skip failed.', false); return; }
+  location.href='/';
+ }catch(e){
+  showMsg(`Skip failed: ${e.message}`, false);
+ }finally{
+  setBusy(false);
+ }
+}
+syncRoleOptions();
+document.getElementById('fleet').focus();
 </script></body></html>
 )HTML";
 
@@ -261,6 +355,9 @@ header .relay-head.mem-crit{background:rgba(248,113,113,0.15);border-color:rgba(
 header .reason-head{font-size:.8rem;background:rgba(255,255,255,.08);border:var(--glass-border);border-radius:999px;padding:6px 12px;white-space:nowrap;display:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 header .reason-head.show{display:inline-flex}
 header .right{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+header .id-badge{font-size:.82rem;background:rgba(255,255,255,0.05);border:var(--glass-border);border-radius:999px;padding:4px 10px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+header .id-copy{margin:0;padding:4px 9px;font-size:.72rem;border-radius:999px;border:var(--glass-border);background:rgba(255,255,255,0.08);color:var(--txt);cursor:pointer}
+header .id-copy:hover{background:rgba(255,255,255,0.2)}
 header .theme{margin-top:0;padding:6px 14px;min-width:40px;border:var(--glass-border);background:rgba(255,255,255,0.05);border-radius:999px;cursor:pointer;transition:all 0.3s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
 header .logout{margin-top:0;padding:6px 14px;border:var(--glass-border);background:rgba(255,255,255,0.05);border-radius:999px;cursor:pointer;transition:all 0.3s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1);font-weight:700}
 header .theme:hover, header .logout:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
@@ -271,9 +368,9 @@ label{display:block;font-size:0.85rem;margin-top:12px;font-weight:700;color:var(
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
 input,select,textarea{width:100%;padding:10px 14px;border:var(--glass-border);border-radius:12px;font-size:0.95rem;background:var(--field);color:var(--txt);transition:all 0.2s ease;outline:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 input:focus,select:focus,textarea:focus{border-color:rgba(255,255,255,0.3);box-shadow:0 0 0 3px var(--focus), inset 0 0 0 1px rgba(255,255,255,0.1)}
-.pass-field{display:flex;align-items:center;gap:10px}
+.pass-field{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px}
 .pass-field input{flex:1 1 auto}
-.pass-toggle{margin-top:0;padding:10px 14px;border:var(--glass-border);border-radius:12px;background:var(--field);color:var(--txt);white-space:nowrap;cursor:pointer;font-weight:700;transition:all 0.2s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.pass-toggle{margin-top:0;padding:0;width:40px;height:40px;min-width:40px;border:var(--glass-border);border-radius:12px;background:var(--field);color:var(--txt);white-space:nowrap;cursor:pointer;font-weight:700;font-size:1rem;display:inline-flex;align-items:center;justify-content:center;transition:all 0.2s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .pass-toggle:hover{background:rgba(255,255,255,0.1);transform:translateY(-1px)}
 body.light .pass-toggle:hover{background:rgba(255,255,255,0.6)}
 input[type=checkbox]{width:20px;height:20px;padding:0;accent-color:#8b5cf6;cursor:pointer}
@@ -315,13 +412,15 @@ body.light .wifi-icon .dot{fill:rgba(0,0,0,.3)}
 .wifi-icon.lv3 .a2,.wifi-icon.lv4 .a2{stroke:#4ade80}
 .wifi-icon.lv4 .a1{stroke:#4ade80}
 .wifi-icon.lv0 .x{display:block}
-.wifi-list{margin-top:16px;background:rgba(255,255,255,0.05);border-radius:12px;overflow:hidden;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+.wifi-list{margin-top:16px;background:rgba(255,255,255,0.05);border-radius:12px;overflow:auto;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
 body.light .wifi-list{background:rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(31,38,135,0.05)}
 .wifi-table{width:100%;border-collapse:collapse;font-size:0.9rem}
 .wifi-table th,.wifi-table td{padding:10px 14px;border-bottom:var(--glass-border);text-align:left}
 .wifi-table th{font-weight:700;color:var(--muted);background:rgba(0,0,0,0.2)}
 body.light .wifi-table th{background:rgba(0,0,0,0.05)}
 .wifi-table th:last-child,.wifi-table td:last-child{text-align:right}
+.wifi-table td:last-child{white-space:nowrap}
+.wifi-table button{margin-top:0;padding:6px 10px;font-size:0.85rem;border-radius:10px}
 .sig{display:inline-flex;align-items:flex-end;gap:3px;height:14px;margin-right:10px;vertical-align:-2px}
 .sig i{display:block;width:3px;background:rgba(255,255,255,0.2);border-radius:2px;transition:background 0.3s}
 body.light .sig i{background:rgba(0,0,0,0.1)}
@@ -463,6 +562,9 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  .status-table{grid-template-columns:140px 1fr}
  .relay-card{flex-direction:row;justify-content:space-between;padding:24px}
  .relay-badge{width:100px;height:100px;font-size:0.85rem}
+ .wifi-table th,.wifi-table td{padding:8px 10px}
+ .wifi-table{font-size:0.85rem}
+ .pass-toggle{width:36px;height:36px;min-width:36px}
 }
 </style></head>
 <body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button>
@@ -472,7 +574,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
     R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automations')">Automations</button>
 )HTML"
 #endif
-    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn" id="nav-diagnostics" onclick="showPage('diagnostics')">Diagnostics</button><button class="navbtn" id="nav-logs" onclick="showPage('logs')">Logs</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="deviceBadge" class="id-badge"><span id="deviceBadgeText">Device: -</span><button id="deviceBadgeCopy" type="button" class="id-copy" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
 <h3>Status</h3>
 <div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
@@ -523,9 +625,10 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 )HTML"
 #endif
     R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane" id="settings-pane-lora"><div class="grid">
-<div class="lora-field"><label>Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> Transmitter</label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> Receiver</label></div><input id="role_tx" type="hidden" value="true" /></div>
+<div><label>Mode</label><select id="mode_select"><option value="standalone">Standalone</option><option value="paired">Paired</option><option value="mesh">Mesh</option></select></div>
+<div class="lora-field"><label id="role_label">Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> <span id="role_tx_text">Transmitter</span></label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> <span id="role_rx_text">Receiver</span></label></div><input id="role_tx" type="hidden" value="true" /><input id="role_name" type="hidden" value="transmitter" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
-<div style="grid-column:1/-1"><label>Deployment Key (Encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
+<div style="grid-column:1/-1"><label>Fleet key (encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
 <div><label id="local_address_label">Local address</label><input id="local_address" type="text" /><div class="hint" id="local_address_hex"></div></div>
 <div><label id="remote_address_label">Remote address</label><input id="remote_address" type="text" /><div class="hint" id="remote_address_hex"></div></div>
 </div>
@@ -544,10 +647,10 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="input_control_paired_lora_enabled" type="checkbox" /><label for="input_control_paired_lora_enabled">Local input drives LoRa control of paired relay</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
 </div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
-<div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)">Show</button></div></div>
+<div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)" title="Show password" aria-label="Show password">👁</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label id="lan_hostname_label">LAN hostname</label><input id="lan_hostname" /><div class="hint" id="lan_hostname_hint">Used as the device hostname for WiFi and OTA.</div><div class="hint" id="lan_hostname_preview_wrap" style="display:none">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
-</div><div class="actions"><button onclick="saveNetwork()">Save</button></div><div class="small">STA connection test is available during setup only.</div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
+</div><div class="actions"><button onclick="saveNetwork()">Save</button><button id="btnTestSta" onclick="testSta()">Test</button></div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_client_enabled" type="checkbox" /><label for="mqtt_client_enabled">MQTT client enabled</label></div></div>
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_control_enabled" type="checkbox" /><label for="mqtt_control_enabled">MQTT control enabled</label></div><div class="small">When enabled, inbound MQTT control commands are accepted and local automations are disabled.</div></div>
 <div><label>Broker host</label><input id="mqtt_host" /></div>
@@ -651,11 +754,47 @@ function refreshAddressHints(){
  document.getElementById('remote_address_hex').innerText=Number.isInteger(remote)?`hex ${toHexByte(remote)}`:'enter dec or hex (e.g. 10 or 0x0A)';
 }
 function refreshRoleLabels(){
+ const modeEl=document.getElementById('mode_select');
+ const mode=String((modeEl && modeEl.value) || 'paired');
+ const txTextEl=document.getElementById('role_tx_text');
+ const rxTextEl=document.getElementById('role_rx_text');
+ const roleNameEl=document.getElementById('role_name');
+ if(mode === 'mesh'){
+  if(txTextEl) txTextEl.innerText='Coordinator';
+  if(rxTextEl) rxTextEl.innerText='Node';
+ }else if(mode === 'standalone'){
+  if(txTextEl) txTextEl.innerText='Host';
+  if(rxTextEl) rxTextEl.innerText='Disabled';
+ }else{
+  if(txTextEl) txTextEl.innerText='Transmitter';
+  if(rxTextEl) rxTextEl.innerText='Receiver';
+ }
  const tx=document.getElementById('role_tx').value==='true';
- document.getElementById('local_address_label').innerText=tx?'TX local address (source)':'RX local address';
- document.getElementById('remote_address_label').innerText=tx?'RX remote address (destination)':'TX remote address (source)';
+ const localLabel=document.getElementById('local_address_label');
+ const remoteLabel=document.getElementById('remote_address_label');
+ if(localLabel && remoteLabel){
+  if(mode === 'paired'){
+   localLabel.innerText=tx?'TX local address (source)':'RX local address';
+   remoteLabel.innerText=tx?'RX remote address (destination)':'TX remote address (source)';
+  }else if(mode === 'mesh'){
+   localLabel.innerText=tx?'Coordinator local address':'Node local address';
+   remoteLabel.innerText=tx?'Node address (target)':'Coordinator address (parent)';
+  }else{
+   localLabel.innerText='Local address';
+   remoteLabel.innerText='Peer address (optional)';
+  }
+ }
+ if(roleNameEl){
+  if(mode === 'mesh'){
+   roleNameEl.value = tx ? 'coordinator' : 'node';
+  }else if(mode === 'standalone'){
+   roleNameEl.value = 'none';
+  }else{
+   roleNameEl.value = tx ? 'transmitter' : 'receiver';
+  }
+ }
  const txInputRow=document.getElementById('tx_input_lora_control_row');
- if(txInputRow){ txInputRow.style.display = tx ? '' : 'none'; }
+ if(txInputRow){ txInputRow.style.display = (mode === 'paired' && tx) ? '' : 'none'; }
  const txMqttRetryRow=document.getElementById('tx_mqtt_remote_retry_row');
  if(txMqttRetryRow){ txMqttRetryRow.style.display = tx ? '' : 'none'; }
  const txPollingEnabledRow=document.getElementById('tx_polling_enabled_row');
@@ -898,10 +1037,10 @@ function updateStaTestButtonState(){
  if(!btn) return;
  const hasSsid=normalizedInputValue('wifi_sta_ssid').length>0;
  const unchanged=currentStaMatchesConnected();
- const disabled=staTestInFlight || !hasSsid || unchanged;
+ const disabled=staTestInFlight || !hasSsid;
  btn.disabled=disabled;
  if(unchanged){
-  btn.title='Already connected with these STA credentials. Change SSID or password to run a test.';
+  btn.title='Already connected with these STA credentials. Test will re-check current connection.';
  }else if(!hasSsid){
   btn.title='Enter an SSID to test.';
  }else{
@@ -1478,7 +1617,11 @@ function togglePasswordField(id,btn){
  if(!el) return;
  const show=el.type==='password';
  el.type=show?'text':'password';
- if(btn){ btn.innerText=show?'Hide':'Show'; }
+ if(btn){
+  btn.innerText=show?'🙈':'👁';
+  btn.title=show?'Hide password':'Show password';
+  btn.setAttribute('aria-label', btn.title);
+ }
 }
 async function ensureStatusStatic(silent){
  if(location.pathname !== '/') return statusStaticCache;
@@ -1505,6 +1648,10 @@ async function ensureStatusStatic(silent){
 function buildStatusFallbackFromLite(lite){
  const role = String((lite && lite.role) || (lastRoleIsTx ? 'tx' : 'rx') || 'tx').toLowerCase();
  return {
+  chip_id: String((lite && lite.chip_id) || ''),
+  factory_serial: String((lite && lite.factory_serial) || ''),
+  mode: String((lite && lite.mode) || 'paired'),
+  role_name: String((lite && lite.role_name) || ''),
   role: (role === 'rx') ? 'rx' : 'tx',
   local_address: Number((lite && lite.local_address) || 0),
   remote_address: Number((lite && lite.remote_address) || 0),
@@ -1701,9 +1848,19 @@ function applyStatusPageState(st){
  }
  applyFleetTabVisibility();
  const roleIsTx = lastRoleIsTx;
- const txAddress = roleIsTx ? st.local_address : st.remote_address;
- const rxAddress = roleIsTx ? st.remote_address : st.local_address;
- const roleDisplay = `${roleIsTx ? 'Transmitter' : 'Receiver'} (tx ${txAddress}, rx ${rxAddress})`;
+ const modeRaw = String(st.mode || 'paired').toLowerCase();
+ const roleRaw = String(st.role_name || '').toLowerCase();
+ const modeDisplay = modeRaw === 'mesh' ? 'Mesh' : (modeRaw === 'standalone' ? 'Standalone' : 'Paired');
+ let roleDisplayName = roleRaw;
+ if(!roleDisplayName){
+  roleDisplayName = roleIsTx ? 'transmitter' : 'receiver';
+ }
+ if(roleDisplayName === 'transmitter') roleDisplayName = 'Transmitter';
+ else if(roleDisplayName === 'receiver') roleDisplayName = 'Receiver';
+ else if(roleDisplayName === 'coordinator') roleDisplayName = 'Coordinator';
+ else if(roleDisplayName === 'node') roleDisplayName = 'Node';
+ else if(roleDisplayName === 'none') roleDisplayName = 'None';
+ const roleDisplay = `${modeDisplay} / ${roleDisplayName} (local ${st.local_address}, peer ${st.remote_address})`;
  const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
  const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
  const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
@@ -1740,7 +1897,6 @@ function applyStatusPageState(st){
  if(rm){ rm.innerText = `Link: ${st.link_state}`; }
  const table=document.getElementById('statusTable');
  const deployKey=String(st.deployment_key || '');
- const deployKeyCopyBtn = copyButtonHtml(deployKey, 'Fleet key');
  const footerFw=document.getElementById('footerFw');
  if(footerFw){
   footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
@@ -1815,11 +1971,27 @@ function applyStatusPageState(st){
 function applyHeaderStatus(st){
  if(!st) return;
  const heapEl=document.getElementById('heapHeader');
- const roleTag = String(st.role || '').toLowerCase() === 'tx' ? 'TX' : 'RX';
+ const modeRaw = String(st.mode || 'paired').toLowerCase();
+ const modeLabel = modeRaw === 'mesh' ? 'Mesh' : (modeRaw === 'standalone' ? 'Standalone' : 'Paired');
+ const roleTag = String(st.role_name || (String(st.role || '').toLowerCase() === 'tx' ? 'transmitter' : 'receiver')).toLowerCase();
+ const roleLabel = roleTag === 'coordinator' ? 'Coordinator' :
+                   (roleTag === 'node' ? 'Node' :
+                   (roleTag === 'none' ? 'None' :
+                   (roleTag === 'receiver' ? 'Receiver' : 'Transmitter')));
  const titleEl = document.getElementById('consoleTitle');
- const pageTitle = `LRS Device Console (${roleTag})`;
+ const pageTitle = `LRS Device Console (${modeLabel}/${roleLabel})`;
  if(titleEl){ titleEl.innerText = pageTitle; }
  document.title = pageTitle;
+ const chipId = String(st.chip_id || '').trim();
+ const serial = String(st.factory_serial || '').trim();
+ const identity = serial || (chipId ? `lrs-${chipId}` : '-');
+ const idText=document.getElementById('deviceBadgeText');
+ const idCopy=document.getElementById('deviceBadgeCopy');
+ if(idText){ idText.innerText = `Device: ${identity}`; }
+ if(idCopy){
+  idCopy.dataset.copy = identity;
+  idCopy.dataset.label = 'Device identity';
+ }
  const roleText=String(st.role||'').toLowerCase();
  if(roleText==='tx' || roleText==='rx'){
   lastRoleIsTx = roleText==='tx';
@@ -1962,6 +2134,10 @@ async function loadSettingsPageData(force){
   }
   updateDeploymentKeyStrength();
   updateStaTestButtonState();
+  const modeSelect=document.getElementById('mode_select');
+  if(modeSelect){
+   modeSelect.value = String(s.mode || 'paired');
+  }
   document.getElementById('role_tx').value = String(!!s.role_tx);
   document.getElementById('role_tx_true').checked = !!s.role_tx;
   document.getElementById('role_tx_false').checked = !s.role_tx;
@@ -2017,11 +2193,11 @@ async function scanWifi(){
     return;
   }
   out.networks.sort((a,b)=>Number(b.rssi)-Number(a.rssi));
-  host.innerHTML='<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th>Secure</th><th></th></tr></thead><tbody></tbody></table>';
+  host.innerHTML='<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table>';
   const tbody=host.querySelector('tbody');
   out.networks.forEach(n=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi,'scan')}${escapeHtml(n.rssi)} dBm</td><td><span class="sec-chip ${n.secure?'y':'n'}">${n.secure?'Y':'N'}</span></td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
+    tr.innerHTML=`<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi,'scan')}${escapeHtml(n.rssi)} dBm</td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
     tbody.appendChild(tr);
   });
   host.querySelectorAll('button[data-ssid]').forEach(btn=>{
@@ -2099,6 +2275,10 @@ function collectLoraBody(){
   }
   body.fleet_passphrase=fleetPassphrase;
  }
+ const mode=String((document.getElementById('mode_select')||{}).value || 'paired');
+ const roleName=String((document.getElementById('role_name')||{}).value || 'transmitter');
+ body.mode=mode;
+ body.role=roleName;
  body.role_tx=document.getElementById('role_tx_true').checked;
  body.local_address=local;
  body.remote_address=remote;
@@ -2855,6 +3035,7 @@ window.addEventListener('error', (e) => {
 });
 function initPage(){
  const role=document.getElementById('role_tx');
+ const modeSelect=document.getElementById('mode_select');
   const local=document.getElementById('local_address');
   const remote=document.getElementById('remote_address');
  const host=document.getElementById('lan_hostname');
@@ -2863,9 +3044,22 @@ function initPage(){
  const roleTx=document.getElementById('role_tx_true');
  const roleRx=document.getElementById('role_tx_false');
  const fleetKey=document.getElementById('fleet_passphrase');
- const syncRole=()=>{ if(role){ role.value = roleTx.checked ? 'true' : 'false'; refreshRoleLabels(); } };
+ const syncRole=()=>{
+  if(!role) return;
+  const mode = String((modeSelect && modeSelect.value) || 'paired');
+  if(mode === 'standalone'){
+   if(roleTx) roleTx.checked = true;
+   if(roleRx) roleRx.checked = false;
+   if(roleRx) roleRx.disabled = true;
+  }else{
+   if(roleRx) roleRx.disabled = false;
+  }
+  role.value = roleTx && roleTx.checked ? 'true' : 'false';
+  refreshRoleLabels();
+ };
  if(roleTx) roleTx.addEventListener('change',syncRole);
  if(roleRx) roleRx.addEventListener('change',syncRole);
+ if(modeSelect) modeSelect.addEventListener('change',syncRole);
  if(local) local.addEventListener('input',refreshAddressHints);
  if(remote) remote.addEventListener('input',refreshAddressHints);
  if(host && UI_MDNS_ENABLED) host.addEventListener('input',refreshHostnamePreview);

@@ -56,6 +56,7 @@ class WebConsole {
   void handleFleetSetupPage();
   void handleLoginApi();
   void handleFleetSetupApi();
+  void handleSetupCommissioningApi();
   void handleLogoutApi();
   void handleSessionApi();
   void handleStatus();

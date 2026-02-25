@@ -9,6 +9,41 @@
 
 using namespace webconsole_internal;
 
+namespace {
+bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleTx) {
+  if (mode == "paired") {
+    if (role == "transmitter") {
+      roleTx = true;
+      return true;
+    }
+    if (role == "receiver") {
+      roleTx = false;
+      return true;
+    }
+    return false;
+  }
+  if (mode == "mesh") {
+    if (role == "coordinator") {
+      roleTx = true;
+      return true;
+    }
+    if (role == "node") {
+      roleTx = false;
+      return true;
+    }
+    return false;
+  }
+  if (mode == "standalone") {
+    if (role == "none") {
+      roleTx = true;
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+}  // namespace
+
 void WebConsole::handleIndex() {
   if (!requireAuth(false)) return;
   if (needsFleetSetupPrompt()) {
@@ -170,6 +205,101 @@ void WebConsole::handleFleetSetupApi() {
   if (on_apply_) on_apply_(false, false);
   sendTracked(200, "application/json", "{\"ok\":true}");
   LRS_LOGI(API, "event=fleet_key_set key=%s", lrslog::maskSecret(fleetKey).c_str());
+}
+
+void WebConsole::handleSetupCommissioningApi() {
+  if (!requireAuth(true)) return;
+
+  DynamicJsonDocument doc(1024);
+  auto err = deserializeJson(doc, server_.arg("plain"));
+  if (err) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    return;
+  }
+
+  String fleetKey = String(static_cast<const char *>(doc["fleet_passphrase"] | ""));
+  fleetKey.trim();
+  if (fleetKey.length() < kMinDeploymentKeyLen) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"deployment_key_too_short\"}");
+    return;
+  }
+  if (isDefaultDeploymentKey(fleetKey)) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"deployment_key_default_blocked\"}");
+    return;
+  }
+
+  String mode = String(static_cast<const char *>(doc["mode"] | ""));
+  String role = String(static_cast<const char *>(doc["role"] | ""));
+  mode.toLowerCase();
+  role.toLowerCase();
+
+  bool roleTx = true;
+  if (!parseRoleTxFromModeRole(mode, role, roleTx)) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_mode_role\"}");
+    return;
+  }
+
+  const bool mqttClientEnabled = parseBoolField(doc["mqtt_client_enabled"], false);
+  const bool mqttControlEnabled = parseBoolField(doc["mqtt_control_enabled"], false);
+  const bool inputControlPairedLoRaEnabled = parseBoolField(doc["input_control_paired_lora_enabled"], false);
+  if (mqttControlEnabled && !mqttClientEnabled) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"mqtt_control_requires_mqtt_client\"}");
+    return;
+  }
+  if (inputControlPairedLoRaEnabled && !(mode == "paired" && roleTx)) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"paired_input_requires_paired_transmitter\"}");
+    return;
+  }
+
+  auto &cfg = config_->settings();
+  const Settings prev = cfg;
+
+  const String prevStaSsid = prev.wifi_sta_ssid;
+  const String prevStaPassword = prev.wifi_sta_password;
+  const String prevLanHost = prev.lan_hostname;
+  const bool prevApAlwaysOn = prev.ap_always_on;
+
+  cfg.mode = mode;
+  cfg.role = role;
+  cfg.role_tx = roleTx;
+  cfg.fleet_passphrase = fleetKey;
+  cfg.fleet_setup_prompt_dismissed = true;
+  cfg.commissioned = true;
+  cfg.mqtt_client_enabled = mqttClientEnabled;
+  cfg.mqtt_control_enabled = mqttControlEnabled;
+  cfg.input_control_paired_lora_enabled = inputControlPairedLoRaEnabled;
+  cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
+
+  const String wifiSsid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str()));
+  const String wifiPassword = String(static_cast<const char *>(doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str()));
+  const String mqttControllerAddresses =
+      String(static_cast<const char *>(doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str()));
+  cfg.wifi_sta_ssid = wifiSsid;
+  cfg.wifi_sta_password = wifiPassword;
+  cfg.mqtt_controller_addresses = mqttControllerAddresses;
+  if (cfg.lan_hostname.length() == 0) {
+    cfg.lan_hostname = config_->defaultLanHostnameForRole(cfg.role_tx);
+  }
+  cfg.audit_last_saved_by = "first_login_commissioning";
+  cfg.audit_last_saved_ms = millis();
+
+  if (!config_->save()) {
+    cfg = prev;
+    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"save_failed\"}");
+    return;
+  }
+
+  const bool networkChanged = (cfg.wifi_sta_ssid != prevStaSsid) || (cfg.wifi_sta_password != prevStaPassword) ||
+                              (cfg.lan_hostname != prevLanHost) || (cfg.ap_always_on != prevApAlwaysOn);
+  if (on_apply_) on_apply_(networkChanged, false);
+  sendTracked(200, "application/json", "{\"ok\":true}");
+  LRS_LOGI(API,
+           "event=commissioning_setup_saved mode=%s role=%s mqtt_client=%u mqtt_control=%u input_control=%u",
+           cfg.mode.c_str(),
+           cfg.role.c_str(),
+           cfg.mqtt_client_enabled ? 1U : 0U,
+           cfg.mqtt_control_enabled ? 1U : 0U,
+           cfg.input_control_paired_lora_enabled ? 1U : 0U);
 }
 
 void WebConsole::handleLogoutApi() {

@@ -32,6 +32,11 @@ void WebConsole::routes() {
     handleFleetSetupApi();
     finishRequestLog();
   });
+  server_.on("/api/setup/commissioning", HTTP_POST, [this]() {
+    beginRequestLog("/api/setup/commissioning", true, false, true);
+    handleSetupCommissioningApi();
+    finishRequestLog();
+  });
   server_.on("/api/logout", HTTP_POST, [this]() {
     beginRequestLog("/api/logout", true, false, false);
     handleLogoutApi();
