@@ -36,6 +36,21 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Provisioning status endpoint now uses compact payload responses to avoid large dynamic JSON allocations during active provisioning and low-memory periods.
 - Request logging now avoids per-request `String` allocations for path/IP, reducing allocator churn in high-frequency API polling paths.
 - Bounded polling endpoints now use stack-backed JSON docs where safe (`/api/status-lite`, `/api/session`) to reduce transient heap pressure.
+- Heap fragmentation stabilization tranche (M1-M6):
+  - M1: added unified heap-probe telemetry across hot endpoints (`/api/status-lite`, `/api/status-static`, `/api/fleet`, `/api/provisioning/status`, `/api/settings` GET/POST) with threshold/large-delta/periodic log gating.
+  - M2: added single-flight guards for status cache builds and stale-cache fallback on build failure; tightened fleet cache sizing bounds.
+  - M3: provisioning status now defaults to compact payloads during active sessions and low-heap periods, with explicit `session.compact_reason` metadata; provisioning JSON responses were further streamed to reduce temporary allocation churn.
+  - M4: applied JSON deserialization filters across remaining admin/config/provisioning POST handlers to prevent allocation from unknown fields.
+  - M5: hardened config load/save with early non-object JSON rejection, pre-serialize size bounds, and atomic temp-write+rename save path.
+  - M6: documented endpoint measurement scope, soak validation strategy, and acceptance criteria in `docs/internal/memory-budget-and-measurement.md`.
+
+### Notes
+- Memory checkpoints during this tranche (`python3 -m platformio run -e lrs_za`):
+  - M1: RAM `54584 / 81920`, Flash `718967 / 1044464`
+  - M2: RAM `54600 / 81920`, Flash `719143 / 1044464`
+  - M3: RAM `54648 / 81920`, Flash `718447 / 1044464`
+  - M4: RAM `54648 / 81920`, Flash `718431 / 1044464`
+  - M5: RAM `54968 / 81920`, Flash `719071 / 1044464`
 
 ## [0.2.2-alpha] - 2026-02-21
 

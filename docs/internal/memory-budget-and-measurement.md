@@ -38,3 +38,46 @@ Note: A refactor can preserve linker RAM while regressing runtime fragmentation.
 
 ## Milestone 1 expectation
 UI asset extraction is a maintainability/build organization improvement. Do not expect runtime heap improvement from asset extraction alone.
+
+## Heap Stabilization Baseline (2026-02)
+Baseline for this memory-stabilization tranche:
+- `python3 -m platformio run -e lrs_za`
+- RAM: `57440 / 81920`
+- Flash: `713863 / 1044464`
+
+### Instrumented Endpoints
+Heap-probe telemetry is attached to:
+- `/api/status-lite`
+- `/api/status-static`
+- `/api/fleet`
+- `/api/provisioning/status`
+- `/api/settings` (GET/POST)
+
+Telemetry fields (before/after):
+- `heap_free`
+- `max_free_block`
+- `heap_frag`
+- `dur_ms`
+
+Logging is throttled and emitted on:
+- threshold breach,
+- large delta,
+- periodic sample interval.
+
+### Soak Procedure
+Run each milestone through:
+1. Build check: `python3 -m platformio run -e lrs_za`
+2. Runtime soak (10-20 min):
+   - WebUI open
+   - status polling and SSE active
+   - one provisioning flow (discover + provision)
+3. Functional checks:
+   - settings save/import and reboot persistence
+   - commissioning save/apply
+   - MQTT test path
+   - mDNS resolution in AP/STA modes
+
+### Acceptance Criteria
+- Fragmentation plateaus during soak (no persistent `max_free_block` ratchet down in idle polling window).
+- No endpoint regressions/timeouts on hot APIs.
+- No behavior regressions in settings, provisioning, commissioning, MQTT, or mDNS flows.
