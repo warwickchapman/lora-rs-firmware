@@ -71,6 +71,33 @@ bool isDefaultDeploymentKey(const String &v) {
   return key == "lora-default-passphrase";
 }
 
+bool csvContainsAddress(const String &raw, uint8_t src) {
+  const char *cursor = raw.c_str();
+  while (*cursor != '\0') {
+    while (*cursor == ',' || *cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') {
+      ++cursor;
+    }
+    if (*cursor == '\0') break;
+
+    char *tail = nullptr;
+    const long parsed = strtol(cursor, &tail, 0);
+    if (tail != cursor) {
+      while (*tail == ' ' || *tail == '\t' || *tail == '\r' || *tail == '\n') {
+        ++tail;
+      }
+      if ((*tail == ',' || *tail == '\0') && parsed > 0 && parsed < 255 && static_cast<uint8_t>(parsed) == src) {
+        return true;
+      }
+    }
+
+    while (*cursor != '\0' && *cursor != ',') {
+      ++cursor;
+    }
+    if (*cursor == ',') ++cursor;
+  }
+  return false;
+}
+
 uint16_t crc16Ccitt(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFFU;
   for (size_t i = 0; i < len; ++i) {
@@ -693,25 +720,9 @@ bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, uint
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
   if (settings_ == nullptr) return false;
-  const String raw = settings_->mqtt_controller_addresses;
+  const String &raw = settings_->mqtt_controller_addresses;
   if (raw.length() == 0) return false;
-
-  int start = 0;
-  while (start < raw.length()) {
-    int end = raw.indexOf(',', start);
-    if (end < 0) end = raw.length();
-    String token = raw.substring(start, end);
-    token.trim();
-    if (token.length() > 0) {
-      char *tail = nullptr;
-      const long parsed = strtol(token.c_str(), &tail, 0);
-      if (tail != token.c_str() && *tail == '\0' && parsed > 0 && parsed < 255 && static_cast<uint8_t>(parsed) == src) {
-        return true;
-      }
-    }
-    start = end + 1;
-  }
-  return false;
+  return csvContainsAddress(raw, src);
 }
 
 bool NodeStateMachine::isDefaultFleetKey() const {
