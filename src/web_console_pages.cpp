@@ -163,7 +163,7 @@ void WebConsole::handleLoginApi() {
 void WebConsole::handleFleetSetupApi() {
   if (!requireAuth(true)) return;
 
-  DynamicJsonDocument doc(384);
+  DynamicJsonDocument doc(256);
   auto err = deserializeJson(doc, server_.arg("plain"));
   if (err) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
@@ -212,7 +212,7 @@ void WebConsole::handleFleetSetupApi() {
 void WebConsole::handleSetupCommissioningApi() {
   if (!requireAuth(true)) return;
 
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(640);
   auto err = deserializeJson(doc, server_.arg("plain"));
   if (err) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");

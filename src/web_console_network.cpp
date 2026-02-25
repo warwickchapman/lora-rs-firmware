@@ -51,7 +51,7 @@ void WebConsole::handleTestSta() {
     server_.send(403, "application/json", "{\"ok\":false,\"error\":\"setup_only\"}");
     return;
   }
-  DynamicJsonDocument body(512);
+  DynamicJsonDocument body(256);
   auto err = deserializeJson(body, server_.arg("plain"));
   if (err) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid json\"}");

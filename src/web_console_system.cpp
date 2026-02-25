@@ -46,7 +46,7 @@ void WebConsole::handleFactory() {
   serializeJson(doc, server_.client());
 }
 void WebConsole::handleDiagnostics() {
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(768);
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
   doc["role"] = cfg.role_tx ? "tx" : "rx";
@@ -85,7 +85,7 @@ void WebConsole::handleDiagnostics() {
 }
 void WebConsole::handleTestMqtt() {
   if (!requireAuth(true)) return;
-  DynamicJsonDocument body(512);
+  DynamicJsonDocument body(256);
   auto err = deserializeJson(body, server_.arg("plain"));
   if (err) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid json\"}");
@@ -261,7 +261,7 @@ void WebConsole::handleLogsText() {
 void WebConsole::handleFactoryReset() {
   if (!requireAuth(true)) return;
 
-  DynamicJsonDocument body(512);
+  DynamicJsonDocument body(256);
   auto err = deserializeJson(body, server_.arg("plain"));
   if (err) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");

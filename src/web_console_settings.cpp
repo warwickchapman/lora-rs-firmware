@@ -199,7 +199,7 @@ void WebConsole::handlePostSettings() {
 void WebConsole::handleExportSettings() {
   if (!requireAuth(true)) return;
   server_.sendHeader("Content-Disposition", "attachment; filename=lrs-config.json");
-  DynamicJsonDocument doc(2048);
+  DynamicJsonDocument doc(1536);
   auto &cfg = config_->settings();
   doc["mode"] = cfg.mode;
   doc["role"] = cfg.role;
