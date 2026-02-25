@@ -43,6 +43,11 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
   return false;
 }
 
+const char *formatIp(const IPAddress &ip, char out[16]) {
+  snprintf(out, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+  return out;
+}
+
 constexpr size_t kProgmemHtmlChunkBytes = 768;
 
 bool sendProgmemHtml(ESP8266WebServer &server, int code, const char *contentType, PGM_P html) {
@@ -154,9 +159,11 @@ void WebConsole::handleFleetSetupPage() {
 }
 
 void WebConsole::handleLoginApi() {
+  char ip[16];
+  formatIp(server_.client().remoteIP(), ip);
   if (locked_until_ms_ != 0 && static_cast<int32_t>(locked_until_ms_ - millis()) > 0) {
     sendTracked(429, "application/json", "{\"error\":\"Too many failed logins. Try again shortly.\"}");
-    LRS_LOGW(API, "event=login_blocked ip=%s", server_.client().remoteIP().toString().c_str());
+    LRS_LOGW(API, "event=login_blocked ip=%s", ip);
     return;
   }
 
@@ -176,7 +183,7 @@ void WebConsole::handleLoginApi() {
     sendTracked(401, "application/json", "{\"error\":\"Invalid password\"}");
     LRS_LOGW(API,
              "event=login_failed ip=%s remaining_lock_attempts=%u",
-             server_.client().remoteIP().toString().c_str(),
+             ip,
              static_cast<unsigned>((failed_auth_ < 5) ? (5 - failed_auth_) : 0));
     return;
   }
@@ -194,7 +201,7 @@ void WebConsole::handleLoginApi() {
   serializeJson(out, server_.client());
   LRS_LOGI(API,
            "event=login_ok ip=%s setup_required=%u",
-           server_.client().remoteIP().toString().c_str(),
+           ip,
            needsFleetSetupPrompt() ? 1U : 0U);
 }
 
@@ -351,10 +358,12 @@ void WebConsole::handleSetupCommissioningApi() {
 }
 
 void WebConsole::handleLogoutApi() {
+  char ip[16];
+  formatIp(server_.client().remoteIP(), ip);
   clearSession();
   server_.sendHeader("Set-Cookie", "lrs_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
   sendTracked(200, "application/json", "{\"ok\":true}");
-  LRS_LOGI(API, "event=logout ip=%s", server_.client().remoteIP().toString().c_str());
+  LRS_LOGI(API, "event=logout ip=%s", ip);
 }
 
 void WebConsole::handleSessionApi() {
