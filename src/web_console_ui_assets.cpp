@@ -150,10 +150,14 @@ button.alt{background:rgba(255,255,255,.1)}
 <div class="hint">When MQTT control is enabled, local automations are disabled.</div>
 </div>
 
-<div class="section grid">
+<div class="section">
+<label>Connect to WiFi</label>
+<div class="row" style="margin-top:6px"><button id="wifiScanBtn" class="alt" type="button" onclick="scanSetupWifi()">Scan</button></div>
+<div id="wifi_scan_list_setup" class="wifi-list" style="display:none"></div>
+<div class="grid" style="margin-top:10px">
 <div><label for="wifi_sta_ssid">WiFi SSID (optional)</label><input id="wifi_sta_ssid" /></div>
 <div><label for="wifi_sta_password">WiFi password (optional)</label><input id="wifi_sta_password" type="password" /></div>
-<div style="grid-column:1/-1"><div class="row" style="margin-top:6px"><button id="wifiScanBtn" class="alt" type="button" onclick="scanSetupWifi()">Scan SSIDs</button></div><div id="wifi_scan_list_setup" class="wifi-list" style="display:none"></div></div>
+</div>
 </div>
 
 <div class="row">
@@ -240,7 +244,7 @@ async function scanSetupWifi(){
   setupWifiScanHost.innerHTML='Scan failed';
  }finally{
   setupWifiScanInFlight=false;
-  if(setupWifiScanBtn){ setupWifiScanBtn.disabled=false; setupWifiScanBtn.innerText='Scan SSIDs'; }
+  if(setupWifiScanBtn){ setupWifiScanBtn.disabled=false; setupWifiScanBtn.innerText='Scan'; }
  }
 }
 function randomIndex(max){
@@ -368,6 +372,7 @@ async function skipForNow(){
 }
 syncRoleOptions();
 applySuggestedFleetKey(false);
+scanSetupWifi().catch(()=>{});
 document.getElementById('fleet').focus();
 </script></body></html>
 )HTML";
