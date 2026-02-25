@@ -40,9 +40,10 @@ void WebConsole::handleFactory() {
   doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
   doc["audit_boot_count"] = cfg.audit_boot_count;
 
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 void WebConsole::handleDiagnostics() {
   DynamicJsonDocument doc(1024);
@@ -77,9 +78,10 @@ void WebConsole::handleDiagnostics() {
   doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
   doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
   doc["audit_boot_count"] = cfg.audit_boot_count;
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 void WebConsole::handleTestMqtt() {
   if (!requireAuth(true)) return;
@@ -128,9 +130,10 @@ void WebConsole::handleTestMqtt() {
   doc["host"] = host;
   doc["port"] = port;
   if (ok) mqtt.disconnect();
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 
 void WebConsole::handleUdpLogging() {

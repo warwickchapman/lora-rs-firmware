@@ -50,9 +50,10 @@ void WebConsole::handleGetSettings() {
   doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
 
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 
 void WebConsole::handlePostSettings() {
@@ -233,9 +234,10 @@ void WebConsole::handleExportSettings() {
   doc["mqtt_password"] = cfg.mqtt_password;
   doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
-  String out;
-  serializeJsonPretty(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJsonPretty(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJsonPretty(doc, server_.client());
 }
 
 void WebConsole::handleImportSettings() { handlePostSettings(); }

@@ -149,9 +149,11 @@ void WebConsole::handleLoginApi() {
   DynamicJsonDocument out(128);
   out["ok"] = true;
   out["setup_required"] = needsFleetSetupPrompt();
-  String body;
-  serializeJson(out, body);
-  sendTracked(200, "application/json", body);
+  const size_t len = measureJson(out);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(out, server_.client());
   LRS_LOGI(API,
            "event=login_ok ip=%s setup_required=%u",
            server_.client().remoteIP().toString().c_str(),

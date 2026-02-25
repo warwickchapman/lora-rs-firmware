@@ -38,9 +38,11 @@ void WebConsole::handleWifiScan() {
   }
   WiFi.scanDelete();
   WiFi.scanNetworks(true, true);
-  String out;
-  serializeJson(doc, out);
-  sendTracked(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 }
 
 void WebConsole::handleTestSta() {
@@ -73,9 +75,10 @@ void WebConsole::handleTestSta() {
     doc["status_text"] = wifiStatusText(WL_CONNECTED);
     doc["ip"] = WiFi.localIP().toString();
     doc["rssi"] = WiFi.RSSI();
-    String out;
-    serializeJson(doc, out);
-    server_.send(200, "application/json", out);
+    const size_t len = measureJson(doc);
+    server_.setContentLength(len);
+    server_.send(200, "application/json", "");
+    serializeJson(doc, server_.client());
     return;
   }
 
@@ -99,9 +102,10 @@ void WebConsole::handleTestSta() {
     doc["rssi"] = WiFi.RSSI();
   }
 
-  String out;
-  serializeJson(doc, out);
-  server_.send(200, "application/json", out);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
 
   // If test credentials differ from persisted settings, restore configured STA
   // after replying so the HTTP response has a chance to reach the browser.
