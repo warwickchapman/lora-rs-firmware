@@ -538,6 +538,7 @@ button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
 .key-strength.ok{color:#fde047}
 .key-strength.strong{color:#86efac}
 .actions{display:flex;gap:10px 12px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.actions.action-commit{justify-content:flex-end}
 #status{overflow-wrap:anywhere;line-height:1.5}
 .inline-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .hint{font-size:0.8rem;opacity:.9;margin-top:6px;color:var(--muted)}
@@ -702,6 +703,12 @@ body.light .sensor-state.closed{background:rgba(74,222,128,0.2);color:#15803d}
 body.light .toast{background:rgba(255,255,255,0.8);color:#0f172a;box-shadow:0 20px 40px rgba(31,38,135,.15);border-color:rgba(255,255,255,0.8)}
 .toast.show{display:block}
 .toast.err{border-left:4px solid #f87171}
+.mobile-action-bar{display:none;position:fixed;left:10px;right:10px;bottom:max(10px,env(safe-area-inset-bottom));z-index:30;padding:8px;background:rgba(15,23,42,0.8);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:var(--glass-border);border-radius:14px;gap:8px;box-shadow:0 12px 28px rgba(0,0,0,.35)}
+body.light .mobile-action-bar{background:rgba(255,255,255,0.85);box-shadow:0 12px 28px rgba(31,38,135,.15)}
+.mobile-action-bar button{margin-top:0;min-height:40px;padding:8px 12px;border-radius:10px}
+.mobile-action-bar .primary{flex:1 1 auto}
+.mobile-action-bar .secondary{flex:0 0 auto;background:rgba(255,255,255,0.08);border:var(--glass-border);box-shadow:none}
+body.light .mobile-action-bar .secondary{background:rgba(255,255,255,0.7)}
 .result-line{margin-top:16px;padding:14px 20px;border-radius:12px;border:var(--glass-border);font-weight:700;font-size:0.95rem;display:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .result-line.show{display:block;animation:fadeIn 0.3s ease}
 .result-line.ok{background:rgba(74,222,128,0.15);color:#86efac;border-color:rgba(74,222,128,0.4)}
@@ -739,6 +746,9 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  .wifi-table td:first-child{max-width:44vw}
  .wifi-table button{padding:6px 8px}
  .pass-toggle{width:36px;height:36px;min-width:36px}
+ .actions.mobile-action-source{display:none}
+ .mobile-action-bar.show{display:flex}
+ main{padding-bottom:90px}
 }
 </style></head>
 <body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button>
@@ -795,7 +805,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div class="actions"><button type="button" onclick="reloadAutomations()">Reload</button><button type="button" onclick="addAutomationRule()">Add Rule</button></div>
 <div id="autoResult" class="result-line"></div>
 <div id="automationsRulesHost" style="margin-top:8px">Open this page to load automations.</div>
-<div class="actions" style="margin-top:20px;margin-bottom:20px"><button type="button" onclick="saveAutomations()">Save Rules</button></div>
+<div class="actions action-commit" style="margin-top:20px;margin-bottom:20px"><button type="button" onclick="saveAutomations()">Save Rules</button></div>
 <details style="margin-top:8px"><summary>JSON Preview</summary><div class="small" style="margin:6px 0">Generated from the form builder. You can paste JSON here and apply it back to the form.</div><textarea id="auto_json_preview" rows="14" style="width:100%;font-family:monospace" spellcheck="false"></textarea><div class="actions"><button type="button" onclick="applyAutomationsJsonFromPreview()">Apply JSON</button><button type="button" onclick="copyAutomationJsonPreview()">Copy JSON</button></div></details>
 </section>
 )HTML"
@@ -821,12 +831,12 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div id="tx_polling_default_row"><label>Default remote poll interval (seconds)</label><input id="tx_mqtt_remote_default_poll_interval_s" type="number" min="60" max="3600" /><div class="small">TX only. Applied to newly discovered remote nodes. Minimum 60s to reduce LoRa duty-cycle risk.</div></div>
 <div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
-</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
+</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions action-commit"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button id="wifiScanBtn" type="button" onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)" title="Show password" aria-label="Show password">👁</button></div></div>
 <div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label id="lan_hostname_label">LAN hostname</label><input id="lan_hostname" /><div class="hint" id="lan_hostname_hint">Used as the device hostname for WiFi and OTA.</div><div class="hint" id="lan_hostname_preview_wrap" style="display:none">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
-</div><div class="actions"><button onclick="saveNetwork()">Save</button><button id="btnTestSta" onclick="testSta()">Test</button></div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
+</div><div class="actions action-commit"><button onclick="saveNetwork()">Save</button><button id="btnTestSta" onclick="testSta()">Test</button></div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_client_enabled" type="checkbox" /><label for="mqtt_client_enabled">MQTT client enabled</label></div></div>
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_control_enabled" type="checkbox" /><label for="mqtt_control_enabled">MQTT control enabled</label></div><div class="small">When enabled, inbound MQTT control commands are accepted and local automations are disabled.</div></div>
 <div><label>Broker host</label><input id="mqtt_host" /></div>
@@ -835,7 +845,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div><label>MQTT password</label><input id="mqtt_password" /></div>
 <div style="grid-column:1/-1"><label>Topic root</label><input id="mqtt_topic_root" /></div>
 <div style="grid-column:1/-1"><label>MQTT controller addresses</label><input id="mqtt_controller_addresses" placeholder="e.g. 1,84" /></div>
-</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><label>Confirmation word</label><input id="factory_reset_confirm_word" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="RESET or REMOVE" /><div class="small">Type <code>RESET</code> to keep the LoRa fleet key, or <code>REMOVE</code> to clear it.</div></div><div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
+</div><div class="small" style="margin-top:4px">Control topics are per-device under &lt;topic_root&gt;/lrs-&lt;chipid&gt;.</div><div class="actions action-commit"><button onclick="saveMqtt()">Save</button><button onclick="testMqtt()">Test</button></div><div id="mqttTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-system"><div class="system-tabs"><button class="tabbtn active" id="system-tab-security" onclick="showSystemTab('security')">Security</button><button class="tabbtn" id="system-tab-configuration" onclick="showSystemTab('configuration')">Configuration</button><button class="tabbtn" id="system-tab-maintenance" onclick="showSystemTab('maintenance')">Maintenance</button></div><div class="system-pane active" id="system-pane-security"><div class="grid"><div><label>Admin password</label><input id="admin_password" type="password" /></div></div><div class="actions action-commit"><button onclick="saveSystem()">Save</button></div></div><div class="system-pane" id="system-pane-configuration"><div class="grid"><div style="grid-column:1/-1"><label>Configuration</label><div class="actions"><button onclick="window.location='/api/settings/export'">Export Config</button><button onclick="document.getElementById('importFile').click()">Import Config</button><input type="file" id="importFile" accept="application/json" style="display:none" onchange="importConfig(this.files&&this.files[0])"></div></div></div><pre id="factory"></pre></div><div class="system-pane" id="system-pane-maintenance"><div class="grid"><div style="grid-column:1/-1"><label>Firmware OTA</label><div class="actions"><input id="otaFile" type="file" accept=".bin,application/octet-stream" /><button onclick="uploadOta()">Upload OTA</button><span id="otaResult" class="small"></span></div></div><div style="grid-column:1/-1"><label>Device actions</label><div class="actions"><button onclick="window.location='/api/logs.csv'">Download Logs CSV</button><button onclick="reboot()">Reboot</button></div></div><div style="grid-column:1/-1"><label>Factory reset</label><div class="grid"><div><label>Confirm admin password</label><input id="factory_reset_password" type="password" autocomplete="current-password" /></div><div><label>Confirmation word</label><input id="factory_reset_confirm_word" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="RESET or REMOVE" /><div class="small">Type <code>RESET</code> to keep the LoRa fleet key, or <code>REMOVE</code> to clear it.</div></div><div><div class="check-row"><input id="factory_reset_keep_wifi_local" type="checkbox" /><label for="factory_reset_keep_wifi_local">Keep WiFi credentials</label></div><div class="small">Tick to keep STA SSID/password after reset.</div></div></div><div class="actions"><button onclick="factoryResetLocal()">Factory Reset Device</button></div><div id="factoryResetResult" class="result-line"></div></div></div></div></section>
 <section class="card page" id="page-sensors"><h3>Sensors</h3>
 <h4 style="margin:6px 0 8px 0">Temperature Sensor</h4>
 <div class="check-row" style="margin-bottom:8px"><input id="sensor_temp_enabled" type="checkbox" /><label for="sensor_temp_enabled">Enable DS18B20 (GPIO0)</label></div>
@@ -845,8 +855,12 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div class="sensor-tile" id="sensorDiagAddr">Address: n/a</div>
 <div class="sensor-tile" id="sensorDiagLast">Last read: n/a</div>
 </div>
-<div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions"><button onclick="saveSensors()">Save</button></div></section>
+<div class="small">Data pin is fixed to GPIO0 on this hardware. Temperature is sampled automatically at heartbeat/2 (twice per heartbeat period, minimum 2s).</div><div class="actions action-commit"><button onclick="saveSensors()">Save</button></div></section>
 </main>
+<div id="mobileActionBar" class="mobile-action-bar" aria-live="polite">
+ <button id="mobileActionPrimary" class="primary" type="button">Save</button>
+ <button id="mobileActionSecondary" class="secondary" type="button" style="display:none">Test</button>
+</div>
 <footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101 | <span id="footerFw">FW: -</span></div></footer>
 <div id="toast" class="toast"></div>
 <script>
@@ -914,6 +928,10 @@ let statusLiveSseBackoffMs = 1000;
 let statusLiveUiTicker = 0;
 let statusLiveHasLiveData = false;
 let statusDegradedLiteMode = false;
+let mobileActionSourceEl = null;
+let mobileActionPrimaryEl = null;
+let mobileActionSecondaryEl = null;
+let mobileActionBarEl = null;
 
 function parseAddress(v){
  const t=String(v||'').trim();
@@ -1187,6 +1205,77 @@ function humanAgeMsShort(ms){
 function sleep(ms){
  return new Promise((resolve)=>setTimeout(resolve, ms));
 }
+function isCompactMobile(){
+ return window.matchMedia && window.matchMedia('(max-width:650px)').matches;
+}
+function getActiveActionContainer(){
+ const page=document.querySelector('.page.active');
+ if(!page) return null;
+ if(page.id==='page-settings'){
+  const pane=page.querySelector('.settings-pane.active');
+  if(pane){
+   const own=Array.from(pane.children).find((el)=>el.classList && el.classList.contains('actions') && el.classList.contains('action-commit'));
+   if(own) return own;
+   const fallback=Array.from(pane.children).find((el)=>el.classList && el.classList.contains('actions'));
+   if(fallback) return fallback;
+  }
+ }
+ const pageCommit=Array.from(page.children||[]).find((el)=>el.classList && el.classList.contains('actions') && el.classList.contains('action-commit'));
+ if(pageCommit) return pageCommit;
+ const own=Array.from(page.children||[]).find((el)=>el.classList && el.classList.contains('actions'));
+ if(own) return own;
+ const nestedCommit=page.querySelector('.actions.action-commit');
+ if(nestedCommit) return nestedCommit;
+ const nested=page.querySelector('.actions');
+ if(nested) return nested;
+ return null;
+}
+function setMobileActionBarBindings(primaryBtn, secondaryBtn){
+ if(mobileActionPrimaryEl){
+  mobileActionPrimaryEl.onclick = primaryBtn ? ()=>primaryBtn.click() : null;
+  mobileActionPrimaryEl.textContent = primaryBtn ? String(primaryBtn.textContent||'Save').trim() : 'Save';
+ }
+ if(mobileActionSecondaryEl){
+  if(secondaryBtn){
+   mobileActionSecondaryEl.style.display='';
+   mobileActionSecondaryEl.textContent = String(secondaryBtn.textContent||'Test').trim();
+   mobileActionSecondaryEl.onclick = ()=>secondaryBtn.click();
+  }else{
+   mobileActionSecondaryEl.style.display='none';
+   mobileActionSecondaryEl.onclick = null;
+  }
+ }
+}
+function updateMobileActionBar(){
+ if(!mobileActionBarEl) return;
+ if(mobileActionSourceEl){
+  mobileActionSourceEl.classList.remove('mobile-action-source');
+  mobileActionSourceEl = null;
+ }
+ if(!isCompactMobile()){
+  mobileActionBarEl.classList.remove('show');
+  setMobileActionBarBindings(null, null);
+  return;
+ }
+ const actions=getActiveActionContainer();
+ if(!actions){
+  mobileActionBarEl.classList.remove('show');
+  setMobileActionBarBindings(null, null);
+  return;
+ }
+ const buttons=Array.from(actions.querySelectorAll('button'));
+ const primary=buttons.find((b)=>/save/i.test(String(b.textContent||'')));
+ if(!primary){
+  mobileActionBarEl.classList.remove('show');
+  setMobileActionBarBindings(null, null);
+  return;
+ }
+ const secondary=buttons.find((b)=>/test/i.test(String(b.textContent||'')));
+ mobileActionSourceEl = actions;
+ mobileActionSourceEl.classList.add('mobile-action-source');
+ setMobileActionBarBindings(primary, secondary || null);
+ mobileActionBarEl.classList.add('show');
+}
 function fleetDeviceStaleThresholdMs(r){
  const staleAfterMs=Math.max(0, Number(r.stale_after_ms||0));
  if(staleAfterMs>0) return staleAfterMs;
@@ -1331,6 +1420,7 @@ function showSettingsTab(tab){
   if(btn) btn.classList.toggle('active', p===target);
  });
  if(target==='system'){ showSystemTab(activeSystemTab); }
+ updateMobileActionBar();
 }
 function showSystemTab(tab){
  const target = ['security','configuration','maintenance'].includes(tab) ? tab : 'security';
@@ -1341,6 +1431,7 @@ function showSystemTab(tab){
   if(pane) pane.classList.toggle('active', p===target);
   if(btn) btn.classList.toggle('active', p===target);
  });
+ updateMobileActionBar();
 }
 function showFleetTab(tab){
  const target = (tab==='manage') ? 'manage' : 'devices';
@@ -1805,6 +1896,7 @@ function showPage(page){
  applyAutomationsFeatureVisibility();
  toggleDrawer(false);
  syncPagePolling();
+ updateMobileActionBar();
 }
 function applyFleetTabVisibility(){
  const fleetTabBtn=document.getElementById('nav-fleet');
@@ -3230,6 +3322,9 @@ function initPage(){
  const roleTx=document.getElementById('role_tx_true');
  const roleRx=document.getElementById('role_tx_false');
  const fleetKey=document.getElementById('fleet_passphrase');
+ mobileActionBarEl=document.getElementById('mobileActionBar');
+ mobileActionPrimaryEl=document.getElementById('mobileActionPrimary');
+ mobileActionSecondaryEl=document.getElementById('mobileActionSecondary');
  const syncRole=()=>{
   if(!role) return;
   const mode = String((modeSelect && modeSelect.value) || 'paired');
@@ -3260,6 +3355,7 @@ function initPage(){
  const menuBtn=document.getElementById('menuBtn');
  if(menuBtn){ menuBtn.setAttribute('aria-expanded','false'); }
  document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ toggleDrawer(false); } });
+ window.addEventListener('resize', ()=>{ updateMobileActionBar(); });
  showPage('status');
  window.addEventListener('beforeunload', ()=>{ stopProvisioningPolling(); stopPagePolling(); stopHeaderPolling(); closeStatusLiveSse(); });
  document.addEventListener('visibilitychange', ()=>{ syncPagePolling(); });
