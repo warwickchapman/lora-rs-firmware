@@ -664,6 +664,9 @@ body.light .chip.err{color:#b91c1c;background:rgba(248,113,113,0.2)}
 .chip.neutral{background:rgba(255,255,255,0.1);color:var(--txt);border:var(--glass-border)}
 body.light .chip.neutral{background:rgba(255,255,255,0.4);border:var(--glass-border)}
 .status-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start}
+.status-head{margin-bottom:8px}
+.status-head h3{margin:0;display:inline-flex;align-items:center;gap:8px}
+.status-live-dot{font-size:1.1rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:1.1em}
 .deploy-note{padding:16px;border:var(--glass-border);border-radius:12px;background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);margin-bottom:20px;line-height:1.5}
 .deploy-note.warn{border-color:rgba(251,191,36,0.4);background:rgba(251,191,36,0.1);color:#fde047}
 body.light .deploy-note.warn{color:#b45309;background:rgba(251,191,36,0.1)}
@@ -672,6 +675,11 @@ body.light .status-table{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 1
 .status-table .k{color:var(--muted);font-weight:600}
 .status-table .v{font-weight:700;overflow-wrap:anywhere}
 .status-table .v.copyable{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sta-line{display:inline-flex;align-items:center;gap:8px}
+.sta-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.35)}
+.sta-dot.on{background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,.5)}
+.sta-dot.off{background:rgba(255,255,255,.35)}
+body.light .sta-dot.off{background:rgba(0,0,0,.25)}
 .status-table .section{grid-column:1/-1;font-weight:800;margin-top:12px;padding-top:12px;border-top:var(--glass-border);color:var(--txt);font-size:1.05rem}
 .copy-btn{margin:0;padding:6px 12px;font-size:0.8rem;border-radius:8px;background:rgba(255,255,255,0.05);color:var(--txt);border:var(--glass-border);box-shadow:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-weight:700}
 .copy-btn:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
@@ -761,9 +769,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 #endif
     R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="deviceBadge" class="id-badge"><span id="deviceBadgeText">Device: -</span><button id="deviceBadgeCopy" type="button" class="id-copy" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
-<h3>Status</h3>
-<div id="statusFleetShortcut" class="small" style="display:none;margin-bottom:10px"><a class="link" href="#" onclick="showPage('fleet');return false;">View fleet</a></div>
-<div class="actions" style="margin-top:0;margin-bottom:8px"><span id="statusLiveNotice" class="small" style="align-self:center">Waiting for device updates...</span></div>
+<div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3></div>
 <div class="status-grid">
 <div>
 <div id="statusTable">Loading status...</div>
@@ -872,10 +878,10 @@ const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
 )HTML"
 #if LRS_ENABLE_MDNS
-    R"HTML(const UI_MDNS_ENABLED = true;
+    R"HTML(const LRS_ENABLE_MDNS = true;
 )HTML"
 #else
-    R"HTML(const UI_MDNS_ENABLED = false;
+    R"HTML(const LRS_ENABLE_MDNS = false;
 )HTML"
 #endif
 #if LRS_ENABLE_AUTOMATIONS
@@ -1002,7 +1008,7 @@ function refreshRoleLabels(){
  if(rxPushIntervalRow){ rxPushIntervalRow.style.display = tx ? 'none' : ''; }
 }
 function refreshHostnamePreview(){
- if(!UI_MDNS_ENABLED) return;
+ if(!LRS_ENABLE_MDNS) return;
  const label=document.getElementById('lan_hostname_label');
  const hint=document.getElementById('lan_hostname_hint');
  const wrap=document.getElementById('lan_hostname_preview_wrap');
@@ -1321,12 +1327,19 @@ function fleetDeviceTempText(r){
 }
 function reasonLabel(v){
  const r=String(v||'').toLowerCase();
- if(r==='ack_timeout') return 'ack_timeout';
- if(r==='no_lora_link') return 'no_lora_link';
- if(r==='input_open') return 'input_open';
+ if(r==='ack_timeout') return 'ack timeout';
+ if(r==='no_lora_link') return 'no LoRa link';
+ if(r==='input_open') return 'input open';
  if(r==='boot') return 'boot';
- if(r==='wait_ack') return 'wait_ack';
- return r || 'unknown';
+ if(r==='wait_ack') return 'waiting ack';
+ if(r==='ok') return 'normal';
+ if(r==='automation_on') return 'automation on';
+ if(r==='automation_off') return 'automation off';
+ if(r==='mqtt_on') return 'mqtt command on';
+ if(r==='mqtt_off') return 'mqtt command off';
+ if(r==='lora_on') return 'LoRa command on';
+ if(r==='lora_off') return 'LoRa command off';
+ return (r || 'unknown').replace(/_/g,' ');
 }
 function inputValue(id){
  const el=document.getElementById(id);
@@ -1368,7 +1381,7 @@ function normalizeLanHost(raw){
  return `${h}.local`;
 }
 function startLanHostnameRedirect(hostname){
- if(!UI_MDNS_ENABLED) return;
+ if(!LRS_ENABLE_MDNS) return;
  const targetHost=normalizeLanHost(hostname);
  if(!targetHost) return;
  const targetUrl=`http://${targetHost}/`;
@@ -1399,7 +1412,7 @@ function isLikelyStaSessionPath(){
  const lanMdns=stripPort(currentLanMdns);
  if(host.length===0) return false;
  if(staIp && host===staIp) return true;
- if(UI_MDNS_ENABLED && lanMdns && host===lanMdns) return true;
+ if(LRS_ENABLE_MDNS && lanMdns && host===lanMdns) return true;
  return false;
 }
 function toggleDrawer(force){
@@ -1902,8 +1915,6 @@ function showPage(page){
 function applyFleetTabVisibility(){
  const fleetTabBtn=document.getElementById('nav-fleet');
  if(fleetTabBtn){ fleetTabBtn.style.display = lastRoleIsTx ? '' : 'none'; }
- const fleetShortcut=document.getElementById('statusFleetShortcut');
- if(fleetShortcut){ fleetShortcut.style.display = lastRoleIsTx ? '' : 'none'; }
  if(!lastRoleIsTx && activePage==='fleet'){ showPage('status'); }
 }
 function showToast(msg, isError=false){
@@ -1982,6 +1993,7 @@ function buildStatusFallbackFromLite(lite){
   sta_rssi: Number((lite && lite.sta_rssi) || -127),
   sta_status_code: Number((lite && lite.sta_status_code) || 0),
   sta_status_text: String((lite && lite.sta_status_text) || (((lite && lite.sta_connected) ? 'connected' : 'unknown'))),
+  lan_hostname: String((lite && lite.lan_hostname) || ''),
   heap_free_bytes: Number((lite && lite.heap_free_bytes) || 0),
   heap_frag_percent: Number((lite && lite.heap_frag_percent) || 0),
   max_free_block_bytes: Number((lite && lite.max_free_block_bytes) || 0),
@@ -2011,9 +2023,20 @@ function applyStatusLiteDegraded(lite, noticeText){
  return true;
 }
 function setStatusLiveNotice(text){
- const el=document.getElementById('statusLiveNotice');
+ const el=document.getElementById('statusLiveState');
  if(!el) return;
- el.innerText = String(text || '');
+ const t = String(text || '');
+ let dot = '⚪';
+ if(t.includes('connected')){
+  dot = '🟢';
+ }else if(t.includes('disconnected')){
+  dot = '🔴';
+ }else if(t.includes('paused') || t.includes('waiting') || t.includes('reconnect') || t.includes('limited')){
+  dot = '🟡';
+ }
+ el.innerText = dot;
+ el.title = t;
+ el.setAttribute('aria-label', t || 'status updates');
 }
 function refreshStatusLiveNotice(){
  if(location.pathname !== '/' || activePage !== 'status'){
@@ -2179,14 +2202,31 @@ function applyStatusPageState(st){
  const addressHexDisplay = modeRaw === 'paired'
    ? `tx ${localAddrHex}, rx ${remoteAddrHex}`
    : `local ${localAddrHex}, peer ${remoteAddrHex}`;
- const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
- const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
- const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
+ const loraRssiText = hasLora ? `${st.lora_last_rssi} dBm` : 'n/a';
+ const loraLastText = hasLora ? humanAgeMsShort(loraAgoMs) : '—';
+ const loraLastTxText = hasLoraTx ? humanAgeMsShort(loraTxAgoMs) : '—';
+ const linkStateRaw = String(st.link_state || 'unknown').toLowerCase();
+ let linkEmoji = '⚪';
+ if(linkStateRaw==='ok' || linkStateRaw==='linked' || linkStateRaw==='connected' || linkStateRaw==='active'){
+  linkEmoji = '🟢';
+ }else if(linkStateRaw==='timeout' || linkStateRaw==='lost' || linkStateRaw==='down' || linkStateRaw==='error' || linkStateRaw==='failed'){
+  linkEmoji = '🔴';
+ }else if(linkStateRaw==='syncing' || linkStateRaw==='searching' || linkStateRaw==='degraded'){
+  linkEmoji = '🟡';
+ }
+ const linkLine = `${linkEmoji} ${String(st.link_state || 'unknown')} • RSSI ${loraRssiText}`;
+ const loraActivityLine = `tx ${loraLastTxText} • rx ${loraLastText}`;
+ const relayReasonRaw = String(st.relay_reason || '').toLowerCase();
+ let relaySource = '';
+ if(relayReasonRaw.startsWith('mqtt_')) relaySource = 'mqtt command';
+ else if(relayReasonRaw.startsWith('automation_')) relaySource = 'automation';
+ else if(relayReasonRaw.startsWith('lora_')) relaySource = 'LoRa command';
+ else if(relayReasonRaw.startsWith('input_')) relaySource = 'input';
  staIsConnected = !!st.sta_connected;
  currentStaIp = String(st.sta_ip || '');
- currentLanMdns = String(st.mdns_lan || '');
+ currentLanMdns = LRS_ENABLE_MDNS ? String(st.mdns_lan || (st.lan_hostname ? `${st.lan_hostname}.local` : '')) : '';
  currentApIp = String(st.ap_ip || '');
- currentApMdns = String(st.mdns_ap || '');
+ currentApMdns = LRS_ENABLE_MDNS ? String(st.mdns_ap || 'lrs.local') : '';
  if(staIsConnected){
   const connectedSsid=String(st.sta_ssid || '');
   if(connectedSsid.length){
@@ -2196,14 +2236,16 @@ function applyStatusPageState(st){
   connectedStaSsid = '';
  }
  updateStaTestButtonState();
- const apUrl = UI_MDNS_ENABLED && st.mdns_ap ? `http://${String(st.mdns_ap).replace(/\/+$/,'')}/` : '';
- const lanUrl = UI_MDNS_ENABLED && st.mdns_lan ? `http://${String(st.mdns_lan).replace(/\/+$/,'')}/` : '';
+ const lanHost = LRS_ENABLE_MDNS ? String(st.mdns_lan || (st.lan_hostname ? `${st.lan_hostname}.local` : '')).replace(/\/+$/,'') : '';
+ const apHost = LRS_ENABLE_MDNS ? String(st.mdns_ap || 'lrs.local').replace(/\/+$/,'') : '';
+ const apUrl = apHost ? `http://${apHost}/` : '';
+ const lanUrl = lanHost ? `http://${lanHost}/` : '';
  const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(lanUrl)}</a>` : 'n/a';
  const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(apUrl)}</a>` : 'n/a';
- const statusMdnsRows = UI_MDNS_ENABLED
+ const statusMdnsRows = LRS_ENABLE_MDNS
    ? `<div class="k">LAN mDNS URL</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, lanUrl, 'LAN mDNS URL')}</div>`
    : '';
- const apMdnsRow = UI_MDNS_ENABLED
+ const apMdnsRow = LRS_ENABLE_MDNS
    ? `<div class="k">AP mDNS URL</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, apUrl, 'AP mDNS URL')}</div>`
    : '';
  const rb=document.getElementById('relayBadge');
@@ -2212,7 +2254,10 @@ function applyStatusPageState(st){
   rb.innerText = relayOn ? 'RELAY ON' : 'RELAY OFF';
  }
  const rm=document.getElementById('relayMeta');
- if(rm){ rm.innerText = `Link: ${st.link_state}`; }
+ if(rm){
+  const relayMeta = relaySource ? `Link: ${linkEmoji} ${st.link_state} • via ${relaySource}` : `Link: ${linkEmoji} ${st.link_state}`;
+  rm.innerText = relayMeta;
+ }
  const table=document.getElementById('statusTable');
  const deployKey=String(st.deployment_key || '');
  const footerFw=document.getElementById('footerFw');
@@ -2226,15 +2271,11 @@ function applyStatusPageState(st){
     <div class="k">Role</div><div class="v">${escapeHtml(roleDisplay)}</div>
     <div class="k">Address</div><div class="v copyable">${copyableValueHtml(`${escapeHtml(addressDisplay)}<div class="small">${escapeHtml(addressHexDisplay)}</div>`, addressDisplay, 'Address')}</div>
     <div class="k">Fleet key</div><div class="v copyable">${copyableValueHtml(escapeHtml(deployKey || 'not_set'), deployKey, 'Fleet key')}</div>
-    <div class="k">Link</div><div class="v">${escapeHtml(st.link_state)}</div>
-    <div class="k">LoRa RSSI</div><div class="v">${loraRssiText}</div>
-    <div class="k">Last LoRa TX</div><div class="v">${escapeHtml(loraLastTxText)}</div>
-    <div class="k">Last LoRa packet</div><div class="v">${escapeHtml(loraLastText)}</div>
+    <div class="k">Link</div><div class="v">${escapeHtml(linkLine)}</div>
+    <div class="k">Activity</div><div class="v">${escapeHtml(loraActivityLine)}</div>
     <div class="k">Relay reason</div><div class="v">${escapeHtml(reasonLabel(st.relay_reason))}</div>
     <div class="section">WiFi Station</div>
-    <div class="k">STA SSID</div><div class="v">${escapeHtml(st.sta_ssid || st.sta_target_ssid || 'not configured')}</div>
-    <div class="k">STA State</div><div class="v">${escapeHtml(st.sta_status_text)} [${escapeHtml(st.sta_status_code)}]</div>
-    <div class="k">Current RSSI</div><div class="v">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'n/a')}</div>
+    <div class="k">STA</div><div class="v"><span class="sta-line">${escapeHtml(st.sta_ssid || st.sta_target_ssid || 'not configured')}<span class="sta-dot ${st.sta_connected ? 'on' : 'off'}" title="${st.sta_connected ? 'connected' : 'not connected'}"></span></span><div class="small">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'not connected')}</div></div>
     <div class="k">STA IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.sta_ip || 'n/a'), st.sta_ip, 'STA IP')}</div>
     ${statusMdnsRows}
     <div class="section">Soft AP</div>
@@ -2662,7 +2703,7 @@ async function saveNetwork(){
  const body=collectNetworkBody();
  let shouldRedirect=false;
  let newHost='';
- if(UI_MDNS_ENABLED){
+ if(LRS_ENABLE_MDNS){
   const oldHost=normalizeLanHost(currentLanMdns);
   newHost=normalizeLanHost(body.lan_hostname);
   const hostChanged=oldHost.length>0 && newHost.length>0 && oldHost!==newHost;
@@ -2739,7 +2780,7 @@ async function testSta(){
  if(btn && btn.disabled) return;
  const requestedSsid=normalizedInputValue('wifi_sta_ssid');
  if(staIsConnected && requestedSsid.length && requestedSsid!==connectedStaSsid && isLikelyStaSessionPath()){
-  const apHint=currentApIp ? `http://${currentApIp}` : (UI_MDNS_ENABLED && currentApMdns ? `http://${currentApMdns}` : 'the Soft AP URL');
+  const apHint=currentApIp ? `http://${currentApIp}` : (LRS_ENABLE_MDNS && currentApMdns ? `http://${currentApMdns}` : 'the Soft AP URL');
   const msg=`Cannot test a different SSID from current LAN session (it drops this connection). Join device Soft AP and retry via ${apHint}.`;
   el.className='result-line show err';
   el.innerText=msg;
@@ -3353,7 +3394,7 @@ function initPage(){
  if(modeSelect) modeSelect.addEventListener('change',syncRole);
  if(local) local.addEventListener('input',refreshAddressHints);
  if(remote) remote.addEventListener('input',refreshAddressHints);
- if(host && UI_MDNS_ENABLED) host.addEventListener('input',refreshHostnamePreview);
+ if(host && LRS_ENABLE_MDNS) host.addEventListener('input',refreshHostnamePreview);
  if(fleetKey) fleetKey.addEventListener('input',updateDeploymentKeyStrength);
  if(staSsid) staSsid.addEventListener('input',updateStaTestButtonState);
  if(staPass) staPass.addEventListener('input',updateStaTestButtonState);
