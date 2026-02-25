@@ -617,6 +617,11 @@ body.light .tabbtn.active{color:#fff}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .settings-tabs{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
 .settings-pane .grid{align-items:start}
+#page-settings .settings-pane>.actions{justify-content:flex-end;margin-top:16px}
+#page-settings .settings-pane>.actions button{margin-top:0}
+#settings-pane-lora>.grid{grid-template-columns:repeat(3,minmax(200px,1fr))}
+#settings-pane-lora details .grid{grid-template-columns:repeat(2,minmax(220px,1fr))}
+#settings-pane-lora #tx_input_lora_control_row{padding-top:8px;margin-top:4px;border-top:var(--glass-border)}
 #page-settings .settings-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 #page-settings .settings-tabs .tabbtn{width:100%;padding:8px 10px;min-height:42px}
 .settings-pane{display:none}
@@ -705,6 +710,9 @@ body.light .result-line.err{color:#b91c1c;background:rgba(248,113,113,0.1)}
 .spin{display:inline-block;width:16px;height:16px;border:3px solid rgba(255,255,255,.2);border-top-color:#8b5cf6;border-radius:50%;animation:sp 0.8s linear infinite;margin-right:12px;vertical-align:-3px}
 body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 @keyframes sp{to{transform:rotate(360deg)}}
+@media(max-width:920px){
+ #settings-pane-lora>.grid{grid-template-columns:repeat(2,minmax(180px,1fr))}
+}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){
  .grid{grid-template-columns:1fr}
@@ -798,6 +806,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div style="grid-column:1/-1"><label>Fleet key (encryption)</label><input id="fleet_passphrase" /><div class="actions" style="margin-top:8px"><button type="button" onclick="suggestReadableFleetKeyForSettings()">Suggest readable key</button></div><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Suggested format is read-aloud friendly.</div></div>
 <div><label id="local_address_label">Local address</label><input id="local_address" type="text" /><div class="hint" id="local_address_hex"></div></div>
 <div><label id="remote_address_label">Remote address</label><input id="remote_address" type="text" /><div class="hint" id="remote_address_hex"></div></div>
+<div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="input_control_paired_lora_enabled" type="checkbox" /><label for="input_control_paired_lora_enabled">Local input drives LoRa control of paired relay</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
 </div>
 <details><summary>Advanced</summary><div class="grid">
 <div><label>TX power</label><input id="lora_tx_power" type="number" min="2" max="20" /></div>
@@ -811,7 +820,6 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div id="tx_polling_default_row"><label>Default remote poll interval (seconds)</label><input id="tx_mqtt_remote_default_poll_interval_s" type="number" min="60" max="3600" /><div class="small">TX only. Applied to newly discovered remote nodes. Minimum 60s to reduce LoRa duty-cycle risk.</div></div>
 <div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
-<div id="tx_input_lora_control_row" style="grid-column:1/-1"><div class="check-row"><input id="input_control_paired_lora_enabled" type="checkbox" /><label for="input_control_paired_lora_enabled">Local input drives LoRa control of paired relay</label></div><div class="small">When disabled, TX still reports local input but does not send input-driven LoRa relay commands.</div></div>
 </div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button id="wifiScanBtn" type="button" onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)" title="Show password" aria-label="Show password">👁</button></div></div>
