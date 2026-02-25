@@ -6,6 +6,7 @@
 
 #include <DNSServer.h>
 
+#include "feature_flags.h"
 #include "config_store.h"
 #include "logger.h"
 #include "mqtt_bridge.h"
@@ -13,6 +14,9 @@
 #include "sensor_manager.h"
 #include "state_machine.h"
 #include "web_console.h"
+#if LRS_ENABLE_AUTOMATIONS
+#include "automation_rules_engine.h"
+#endif
 
 class App {
  public:
@@ -26,6 +30,9 @@ class App {
   SensorManager sensors_;
   NodeStateMachine sm_;
   WebConsole web_;
+#if LRS_ENABLE_AUTOMATIONS
+  AutomationRulesEngine automations_;
+#endif
 
   bool wifi_sta_connecting_ = false;
   uint32_t wifi_sta_started_ms_ = 0;

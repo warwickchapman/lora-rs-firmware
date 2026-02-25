@@ -94,9 +94,18 @@ void App::begin() {
   };
     lrslog::setUnixTimeProvider(unixProvider);
   mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_);
-  web_.begin(&config_, &sm_, &sensors_, [this](bool restartNetwork, bool restartOtaAuth) {
-    applyUpdatedConfig(restartNetwork, restartOtaAuth);
-  });
+#if LRS_ENABLE_AUTOMATIONS
+  automations_.begin();
+#endif
+  web_.begin(&config_, &sm_, &sensors_,
+             [this](bool restartNetwork, bool restartOtaAuth) {
+               applyUpdatedConfig(restartNetwork, restartOtaAuth);
+             },
+             [this]() {
+#if LRS_ENABLE_AUTOMATIONS
+               automations_.requestReload();
+#endif
+             });
 
   startOta();
   startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
@@ -188,6 +197,11 @@ void App::tick() {
   phaseStartMs = millis();
   sm_.tick();
   phaseSlowWarn("sm_tick", phaseStartMs);
+#if LRS_ENABLE_AUTOMATIONS
+  phaseStartMs = millis();
+  automations_.tick(config_.settings(), sm_);
+  phaseSlowWarn("automations_tick", phaseStartMs);
+#endif
   {
     if (sm_.hasPendingWifiProvision()) {
       String provSsid;

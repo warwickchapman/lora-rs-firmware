@@ -23,11 +23,13 @@ using namespace webconsole_internal;
 bool WebConsole::begin(ConfigStore *config,
                        NodeStateMachine *sm,
                        SensorManager *sensors,
-                       std::function<void(bool, bool)> onApply) {
+                       std::function<void(bool, bool)> onApply,
+                       std::function<void()> onAutomationsSaved) {
   config_ = config;
   sm_ = sm;
   sensors_ = sensors;
   on_apply_ = onApply;
+  on_automations_saved_ = onAutomationsSaved;
   server_.collectHeaders("Cookie", "User-Agent");
   initStatusCaches();
 

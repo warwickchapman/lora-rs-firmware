@@ -60,6 +60,9 @@ bool WebConsole::buildStatusLiveCache() {
   } else {
     const bool relayOn = sm_->relayState() != 0;
     switch (sm_->lastRxControlSource()) {
+      case RxControlSource::Automation:
+        relayReason = relayOn ? "automation_on" : "automation_off";
+        break;
       case RxControlSource::Mqtt:
         relayReason = relayOn ? "mqtt_on" : "mqtt_off";
         break;

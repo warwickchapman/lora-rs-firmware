@@ -4,6 +4,8 @@
 #include <ESP8266WebServer.h>
 #include <functional>
 
+#include "feature_flags.h"
+
 class ConfigStore;
 class NodeStateMachine;
 class SensorManager;
@@ -13,7 +15,8 @@ class WebConsole {
   bool begin(ConfigStore *config,
              NodeStateMachine *sm,
              SensorManager *sensors,
-             std::function<void(bool, bool)> onApply);
+             std::function<void(bool, bool)> onApply,
+             std::function<void()> onAutomationsSaved = {});
   void tick();
 
  private:
@@ -22,6 +25,7 @@ class WebConsole {
   NodeStateMachine *sm_ = nullptr;
   SensorManager *sensors_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
+  std::function<void()> on_automations_saved_;
 
   uint16_t failed_auth_ = 0;
   uint32_t locked_until_ms_ = 0;
@@ -65,9 +69,12 @@ class WebConsole {
   void handleExportSettings();
   void handleImportSettings();
   void handleFleet();
+  void handleGetAutomationRules();
+  void handlePostAutomationRules();
   bool handleFleetDeviceActionRoute(const String &uri);
   void handleDiagnostics();
   void handleTestSta();
+  void handleWifiScan();
   void handleProvisionFleetWifi();
   void handleProvisioningStart();
   void handleProvisioningStatus();

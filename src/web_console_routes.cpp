@@ -102,6 +102,26 @@ void WebConsole::routes() {
     handleFleet();
     finishRequestLog();
   });
+  #if LRS_ENABLE_AUTOMATIONS
+  server_.on("/api/automation-rules", HTTP_GET, [this]() {
+    beginRequestLog("/api/automation-rules", true, false, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handleGetAutomationRules();
+    finishRequestLog();
+  });
+  server_.on("/api/automation-rules", HTTP_POST, [this]() {
+    beginRequestLog("/api/automation-rules", true, false, true);
+    if (!requireAuth(true)) {
+      finishRequestLog();
+      return;
+    }
+    handlePostAutomationRules();
+    finishRequestLog();
+  });
+  #endif
   server_.on("/api/factory", HTTP_GET, [this]() {
     if (!requireAuth(true)) return;
     handleFactory();
@@ -110,25 +130,7 @@ void WebConsole::routes() {
     if (!requireAuth(true)) return;
     handleDiagnostics();
   });
-  server_.on("/api/wifi/scan", HTTP_GET, [this]() {
-    if (!requireAuth(true)) return;
-    DynamicJsonDocument doc(2048);
-    JsonArray arr = doc.createNestedArray("networks");
-    const int count = WiFi.scanNetworks(false, true);
-    for (int i = 0; i < count; i++) {
-      const String ssid = WiFi.SSID(i);
-      if (ssid.length() == 0) continue;
-      if (isOwnLrsSoftApLike(ssid)) continue;
-      JsonObject n = arr.createNestedObject();
-      n["ssid"] = ssid;
-      n["rssi"] = WiFi.RSSI(i);
-      n["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
-    }
-    WiFi.scanDelete();
-    String out;
-    serializeJson(doc, out);
-    server_.send(200, "application/json", out);
-  });
+  server_.on("/api/wifi/scan", HTTP_GET, [this]() { handleWifiScan(); });
   server_.on("/api/network/test", HTTP_POST, [this]() { handleTestSta(); });
   server_.on("/api/network/provision-fleet", HTTP_POST, [this]() {
     beginRequestLog("/api/network/provision-fleet", true, false, true);

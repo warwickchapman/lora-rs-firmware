@@ -8,6 +8,26 @@
 
 using namespace webconsole_internal;
 
+void WebConsole::handleWifiScan() {
+  if (!requireAuth(true)) return;
+  DynamicJsonDocument doc(2048);
+  JsonArray arr = doc.createNestedArray("networks");
+  const int count = WiFi.scanNetworks(false, true);
+  for (int i = 0; i < count; i++) {
+    const String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;
+    if (isOwnLrsSoftApLike(ssid)) continue;
+    JsonObject n = arr.createNestedObject();
+    n["ssid"] = ssid;
+    n["rssi"] = WiFi.RSSI(i);
+    n["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
+  }
+  WiFi.scanDelete();
+  String out;
+  serializeJson(doc, out);
+  server_.send(200, "application/json", out);
+}
+
 void WebConsole::handleTestSta() {
   if (!requireAuth(true)) return;
   if (!needsFleetSetupPrompt()) {
