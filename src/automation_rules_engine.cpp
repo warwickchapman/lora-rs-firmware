@@ -565,6 +565,7 @@ AutomationRulesEngine::GuardBlock AutomationRulesEngine::guardBlockForRuntime(co
   if (!program_.enabled) return GuardBlock::DisabledConfig;
   if (!program_.standalone_mode) return GuardBlock::NonStandaloneMode;
   if (!program_.action_target_is_self) return GuardBlock::ActionTargetNotSelf;
+  if (cfg.mqtt_control_enabled) return GuardBlock::MqttControlOwnsRelay;
   if (cfg.role_tx && cfg.input_control_paired_lora_enabled) return GuardBlock::TxInputLoRaControlOwnsRelay;
   return GuardBlock::None;
 #endif
@@ -582,6 +583,9 @@ void AutomationRulesEngine::logGuardTransition(GuardBlock block) {
       break;
     case GuardBlock::NonStandaloneMode:
       LRS_LOGI(SYS, "event=automations_runtime_blocked reason=mode_not_standalone");
+      break;
+    case GuardBlock::MqttControlOwnsRelay:
+      LRS_LOGI(SYS, "event=automations_runtime_blocked reason=mqtt_control_enabled");
       break;
     case GuardBlock::TxInputLoRaControlOwnsRelay:
       LRS_LOGI(SYS, "event=automations_runtime_blocked reason=input_control_paired_lora_enabled");

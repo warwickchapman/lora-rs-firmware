@@ -231,6 +231,7 @@ void MqttBridge::staticCallback(char *topic, uint8_t *payload, unsigned int leng
 
 void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.mqtt_client_enabled = cfg.mqtt_client_enabled;
+  runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
   runtime_.role_tx = cfg.role_tx;
   runtime_.local_address = cfg.local_address;
   runtime_.remote_address = cfg.remote_address;
@@ -266,6 +267,10 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   if (topic == nullptr) return;
 
   if (strcmp(topic, relay_topic_) == 0) {
+    if (!runtime_.mqtt_control_enabled) {
+      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+      return;
+    }
     if (length == 0 || sm_ == nullptr) {
       return;
     }
@@ -280,6 +285,10 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 
   if (strcmp(topic, control_topic_) == 0) {
+    if (!runtime_.mqtt_control_enabled) {
+      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+      return;
+    }
     if (!runtime_.role_tx || sm_ == nullptr) {
       return;
     }
@@ -316,6 +325,9 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 
   if (runtime_.role_tx && sm_ != nullptr) {
+    if (!runtime_.mqtt_control_enabled) {
+      return;
+    }
     const size_t remotePrefixLen = strlen(remote_prefix_);
     if (strncmp(topic, remote_prefix_, remotePrefixLen) != 0) {
       return;
@@ -426,12 +438,14 @@ bool MqttBridge::connectIfNeeded() {
     return false;
   }
 
-  mqtt_client_.subscribe(relay_topic_);
-  mqtt_client_.subscribe(control_topic_);
-  char topic[kMqttTopicBufBytes];
-  if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
-  if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
-  if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
+  if (runtime_.mqtt_control_enabled) {
+    mqtt_client_.subscribe(relay_topic_);
+    mqtt_client_.subscribe(control_topic_);
+    char topic[kMqttTopicBufBytes];
+    if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
+    if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
+    if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
+  }
 
   {
     lrslog::event("mqtt_connected", 0, 0, 0);

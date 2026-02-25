@@ -21,6 +21,7 @@ class AutomationRulesEngine {
     None = 0,
     DisabledConfig,
     NonStandaloneMode,
+    MqttControlOwnsRelay,
     TxInputLoRaControlOwnsRelay,
     ActionTargetNotSelf,
     CompileError,

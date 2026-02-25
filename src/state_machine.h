@@ -163,6 +163,7 @@ class NodeStateMachine {
     bool rx_push_on_change_enabled = false;
     uint32_t rx_push_min_interval_ms = 60000;
     bool input_control_paired_lora_enabled = false;
+    bool mqtt_control_enabled = false;
   };
   static constexpr uint8_t kLedPin = 2;
 
@@ -369,6 +370,7 @@ class NodeStateMachine {
   bool handleWifiProvisionFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
+  bool isAuthorizedMqttController(uint8_t src) const;
   bool isDefaultFleetKey() const;
   bool shouldAcceptReplayAndUpdate(const ProtocolMessage &msg, bool trustedSourceHint);
   bool isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const;

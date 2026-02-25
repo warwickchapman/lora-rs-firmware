@@ -20,6 +20,7 @@ class MqttBridge {
 
   struct RuntimeCfg {
     bool mqtt_client_enabled = false;
+    bool mqtt_control_enabled = false;
     bool role_tx = false;
     uint8_t local_address = 0;
     uint8_t remote_address = 0;

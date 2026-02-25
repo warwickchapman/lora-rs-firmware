@@ -2,6 +2,7 @@
 
 #include <ESP8266WiFi.h>
 #include <new>
+#include <stdlib.h>
 
 #include "build_info.h"
 #include "logger.h"
@@ -287,6 +288,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.rx_push_on_change_enabled = cfg.rx_push_on_change_enabled;
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
+  runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
 }
 
 bool NodeStateMachine::ensureProvisioningStorage() {
@@ -682,6 +684,29 @@ bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, uint
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
   return true;
+}
+
+bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
+  if (settings_ == nullptr) return false;
+  const String raw = settings_->mqtt_controller_addresses;
+  if (raw.length() == 0) return false;
+
+  int start = 0;
+  while (start < raw.length()) {
+    int end = raw.indexOf(',', start);
+    if (end < 0) end = raw.length();
+    String token = raw.substring(start, end);
+    token.trim();
+    if (token.length() > 0) {
+      char *tail = nullptr;
+      const long parsed = strtol(token.c_str(), &tail, 0);
+      if (tail != token.c_str() && *tail == '\0' && parsed > 0 && parsed < 255 && static_cast<uint8_t>(parsed) == src) {
+        return true;
+      }
+    }
+    start = end + 1;
+  }
+  return false;
 }
 
 bool NodeStateMachine::isDefaultFleetKey() const {
@@ -1295,9 +1320,20 @@ void NodeStateMachine::tickReceive() {
       lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
-  } else if (!isWifiProvision && msg.src != runtime_.remote_address) {
-    lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
-    return;
+  } else if (!isWifiProvision) {
+    if (msg.type == MessageType::Mqtt) {
+      if (!runtime_.mqtt_control_enabled) {
+        lrslog::event("rx_mqtt_control_disabled", msg.rssi, msg.counter, msg.relay_state);
+        return;
+      }
+      if (!isAuthorizedMqttController(msg.src)) {
+        lrslog::event("rx_mqtt_unauthorized_source", msg.rssi, msg.counter, msg.src);
+        return;
+      }
+    } else if (msg.src != runtime_.remote_address) {
+      lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
+      return;
+    }
   }
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isFactoryReset);
