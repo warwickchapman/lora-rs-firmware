@@ -109,20 +109,20 @@ String compileWeekStamp() {
 }
 
 String deriveShortPassword(const String &chip) {
-  String material = String(kProductSecret) + ":" + chip;
   uint8_t digest[32];
   SHA256 hash;
   hash.reset();
-  hash.update(reinterpret_cast<const uint8_t *>(material.c_str()), material.length());
+  hash.update(reinterpret_cast<const uint8_t *>(kProductSecret), strlen(kProductSecret));
+  hash.update(reinterpret_cast<const uint8_t *>(":"), 1);
+  hash.update(reinterpret_cast<const uint8_t *>(chip.c_str()), chip.length());
   hash.finalize(digest, sizeof(digest));
 
-  char hexbuf[65];
-  for (size_t i = 0; i < 32; i++) {
-    snprintf(hexbuf + (i * 2), 3, "%02x", digest[i]);
+  char out[9];
+  for (size_t i = 0; i < 4; i++) {
+    snprintf(out + (i * 2), 3, "%02x", digest[i]);
   }
-  hexbuf[64] = '\0';
-  // ESP8266 SoftAP WPA2 passwords must be at least 8 chars.
-  return String(hexbuf).substring(0, 8);
+  out[8] = '\0';
+  return String(out);
 }
 
 bool isAllowedConfigKey(const char *key) {
@@ -523,7 +523,13 @@ void ConfigStore::ensureProvisionedDefaults() {
   const String chipHex = chipIdHex();
   cfg_.lan_hostname = defaultLanHostnameForRole(cfg_.role_tx);
   cfg_.admin_password = deriveShortPassword(chipHex);
-  cfg_.factory_serial = String("lrs") + compileWeekStamp() + "-" + chipHex;
+  String serial;
+  serial.reserve(4 + 4 + 1 + chipHex.length());
+  serial = "lrs";
+  serial += compileWeekStamp();
+  serial += "-";
+  serial += chipHex;
+  cfg_.factory_serial = serial;
   cfg_.audit_last_saved_by = "factory";
   cfg_.audit_last_saved_ms = 0;
   cfg_.audit_last_reboot_reason = "power_on";
