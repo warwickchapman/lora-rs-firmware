@@ -122,9 +122,9 @@ button.alt{background:rgba(255,255,255,.1)}
 
 <div class="grid">
 <div><label for="install_type">Installation type</label><select id="install_type"><option value="new">New installation</option><option value="join">Join existing installation</option></select></div>
-<div><label for="fleet">Fleet key</label><input id="fleet" type="text" placeholder="At least 16 characters" /></div>
+<div><label for="fleet">Fleet key</label><input id="fleet" type="text" placeholder="At least 16 characters" /><div class="row" style="margin-top:8px"><button class="alt" type="button" onclick="applySuggestedFleetKey(true)">Suggest key</button></div></div>
 </div>
-<div class="hint">Use the same Fleet key on all devices in the installation.</div>
+<div class="hint">Use the same Fleet key on all devices in the installation. Suggested keys are read-aloud friendly.</div>
 
 <div class="section grid">
 <div><label for="mode">Mode</label><select id="mode" onchange="syncRoleOptions()"><option value="standalone">Standalone</option><option value="paired" selected>Paired</option><option value="mesh">Mesh</option></select></div>
@@ -155,10 +155,55 @@ const saveBtn=document.getElementById('saveBtn');
 const skipBtn=document.getElementById('skipBtn');
 const modeEl=document.getElementById('mode');
 const roleEl=document.getElementById('role');
+const installTypeEl=document.getElementById('install_type');
+const fleetKeyEl=document.getElementById('fleet');
+const READABLE_KEY_CONSONANTS='bdfghjkmnprstvwz';
+const READABLE_KEY_VOWELS='aeiou';
 function setBusy(b){ saveBtn.disabled=b; skipBtn.disabled=b; }
 function showMsg(text, ok){
  msg.className = `msg show ${ok ? 'ok' : 'err'}`;
  msg.innerText = text || '';
+}
+function randomIndex(max){
+ if(max <= 1) return 0;
+ try{
+  if(window.crypto && window.crypto.getRandomValues){
+   const arr=new Uint32Array(1);
+   const lim=Math.floor(0x100000000/max)*max;
+   let v=0;
+   do{
+    window.crypto.getRandomValues(arr);
+    v=arr[0];
+   }while(v>=lim);
+   return v%max;
+  }
+ }catch(e){}
+ return Math.floor(Math.random()*max);
+}
+function generateReadableFleetKey(){
+ const c=READABLE_KEY_CONSONANTS;
+ const v=READABLE_KEY_VOWELS;
+ const groups=[];
+ for(let i=0;i<4;i++){
+  const part=
+   c[randomIndex(c.length)] +
+   v[randomIndex(v.length)] +
+   c[randomIndex(c.length)] +
+   v[randomIndex(v.length)] +
+   c[randomIndex(c.length)];
+  groups.push(part);
+ }
+ return groups.join('-');
+}
+function applySuggestedFleetKey(force){
+ if(!fleetKeyEl) return;
+ const install=String((installTypeEl && installTypeEl.value) || 'new');
+ const current=String(fleetKeyEl.value || '').trim();
+ if(!force){
+  if(install !== 'new') return;
+  if(current.length) return;
+ }
+ fleetKeyEl.value = generateReadableFleetKey();
 }
 function syncRoleOptions(){
  const mode = String(modeEl.value || 'paired');
@@ -181,6 +226,11 @@ function syncRoleOptions(){
  }
 }
 roleEl.addEventListener('change', syncRoleOptions);
+if(installTypeEl){
+ installTypeEl.addEventListener('change', ()=>{
+  if(String(installTypeEl.value||'new')==='new') applySuggestedFleetKey(false);
+ });
+}
 document.getElementById('mqtt_control_enabled').addEventListener('change', ()=>{
  const control = document.getElementById('mqtt_control_enabled').checked;
  if(control){ document.getElementById('mqtt_client_enabled').checked = true; }
@@ -232,6 +282,7 @@ async function skipForNow(){
  }
 }
 syncRoleOptions();
+applySuggestedFleetKey(false);
 document.getElementById('fleet').focus();
 </script></body></html>
 )HTML";
@@ -649,7 +700,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div><label>Mode</label><select id="mode_select"><option value="standalone">Standalone</option><option value="paired">Paired</option><option value="mesh">Mesh</option></select></div>
 <div class="lora-field"><label id="role_label">Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> <span id="role_tx_text">Transmitter</span></label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> <span id="role_rx_text">Receiver</span></label></div><input id="role_tx" type="hidden" value="true" /><input id="role_name" type="hidden" value="transmitter" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
-<div style="grid-column:1/-1"><label>Fleet key (encryption)</label><input id="fleet_passphrase" /><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Examples: <code>fairview-generator-start-line-alpha42</code>, <code>smith-load-management-south-basin-27</code>, <code>farm-pump-control-west-field-9k</code>.</div></div>
+<div style="grid-column:1/-1"><label>Fleet key (encryption)</label><input id="fleet_passphrase" /><div class="actions" style="margin-top:8px"><button type="button" onclick="suggestReadableFleetKeyForSettings()">Suggest readable key</button></div><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Suggested format is read-aloud friendly.</div></div>
 <div><label id="local_address_label">Local address</label><input id="local_address" type="text" /><div class="hint" id="local_address_hex"></div></div>
 <div><label id="remote_address_label">Remote address</label><input id="remote_address" type="text" /><div class="hint" id="remote_address_hex"></div></div>
 </div>
@@ -698,6 +749,8 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 const FREQ_MIN_MHZ = 400.0;
 const FREQ_MAX_MHZ = 1000.0;
 const MIN_DEPLOYMENT_KEY_LEN = 16;
+const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
+const READABLE_KEY_VOWELS = 'aeiou';
 )HTML"
 #if LRS_ENABLE_MDNS
     R"HTML(const UI_MDNS_ENABLED = true;
@@ -841,10 +894,50 @@ function refreshHostnamePreview(){
 function isDefaultDeploymentKey(v){
  return String(v||'').trim() === 'lora-default-passphrase';
 }
+function randomIndex(max){
+ if(max<=1) return 0;
+ try{
+  if(window.crypto && window.crypto.getRandomValues){
+   const arr=new Uint32Array(1);
+   const lim=Math.floor(0x100000000/max)*max;
+   let v=0;
+   do{
+    window.crypto.getRandomValues(arr);
+    v=arr[0];
+   }while(v>=lim);
+   return v%max;
+  }
+ }catch(e){}
+ return Math.floor(Math.random()*max);
+}
+function generateReadableFleetKey(){
+ const c=READABLE_KEY_CONSONANTS;
+ const v=READABLE_KEY_VOWELS;
+ const groups=[];
+ for(let i=0;i<4;i++){
+  const part=
+   c[randomIndex(c.length)] +
+   v[randomIndex(v.length)] +
+   c[randomIndex(c.length)] +
+   v[randomIndex(v.length)] +
+   c[randomIndex(c.length)];
+  groups.push(part);
+ }
+ return groups.join('-');
+}
+function suggestReadableFleetKeyForSettings(){
+ const input=document.getElementById('fleet_passphrase');
+ if(!input) return;
+ input.value = generateReadableFleetKey();
+ updateDeploymentKeyStrength();
+ showToast('Suggested readable key generated.');
+}
 function deploymentKeyStrength(v){
  const s=String(v||'').trim();
+ const readablePattern = /^(?:[bdfghjkmnprstvwz][aeiou][bdfghjkmnprstvwz][aeiou][bdfghjkmnprstvwz])(?:-(?:[bdfghjkmnprstvwz][aeiou][bdfghjkmnprstvwz][aeiou][bdfghjkmnprstvwz])){3}$/;
  if(!s.length){ return {cls:'', text:`Enter deployment key (min ${MIN_DEPLOYMENT_KEY_LEN} chars).`}; }
  if(isDefaultDeploymentKey(s)){ return {cls:'weak', text:'Weak: default key is blocked.'}; }
+ if(readablePattern.test(s)){ return {cls:'strong', text:'Strong: read-aloud key format (~80-bit).'}; }
  const hasLower=/[a-z]/.test(s);
  const hasUpper=/[A-Z]/.test(s);
  const hasDigit=/\d/.test(s);
