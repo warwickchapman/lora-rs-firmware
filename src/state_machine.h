@@ -253,7 +253,9 @@ class NodeStateMachine {
     uint32_t poll_deadline_ms = 0;
     uint32_t last_poll_tx_ms = 0;
   };
-  static constexpr size_t kMaxPeers = 16;
+  // Managed peer slots on ESP8266 (telemetry/poll/retry history). Remote commands
+  // may still be sent to uncached peers as transient fire-and-forget operations.
+  static constexpr size_t kMaxPeers = 8;
   PeerRuntime peers_[kMaxPeers]{};
   size_t peer_count_ = 0;
 

@@ -468,12 +468,17 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
   }
   if (dstAddress == 0 || dstAddress == 255) return false;
 
-  PeerRuntime *node = findOrCreatePeer(dstAddress);
-  if (node == nullptr) return false;
-
   uint32_t sentCounter = 0;
   if (!sendPeerMqttCommand(dstAddress, relayState, &sentCounter)) {
     return false;
+  }
+
+  // Decouple send-path from managed peer slots: if cache is full, keep command send
+  // working as transient fire-and-forget (no retry/poll/ack tracking for this peer).
+  PeerRuntime *node = findOrCreatePeer(dstAddress);
+  if (node == nullptr) {
+    lrslog::event("mqtt_remote_transient", 0, sentCounter, relayState ? 1 : 0);
+    return true;
   }
 
   const uint32_t now = millis();

@@ -40,8 +40,8 @@ class MqttBridge {
 
   NodeStateMachine *sm_ = nullptr;
 
-  // Keep this aligned with NodeStateMachine::kMaxPeers to avoid oversized static arrays.
-  static constexpr size_t kPeerPublishCacheSize = 16;
+  // Keep this aligned with NodeStateMachine::kMaxPeers.
+  static constexpr size_t kPeerPublishCacheSize = 8;
   struct PeerPublishCacheEntry {
     bool in_use = false;
     uint8_t addr = 0;
