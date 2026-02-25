@@ -33,6 +33,9 @@ constexpr uint32_t kOtaStartupMinMaxBlockBytes = 1200;
 constexpr uint32_t kSteadySlowPhaseWarnMs = 50;
 constexpr uint32_t kSteadySlowPhaseWarnRateLimitMs = 5000;
 constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
+constexpr uint32_t kStaReconnectMinFreeHeapBytes = 11000;
+constexpr uint32_t kStaReconnectMinMaxBlockBytes = 6000;
+constexpr uint32_t kStaReconnectHeapLogIntervalMs = 30000;
 
 const char *wifiStatusText(wl_status_t st) {
   switch (st) {
@@ -321,6 +324,7 @@ void App::startNetworking() {
   wifi_sta_started_ms_ = 0;
   wifi_sta_retry_ms_ = 0;
   sta_connected_since_ms_ = 0;
+  sta_reconnect_heap_block_log_ms_ = 0;
   ap_enabled_ = false;
   dns_running_ = false;
   ntp_started_ = false;
@@ -346,6 +350,7 @@ void App::updateNetworking() {
       sta_connected_ = true;
       wifi_sta_connecting_ = false;
       sta_connected_since_ms_ = millis();
+      sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
       lrslog::event("sta_connected", rssi, 0, 0);
       LRS_LOGI(WIFI,
@@ -378,6 +383,7 @@ void App::updateNetworking() {
     if (!sta_connected_) {
       sta_connected_ = true;
       sta_connected_since_ms_ = millis();
+      sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
       lrslog::event("sta_connected", rssi, 0, 0);
       LRS_LOGI(WIFI,
@@ -400,7 +406,26 @@ void App::updateNetworking() {
   }
 
   if (cfg.wifi_sta_ssid.length() >= 1 && millis() - wifi_sta_retry_ms_ >= kStaReconnectIntervalMs) {
-    beginStaConnect();
+    const uint32_t freeHeap = lrslog::heapFree();
+    const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+    const bool lowHeapForScan = (freeHeap < kStaReconnectMinFreeHeapBytes) || (maxBlock < kStaReconnectMinMaxBlockBytes);
+    if (lowHeapForScan) {
+      const uint32_t nowMs = millis();
+      if (sta_reconnect_heap_block_log_ms_ == 0U ||
+          static_cast<int32_t>(nowMs - sta_reconnect_heap_block_log_ms_) >= static_cast<int32_t>(kStaReconnectHeapLogIntervalMs)) {
+        sta_reconnect_heap_block_log_ms_ = nowMs;
+        LRS_LOGW(WIFI,
+                 "event=sta_reconnect_deferred reason=low_heap heap_free=%lu max_free_block=%lu min_free=%lu min_max_block=%lu",
+                 static_cast<unsigned long>(freeHeap),
+                 static_cast<unsigned long>(maxBlock),
+                 static_cast<unsigned long>(kStaReconnectMinFreeHeapBytes),
+                 static_cast<unsigned long>(kStaReconnectMinMaxBlockBytes));
+      }
+      ensureApEnabled();
+    } else {
+      beginStaConnect();
+      sta_reconnect_heap_block_log_ms_ = 0;
+    }
   } else {
     ensureApEnabled();
   }
