@@ -81,3 +81,24 @@ Run each milestone through:
 - Fragmentation plateaus during soak (no persistent `max_free_block` ratchet down in idle polling window).
 - No endpoint regressions/timeouts on hot APIs.
 - No behavior regressions in settings, provisioning, commissioning, MQTT, or mDNS flows.
+
+## Replay Table Policy (2026-02 update)
+- Replay protection source capacity is now compile-time configurable via `LRS_REPLAY_TRACKED_SOURCES` (default `16`).
+- Peer runtime capacity remains `LRS_MAX_PEERS` (default `8`), and replay source capacity must be `>= LRS_MAX_PEERS`.
+- Rationale:
+  - keep deterministic static RAM bounds,
+  - preserve transient sender headroom during provisioning/commissioning,
+  - avoid oversized always-on tables on ESP8266.
+
+### Replay Validation Signals
+During soak and provisioning runs, monitor:
+- `rx_replay_table_full_drop`
+- `rx_replay_table_evict`
+- `rx_replay_table_stale_evict`
+
+Expected result for healthy operation:
+- no persistent replay-table full drops in normal coordinator workflows.
+
+Rollback trigger:
+- frequent `rx_replay_table_full_drop` events during normal discovery/provisioning flow.
+- If hit, raise `LRS_REPLAY_TRACKED_SOURCES` (recommended next step: `24`, then `32` if still needed).

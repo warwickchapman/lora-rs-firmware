@@ -259,6 +259,11 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   replay_table_stale_evictions_ = 0;
   replay_table_full_drops_ = 0;
   replay_table_peak_used_ = 0;
+  LRS_LOGI(SYS,
+           "event=memory_policy max_peers=%u replay_sources=%u max_prov_devices=%u",
+           static_cast<unsigned>(kMaxPeers),
+           static_cast<unsigned>(kReplayTrackedSources),
+           static_cast<unsigned>(kMaxProvisioningDevices));
   return true;
 }
 

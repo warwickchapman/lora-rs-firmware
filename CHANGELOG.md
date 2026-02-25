@@ -43,6 +43,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
   - M4: applied JSON deserialization filters across remaining admin/config/provisioning POST handlers to prevent allocation from unknown fields.
   - M5: hardened config load/save with early non-object JSON rejection, pre-serialize size bounds, and atomic temp-write+rename save path.
   - M6: documented endpoint measurement scope, soak validation strategy, and acceptance criteria in `docs/internal/memory-budget-and-measurement.md`.
+- Replay table capacity is now configurable via compile-time policy (`LRS_REPLAY_TRACKED_SOURCES`) and defaults to `16` (down from `32`) to reduce static RAM while preserving headroom over the `8`-peer runtime cap.
+- Added startup memory-policy logging to report effective caps (`max_peers`, `replay_sources`, `max_prov_devices`) for field validation.
 
 ### Notes
 - Memory checkpoints during this tranche (`python3 -m platformio run -e lrs_za`):

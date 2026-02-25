@@ -10,6 +10,14 @@
 #define LRS_PROVISIONING_MAX_DEVICES 8
 #endif
 
+#ifndef LRS_MAX_PEERS
+#define LRS_MAX_PEERS 8
+#endif
+
+#ifndef LRS_REPLAY_TRACKED_SOURCES
+#define LRS_REPLAY_TRACKED_SOURCES 16
+#endif
+
 enum class LinkState : uint8_t {
   Boot,
   Idle,
@@ -151,6 +159,13 @@ class NodeStateMachine {
  bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
 
  private:
+  static constexpr size_t kMaxPeers = LRS_MAX_PEERS;
+  static constexpr size_t kReplayTrackedSources = LRS_REPLAY_TRACKED_SOURCES;
+  static_assert(kMaxPeers > 0, "LRS_MAX_PEERS must be > 0");
+  static_assert(kMaxPeers <= 32, "LRS_MAX_PEERS must be <= 32 on ESP8266");
+  static_assert(kReplayTrackedSources >= kMaxPeers, "LRS_REPLAY_TRACKED_SOURCES must be >= LRS_MAX_PEERS");
+  static_assert(kReplayTrackedSources <= 64, "LRS_REPLAY_TRACKED_SOURCES must be <= 64 on ESP8266");
+
   struct RuntimeCfg {
     bool role_tx = false;
     uint8_t local_address = 0;
@@ -186,7 +201,6 @@ class NodeStateMachine {
     uint32_t counter = 0;
     uint32_t last_seen_ms = 0;
   };
-  static constexpr size_t kReplayTrackedSources = 32;
   ReplaySourceState replay_sources_[kReplayTrackedSources]{};
   uint32_t replay_table_evictions_ = 0;
   uint32_t replay_table_stale_evictions_ = 0;
@@ -255,7 +269,6 @@ class NodeStateMachine {
   };
   // Managed peer slots on ESP8266 (telemetry/poll/retry history). Remote commands
   // may still be sent to uncached peers as transient fire-and-forget operations.
-  static constexpr size_t kMaxPeers = 8;
   PeerRuntime peers_[kMaxPeers]{};
   size_t peer_count_ = 0;
 
