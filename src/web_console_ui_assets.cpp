@@ -668,6 +668,7 @@ body.light .status-table{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 1
 .copy-btn{margin:0;padding:6px 12px;font-size:0.8rem;border-radius:8px;background:rgba(255,255,255,0.05);color:var(--txt);border:var(--glass-border);box-shadow:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-weight:700}
 .copy-btn:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
 body.light .copy-btn:hover{background:rgba(255,255,255,0.8)}
+.status-side{display:flex;flex-direction:column;gap:14px}
 .relay-card{display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);border-radius:16px;padding:32px 24px;box-shadow:inset 0 0 20px rgba(0,0,0,0.1)}
 body.light .relay-card{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 20px rgba(31,38,135,0.05)}
 .relay-badge{width:120px;height:120px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.95rem;font-weight:800;letter-spacing:0.05em;transition:all 0.4s cubic-bezier(0.19, 1, 0.22, 1);position:relative}
@@ -680,6 +681,8 @@ body.light .relay-badge.on{color:#15803d;box-shadow:0 0 32px rgba(74,222,128,0.2
 body.light .relay-badge.off{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 16px rgba(31,38,135,0.1)}
 body.light .relay-badge.off::before{border-color:rgba(255,255,255,0.3)}
 .sensor-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:16px;margin-top:16px}
+.status-sensor-grid{display:grid;grid-template-columns:1fr;gap:10px}
+.status-sensor-grid .sensor-tile{padding:14px 16px;font-size:0.9rem}
 .sensor-tile{background:rgba(255,255,255,0.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:var(--glass-border);border-radius:12px;padding:20px;font-size:0.95rem;transition:all 0.2s;box-shadow:inset 0 0 16px rgba(0,0,0,0.1);font-weight:600}
 body.light .sensor-tile{background:rgba(255,255,255,0.4);box-shadow:inset 0 0 16px rgba(31,38,135,0.02)}
 .sensor-tile:hover{transform:translateY(-2px);background:rgba(255,255,255,0.08);box-shadow:0 8px 16px rgba(0,0,0,0.2)}
@@ -745,19 +748,21 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div>
 <div id="statusTable">Loading status...</div>
 </div>
+<div class="status-side">
 <div class="relay-card">
 <div id="relayBadge" class="relay-badge off">RELAY OFF</div>
 <div id="relayMeta" class="small" style="margin-top:8px">Input: -, Link: -</div>
 </div>
-</div>
-<h4 style="margin:10px 0 6px 0">Sensors</h4>
-<div class="sensor-grid">
+<h4 style="margin:0 0 2px 0">Sensors</h4>
+<div class="status-sensor-grid">
 <div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div>
 <div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div>
 <div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div>
 <div class="sensor-tile">Tank: n/a</div>
 <div class="sensor-tile">Float: n/a</div>
 <div class="sensor-tile">Flow: n/a</div>
+</div>
+</div>
 </div>
 </section>
 <section class="card page" id="page-fleet">
