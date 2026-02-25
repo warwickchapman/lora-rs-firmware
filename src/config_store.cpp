@@ -10,6 +10,7 @@
 
 namespace {
 constexpr char kConfigPath[] = "/config.json";
+constexpr char kConfigTmpPath[] = "/config.tmp";
 constexpr size_t kConfigMaxBytes = 8192;
 constexpr uint16_t kConfigSchemaVersion = 2;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
@@ -164,6 +165,17 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
   return false;
 }
 
+char readFirstNonWhitespace(File &f) {
+  while (f.available()) {
+    const int c = f.read();
+    if (c < 0) break;
+    if (c != ' ' && c != '\n' && c != '\r' && c != '\t') {
+      return static_cast<char>(c);
+    }
+  }
+  return '\0';
+}
+
 }  // namespace
 
 bool ConfigStore::begin() {
@@ -194,6 +206,14 @@ bool ConfigStore::begin() {
              "event=config_invalid path=%s reason=size_invalid bytes=%lu action=reset_defaults",
              kConfigPath,
              static_cast<unsigned long>(fileSize));
+    ensureProvisionedDefaults();
+    return save();
+  }
+  const char firstChar = readFirstNonWhitespace(f);
+  f.seek(0, SeekSet);
+  if (firstChar != '{') {
+    f.close();
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=not_json_object action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
   }
@@ -375,17 +395,43 @@ bool ConfigStore::save() {
   doc["audit_last_reboot_ms"] = cfg_.audit_last_reboot_ms;
   doc["audit_boot_count"] = cfg_.audit_boot_count;
 
-  File f = LittleFS.open(kConfigPath, "w");
+  const size_t estimatedBytes = measureJson(doc);
+  if (estimatedBytes == 0 || estimatedBytes > kConfigMaxBytes) {
+    LRS_LOGE(FS,
+             "event=config_save_failed path=%s reason=size_invalid estimated=%lu limit=%lu",
+             kConfigPath,
+             static_cast<unsigned long>(estimatedBytes),
+             static_cast<unsigned long>(kConfigMaxBytes));
+    return false;
+  }
+
+  LittleFS.remove(kConfigTmpPath);
+  File f = LittleFS.open(kConfigTmpPath, "w");
   if (!f) {
+    LRS_LOGE(FS, "event=config_save_failed path=%s reason=open_tmp_failed", kConfigTmpPath);
     return false;
   }
   const size_t bytes = serializeJson(doc, f);
-  bool ok = bytes > 0;
+  f.flush();
   f.close();
+  const bool ok = (bytes == estimatedBytes);
   if (!ok) {
-    LRS_LOGE(FS, "event=config_save_failed path=%s", kConfigPath);
+    LittleFS.remove(kConfigTmpPath);
+    LRS_LOGE(FS,
+             "event=config_save_failed path=%s reason=serialize_mismatch estimated=%lu actual=%lu",
+             kConfigPath,
+             static_cast<unsigned long>(estimatedBytes),
+             static_cast<unsigned long>(bytes));
     return false;
   }
+
+  LittleFS.remove(kConfigPath);
+  if (!LittleFS.rename(kConfigTmpPath, kConfigPath)) {
+    LittleFS.remove(kConfigTmpPath);
+    LRS_LOGE(FS, "event=config_save_failed path=%s reason=atomic_rename_failed", kConfigPath);
+    return false;
+  }
+
   LRS_LOGI(FS,
            "event=config_saved path=%s bytes=%lu role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
