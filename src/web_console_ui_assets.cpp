@@ -621,6 +621,7 @@ body.light .tabbtn.active{color:#fff}
 #page-settings .settings-pane>.actions button{margin-top:0}
 #settings-pane-lora>.grid{grid-template-columns:repeat(3,minmax(200px,1fr))}
 #settings-pane-lora details .grid{grid-template-columns:repeat(2,minmax(220px,1fr))}
+#settings-pane-lora #mode_select{margin-top:8px;min-height:42px}
 #settings-pane-lora #tx_input_lora_control_row{padding-top:8px;margin-top:4px;border-top:var(--glass-border)}
 #page-settings .settings-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 #page-settings .settings-tabs .tabbtn{width:100%;padding:8px 10px;min-height:42px}
@@ -800,7 +801,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 )HTML"
 #endif
     R"HTML(<section class="card page" id="page-settings"><h3>Settings</h3><div class="settings-tabs"><button class="tabbtn active" id="settings-tab-network" onclick="showSettingsTab('network')">Network</button><button class="tabbtn" id="settings-tab-lora" onclick="showSettingsTab('lora')">LoRa</button><button class="tabbtn" id="settings-tab-mqtt" onclick="showSettingsTab('mqtt')">MQTT</button><button class="tabbtn" id="settings-tab-system" onclick="showSettingsTab('system')">System</button></div><div class="settings-pane" id="settings-pane-lora"><div class="grid">
-<div><label>Mode</label><select id="mode_select"><option value="standalone">Standalone</option><option value="paired">Paired</option><option value="mesh">Mesh</option></select></div>
+<div class="lora-field"><label>Mode</label><select id="mode_select"><option value="standalone">Standalone</option><option value="paired">Paired</option><option value="mesh">Mesh</option></select></div>
 <div class="lora-field"><label id="role_label">Role</label><div class="radio-row"><label><input type="radio" name="role_tx_radio" id="role_tx_true" checked /> <span id="role_tx_text">Transmitter</span></label><label><input type="radio" name="role_tx_radio" id="role_tx_false" /> <span id="role_rx_text">Receiver</span></label></div><input id="role_tx" type="hidden" value="true" /><input id="role_name" type="hidden" value="transmitter" /></div>
 <div class="lora-field"><label>Frequency (MHz)</label><div class="freq-wrap"><div class="radio-row"><label><input type="radio" name="freq_preset" id="freq_433" /> 433</label><label><input type="radio" name="freq_preset" id="freq_915" /> 915</label></div><div class="small" id="freq_selected_text">Selected: 433.000 MHz</div><input id="lora_frequency_mhz" type="hidden" /></div></div>
 <div style="grid-column:1/-1"><label>Fleet key (encryption)</label><input id="fleet_passphrase" /><div class="actions" style="margin-top:8px"><button type="button" onclick="suggestReadableFleetKeyForSettings()">Suggest readable key</button></div><div id="fleet_passphrase_strength" class="key-strength"></div><div class="small">Must be unique per installation to prevent nearby systems from controlling each other.<br>Use at least 16 characters.<br>Suggested format is read-aloud friendly.</div></div>
