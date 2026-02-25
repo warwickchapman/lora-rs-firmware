@@ -2170,7 +2170,15 @@ function applyStatusPageState(st){
  else if(roleDisplayName === 'coordinator') roleDisplayName = 'Coordinator';
  else if(roleDisplayName === 'node') roleDisplayName = 'Node';
  else if(roleDisplayName === 'none') roleDisplayName = 'None';
- const roleDisplay = `${modeDisplay} / ${roleDisplayName} (local ${st.local_address}, peer ${st.remote_address})`;
+ const roleDisplay = `${modeDisplay} / ${roleDisplayName}`;
+ const addressDisplay = modeRaw === 'paired'
+   ? `tx ${st.local_address}, rx ${st.remote_address}`
+   : `local ${st.local_address}, peer ${st.remote_address}`;
+ const localAddrHex = `0x${Number(st.local_address || 0).toString(16).toUpperCase()}`;
+ const remoteAddrHex = `0x${Number(st.remote_address || 0).toString(16).toUpperCase()}`;
+ const addressHexDisplay = modeRaw === 'paired'
+   ? `tx ${localAddrHex}, rx ${remoteAddrHex}`
+   : `local ${localAddrHex}, peer ${remoteAddrHex}`;
  const loraRssiText = hasLora ? `${sigIconHtml(st.lora_last_rssi,'lora')}${st.lora_last_rssi} dBm` : 'n/a';
  const loraLastText = hasLora ? `${humanAgeMsShort(loraAgoMs)} ago` : 'no packets yet';
  const loraLastTxText = hasLoraTx ? `${humanAgeMsShort(loraTxAgoMs)} ago` : 'none yet';
@@ -2215,7 +2223,8 @@ function applyStatusPageState(st){
  table.className='status-table';
   table.innerHTML=
    `<div class="section">LoRa</div>
-    <div class="k">Role</div><div class="v copyable">${copyableValueHtml(escapeHtml(roleDisplay), roleDisplay, 'Role')}</div>
+    <div class="k">Role</div><div class="v">${escapeHtml(roleDisplay)}</div>
+    <div class="k">Address</div><div class="v copyable">${copyableValueHtml(`${escapeHtml(addressDisplay)}<div class="small">${escapeHtml(addressHexDisplay)}</div>`, addressDisplay, 'Address')}</div>
     <div class="k">Fleet key</div><div class="v copyable">${copyableValueHtml(escapeHtml(deployKey || 'not_set'), deployKey, 'Fleet key')}</div>
     <div class="k">Link</div><div class="v">${escapeHtml(st.link_state)}</div>
     <div class="k">LoRa RSSI</div><div class="v">${loraRssiText}</div>
