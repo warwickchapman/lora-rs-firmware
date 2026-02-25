@@ -159,11 +159,7 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   mqtt_client_.setSocketTimeout(1);
   mqtt_client_.setBufferSize(768);
   mqtt_client_.setCallback(MqttBridge::staticCallback);
-  memset(peer_last_seen_published_, 0, sizeof(peer_last_seen_published_));
-  memset(peer_last_cmd_published_, 0, sizeof(peer_last_cmd_published_));
-  memset(peer_published_once_, 0, sizeof(peer_published_once_));
-  memset(peer_input_published_, 0, sizeof(peer_input_published_));
-  memset(peer_input_value_, 0, sizeof(peer_input_value_));
+  resetPeerPublishCache();
   return true;
 }
 
@@ -176,11 +172,7 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
   if (mqtt_client_.connected()) {
     mqtt_client_.disconnect();
   }
-  memset(peer_last_seen_published_, 0, sizeof(peer_last_seen_published_));
-  memset(peer_last_cmd_published_, 0, sizeof(peer_last_cmd_published_));
-  memset(peer_published_once_, 0, sizeof(peer_published_once_));
-  memset(peer_input_published_, 0, sizeof(peer_input_published_));
-  memset(peer_input_value_, 0, sizeof(peer_input_value_));
+  resetPeerPublishCache();
   status_publish_in_progress_ = false;
   status_publish_locals_done_ = false;
   status_publish_peer_index_ = 0;
@@ -237,6 +229,39 @@ void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.remote_address = cfg.remote_address;
   runtime_.mqtt_port = cfg.mqtt_port;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
+}
+
+void MqttBridge::resetPeerPublishCache() {
+  for (size_t i = 0; i < kPeerPublishCacheSize; ++i) {
+    peer_publish_cache_[i] = PeerPublishCacheEntry{};
+  }
+}
+
+MqttBridge::PeerPublishCacheEntry *MqttBridge::findPeerPublishCache(uint8_t addr) {
+  for (size_t i = 0; i < kPeerPublishCacheSize; ++i) {
+    if (peer_publish_cache_[i].in_use && peer_publish_cache_[i].addr == addr) return &peer_publish_cache_[i];
+  }
+  return nullptr;
+}
+
+MqttBridge::PeerPublishCacheEntry *MqttBridge::upsertPeerPublishCache(uint8_t addr) {
+  PeerPublishCacheEntry *entry = findPeerPublishCache(addr);
+  if (entry != nullptr) return entry;
+  for (size_t i = 0; i < kPeerPublishCacheSize; ++i) {
+    if (!peer_publish_cache_[i].in_use) {
+      peer_publish_cache_[i].in_use = true;
+      peer_publish_cache_[i].addr = addr;
+      return &peer_publish_cache_[i];
+    }
+  }
+  return nullptr;
+}
+
+void MqttBridge::clearPeerPublishCache(uint8_t addr) {
+  PeerPublishCacheEntry *entry = findPeerPublishCache(addr);
+  if (entry != nullptr) {
+    *entry = PeerPublishCacheEntry{};
+  }
 }
 
 void MqttBridge::rebuildTopics() {
@@ -382,11 +407,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
 
 void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   if (!mqtt_client_.connected()) return;
-  peer_last_seen_published_[addr] = 0;
-  peer_last_cmd_published_[addr] = 0;
-  peer_published_once_[addr] = false;
-  peer_input_published_[addr] = false;
-  peer_input_value_[addr] = 0;
+  clearPeerPublishCache(addr);
 
   char addrHex[3];
   snprintf(addrHex, sizeof(addrHex), "%02X", addr);
@@ -530,9 +551,13 @@ void MqttBridge::publishStatus() {
         continue;
       }
       const uint8_t addr = node.address;
+      PeerPublishCacheEntry *peerCache = upsertPeerPublishCache(addr);
+      if (peerCache == nullptr) {
+        continue;
+      }
       if (!runtime_.tx_mqtt_remote_polling_enabled) {
-        const bool changed = !peer_published_once_[addr] || peer_last_seen_published_[addr] != node.last_seen_ms ||
-                             peer_last_cmd_published_[addr] != node.last_cmd_counter;
+        const bool changed =
+            !peerCache->published_once || peerCache->last_seen_ms != node.last_seen_ms || peerCache->last_cmd_counter != node.last_cmd_counter;
         if (!changed) {
           continue;
         }
@@ -549,10 +574,10 @@ void MqttBridge::publishStatus() {
         char topic[kMqttTopicBufBytes];
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
         const uint8_t inputValue = node.input_state ? 1 : 0;
-        if (!peer_input_published_[addr] || peer_input_value_[addr] != inputValue) {
+        if (!peerCache->input_published || peerCache->input_value != inputValue) {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
-          peer_input_published_[addr] = true;
-          peer_input_value_[addr] = inputValue;
+          peerCache->input_published = true;
+          peerCache->input_value = inputValue;
         }
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ack_state")) publishRetainedTopic(topic, peerAckStateText(node.ack_state));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_hex")) publishRetainedTopic(topic, addrHex);
@@ -585,9 +610,9 @@ void MqttBridge::publishStatus() {
       };
 
       publishRemote(addrHexPrefixed);
-      peer_last_seen_published_[addr] = node.last_seen_ms;
-      peer_last_cmd_published_[addr] = node.last_cmd_counter;
-      peer_published_once_[addr] = true;
+      peerCache->last_seen_ms = node.last_seen_ms;
+      peerCache->last_cmd_counter = node.last_cmd_counter;
+      peerCache->published_once = true;
       ++peerSnapshotsPublished;
       ++status_publish_peer_index_;
       if (peerSnapshotsPublished >= kStatusPeerSnapshotsPerTick) {

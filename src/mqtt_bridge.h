@@ -40,14 +40,22 @@ class MqttBridge {
 
   NodeStateMachine *sm_ = nullptr;
 
+  // Keep this aligned with NodeStateMachine::kMaxPeers to avoid oversized static arrays.
+  static constexpr size_t kPeerPublishCacheSize = 16;
+  struct PeerPublishCacheEntry {
+    bool in_use = false;
+    uint8_t addr = 0;
+    uint32_t last_seen_ms = 0;
+    uint32_t last_cmd_counter = 0;
+    bool published_once = false;
+    bool input_published = false;
+    uint8_t input_value = 0;
+  };
+
   uint32_t last_reconnect_attempt_ms_ = 0;
   uint32_t last_publish_ms_ = 0;
   uint32_t last_discovery_publish_ms_ = 0;
-  uint32_t peer_last_seen_published_[256]{};
-  uint32_t peer_last_cmd_published_[256]{};
-  bool peer_published_once_[256]{};
-  bool peer_input_published_[256]{};
-  uint8_t peer_input_value_[256]{};
+  PeerPublishCacheEntry peer_publish_cache_[kPeerPublishCacheSize]{};
   bool status_publish_in_progress_ = false;
   bool status_publish_locals_done_ = false;
   size_t status_publish_peer_index_ = 0;
@@ -60,6 +68,10 @@ class MqttBridge {
   bool buildLocalTopic(char *out, size_t outLen, const char *leaf) const;
   bool buildPeerTopic(char *out, size_t outLen, const char *addrSegment, const char *leaf) const;
   void mqttCallback(char *topic, uint8_t *payload, unsigned int length);
+  void resetPeerPublishCache();
+  PeerPublishCacheEntry *findPeerPublishCache(uint8_t addr);
+  PeerPublishCacheEntry *upsertPeerPublishCache(uint8_t addr);
+  void clearPeerPublishCache(uint8_t addr);
   void clearPeerRetainedTopics(uint8_t addr);
   bool connectIfNeeded();
   void publishStatus();
