@@ -166,8 +166,8 @@ void WebConsole::handleLoginApi() {
     sendTracked(400, "application/json", "{\"error\":\"invalid json\"}");
     return;
   }
-  const String posted = String(static_cast<const char *>(doc["password"] | ""));
-  if (posted != config_->settings().admin_password) {
+  const char *posted = doc["password"] | "";
+  if (!config_->settings().admin_password.equals(posted)) {
     failed_auth_++;
     if (failed_auth_ >= 5) {
       locked_until_ms_ = millis() + 60000;
@@ -223,7 +223,7 @@ void WebConsole::handleFleetSetupApi() {
     return;
   }
 
-  String fleetKey = String(static_cast<const char *>(doc["fleet_passphrase"] | ""));
+  String fleetKey = doc["fleet_passphrase"] | "";
   fleetKey.trim();
   if (fleetKey.length() < kMinDeploymentKeyLen) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"deployment_key_too_short\"}");
@@ -269,7 +269,7 @@ void WebConsole::handleSetupCommissioningApi() {
     return;
   }
 
-  String fleetKey = String(static_cast<const char *>(doc["fleet_passphrase"] | ""));
+  String fleetKey = doc["fleet_passphrase"] | "";
   fleetKey.trim();
   if (fleetKey.length() < kMinDeploymentKeyLen) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"deployment_key_too_short\"}");
@@ -280,8 +280,8 @@ void WebConsole::handleSetupCommissioningApi() {
     return;
   }
 
-  String mode = String(static_cast<const char *>(doc["mode"] | ""));
-  String role = String(static_cast<const char *>(doc["role"] | ""));
+  String mode = doc["mode"] | "";
+  String role = doc["role"] | "";
   mode.toLowerCase();
   role.toLowerCase();
 
@@ -322,13 +322,9 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.input_control_paired_lora_enabled = inputControlPairedLoRaEnabled;
   cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
 
-  const String wifiSsid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str()));
-  const String wifiPassword = String(static_cast<const char *>(doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str()));
-  const String mqttControllerAddresses =
-      String(static_cast<const char *>(doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str()));
-  cfg.wifi_sta_ssid = wifiSsid;
-  cfg.wifi_sta_password = wifiPassword;
-  cfg.mqtt_controller_addresses = mqttControllerAddresses;
+  cfg.wifi_sta_ssid = doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str();
+  cfg.wifi_sta_password = doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str();
+  cfg.mqtt_controller_addresses = doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str();
   if (cfg.lan_hostname.length() == 0) {
     cfg.lan_hostname = config_->defaultLanHostnameForRole(cfg.role_tx);
   }

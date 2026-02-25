@@ -115,8 +115,8 @@ void WebConsole::handlePostSettings() {
   const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
   const String oldLegacyRoleTxHost = oldLegacyDefaultHost + "-tx";
   const String oldLegacyRoleRxHost = oldLegacyDefaultHost + "-rx";
-  next.mode = String(static_cast<const char *>(doc["mode"] | next.mode.c_str()));
-  next.role = String(static_cast<const char *>(doc["role"] | next.role.c_str()));
+  next.mode = doc["mode"] | next.mode.c_str();
+  next.role = doc["role"] | next.role.c_str();
   next.role_tx = parseBoolField(doc["role_tx"], next.role_tx);
   if (next.mode == "paired") {
     next.role = next.role_tx ? "transmitter" : "receiver";
@@ -140,31 +140,30 @@ void WebConsole::handlePostSettings() {
   next.rx_push_on_change_enabled = parseBoolField(doc["rx_push_on_change_enabled"], next.rx_push_on_change_enabled);
   next.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | next.rx_push_min_interval_ms;
   next.input_control_paired_lora_enabled = parseBoolField(doc["input_control_paired_lora_enabled"], next.input_control_paired_lora_enabled);
-  next.wifi_sta_ssid = String(static_cast<const char *>(doc["wifi_sta_ssid"] | next.wifi_sta_ssid.c_str()));
-  next.wifi_sta_password = String(static_cast<const char *>(doc["wifi_sta_password"] | next.wifi_sta_password.c_str()));
-  const String postedLanHost = String(static_cast<const char *>(doc["lan_hostname"] | next.lan_hostname.c_str()));
+  next.wifi_sta_ssid = doc["wifi_sta_ssid"] | next.wifi_sta_ssid.c_str();
+  next.wifi_sta_password = doc["wifi_sta_password"] | next.wifi_sta_password.c_str();
+  const char *postedLanHost = doc["lan_hostname"] | next.lan_hostname.c_str();
   const bool wasDefaultHostname = (prev.lan_hostname == oldDefaultHost) || (prev.lan_hostname == oldLegacyDefaultHost) ||
                                   (prev.lan_hostname == oldLegacyRoleTxHost) || (prev.lan_hostname == oldLegacyRoleRxHost);
-  if (wasDefaultHostname && (postedLanHost == oldDefaultHost || postedLanHost == oldLegacyDefaultHost ||
-                             postedLanHost == oldLegacyRoleTxHost || postedLanHost == oldLegacyRoleRxHost)) {
+  if (wasDefaultHostname && (oldDefaultHost.equals(postedLanHost) || oldLegacyDefaultHost.equals(postedLanHost) ||
+                             oldLegacyRoleTxHost.equals(postedLanHost) || oldLegacyRoleRxHost.equals(postedLanHost))) {
     next.lan_hostname = config_->defaultLanHostnameForRole(next.role_tx);
   } else {
     next.lan_hostname = postedLanHost;
   }
-  next.fleet_passphrase = String(static_cast<const char *>(doc["fleet_passphrase"] | next.fleet_passphrase.c_str()));
+  next.fleet_passphrase = doc["fleet_passphrase"] | next.fleet_passphrase.c_str();
   next.ap_always_on = parseBoolField(doc["ap_always_on"], next.ap_always_on);
   next.mqtt_client_enabled = parseBoolField(doc["mqtt_client_enabled"], next.mqtt_client_enabled);
   next.mqtt_control_enabled = parseBoolField(doc["mqtt_control_enabled"], next.mqtt_control_enabled);
-  next.mqtt_controller_addresses =
-      String(static_cast<const char *>(doc["mqtt_controller_addresses"] | next.mqtt_controller_addresses.c_str()));
-  next.mqtt_host = String(static_cast<const char *>(doc["mqtt_host"] | next.mqtt_host.c_str()));
+  next.mqtt_controller_addresses = doc["mqtt_controller_addresses"] | next.mqtt_controller_addresses.c_str();
+  next.mqtt_host = doc["mqtt_host"] | next.mqtt_host.c_str();
   next.mqtt_port = static_cast<uint16_t>(doc["mqtt_port"] | next.mqtt_port);
-  next.mqtt_user = String(static_cast<const char *>(doc["mqtt_user"] | next.mqtt_user.c_str()));
-  next.mqtt_password = String(static_cast<const char *>(doc["mqtt_password"] | next.mqtt_password.c_str()));
-  next.mqtt_topic_root = String(static_cast<const char *>(doc["mqtt_topic_root"] | next.mqtt_topic_root.c_str()));
+  next.mqtt_user = doc["mqtt_user"] | next.mqtt_user.c_str();
+  next.mqtt_password = doc["mqtt_password"] | next.mqtt_password.c_str();
+  next.mqtt_topic_root = doc["mqtt_topic_root"] | next.mqtt_topic_root.c_str();
   next.sensor_temp_enabled = parseBoolField(doc["sensor_temp_enabled"], next.sensor_temp_enabled);
 
-  String newAdmin = String(static_cast<const char *>(doc["admin_password"] | next.admin_password.c_str()));
+  String newAdmin = doc["admin_password"] | next.admin_password.c_str();
   if (newAdmin.length() >= 8) {
     next.admin_password = newAdmin;
   }

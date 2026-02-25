@@ -1,6 +1,7 @@
 #include "web_console.h"
 
 #include <ArduinoJson.h>
+#include <cstring>
 
 #include "config_store.h"
 #include "logger.h"
@@ -22,17 +23,20 @@ void WebConsole::handleProvisionFleetWifi() {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
     return;
   }
-  const String ssid = String(static_cast<const char *>(body["wifi_sta_ssid"] | config_->settings().wifi_sta_ssid.c_str()));
-  const String pass = String(static_cast<const char *>(body["wifi_sta_password"] | config_->settings().wifi_sta_password.c_str()));
-  if (ssid.length() == 0) {
+  const auto &cfg = config_->settings();
+  const char *ssid = body["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str();
+  const char *pass = body["wifi_sta_password"] | cfg.wifi_sta_password.c_str();
+  const size_t ssidLen = (ssid != nullptr) ? strlen(ssid) : 0U;
+  const size_t passLen = (pass != nullptr) ? strlen(pass) : 0U;
+  if (ssidLen == 0U) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"ssid_required\"}");
     return;
   }
-  if (ssid.length() > 32 || pass.length() > 64) {
+  if (ssidLen > 32U || passLen > 64U) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"credentials_too_long\"}");
     return;
   }
-  if (isDefaultDeploymentKey(config_->settings().fleet_passphrase)) {
+  if (isDefaultDeploymentKey(cfg.fleet_passphrase)) {
     sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"fleet_key_default\"}");
     return;
   }
@@ -50,12 +54,12 @@ void WebConsole::handleProvisionFleetWifi() {
     return;
   }
 
-  if (!sm_->sendFleetWifiProvision(ssid, pass)) {
+  if (!sm_->sendFleetWifiProvision(String(ssid), String(pass))) {
     sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"send_failed\"}");
     return;
   }
 
-  const size_t totalLen = static_cast<size_t>(ssid.length() + pass.length());
+  const size_t totalLen = ssidLen + passLen;
   const size_t chunks = (totalLen + 6U) / 7U;
   DynamicJsonDocument out(128);
   out["ok"] = true;
@@ -65,8 +69,8 @@ void WebConsole::handleProvisionFleetWifi() {
   sendTracked(200, "application/json", json);
   LRS_LOGI(API,
            "event=fleet_wifi_provision_tx ssid=%s password=%s packets=%lu",
-           ssid.c_str(),
-           lrslog::maskSecret(pass).c_str(),
+           ssid,
+           lrslog::maskSecret(String(pass)).c_str(),
            static_cast<unsigned long>(chunks + 2U));
 }
 

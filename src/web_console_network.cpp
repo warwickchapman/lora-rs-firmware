@@ -58,16 +58,16 @@ void WebConsole::handleTestSta() {
     return;
   }
 
-  const String ssid = String(static_cast<const char *>(body["wifi_sta_ssid"] | config_->settings().wifi_sta_ssid.c_str()));
-  const String pass = String(static_cast<const char *>(body["wifi_sta_password"] | config_->settings().wifi_sta_password.c_str()));
-  if (ssid.length() == 0) {
+  const auto &cfg = config_->settings();
+  const char *ssid = body["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str();
+  const char *pass = body["wifi_sta_password"] | cfg.wifi_sta_password.c_str();
+  if (ssid == nullptr || ssid[0] == '\0') {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"ssid required\"}");
     return;
   }
 
-  const auto &cfg = config_->settings();
-  const bool alreadyConnectedSameSsid = WiFi.isConnected() && WiFi.SSID() == ssid;
-  const bool sameAsConfigured = (ssid == cfg.wifi_sta_ssid) && (pass == cfg.wifi_sta_password);
+  const bool alreadyConnectedSameSsid = WiFi.isConnected() && WiFi.SSID().equals(ssid);
+  const bool sameAsConfigured = cfg.wifi_sta_ssid.equals(ssid) && cfg.wifi_sta_password.equals(pass);
   if (alreadyConnectedSameSsid && sameAsConfigured) {
     DynamicJsonDocument doc(256);
     doc["ok"] = true;
@@ -82,7 +82,7 @@ void WebConsole::handleTestSta() {
     return;
   }
 
-  WiFi.begin(ssid.c_str(), pass.c_str());
+  WiFi.begin(ssid, pass);
   wl_status_t st = WL_IDLE_STATUS;
   for (int i = 0; i < kStaTestMaxAttempts; i++) {
     delay(100);
