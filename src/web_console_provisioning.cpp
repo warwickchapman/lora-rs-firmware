@@ -17,6 +17,14 @@ void WebConsole::handleProvisionFleetWifi() {
     return;
   }
 
+  auto sendJsonDoc = [this](int code, JsonDocument &doc) {
+    const size_t len = measureJson(doc);
+    server_.setContentLength(len);
+    markResponseStatus(code);
+    server_.send(code, "application/json", "");
+    serializeJson(doc, server_.client());
+  };
+
   DynamicJsonDocument body(512);
   auto err = deserializeJson(body, server_.arg("plain"));
   if (err) {
@@ -48,9 +56,7 @@ void WebConsole::handleProvisionFleetWifi() {
     cooldown["error"] = "cooldown_active";
     cooldown["retry_after_ms"] = cooldownRemainingMs;
     cooldown["retry_after_s"] = (cooldownRemainingMs + 999U) / 1000U;
-    String out;
-    serializeJson(cooldown, out);
-    sendTracked(429, "application/json", out);
+    sendJsonDoc(429, cooldown);
     return;
   }
 
@@ -64,9 +70,7 @@ void WebConsole::handleProvisionFleetWifi() {
   DynamicJsonDocument out(128);
   out["ok"] = true;
   out["packets"] = static_cast<uint32_t>(chunks + 2U);  // start + chunks + commit
-  String json;
-  serializeJson(out, json);
-  sendTracked(200, "application/json", json);
+  sendJsonDoc(200, out);
   LRS_LOGI(API,
            "event=fleet_wifi_provision_tx ssid=%s password=%s packets=%lu",
            ssid,
@@ -97,8 +101,19 @@ void WebConsole::handleProvisioningStatus() {
   }
   StaticJsonDocument<1536> doc;
   doc["ok"] = true;
-  const size_t maxCompactRows = 8;
-  const size_t returnedDevices = (totalDevices < maxCompactRows) ? totalDevices : maxCompactRows;
+  constexpr size_t maxCompactRows = 8;
+  const bool activeSession = sess.active;
+  bool compact = activeSession || veryLowHeap;
+  const size_t returnedDevices =
+      compact ? ((totalDevices < maxCompactRows) ? totalDevices : maxCompactRows) : totalDevices;
+  const bool truncated = returnedDevices < totalDevices;
+  const char *compactReason = nullptr;
+  if (compact) {
+    compactReason = activeSession ? "active_session" : "low_heap";
+  } else if (truncated) {
+    compact = true;
+    compactReason = "truncated_rows";
+  }
   JsonObject s = doc.createNestedObject("session");
   s["active"] = sess.active;
   s["state"] = provisioningSessionStateText(sess.state);
@@ -117,8 +132,11 @@ void WebConsole::handleProvisioningStatus() {
   s["now_ms"] = millis();
   s["devices_total"] = totalDevices;
   s["devices_returned"] = returnedDevices;
-  s["devices_truncated"] = (returnedDevices < totalDevices);
-  s["compact"] = true;
+  s["devices_truncated"] = truncated;
+  s["compact"] = compact;
+  if (compactReason != nullptr) {
+    s["compact_reason"] = compactReason;
+  }
   if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
     last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
     LRS_LOGI(API,
@@ -152,11 +170,14 @@ void WebConsole::handleProvisioningStatus() {
   markResponseStatus(200);
   server_.send(200, "application/json", "");
   serializeJson(doc, server_.client());
-  LRS_LOGW(API,
-           "event=provisioning_status_compact heap_free=%lu heap_frag=%u max_free_block=%lu",
-           static_cast<unsigned long>(heapFree),
-           static_cast<unsigned>(lrslog::heapFragPercent()),
-           static_cast<unsigned long>(maxBlock));
+  if (compact) {
+    LRS_LOGW(API,
+             "event=provisioning_status_compact reason=%s heap_free=%lu heap_frag=%u max_free_block=%lu",
+             compactReason ? compactReason : "unknown",
+             static_cast<unsigned long>(heapFree),
+             static_cast<unsigned>(lrslog::heapFragPercent()),
+             static_cast<unsigned long>(maxBlock));
+  }
 }
 
 void WebConsole::handleProvisioningStart() {
