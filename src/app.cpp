@@ -19,10 +19,12 @@ constexpr uint32_t kNtpPollFixedMs = 60000;
 constexpr uint32_t kNtpForceRefreshMs = 21600000;
 constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
 #if LRS_ENABLE_MDNS
-constexpr uint32_t kMdnsSuspendFreeHeapBytes = 9000;
-constexpr uint32_t kMdnsSuspendMaxBlockBytes = 3000;
-constexpr uint32_t kMdnsResumeFreeHeapBytes = 12000;
-constexpr uint32_t kMdnsResumeMaxBlockBytes = 5000;
+// mDNS should remain available during normal ESP8266 operation and only pause
+// under severe memory pressure.
+constexpr uint32_t kMdnsSuspendFreeHeapBytes = 6000;
+constexpr uint32_t kMdnsSuspendMaxBlockBytes = 1800;
+constexpr uint32_t kMdnsResumeFreeHeapBytes = 8000;
+constexpr uint32_t kMdnsResumeMaxBlockBytes = 2600;
 #endif
 constexpr uint32_t kStartupTraceWindowMs = 15000;
 constexpr uint32_t kStartupTraceBreadcrumbMs = 1000;
@@ -655,10 +657,11 @@ void App::refreshMdns() {
     }
   }
 
-  const bool forceApHost = ap_enabled_ && WiFi.softAPgetStationNum() > 0;
   const char *desiredLiteral = nullptr;
   const String *desiredRef = nullptr;
-  if (forceApHost || !sta_connected_) {
+  // Keep hostname stable on LAN once STA is connected.
+  // `lrs.local` is reserved for AP-only operation before STA comes up.
+  if (!sta_connected_) {
     desiredLiteral = "lrs";
   } else {
     if (cached_sta_hostname_.length() == 0) {
