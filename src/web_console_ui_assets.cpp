@@ -480,30 +480,27 @@ const char kIndexHtml[] PROGMEM =
 body.light{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%23f8fafc"/><circle cx="80" cy="20" r="50" fill="%23c4b5fd" opacity="0.5" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%2393c5fd" opacity="0.5" filter="blur(30px)"/></svg>');--card:rgba(255,255,255,0.4);--accent:linear-gradient(135deg,#3b82f6,#6366f1);--accent-hover:linear-gradient(135deg,#2563eb,#4f46e5);--txt:#0f172a;--border:rgba(255,255,255,0.3);--field:rgba(255,255,255,0.4);--muted:#475569;--link:#4f46e5;--focus:rgba(99,102,241,0.5);--glass-shadow:0 4px 16px 0 rgba(31,38,135,0.1);--glass-border:1px solid rgba(255,255,255,0.4)}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);background-size:cover;background-position:center;background-attachment:fixed;color:var(--txt);-webkit-text-size-adjust:100%;overflow-x:hidden}
-header{background:rgba(15,23,42,0.3);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:var(--glass-border);color:var(--txt);padding:14px 20px;font-weight:700;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:10;box-shadow:var(--glass-shadow)}
+header{background:rgba(15,23,42,0.3);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:var(--glass-border);color:var(--txt);padding:12px 16px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:10;box-shadow:var(--glass-shadow)}
 body.light header{background:rgba(255,255,255,0.3)}
-header .title{font-size:1.2rem;font-weight:800;letter-spacing:-0.02em;background:linear-gradient(to right,var(--txt),var(--muted));-webkit-background-clip:text;-webkit-text-fill-color:transparent;flex:1 1 280px;min-width:220px;padding-top:4px}
-header .wifi{font-size:.85rem;background:rgba(255,255,255,0.05);border:var(--glass-border);border-radius:999px;padding:6px 14px;white-space:nowrap;display:flex;align-items:center;gap:8px;font-weight:700;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1);min-height:36px}
-body.light header .wifi{background:rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(31,38,135,0.05)}
-header .relay-head{font-size:.85rem;background:rgba(255,255,255,0.05);border:var(--glass-border);border-radius:999px;padding:6px 14px;white-space:nowrap;font-weight:700;transition:all 0.3s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1);min-height:36px;display:flex;align-items:center}
-header .relay-head.on{background:rgba(74,222,128,0.2);border-color:rgba(74,222,128,0.5);color:#86efac;box-shadow:0 0 16px rgba(74,222,128,0.3)}
-body.light header .relay-head.on{color:#15803d;background:rgba(74,222,128,0.2)}
-header .relay-head.off{background:rgba(255,255,255,0.05)}
-body.light header .relay-head.off{background:rgba(255,255,255,0.4)}
-header .relay-head.mem-ok{background:rgba(74,222,128,0.15);border-color:rgba(74,222,128,0.4);color:#86efac}
-header .relay-head.mem-warn{background:rgba(251,191,36,0.15);border-color:rgba(251,191,36,0.4);color:#fde047}
-header .relay-head.mem-crit{background:rgba(248,113,113,0.15);border-color:rgba(248,113,113,0.4);color:#fca5a5}
+header .title{font-size:1.15rem;font-weight:700;letter-spacing:-0.01em;background:linear-gradient(to right,var(--txt),var(--muted));-webkit-background-clip:text;-webkit-text-fill-color:transparent;flex:1 1 260px;min-width:220px}
+header .wifi{font-size:.8rem;padding:0;white-space:nowrap;display:flex;align-items:center;gap:6px;font-weight:600;min-height:auto;background:transparent;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+header .relay-head{font-size:.8rem;padding:0;white-space:nowrap;font-weight:600;min-height:auto;display:flex;align-items:center;background:transparent;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;transition:color 0.2s ease}
+header .relay-head.on{color:#86efac}
+body.light header .relay-head.on{color:#15803d}
+header .relay-head.off{color:var(--txt)}
+header .relay-head.mem-ok{color:#86efac}
+header .relay-head.mem-warn{color:#fde047}
+header .relay-head.mem-crit{color:#fca5a5}
 header .reason-head{font-size:.8rem;background:rgba(255,255,255,.08);border:var(--glass-border);border-radius:999px;padding:6px 12px;white-space:nowrap;display:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 header .reason-head.show{display:inline-flex}
-header .right{display:flex;gap:12px;row-gap:8px;flex-wrap:wrap;align-items:center;flex:1 1 520px;justify-content:flex-end}
-header .id-badge{font-size:.82rem;background:rgba(255,255,255,0.05);border:var(--glass-border);border-radius:999px;padding:4px 10px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;min-height:36px;max-width:100%}
+header .right{display:flex;gap:10px;row-gap:6px;flex-wrap:wrap;align-items:center;flex:1 1 520px;justify-content:flex-end}
+header .id-badge{font-size:.8rem;padding:0;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-height:auto;max-width:100%;background:transparent;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 header .id-badge #deviceBadgeText{overflow:hidden;text-overflow:ellipsis;max-width:40ch}
-header .id-copy{margin:0;padding:4px 9px;font-size:.72rem;border-radius:999px;border:var(--glass-border);background:rgba(255,255,255,0.08);color:var(--txt);cursor:pointer}
-header .id-copy:hover{background:rgba(255,255,255,0.2)}
-header .theme{margin-top:0;padding:6px 14px;min-width:40px;min-height:36px;border:var(--glass-border);background:rgba(255,255,255,0.05);border-radius:999px;cursor:pointer;transition:all 0.3s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1)}
-header .logout{margin-top:0;padding:6px 14px;min-height:36px;border:var(--glass-border);background:rgba(255,255,255,0.05);border-radius:999px;cursor:pointer;transition:all 0.3s ease;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1);font-weight:700}
-header .theme:hover, header .logout:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
-body.light header .theme:hover, body.light header .logout:hover{background:rgba(255,255,255,0.8)}
+header .id-copy{margin:0;padding:2px 6px;font-size:.72rem;border-radius:6px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+header .id-copy:hover{color:var(--txt)}
+header .theme{margin-top:0;padding:0;min-width:auto;min-height:auto;border:0;background:transparent;border-radius:0;cursor:pointer;transition:opacity 0.2s ease;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+header .logout{margin-top:0;padding:0;min-height:auto;border:0;background:transparent;border-radius:0;cursor:pointer;transition:opacity 0.2s ease;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;font-weight:600}
+header .theme:hover, header .logout:hover{opacity:.8;transform:none}
 main{padding:24px 16px;display:flex;flex-direction:column;gap:20px;max-width:980px;margin:0 auto}
 .card{background:var(--card);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:var(--glass-border);border-radius:24px;padding:24px;box-shadow:var(--glass-shadow);transition:transform 0.3s ease}
 label{display:block;font-size:0.85rem;margin-top:12px;font-weight:700;color:var(--txt);letter-spacing:0.02em}
@@ -664,9 +661,12 @@ body.light .chip.err{color:#b91c1c;background:rgba(248,113,113,0.2)}
 .chip.neutral{background:rgba(255,255,255,0.1);color:var(--txt);border:var(--glass-border)}
 body.light .chip.neutral{background:rgba(255,255,255,0.4);border:var(--glass-border)}
 .status-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start}
-.status-head{margin-bottom:8px}
+.status-head{margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px}
 .status-head h3{margin:0;display:inline-flex;align-items:center;gap:8px}
 .status-live-dot{font-size:1.1rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;min-width:1.1em}
+.status-head-device{display:inline-flex;align-items:center;gap:8px;min-width:0;font-size:.82rem;color:var(--muted)}
+.status-head-device .name{max-width:32ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-head-device .copy-btn{padding:4px 9px;font-size:.72rem}
 .deploy-note{padding:16px;border:var(--glass-border);border-radius:12px;background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);margin-bottom:20px;line-height:1.5}
 .deploy-note.warn{border-color:rgba(251,191,36,0.4);background:rgba(251,191,36,0.1);color:#fde047}
 body.light .deploy-note.warn{color:#b45309;background:rgba(251,191,36,0.1)}
@@ -739,13 +739,35 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  .status-table{grid-template-columns:140px 1fr}
  .relay-card{flex-direction:row;justify-content:space-between;padding:24px}
  .relay-badge{width:100px;height:100px;font-size:0.85rem}
- header{padding:10px 12px}
- header .title{width:100%;font-size:1.05rem;min-width:0;padding-top:0}
- header .right{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;justify-content:stretch}
- header .right > *{min-width:0;justify-content:center}
- header .id-badge{grid-column:span 2}
- header .id-badge #deviceBadgeText{max-width:100%}
- header .theme,header .logout{padding:6px 10px}
+ header{padding:10px 12px;display:grid;grid-template-columns:auto 1fr auto;align-items:start;column-gap:10px;row-gap:4px}
+ header .title{width:auto;font-size:.96rem;font-weight:700;min-width:0;padding-top:0;line-height:1.2}
+ header .right{width:auto;display:flex;flex-wrap:nowrap;gap:8px;align-items:center;justify-content:flex-end}
+ header .right > *{min-width:0}
+ header .id-badge{display:none}
+ header .relay-head,
+ header .wifi,
+ header .theme,
+ header .logout{
+  margin:0;
+  padding:0;
+  min-height:auto;
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+ }
+ header .relay-head{font-size:.74rem;font-weight:600;white-space:nowrap}
+ header .wifi{font-size:.74rem;font-weight:600;gap:4px}
+ header .wifi span:last-child{display:none}
+ header .theme,header .logout{font-size:1rem;line-height:1}
+ header .theme:hover, header .logout:hover{background:transparent;transform:none}
+ header .wifi-icon{width:16px;height:14px}
+ header .wifi-icon svg{width:16px;height:14px}
+ header #loraIcon.sig{height:12px}
+ .status-head-device{font-size:.75rem}
+ .status-head-device .name{max-width:16ch}
  #page-settings .settings-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
  #page-settings .settings-tabs .tabbtn{min-height:40px}
  .system-tabs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -759,6 +781,9 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  .mobile-action-bar.show{display:flex}
  main{padding-bottom:90px}
 }
+@media(max-width:430px){
+ .status-head-device{display:none}
+}
 </style></head>
 <body><div id="drawerBackdrop" class="drawer-backdrop" onclick="toggleDrawer(false)"></div><aside id="appDrawer" class="drawer" aria-label="Main navigation"><h4>Menu</h4><button class="navbtn active" id="nav-status" onclick="showPage('status')">Status</button><button class="navbtn" id="nav-fleet" onclick="showPage('fleet')">Fleet</button>
 
@@ -769,7 +794,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 #endif
     R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="deviceBadge" class="id-badge"><span id="deviceBadgeText">Device: -</span><button id="deviceBadgeCopy" type="button" class="id-copy" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
 <section class="card page active" id="page-status">
-<div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3></div>
+<div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div>
 <div class="status-grid">
 <div>
 <div id="statusTable">Loading status...</div>
@@ -2347,10 +2372,17 @@ function applyHeaderStatus(st){
  const identity = serial || (chipId ? `lrs-${chipId}` : '-');
  const idText=document.getElementById('deviceBadgeText');
  const idCopy=document.getElementById('deviceBadgeCopy');
+ const statusHeadText=document.getElementById('statusHeadDeviceText');
+ const statusHeadCopy=document.getElementById('statusHeadDeviceCopy');
  if(idText){ idText.innerText = `Device: ${identity}`; }
  if(idCopy){
   idCopy.dataset.copy = identity;
   idCopy.dataset.label = 'Device identity';
+ }
+ if(statusHeadText){ statusHeadText.innerText = `Device: ${identity}`; }
+ if(statusHeadCopy){
+  statusHeadCopy.dataset.copy = identity;
+  statusHeadCopy.dataset.label = 'Device identity';
  }
  const roleText=String(st.role||'').toLowerCase();
  if(roleText==='tx' || roleText==='rx'){
