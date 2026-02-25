@@ -17,6 +17,7 @@ constexpr uint32_t kDefaultRemotePollIntervalMs = 60000;
 constexpr uint32_t kMinRemotePollIntervalMs = 60000;
 constexpr uint32_t kMaxRemotePollIntervalMs = 3600000;
 constexpr uint8_t kFlagTimeAuthoritative = 0x01;
+constexpr uint8_t kFlagPairedInputSlave = 0x02;
 constexpr uint8_t kWifiProvisionOpStart = 1;
 constexpr uint8_t kWifiProvisionOpData = 2;
 constexpr uint8_t kWifiProvisionOpCommit = 3;
@@ -197,6 +198,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   tx_command_pending_ = false;
   tx_retry_step_ = 0;
   tx_next_retry_ms_ = 0;
+  paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
   last_wifi_prov_tx_ms_ = 0;
@@ -243,6 +245,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   tx_command_pending_ = false;
   tx_retry_step_ = 0;
   tx_next_retry_ms_ = 0;
+  paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
   peer_count_ = 0;
@@ -375,6 +378,10 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
 }
 
 void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
+  if ((runtime_.role_tx && runtime_.input_control_paired_lora_enabled) || (!runtime_.role_tx && paired_input_slave_mode_)) {
+    lrslog::event("relay_local_mqtt_blocked", 0, last_counter_, relayState ? 1 : 0);
+    return;
+  }
   relay_state_ = relayState ? 1 : 0;
   digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
   {
@@ -383,6 +390,10 @@ void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
 }
 
 void NodeStateMachine::automationSetLocalRelay(uint8_t relayState) {
+  if ((runtime_.role_tx && runtime_.input_control_paired_lora_enabled) || (!runtime_.role_tx && paired_input_slave_mode_)) {
+    lrslog::event("relay_local_automation_blocked", 0, last_counter_, relayState ? 1 : 0);
+    return;
+  }
   relay_state_ = relayState ? 1 : 0;
   digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
   if (!runtime_.role_tx) {
@@ -449,6 +460,10 @@ bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayStat
 
 bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState) {
   if (!runtime_.role_tx) return false;
+  if (runtime_.input_control_paired_lora_enabled) {
+    lrslog::event("mqtt_remote_relay_blocked", 0, dstAddress, relayState ? 1 : 0);
+    return false;
+  }
   if (dstAddress == 0 || dstAddress == 255) return false;
 
   PeerRuntime *node = findOrCreatePeer(dstAddress);
@@ -1380,6 +1395,18 @@ void NodeStateMachine::tickReceive() {
   }
 
   if (msg.type == MessageType::Change || msg.type == MessageType::Heartbeat || msg.type == MessageType::Mqtt) {
+    if (!runtime_.role_tx && msg.type == MessageType::Mqtt && paired_input_slave_mode_) {
+      lrslog::event("rx_slave_block_mqtt", msg.rssi, msg.counter, msg.relay_state);
+      return;
+    }
+    if (!runtime_.role_tx && msg.type != MessageType::Mqtt) {
+      const bool nextSlaveMode = (msg.flags & kFlagPairedInputSlave) != 0U;
+      if (nextSlaveMode != paired_input_slave_mode_) {
+        paired_input_slave_mode_ = nextSlaveMode;
+        lrslog::event(paired_input_slave_mode_ ? "rx_slave_mode_on" : "rx_slave_mode_off", msg.rssi, msg.counter,
+                      msg.relay_state);
+      }
+    }
     relay_state_ = msg.relay_state;
     input_state_ = msg.input_state;
     last_rx_control_source_ = (msg.type == MessageType::Mqtt) ? RxControlSource::Mqtt : RxControlSource::LoRa;

@@ -207,6 +207,7 @@ class NodeStateMachine {
   bool shared_time_authoritative_ = false;
   uint32_t shared_time_sync_unix_s_ = 0;
   uint32_t shared_time_sync_ms_ = 0;
+  bool paired_input_slave_mode_ = false;
   RxControlSource last_rx_control_source_ = RxControlSource::None;
 
   bool tx_ack_pending_ = false;

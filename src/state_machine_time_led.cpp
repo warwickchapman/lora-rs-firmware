@@ -9,6 +9,7 @@ constexpr uint32_t kRssiLowIntervalMs = 1000;
 constexpr uint32_t kNoLinkFastIntervalMs = 150;
 constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
 constexpr uint8_t kFlagTimeAuthoritative = 0x01;
+constexpr uint8_t kFlagPairedInputSlave = 0x02;
 }
 
 void NodeStateMachine::setAuthoritativeUnixTime(uint32_t unixTimeS) {
@@ -28,7 +29,11 @@ void NodeStateMachine::captureRemoteTemp(uint8_t tempCode) {
 }
 
 uint8_t NodeStateMachine::txFlags() const {
-  return shared_time_authoritative_ ? kFlagTimeAuthoritative : 0U;
+  uint8_t flags = shared_time_authoritative_ ? kFlagTimeAuthoritative : 0U;
+  if (runtime_.role_tx && runtime_.input_control_paired_lora_enabled) {
+    flags |= kFlagPairedInputSlave;
+  }
+  return flags;
 }
 
 void NodeStateMachine::updateSharedTimeFromPeer(uint32_t unixTimeS, bool authoritative) {
