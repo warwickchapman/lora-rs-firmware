@@ -12,6 +12,9 @@
   - Embedded UI HTML/CSS/JS `PROGMEM` blobs only.
 - `/Users/warwick/Code/LoRa/lora_rs/src/web_console_status.cpp` ... `/Users/warwick/Code/LoRa/lora_rs/src/web_console_system.cpp`
   - `WebConsole` feature handlers split by concern (status/pages/settings/fleet/provisioning/network/system).
+- `/Users/warwick/Code/LoRa/lora_rs/src/web_console_internal.h` + `/Users/warwick/Code/LoRa/lora_rs/src/web_console_internal.cpp`
+  - Temporary shared helper seam for split-era constants/helpers used across `WebConsole` feature files.
+  - Not a dumping ground: helpers/constants should live with owning feature unless genuinely cross-feature.
 
 - `/Users/warwick/Code/LoRa/lora_rs/src/state_machine.cpp`
   - Runtime control engine, replay protection, peer state, provisioning coordinator/target, RX/TX dispatch.
@@ -47,5 +50,6 @@ Current Milestone 5 target (safe first moves):
 
 ## Split Ownership Rules
 - Each split file owns one concern and only methods/helpers for that concern.
+- `web_console_internal.*` is temporary split support; prefer moving helpers/constants into feature files as ownership becomes clear.
 - No behavior changes mixed with file moves in split milestones.
 - TX/RX/provisioning tick ordering changes may only happen in explicitly planned work, not in file moves.
