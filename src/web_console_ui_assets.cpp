@@ -518,6 +518,7 @@ body.light .pass-toggle:hover{background:rgba(255,255,255,0.6)}
 input[type=checkbox]{width:20px;height:20px;padding:0;accent-color:#8b5cf6;cursor:pointer}
 body.light input[type=checkbox]{accent-color:#6366f1}
 .check-row{display:flex;align-items:center;gap:10px;margin-top:12px}
+.network-soft-ap .check-row{margin-top:8px;min-height:42px}
 .radio-row{display:flex;align-items:center;gap:0;margin-top:8px;border:var(--glass-border);border-radius:12px;overflow:hidden;width:100%;max-width:100%;background:var(--field);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .radio-row label{margin:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none;font-weight:700;flex:1 1 0}
 .radio-row label + label{border-left:var(--glass-border)}
@@ -834,7 +835,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 </div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions action-commit"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button id="wifiScanBtn" type="button" onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)" title="Show password" aria-label="Show password">👁</button></div></div>
-<div><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
+<div class="network-soft-ap"><label>Soft AP</label><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
 <div style="grid-column:1/-1"><label id="lan_hostname_label">LAN hostname</label><input id="lan_hostname" /><div class="hint" id="lan_hostname_hint">Used as the device hostname for WiFi and OTA.</div><div class="hint" id="lan_hostname_preview_wrap" style="display:none">URL: <span id="lan_hostname_preview">http://lrs.local</span></div></div>
 </div><div class="actions action-commit"><button onclick="saveNetwork()">Save</button><button id="btnTestSta" onclick="testSta()">Test</button></div><div id="netTestResult" class="result-line"></div></div><div class="settings-pane" id="settings-pane-mqtt"><div class="grid">
 <div style="grid-column:1/-1"><div class="check-row"><input id="mqtt_client_enabled" type="checkbox" /><label for="mqtt_client_enabled">MQTT client enabled</label></div></div>
@@ -2187,15 +2188,15 @@ function applyStatusPageState(st){
   connectedStaSsid = '';
  }
  updateStaTestButtonState();
- const apUrl = UI_MDNS_ENABLED && st.mdns_ap ? `http://${st.mdns_ap}` : '';
- const lanUrl = UI_MDNS_ENABLED && st.mdns_lan ? `http://${st.mdns_lan}` : '';
- const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(st.mdns_lan)}</a>` : escapeHtml(st.mdns_lan || 'n/a');
- const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(st.mdns_ap)}</a>` : escapeHtml(st.mdns_ap || 'n/a');
+ const apUrl = UI_MDNS_ENABLED && st.mdns_ap ? `http://${String(st.mdns_ap).replace(/\/+$/,'')}/` : '';
+ const lanUrl = UI_MDNS_ENABLED && st.mdns_lan ? `http://${String(st.mdns_lan).replace(/\/+$/,'')}/` : '';
+ const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(lanUrl)}</a>` : 'n/a';
+ const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(apUrl)}</a>` : 'n/a';
  const statusMdnsRows = UI_MDNS_ENABLED
-   ? `<div class="k">LAN mDNS</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, st.mdns_lan, 'LAN mDNS')}</div>`
+   ? `<div class="k">LAN mDNS URL</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, lanUrl, 'LAN mDNS URL')}</div>`
    : '';
  const apMdnsRow = UI_MDNS_ENABLED
-   ? `<div class="k">AP mDNS</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, st.mdns_ap, 'AP mDNS')}</div>`
+   ? `<div class="k">AP mDNS URL</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, apUrl, 'AP mDNS URL')}</div>`
    : '';
  const rb=document.getElementById('relayBadge');
  if(rb){
