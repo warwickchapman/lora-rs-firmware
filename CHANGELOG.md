@@ -10,6 +10,12 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - API-first provisioning helper CLI: `tools/lrs_provisioning_cli.py` for logging into a coordinator, applying local settings (role/addresses/WiFi), running LoRa provisioning discovery + provision-all, and optionally broadcasting fleet WiFi credentials without relying on the embedded web UI.
 - Example provisioning profile file: `tools/lrs_provisioning_profile.example.json`.
 - Optional temporary UDP log mirroring control endpoint (`POST /api/logging/udp`) and provisioning CLI commands (`udp-log-start` / `udp-log-stop`) for bench debugging without web UI log buffering.
+- Automations reimplementation Phase 1/2 foundations: separate rules store (`/automation_rules.json`), low-heap `GET/POST /api/automation-rules`, and an Automations builder shell with JSON preview.
+- Compile-time automations feature flag (`LRS_ENABLE_AUTOMATIONS`) with UI/API/backend gating and UI compile-out support for lean firmware variants.
+- Automations Phase 3 runtime foundation (`AutomationRulesEngine`) that compiles rules into fixed-size RAM structs, evaluates matches in an app-owned tick, and enforces v1 guardrails outside the state-machine hot path.
+- Automations Phase 3b self-relay actuation (`set_relay(self, ...)`) with first-match execution, no-repeat behavior when already in the desired state, and dedicated automation relay ownership logging/status reason on RX.
+- Automations Phase 3c timing semantics (`for_ms`, predicate `for_ms`, `cooldown_ms`) with fixed-size per-rule runtime state and transition-based hold/cooldown logging to avoid tick spam.
+- Automations Phase 4 instrumentation pass: targeted heap/duration logs for `GET/POST /api/automation-rules` and rules compile/reload success/failure metrics (heap/max-block before/after, duration, doc capacity).
 
 ### Changed
 - LoRa replay protection now tracks a per-sender boot/session nonce in addition to the monotonic counter, so a peer reboot no longer gets permanently dropped as replay traffic.
@@ -18,6 +24,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Normal settings/export APIs no longer expose DS18B20 `sensor_temp_pin` / `sensor_temp_interval_s` fields that are not honored at runtime on this hardware (sensor pin is fixed and polling cadence is derived from heartbeat).
 - `/api/network/test` is now commissioning-only (setup flow) and uses a shorter bounded connect-test window to reduce control-loop stalls and prevent accidental production use.
 - `/api/fleet` now sizes its JSON document dynamically from current peer count (bounded), reducing transient heap spikes when only a small number of remotes are tracked.
+- Automations builder now surfaces v1 limits in the UI and maps backend validation errors to clearer installer-facing messages before/after save.
 
 ## [0.2.2-alpha] - 2026-02-21
 
