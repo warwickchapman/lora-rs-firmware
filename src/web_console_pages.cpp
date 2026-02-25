@@ -213,7 +213,19 @@ void WebConsole::handleSetupCommissioningApi() {
   if (!requireAuth(true)) return;
 
   DynamicJsonDocument doc(640);
-  auto err = deserializeJson(doc, server_.arg("plain"));
+  StaticJsonDocument<256> filter;
+  filter["fleet_passphrase"] = true;
+  filter["mode"] = true;
+  filter["role"] = true;
+  filter["mqtt_client_enabled"] = true;
+  filter["mqtt_control_enabled"] = true;
+  filter["input_control_paired_lora_enabled"] = true;
+  filter["ap_always_on"] = true;
+  filter["wifi_sta_ssid"] = true;
+  filter["wifi_sta_password"] = true;
+  filter["mqtt_controller_addresses"] = true;
+
+  auto err = deserializeJson(doc, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
     return;

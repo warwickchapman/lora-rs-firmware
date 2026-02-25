@@ -60,7 +60,43 @@ void WebConsole::handlePostSettings() {
   if (!requireAuth(true)) return;
 
   DynamicJsonDocument doc(1536);
-  auto err = deserializeJson(doc, server_.arg("plain"));
+  StaticJsonDocument<768> filter;
+  filter["mode"] = true;
+  filter["role"] = true;
+  filter["role_tx"] = true;
+  filter["local_address"] = true;
+  filter["remote_address"] = true;
+  filter["lora_frequency_hz"] = true;
+  filter["lora_tx_power"] = true;
+  filter["lora_spreading_factor"] = true;
+  filter["lora_bandwidth_hz"] = true;
+  filter["lora_coding_rate"] = true;
+  filter["heartbeat_ms"] = true;
+  filter["ack_timeout_ms"] = true;
+  filter["mqtt_remote_retry_timeout_ms"] = true;
+  filter["tx_mqtt_remote_polling_enabled"] = true;
+  filter["tx_mqtt_remote_default_poll_interval_ms"] = true;
+  filter["rx_push_on_change_enabled"] = true;
+  filter["rx_push_min_interval_ms"] = true;
+  filter["input_control_paired_lora_enabled"] = true;
+  filter["wifi_sta_ssid"] = true;
+  filter["wifi_sta_password"] = true;
+  filter["lan_hostname"] = true;
+  filter["fleet_passphrase"] = true;
+  filter["allow_default_deployment_key"] = true;
+  filter["admin_password"] = true;
+  filter["ap_always_on"] = true;
+  filter["mqtt_client_enabled"] = true;
+  filter["mqtt_control_enabled"] = true;
+  filter["mqtt_controller_addresses"] = true;
+  filter["mqtt_host"] = true;
+  filter["mqtt_port"] = true;
+  filter["mqtt_user"] = true;
+  filter["mqtt_password"] = true;
+  filter["mqtt_topic_root"] = true;
+  filter["sensor_temp_enabled"] = true;
+
+  auto err = deserializeJson(doc, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     server_.send(400, "text/plain", "invalid json");
     return;

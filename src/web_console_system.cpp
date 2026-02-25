@@ -46,38 +46,46 @@ void WebConsole::handleFactory() {
   serializeJson(doc, server_.client());
 }
 void WebConsole::handleDiagnostics() {
-  DynamicJsonDocument doc(768);
+  const uint32_t heapFree = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  const bool compact = (heapFree < kApiLowHeapRejectFreeBytes || maxBlock < kApiLowHeapRejectMaxBlockBytes);
+  DynamicJsonDocument doc(compact ? 320 : 768);
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
+  doc["compact"] = compact;
   doc["role"] = cfg.role_tx ? "tx" : "rx";
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
   doc["fw_display"] = String(LRS_FW_VERSION) + " (" + String(LRS_GIT_SHA) + (LRS_GIT_DIRTY == 0 ? "" : ", dirty") + ")";
-  doc["build_date"] = __DATE__;
-  doc["build_time"] = __TIME__;
   doc["uptime_ms"] = millis();
   doc["free_heap_bytes"] = ESP.getFreeHeap();
-  doc["cpu_freq_mhz"] = ESP.getCpuFreqMHz();
-  doc["chip_id"] = config_->chipIdHex();
-  doc["flash_real_size"] = ESP.getFlashChipRealSize();
-  doc["flash_ide_size"] = ESP.getFlashChipSize();
-  doc["sdk_version"] = ESP.getSdkVersion();
-  doc["core_version"] = ESP.getCoreVersion();
-  doc["lora_tx_packets"] = nullptr;
-  doc["ack_ok"] = nullptr;
-  doc["ack_timeout"] = nullptr;
-  doc["replay_drop"] = nullptr;
-  doc["wifi_connect_attempts"] = nullptr;
-  doc["wifi_connect_fail"] = nullptr;
-  doc["wifi_disconnects"] = nullptr;
-  doc["log_history_available"] = false;
+  if (!compact) {
+    doc["build_date"] = __DATE__;
+    doc["build_time"] = __TIME__;
+    doc["cpu_freq_mhz"] = ESP.getCpuFreqMHz();
+    doc["chip_id"] = config_->chipIdHex();
+    doc["flash_real_size"] = ESP.getFlashChipRealSize();
+    doc["flash_ide_size"] = ESP.getFlashChipSize();
+    doc["sdk_version"] = ESP.getSdkVersion();
+    doc["core_version"] = ESP.getCoreVersion();
+    doc["lora_tx_packets"] = nullptr;
+    doc["ack_ok"] = nullptr;
+    doc["ack_timeout"] = nullptr;
+    doc["replay_drop"] = nullptr;
+    doc["wifi_connect_attempts"] = nullptr;
+    doc["wifi_connect_fail"] = nullptr;
+    doc["wifi_disconnects"] = nullptr;
+    doc["log_history_available"] = false;
+  }
   doc["sta_status_code"] = static_cast<int>(st);
   doc["sta_status_text"] = wifiStatusText(st);
-  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
-  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
-  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
-  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
-  doc["audit_boot_count"] = cfg.audit_boot_count;
+  if (!compact) {
+    doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
+    doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
+    doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
+    doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
+    doc["audit_boot_count"] = cfg.audit_boot_count;
+  }
   const size_t len = measureJson(doc);
   server_.setContentLength(len);
   server_.send(200, "application/json", "");
