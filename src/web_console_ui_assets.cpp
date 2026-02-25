@@ -484,6 +484,7 @@ header{background:rgba(15,23,42,0.3);backdrop-filter:blur(24px);-webkit-backdrop
 body.light header{background:rgba(255,255,255,0.3)}
 header .title{font-size:1.15rem;font-weight:700;letter-spacing:-0.01em;background:linear-gradient(to right,var(--txt),var(--muted));-webkit-background-clip:text;-webkit-text-fill-color:transparent;flex:1 1 260px;min-width:220px}
 header .wifi{font-size:.8rem;padding:0;white-space:nowrap;display:flex;align-items:center;gap:6px;font-weight:600;min-height:auto;background:transparent;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+header .wifi span:last-child{display:none}
 header .relay-head{font-size:.8rem;padding:0;white-space:nowrap;font-weight:600;min-height:auto;display:flex;align-items:center;background:transparent;border:0;border-radius:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;transition:color 0.2s ease}
 header .relay-head.on{color:#86efac}
 body.light header .relay-head.on{color:#15803d}
@@ -594,7 +595,7 @@ body.light .link:hover{color:#6366f1;text-shadow:none}
 .menu-btn:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px)}
 body.light .menu-btn:hover{background:rgba(255,255,255,0.8)}
 .drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:20}
-.drawer{position:fixed;left:0;top:-10px;bottom:-10px;width:min(85vw,300px);padding:24px 16px;background:rgba(15,23,42,0.6);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-right:var(--glass-border);transform:translateX(-100%);transition:transform .3s cubic-bezier(0.19, 1, 0.22, 1);z-index:21;overflow-y:auto;box-shadow:12px 0 32px rgba(0,0,0,0.3)}
+.drawer{position:fixed;left:0;top:-10px;bottom:-10px;width:min(85vw,300px);padding:24px 16px;background:rgba(15,23,42,0.6);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-right:var(--glass-border);transform:translateX(-100%);transition:transform .3s cubic-bezier(0.19, 1, 0.22, 1);z-index:21;overflow-y:auto;box-shadow:12px 0 32px rgba(0,0,0,0.3);display:flex;flex-direction:column}
 body.light .drawer{background:rgba(255,255,255,0.6);box-shadow:12px 0 32px rgba(31,38,135,0.1)}
 .drawer h4{margin:8px 12px 20px 12px;font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:700}
 .navbtn{display:flex;align-items:center;gap:12px;width:100%;margin-top:0;margin-bottom:6px;padding:12px 16px;border:var(--glass-border);border-color:transparent;border-radius:12px;background:transparent;color:var(--txt);text-align:left;font-weight:600;font-size:0.95rem;transition:all 0.2s;box-shadow:none}
@@ -603,6 +604,9 @@ body.light .navbtn:hover{background:rgba(255,255,255,0.5);border-color:rgba(255,
 .navbtn.active{background:rgba(99,102,241,0.2);color:#a78bfa;border-color:rgba(99,102,241,0.3);box-shadow:inset 0 0 12px rgba(99,102,241,0.2)}
 body.light .navbtn.active{background:rgba(99,102,241,0.15);color:#4f46e5;border-color:rgba(99,102,241,0.2)}
 .navbtn.cog::before{content:'⚙';font-size:1.2rem;opacity:0.9}
+.drawer-footer{margin-top:auto;display:flex;align-items:center;gap:12px;padding:12px 8px 6px}
+.drawer-tool{margin:0;padding:0;border:0;background:transparent;color:var(--txt);font-size:1.15rem;line-height:1;cursor:pointer;opacity:.9}
+.drawer-tool:hover{opacity:1}
 body.nav-open .drawer{transform:translateX(0)}
 body.nav-open .drawer-backdrop{opacity:1;pointer-events:auto}
 body.nav-open{overflow:hidden}
@@ -792,7 +796,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
     R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automations')">Automations</button>
 )HTML"
 #endif
-    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">LRS Device Console</div><div class="right"><div id="deviceBadge" class="id-badge"><span id="deviceBadgeText">Device: -</span><button id="deviceBadgeCopy" type="button" class="id-copy" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div><div id="relayHeader" class="relay-head off">Relay: -</div><div id="heapHeader" class="relay-head off" title="Free heap">Heap: -</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div><button class="logout" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="theme" id="themeBtn" onclick="toggleTheme()">☀</button></div></header><main>
+    R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button><div class="drawer-footer"><button class="drawer-tool" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="drawer-tool theme-toggle" id="themeBtnDrawer" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">☀</button></div></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">lrs-00000000</div><div class="right"><div id="relayHeader" class="relay-head off" title="Relay off" aria-label="Relay off">⚪</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div></div></header><main>
 <section class="card page active" id="page-status">
 <div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div>
 <div class="status-grid">
@@ -893,7 +897,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  <button id="mobileActionPrimary" class="primary" type="button">Save</button>
  <button id="mobileActionSecondary" class="secondary" type="button" style="display:none">Test</button>
 </div>
-<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101 | <span id="footerFw">FW: -</span></div></footer>
+<footer style="max-width:860px;margin:0 auto 12px;padding:0 12px;"><div class="small card">HW: v1.2 | Batch: 251101 | <span id="footerMem">Mem -/-</span> | <span id="footerFw">FW: -</span></div></footer>
 <div id="toast" class="toast"></div>
 <script>
 const FREQ_MIN_MHZ = 400.0;
@@ -1953,8 +1957,8 @@ function showToast(msg, isError=false){
 function applyTheme(theme){
  currentTheme = (theme === 'light') ? 'light' : 'dark';
  document.body.classList.toggle('light', currentTheme === 'light');
- const btn=document.getElementById('themeBtn');
- if(btn){ btn.innerText = currentTheme === 'dark' ? '☀' : '🌙'; }
+ const icons = document.querySelectorAll('.theme-toggle');
+ icons.forEach((btn)=>{ btn.innerText = currentTheme === 'dark' ? '☀' : '🌙'; });
  try{ localStorage.setItem('lrs_theme', currentTheme); }catch(e){}
 }
 function toggleTheme(){ applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
@@ -2355,30 +2359,18 @@ function applyStatusPageState(st){
 }
 function applyHeaderStatus(st){
  if(!st) return;
- const heapEl=document.getElementById('heapHeader');
+ const footerMem=document.getElementById('footerMem');
  const modeRaw = String(st.mode || 'paired').toLowerCase();
- const modeLabel = modeRaw === 'mesh' ? 'Mesh' : (modeRaw === 'standalone' ? 'Standalone' : 'Paired');
- const roleTag = String(st.role_name || (String(st.role || '').toLowerCase() === 'tx' ? 'transmitter' : 'receiver')).toLowerCase();
- const roleLabel = roleTag === 'coordinator' ? 'Coordinator' :
-                   (roleTag === 'node' ? 'Node' :
-                   (roleTag === 'none' ? 'None' :
-                   (roleTag === 'receiver' ? 'Receiver' : 'Transmitter')));
  const titleEl = document.getElementById('consoleTitle');
- const pageTitle = `LRS Device Console (${modeLabel}/${roleLabel})`;
- if(titleEl){ titleEl.innerText = pageTitle; }
- document.title = pageTitle;
+ const hostLabel = String(st.lan_hostname || st.mdns_lan || '').replace(/\.local$/i,'').trim();
+ const headerTitle = hostLabel || `lrs-${String(st.chip_id || '').trim()}`;
+ if(titleEl){ titleEl.innerText = headerTitle; }
+ document.title = headerTitle || 'LRS Console';
  const chipId = String(st.chip_id || '').trim();
  const serial = String(st.factory_serial || '').trim();
  const identity = serial || (chipId ? `lrs-${chipId}` : '-');
- const idText=document.getElementById('deviceBadgeText');
- const idCopy=document.getElementById('deviceBadgeCopy');
  const statusHeadText=document.getElementById('statusHeadDeviceText');
  const statusHeadCopy=document.getElementById('statusHeadDeviceCopy');
- if(idText){ idText.innerText = `Device: ${identity}`; }
- if(idCopy){
-  idCopy.dataset.copy = identity;
-  idCopy.dataset.label = 'Device identity';
- }
  if(statusHeadText){ statusHeadText.innerText = `Device: ${identity}`; }
  if(statusHeadCopy){
   statusHeadCopy.dataset.copy = identity;
@@ -2396,28 +2388,23 @@ function applyHeaderStatus(st){
  const rh=document.getElementById('relayHeader');
  if(rh){
   rh.className=`relay-head ${relayOn ? 'on' : 'off'}`;
-  rh.innerText=relayOn ? 'Relay: ON' : 'Relay: OFF';
+  rh.innerText=relayOn ? '🟢' : '⚪';
+  rh.title=relayOn ? 'Relay on' : 'Relay off';
+  rh.setAttribute('aria-label', relayOn ? 'Relay on' : 'Relay off');
  }
- if(heapEl){
- const heapBytes=Number(st.heap_free_bytes||0);
+ if(footerMem){
+  const heapBytes=Number(st.heap_free_bytes||0);
   const maxBlockBytes=Number(st.max_free_block_bytes||0);
   const heapFrag=Number(st.heap_frag_percent||0);
   const heapK = heapBytes>0 ? (heapBytes/1024) : 0;
   const maxK = maxBlockBytes>0 ? (maxBlockBytes/1024) : 0;
   const heapTxt = heapBytes>0 ? (heapK>=10 ? String(Math.round(heapK)) : heapK.toFixed(1)) : '-';
   const maxTxt = maxBlockBytes>0 ? (maxK>=10 ? String(Math.round(maxK)) : maxK.toFixed(1)) : '-';
-  heapEl.innerText = (heapBytes>0 && maxBlockBytes>0) ? `Mem ${heapTxt}/${maxTxt}` : 'Mem -/-';
-  let memClass='off';
-  if(heapBytes>0 && maxBlockBytes>0){
-   const crit = (maxBlockBytes < 1200) || (heapBytes < 3000 && maxBlockBytes < 1600);
-   const warn = !crit && ((maxBlockBytes < 1800) || (heapBytes < 4000));
-   memClass = crit ? 'mem-crit' : (warn ? 'mem-warn' : 'mem-ok');
-  }
-  heapEl.className = `relay-head ${memClass}`;
+  footerMem.innerText = (heapBytes>0 && maxBlockBytes>0) ? `Mem ${heapTxt}/${maxTxt}` : 'Mem -/-';
   if(heapBytes>0 || maxBlockBytes>0){
-   heapEl.title = `Free heap: ${heapBytes} B | Max block: ${maxBlockBytes} B | Frag: ${heapFrag}%`;
+   footerMem.title = `Free heap: ${heapBytes} B | Max block: ${maxBlockBytes} B | Frag: ${heapFrag}%`;
   }else{
-   heapEl.title = 'Memory metrics unavailable';
+   footerMem.title = 'Memory metrics unavailable';
   }
  }
 }
