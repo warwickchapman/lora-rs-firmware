@@ -20,6 +20,14 @@
 
 using namespace webconsole_internal;
 
+namespace {
+constexpr uint32_t kHeapProbePeriodicMs = 30000;
+constexpr uint32_t kHeapProbeLargeFreeDeltaBytes = 1200;
+constexpr uint32_t kHeapProbeLargeMaxBlockDeltaBytes = 800;
+constexpr uint8_t kHeapProbeLargeFragDeltaPct = 8;
+constexpr uint8_t kHeapProbeWarnFragPct = 35;
+}  // namespace
+
 bool WebConsole::begin(ConfigStore *config,
                        NodeStateMachine *sm,
                        SensorManager *sensors,
@@ -120,6 +128,62 @@ void WebConsole::finishRequestLog() {
   }
 
   request_log_ = RequestLogState{};
+}
+
+WebConsole::HeapProbeSnapshot WebConsole::captureHeapProbe() const {
+  HeapProbeSnapshot s{};
+  s.ms = millis();
+  s.free_heap = lrslog::heapFree();
+  s.max_block = lrslog::heapMaxFreeBlock();
+  s.frag = lrslog::heapFragPercent();
+  return s;
+}
+
+void WebConsole::logHeapProbe(const char *path, const HeapProbeSnapshot &before) {
+  if (path == nullptr || path[0] == '\0') return;
+
+  uint32_t *lastLogMs = nullptr;
+  if (strcmp(path, "/api/status-lite") == 0) {
+    lastLogMs = &heap_probe_last_status_lite_ms_;
+  } else if (strcmp(path, "/api/status-static") == 0) {
+    lastLogMs = &heap_probe_last_status_static_ms_;
+  } else if (strcmp(path, "/api/fleet") == 0) {
+    lastLogMs = &heap_probe_last_fleet_ms_;
+  } else if (strcmp(path, "/api/provisioning/status") == 0) {
+    lastLogMs = &heap_probe_last_provisioning_status_ms_;
+  } else if (strcmp(path, "/api/settings:get") == 0) {
+    lastLogMs = &heap_probe_last_settings_get_ms_;
+  } else if (strcmp(path, "/api/settings:post") == 0) {
+    lastLogMs = &heap_probe_last_settings_post_ms_;
+  } else {
+    return;
+  }
+
+  const HeapProbeSnapshot after = captureHeapProbe();
+  const uint32_t durMs = after.ms - before.ms;
+  const uint32_t freeDrop = (before.free_heap > after.free_heap) ? (before.free_heap - after.free_heap) : 0U;
+  const uint32_t blockDrop = (before.max_block > after.max_block) ? (before.max_block - after.max_block) : 0U;
+  const uint8_t fragRise = (after.frag > before.frag) ? static_cast<uint8_t>(after.frag - before.frag) : 0U;
+
+  const bool thresholdBreach = after.free_heap < kLowHeapWarnThresholdBytes || after.max_block < kApiLowHeapRejectMaxBlockBytes ||
+                               after.frag >= kHeapProbeWarnFragPct;
+  const bool largeDelta = freeDrop >= kHeapProbeLargeFreeDeltaBytes || blockDrop >= kHeapProbeLargeMaxBlockDeltaBytes ||
+                          fragRise >= kHeapProbeLargeFragDeltaPct;
+  const bool periodic = (*lastLogMs == 0U) || ((after.ms - *lastLogMs) >= kHeapProbePeriodicMs);
+  if (!(thresholdBreach || largeDelta || periodic)) return;
+
+  *lastLogMs = after.ms;
+  LRS_LOGI(API,
+           "event=heap_probe path=%s dur_ms=%lu heap_free_before=%lu heap_free_after=%lu max_block_before=%lu "
+           "max_block_after=%lu heap_frag_before=%u heap_frag_after=%u",
+           path,
+           static_cast<unsigned long>(durMs),
+           static_cast<unsigned long>(before.free_heap),
+           static_cast<unsigned long>(after.free_heap),
+           static_cast<unsigned long>(before.max_block),
+           static_cast<unsigned long>(after.max_block),
+           static_cast<unsigned>(before.frag),
+           static_cast<unsigned>(after.frag));
 }
 
 void WebConsole::markResponseStatus(int status) {

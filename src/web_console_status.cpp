@@ -299,6 +299,7 @@ void WebConsole::handleStatusLiveEvents() {
 }
 
 void WebConsole::handleStatusStatic() {
+  HeapProbeGuard heapProbe(this, "/api/status-static");
   if (tryServeCachedJson("/api/status-static",
                          kApiStatusStaticLowHeapRejectFreeBytes,
                          kApiStatusStaticLowHeapRejectMaxBlockBytes,
@@ -313,6 +314,7 @@ void WebConsole::handleStatusStatic() {
 }
 
 void WebConsole::handleStatusLite() {
+  HeapProbeGuard heapProbe(this, "/api/status-lite");
   if (tryServeCachedJson("/api/status-lite",
                          kApiLightLowHeapRejectFreeBytes,
                          kApiLightLowHeapRejectMaxBlockBytes,

@@ -111,6 +111,25 @@ class WebConsole {
   bool buildStatusStaticCache();
   bool buildStatusLiteCache();
 
+  struct HeapProbeSnapshot {
+    uint32_t ms = 0;
+    uint32_t free_heap = 0;
+    uint32_t max_block = 0;
+    uint8_t frag = 0;
+  };
+  HeapProbeSnapshot captureHeapProbe() const;
+  void logHeapProbe(const char *path, const HeapProbeSnapshot &before);
+  class HeapProbeGuard {
+   public:
+    HeapProbeGuard(WebConsole *owner, const char *path) : owner_(owner), path_(path), before_(owner->captureHeapProbe()) {}
+    ~HeapProbeGuard() { owner_->logHeapProbe(path_, before_); }
+
+   private:
+    WebConsole *owner_;
+    const char *path_;
+    HeapProbeSnapshot before_;
+  };
+
   struct RequestLogState {
     bool active = false;
     bool api = false;
@@ -123,6 +142,12 @@ class WebConsole {
   };
   RequestLogState request_log_{};
   uint32_t last_low_heap_warn_ms_ = 0;
+  uint32_t heap_probe_last_status_lite_ms_ = 0;
+  uint32_t heap_probe_last_status_static_ms_ = 0;
+  uint32_t heap_probe_last_fleet_ms_ = 0;
+  uint32_t heap_probe_last_provisioning_status_ms_ = 0;
+  uint32_t heap_probe_last_settings_get_ms_ = 0;
+  uint32_t heap_probe_last_settings_post_ms_ = 0;
   uint8_t last_logged_prov_state_ = 0xFF;
   JsonResponseCache status_live_cache_{};
   JsonResponseCache status_static_cache_{};

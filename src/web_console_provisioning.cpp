@@ -75,6 +75,7 @@ void WebConsole::handleProvisionFleetWifi() {
 }
 
 void WebConsole::handleProvisioningStatus() {
+  HeapProbeGuard heapProbe(this, "/api/provisioning/status");
   if (!requireAuth(true)) return;
   if (sm_ == nullptr) {
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");

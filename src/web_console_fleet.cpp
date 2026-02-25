@@ -10,6 +10,7 @@
 using namespace webconsole_internal;
 
 void WebConsole::handleFleet() {
+  HeapProbeGuard heapProbe(this, "/api/fleet");
   if (rejectApiIfLowHeap("/api/fleet", kApiFleetLowHeapRejectFreeBytes, kApiFleetLowHeapRejectMaxBlockBytes)) return;
   auto &cfg = config_->settings();
   const size_t peerCount = (cfg.role_tx && sm_ != nullptr) ? sm_->peerCount() : 0;

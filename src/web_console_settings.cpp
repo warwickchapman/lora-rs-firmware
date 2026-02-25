@@ -8,6 +8,7 @@
 using namespace webconsole_internal;
 
 void WebConsole::handleGetSettings() {
+  HeapProbeGuard heapProbe(this, "/api/settings:get");
   DynamicJsonDocument doc(1024);
   auto &cfg = config_->settings();
   doc["mode"] = cfg.mode;
@@ -57,6 +58,7 @@ void WebConsole::handleGetSettings() {
 }
 
 void WebConsole::handlePostSettings() {
+  HeapProbeGuard heapProbe(this, "/api/settings:post");
   if (!requireAuth(true)) return;
 
   DynamicJsonDocument doc(1536);
