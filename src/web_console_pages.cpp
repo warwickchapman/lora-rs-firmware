@@ -168,7 +168,9 @@ void WebConsole::handleLoginApi() {
   }
 
   DynamicJsonDocument doc(256);
-  auto err = deserializeJson(doc, server_.arg("plain"));
+  StaticJsonDocument<64> filter;
+  filter["password"] = true;
+  auto err = deserializeJson(doc, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     sendTracked(400, "application/json", "{\"error\":\"invalid json\"}");
     return;
@@ -209,7 +211,10 @@ void WebConsole::handleFleetSetupApi() {
   if (!requireAuth(true)) return;
 
   DynamicJsonDocument doc(256);
-  auto err = deserializeJson(doc, server_.arg("plain"));
+  StaticJsonDocument<96> filter;
+  filter["skip"] = true;
+  filter["fleet_passphrase"] = true;
+  auto err = deserializeJson(doc, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
     return;

@@ -94,7 +94,12 @@ void WebConsole::handleDiagnostics() {
 void WebConsole::handleTestMqtt() {
   if (!requireAuth(true)) return;
   DynamicJsonDocument body(256);
-  auto err = deserializeJson(body, server_.arg("plain"));
+  StaticJsonDocument<160> filter;
+  filter["mqtt_host"] = true;
+  filter["mqtt_port"] = true;
+  filter["mqtt_user"] = true;
+  filter["mqtt_password"] = true;
+  auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid json\"}");
     return;
@@ -148,7 +153,12 @@ void WebConsole::handleUdpLogging() {
   if (!requireAuth(true)) return;
 
   DynamicJsonDocument body(256);
-  auto err = deserializeJson(body, server_.arg("plain"));
+  StaticJsonDocument<128> filter;
+  filter["enabled"] = true;
+  filter["host"] = true;
+  filter["port"] = true;
+  filter["ttl_s"] = true;
+  auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
     return;
@@ -270,7 +280,11 @@ void WebConsole::handleFactoryReset() {
   if (!requireAuth(true)) return;
 
   DynamicJsonDocument body(256);
-  auto err = deserializeJson(body, server_.arg("plain"));
+  StaticJsonDocument<128> filter;
+  filter["admin_password"] = true;
+  filter["keep_shared_fleet_key"] = true;
+  filter["keep_wifi_credentials"] = true;
+  auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
     return;

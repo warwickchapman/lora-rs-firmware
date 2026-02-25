@@ -52,7 +52,10 @@ void WebConsole::handleTestSta() {
     return;
   }
   DynamicJsonDocument body(256);
-  auto err = deserializeJson(body, server_.arg("plain"));
+  StaticJsonDocument<96> filter;
+  filter["wifi_sta_ssid"] = true;
+  filter["wifi_sta_password"] = true;
+  auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
   if (err) {
     server_.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid json\"}");
     return;
