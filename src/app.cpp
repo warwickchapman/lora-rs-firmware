@@ -38,6 +38,8 @@ constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
 constexpr uint32_t kStaReconnectMinFreeHeapBytes = 11000;
 constexpr uint32_t kStaReconnectMinMaxBlockBytes = 6000;
 constexpr uint32_t kStaReconnectHeapLogIntervalMs = 30000;
+constexpr uint8_t kStaFailureResetThreshold = 10;
+constexpr uint8_t kStaStackResetLimit = 10;
 
 const char *wifiStatusText(wl_status_t st) {
   switch (st) {
@@ -221,9 +223,12 @@ void App::tick() {
         cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
           lrslog::event("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
-          if (changed) {
-            applyUpdatedConfig(true, false);
+          if (!changed) {
+            LRS_LOGI(WIFI, "event=wifi_prov_reapply reason=unchanged_credentials action=restart_network");
           }
+          // LoRa-driven WiFi provisioning must always restart networking so a
+          // previously disabled/failed WiFi stack can recover without reboot.
+          applyUpdatedConfig(true, false);
         } else {
           lrslog::event("wifi_prov_save_fail", 0, provSrc, 0);
         }
@@ -320,6 +325,10 @@ void App::tick() {
 
 void App::startNetworking() {
   refreshCachedStaHostname();
+  const bool wasDisabled = wifi_stack_disabled_;
+  wifi_stack_disabled_ = false;
+  sta_connect_consecutive_failures_ = 0;
+  sta_stack_reset_count_ = 0;
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.setOutputPower(20.5f);
@@ -340,12 +349,19 @@ void App::startNetworking() {
   ensureApEnabled();
 
   auto &cfg = config_.settings();
+  if (wasDisabled) {
+    LRS_LOGI(WIFI, "event=sta_stack_reenabled reason=network_restart");
+  }
   if (cfg.wifi_sta_ssid.length() >= 1) {
     beginStaConnect();
   }
 }
 
 void App::updateNetworking() {
+  if (wifi_stack_disabled_) {
+    return;
+  }
+
   auto &cfg = config_.settings();
   const wl_status_t st = WiFi.status();
 
@@ -353,6 +369,8 @@ void App::updateNetworking() {
     if (st == WL_CONNECTED) {
       sta_connected_ = true;
       wifi_sta_connecting_ = false;
+      sta_connect_consecutive_failures_ = 0;
+      sta_stack_reset_count_ = 0;
       sta_connected_since_ms_ = millis();
       sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
@@ -372,13 +390,57 @@ void App::updateNetworking() {
       wifi_sta_connecting_ = false;
       WiFi.disconnect();
       wifi_sta_retry_ms_ = millis();
+      if (sta_connect_consecutive_failures_ != 0xFFU) {
+        ++sta_connect_consecutive_failures_;
+      }
       lrslog::event("sta_connect_failed_fallback_ap", 0, 0, 0);
       LRS_LOGW(WIFI,
-               "event=sta_connect_failed ssid=%s reason=%s status=%d ap_fallback=1",
+               "event=sta_connect_failed ssid=%s reason=%s status=%d ap_fallback=1 consecutive_failures=%u",
                cfg.wifi_sta_ssid.c_str(),
                wifiStatusText(st),
-               static_cast<int>(st));
+               static_cast<int>(st),
+               static_cast<unsigned>(sta_connect_consecutive_failures_));
       ensureApEnabled();
+      if (sta_connect_consecutive_failures_ >= kStaFailureResetThreshold) {
+        if (sta_stack_reset_count_ < kStaStackResetLimit) {
+          ++sta_stack_reset_count_;
+          LRS_LOGW(WIFI,
+                   "event=sta_stack_reset reason=consecutive_failures failures=%u reset_count=%u",
+                   static_cast<unsigned>(sta_connect_consecutive_failures_),
+                   static_cast<unsigned>(sta_stack_reset_count_));
+          WiFi.disconnect(true);
+          delay(50);
+          WiFi.mode(WIFI_OFF);
+          delay(100);
+          WiFi.mode(WIFI_AP_STA);
+          WiFi.setSleepMode(WIFI_NONE_SLEEP);
+          WiFi.setOutputPower(20.5f);
+          ap_enabled_ = false;
+          dns_running_ = false;
+          ensureApEnabled();
+          wifi_sta_connecting_ = false;
+          sta_connected_ = false;
+          wifi_sta_started_ms_ = 0;
+          wifi_sta_retry_ms_ = millis();
+          sta_connect_consecutive_failures_ = 0;
+        } else {
+          wifi_stack_disabled_ = true;
+          WiFi.disconnect(true);
+          delay(50);
+          WiFi.mode(WIFI_OFF);
+          ap_enabled_ = false;
+          if (dns_running_) {
+            dns_.stop();
+            dns_running_ = false;
+          }
+          wifi_sta_connecting_ = false;
+          sta_connected_ = false;
+          LRS_LOGE(WIFI,
+                   "event=sta_stack_disabled reason=reset_limit_reached reset_count=%u",
+                   static_cast<unsigned>(sta_stack_reset_count_));
+          lrslog::event("sta_stack_disabled", 0, sta_stack_reset_count_, 0);
+        }
+      }
     }
     return;
   }
@@ -386,6 +448,8 @@ void App::updateNetworking() {
   if (st == WL_CONNECTED) {
     if (!sta_connected_) {
       sta_connected_ = true;
+      sta_connect_consecutive_failures_ = 0;
+      sta_stack_reset_count_ = 0;
       sta_connected_since_ms_ = millis();
       sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
@@ -561,6 +625,7 @@ void App::refreshCaptiveDns() {
 }
 
 void App::beginStaConnect() {
+  if (wifi_stack_disabled_) return;
   auto &cfg = config_.settings();
   if (cfg.wifi_sta_ssid.length() == 0) return;
   if (cached_sta_hostname_.length() == 0) {

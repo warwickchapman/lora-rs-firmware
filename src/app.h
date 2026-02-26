@@ -58,6 +58,9 @@ class App {
   uint32_t slow_phase_last_log_ms_ = 0;
   uint16_t slow_phase_suppressed_count_ = 0;
   uint32_t sta_reconnect_heap_block_log_ms_ = 0;
+  uint8_t sta_connect_consecutive_failures_ = 0;
+  uint8_t sta_stack_reset_count_ = 0;
+  bool wifi_stack_disabled_ = false;
   String cached_sta_hostname_;
   DNSServer dns_;
 
