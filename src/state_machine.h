@@ -396,7 +396,6 @@ class NodeStateMachine {
   void freeProvisioningStorage();
   void recomputeProvisioningConflictsAndAssignments();
   bool sendProvisioningCoordinatorPacketFactory(const uint8_t payload[12], uint8_t dst);
-  bool sendProvisioningCoordinatorPacketProd(const uint8_t payload[12], uint8_t dst);
   bool sendProvisioningAnnounce(uint16_t sessionNonce);
   bool sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8_t assignedAddress);
 };

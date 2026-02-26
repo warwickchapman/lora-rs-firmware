@@ -982,19 +982,6 @@ bool NodeStateMachine::sendProvisioningCoordinatorPacketFactory(const uint8_t pa
   return true;
 }
 
-bool NodeStateMachine::sendProvisioningCoordinatorPacketProd(const uint8_t payload[12], uint8_t dst) {
-  if (!radioTxBudgetAvailable()) return false;
-  if (radio_ == nullptr) return false;
-  last_counter_++;
-  const uint32_t now = millis();
-  if (!radio_->sendProvisioningRaw(last_counter_, runtime_.local_address, dst, payload, false)) {
-    return false;
-  }
-  last_tx_ms_ = now;
-  markRadioTxSentThisTick();
-  return true;
-}
-
 bool NodeStateMachine::sendProvisioningAnnounce(uint16_t sessionNonce) {
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
