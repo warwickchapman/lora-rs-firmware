@@ -1,8 +1,8 @@
 #include "web_console.h"
 
+#include "web_console_internal.h"
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
-#include "web_console_internal.h"
 
 using namespace webconsole_internal;
 
@@ -42,26 +42,20 @@ void WebConsole::routes() {
     handleLogoutApi();
     finishRequestLog();
   });
-  server_.on("/api/session", HTTP_GET, [this]() {
-    beginRequestLog("/api/session", true, true, true);
-    handleSessionApi();
-    finishRequestLog();
-  });
-  server_.on("/generate_204", HTTP_GET, [this]() { handleCaptiveProbe(); });       // Android
-  server_.on("/gen_204", HTTP_GET, [this]() { handleCaptiveProbe(); });            // Android (variant)
-  server_.on("/hotspot-detect.html", HTTP_GET, [this]() { handleCaptiveProbe(); });  // Apple
-  server_.on("/ncsi.txt", HTTP_GET, [this]() { handleCaptiveProbe(); });           // Windows
-  server_.on("/connecttest.txt", HTTP_GET, [this]() { handleCaptiveProbe(); });    // Windows
-  server_.on("/fwlink", HTTP_GET, [this]() { handleCaptiveProbe(); });             // Windows
-  server_.on("/api/status", HTTP_GET, [this]() {
-    beginRequestLog("/api/status", true, true, true);
-    if (!requireAuth(true)) {
-      finishRequestLog();
-      return;
-    }
-    handleStatus();
-    finishRequestLog();
-  });
+
+  server_.on("/generate_204", HTTP_GET,
+             [this]() { handleCaptiveProbe(); }); // Android
+  server_.on("/gen_204", HTTP_GET,
+             [this]() { handleCaptiveProbe(); }); // Android (variant)
+  server_.on("/hotspot-detect.html", HTTP_GET,
+             [this]() { handleCaptiveProbe(); }); // Apple
+  server_.on("/ncsi.txt", HTTP_GET,
+             [this]() { handleCaptiveProbe(); }); // Windows
+  server_.on("/connecttest.txt", HTTP_GET,
+             [this]() { handleCaptiveProbe(); }); // Windows
+  server_.on("/fwlink", HTTP_GET,
+             [this]() { handleCaptiveProbe(); }); // Windows
+
   server_.on("/api/status-live", HTTP_GET, [this]() {
     beginRequestLog("/api/status-live", true, true, true);
     if (!requireAuth(true)) {
@@ -107,7 +101,7 @@ void WebConsole::routes() {
     handleFleet();
     finishRequestLog();
   });
-  #if LRS_ENABLE_AUTOMATIONS
+#if LRS_ENABLE_AUTOMATIONS
   server_.on("/api/automation-rules", HTTP_GET, [this]() {
     beginRequestLog("/api/automation-rules", true, false, true);
     if (!requireAuth(true)) {
@@ -126,9 +120,10 @@ void WebConsole::routes() {
     handlePostAutomationRules();
     finishRequestLog();
   });
-  #endif
+#endif
   server_.on("/api/factory", HTTP_GET, [this]() {
-    if (!requireAuth(true)) return;
+    if (!requireAuth(true))
+      return;
     handleFactory();
   });
   server_.on("/api/wifi/scan", HTTP_GET, [this]() { handleWifiScan(); });
@@ -165,20 +160,26 @@ void WebConsole::routes() {
     finishRequestLog();
   });
   server_.on("/api/settings", HTTP_GET, [this]() {
-    if (!requireAuth(true)) return;
+    if (!requireAuth(true))
+      return;
     handleGetSettings();
   });
   server_.on("/api/settings", HTTP_POST, [this]() { handlePostSettings(); });
-  server_.on("/api/settings/export", HTTP_GET, [this]() { handleExportSettings(); });
-  server_.on("/api/settings/import", HTTP_POST, [this]() { handleImportSettings(); });
+  server_.on("/api/settings/export", HTTP_GET,
+             [this]() { handleExportSettings(); });
+  server_.on("/api/settings/import", HTTP_POST,
+             [this]() { handleImportSettings(); });
   server_.on(
-      "/api/ota", HTTP_POST, [this]() { handleOtaUpload(); }, [this]() { handleOtaUploadChunk(); });
+      "/api/ota", HTTP_POST, [this]() { handleOtaUpload(); },
+      [this]() { handleOtaUploadChunk(); });
   server_.on("/api/logs.csv", HTTP_GET, [this]() { handleLogsCsv(); });
   server_.on("/api/logs.txt", HTTP_GET, [this]() { handleLogsText(); });
-  server_.on("/api/system/factory-reset", HTTP_POST, [this]() { handleFactoryReset(); });
+  server_.on("/api/system/factory-reset", HTTP_POST,
+             [this]() { handleFactoryReset(); });
   server_.on("/api/reboot", HTTP_POST, [this]() { handleReboot(); });
   server_.onNotFound([this]() {
-    if (server_.method() == HTTP_POST && handleFleetDeviceActionRoute(server_.uri())) {
+    if (server_.method() == HTTP_POST &&
+        handleFleetDeviceActionRoute(server_.uri())) {
       return;
     }
     if (isSoftApActive()) {

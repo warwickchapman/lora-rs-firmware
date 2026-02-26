@@ -13,8 +13,10 @@
 using namespace webconsole_internal;
 
 bool WebConsole::buildStatusLiveCache() {
-  if (!config_ || !sm_) return false;
-  if (status_live_cache_building_) return status_live_cache_.body.length() > 0;
+  if (!config_ || !sm_)
+    return false;
+  if (status_live_cache_building_)
+    return status_live_cache_.body.length() > 0;
   status_live_cache_building_ = true;
 
   DynamicJsonDocument doc(512);
@@ -67,18 +69,18 @@ bool WebConsole::buildStatusLiveCache() {
   } else {
     const bool relayOn = sm_->relayState() != 0;
     switch (sm_->lastRxControlSource()) {
-      case RxControlSource::Automation:
-        relayReason = relayOn ? "automation_on" : "automation_off";
-        break;
-      case RxControlSource::Mqtt:
-        relayReason = relayOn ? "mqtt_on" : "mqtt_off";
-        break;
-      case RxControlSource::LoRa:
-        relayReason = relayOn ? "lora_on" : "lora_off";
-        break;
-      default:
-        relayReason = "boot";
-        break;
+    case RxControlSource::Automation:
+      relayReason = relayOn ? "automation_on" : "automation_off";
+      break;
+    case RxControlSource::Mqtt:
+      relayReason = relayOn ? "mqtt_on" : "mqtt_off";
+      break;
+    case RxControlSource::LoRa:
+      relayReason = relayOn ? "lora_on" : "lora_off";
+      break;
+    default:
+      relayReason = "boot";
+      break;
     }
   }
   doc["relay_reason"] = relayReason;
@@ -101,8 +103,10 @@ bool WebConsole::buildStatusLiveCache() {
 }
 
 bool WebConsole::buildStatusStaticCache() {
-  if (!config_) return false;
-  if (status_static_cache_building_) return status_static_cache_.body.length() > 0;
+  if (!config_)
+    return false;
+  if (status_static_cache_building_)
+    return status_static_cache_.body.length() > 0;
   status_static_cache_building_ = true;
 
   StaticJsonDocument<768> doc;
@@ -113,7 +117,9 @@ bool WebConsole::buildStatusStaticCache() {
   doc["role_name"] = cfg.role;
   doc["lan_hostname"] = cfg.lan_hostname;
   doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
-  doc["deployment_key"] = cfg.fleet_passphrase.length() ? lrslog::maskSecret(cfg.fleet_passphrase) : String("");
+  doc["deployment_key"] = cfg.fleet_passphrase.length()
+                              ? lrslog::maskSecret(cfg.fleet_passphrase)
+                              : String("");
   doc["deployment_key_set"] = (cfg.fleet_passphrase.length() > 0);
   doc["deployment_key_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
@@ -132,9 +138,11 @@ bool WebConsole::buildStatusStaticCache() {
   doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
   char fwDisplay[96];
   if (LRS_GIT_DIRTY == 0) {
-    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s)", LRS_FW_VERSION, LRS_GIT_SHA);
+    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s)", LRS_FW_VERSION,
+             LRS_GIT_SHA);
   } else {
-    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s, dirty)", LRS_FW_VERSION, LRS_GIT_SHA);
+    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s, dirty)", LRS_FW_VERSION,
+             LRS_GIT_SHA);
   }
   doc["fw_display"] = fwDisplay;
   doc["build_date"] = __DATE__;
@@ -153,8 +161,10 @@ bool WebConsole::buildStatusStaticCache() {
 }
 
 bool WebConsole::buildStatusLiteCache() {
-  if (!config_) return false;
-  if (status_lite_cache_building_) return status_lite_cache_.body.length() > 0;
+  if (!config_)
+    return false;
+  if (status_lite_cache_building_)
+    return status_lite_cache_.body.length() > 0;
   status_lite_cache_building_ = true;
 
   StaticJsonDocument<384> doc;
@@ -183,7 +193,8 @@ bool WebConsole::buildStatusLiteCache() {
 }
 
 void WebConsole::tickStatusLiveSse() {
-  if (!status_live_sse_active_) return;
+  if (!status_live_sse_active_)
+    return;
   if (!status_live_sse_client_ || !status_live_sse_client_.connected()) {
     closeStatusLiveSse();
     return;
@@ -193,7 +204,8 @@ void WebConsole::tickStatusLiveSse() {
   const uint32_t pushIntervalMs = computeStatusLiveSseIntervalMs();
   status_live_sse_last_interval_ms_ = pushIntervalMs;
 
-  if (status_live_sse_last_keepalive_ms_ == 0 || (now - status_live_sse_last_keepalive_ms_) >= kStatusLiveSseKeepAliveMs) {
+  if (status_live_sse_last_keepalive_ms_ == 0 ||
+      (now - status_live_sse_last_keepalive_ms_) >= kStatusLiveSseKeepAliveMs) {
     if (status_live_sse_client_.print(F(": keepalive\n\n")) == 0) {
       closeStatusLiveSse();
       return;
@@ -201,13 +213,16 @@ void WebConsole::tickStatusLiveSse() {
     status_live_sse_last_keepalive_ms_ = now;
   }
 
-  if (status_live_sse_last_push_ms_ != 0 && (now - status_live_sse_last_push_ms_) < pushIntervalMs) {
+  if (status_live_sse_last_push_ms_ != 0 &&
+      (now - status_live_sse_last_push_ms_) < pushIntervalMs) {
     return;
   }
 
   bool cacheUpdated = false;
-  if (status_live_cache_.body.length() == 0 || (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) {
-    if (apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes, kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
+  if (status_live_cache_.body.length() == 0 ||
+      (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) {
+    if (apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes,
+                       kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
       cacheUpdated = buildStatusLiveCache();
     }
   }
@@ -216,7 +231,8 @@ void WebConsole::tickStatusLiveSse() {
     return;
   }
 
-  if (!cacheUpdated && status_live_cache_.built_ms == status_live_sse_last_sent_cache_ms_) {
+  if (!cacheUpdated &&
+      status_live_cache_.built_ms == status_live_sse_last_sent_cache_ms_) {
     return;
   }
 
@@ -233,44 +249,37 @@ void WebConsole::tickStatusLiveSse() {
   status_live_sse_last_sent_cache_ms_ = status_live_cache_.built_ms;
 }
 
-void WebConsole::handleStatus() {
-  LRS_LOGW(API,
-           "event=status_compat_removed ip=%s",
-           server_.client().remoteIP().toString().c_str());
-  sendTracked(410,
-              "application/json",
-              "{\"ok\":false,\"error\":\"deprecated\",\"use\":[\"/api/status-live\",\"/api/status-static\"]}");
-}
-
 void WebConsole::handleStatusLive() {
   if (tryServeCachedJson("/api/status-live",
                          kApiStatusLiveLowHeapRejectFreeBytes,
                          kApiStatusLiveLowHeapRejectMaxBlockBytes,
-                         kStatusLiveCacheTtlMs,
-                         status_live_cache_))
+                         kStatusLiveCacheTtlMs, status_live_cache_))
     return;
   if (!buildStatusLiveCache()) {
     if (status_live_cache_.body.length() > 0) {
       sendTracked(200, "application/json", status_live_cache_.body);
       return;
     }
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_live_build_failed\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"status_live_build_failed\"}");
     return;
   }
   sendTracked(200, "application/json", status_live_cache_.body);
 }
 
 void WebConsole::handleStatusLiveEvents() {
-  const bool connectHeapHealthy =
-      apiHeapHealthy(kStatusLiveSseConnectMinFreeBytes, kStatusLiveSseConnectMinMaxBlockBytes);
+  const bool connectHeapHealthy = apiHeapHealthy(
+      kStatusLiveSseConnectMinFreeBytes, kStatusLiveSseConnectMinMaxBlockBytes);
 
   if (status_live_sse_active_) {
     closeStatusLiveSse();
   }
 
   const uint32_t now = millis();
-  if ((status_live_cache_.body.length() == 0 || (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) &&
-      apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes, kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
+  if ((status_live_cache_.body.length() == 0 ||
+       (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) &&
+      apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes,
+                     kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
     buildStatusLiveCache();
   }
 
@@ -285,13 +294,14 @@ void WebConsole::handleStatusLiveEvents() {
 
   server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
   markResponseStatus(200);
-  server_.sendContent_P(PSTR("HTTP/1.1 200 OK\r\n"
-                             "Content-Type: text/event-stream\r\n"
-                             "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
-                             "Pragma: no-cache\r\n"
-                             "Connection: keep-alive\r\n"
-                             "X-Accel-Buffering: no\r\n"
-                             "\r\n"));
+  server_.sendContent_P(
+      PSTR("HTTP/1.1 200 OK\r\n"
+           "Content-Type: text/event-stream\r\n"
+           "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+           "Pragma: no-cache\r\n"
+           "Connection: keep-alive\r\n"
+           "X-Accel-Buffering: no\r\n"
+           "\r\n"));
   if (!status_live_sse_client_ || !status_live_sse_client_.connected()) {
     closeStatusLiveSse();
     return;
@@ -304,7 +314,8 @@ void WebConsole::handleStatusLiveEvents() {
   }
   tickStatusLiveSse();
   LRS_LOGI(API,
-           "event=status_live_sse_open ip=%s heap_free=%lu heap_frag=%u max_free_block=%lu heap_ok=%u",
+           "event=status_live_sse_open ip=%s heap_free=%lu heap_frag=%u "
+           "max_free_block=%lu heap_ok=%u",
            server_.client().remoteIP().toString().c_str(),
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
@@ -317,15 +328,15 @@ void WebConsole::handleStatusStatic() {
   if (tryServeCachedJson("/api/status-static",
                          kApiStatusStaticLowHeapRejectFreeBytes,
                          kApiStatusStaticLowHeapRejectMaxBlockBytes,
-                         kStatusStaticCacheTtlMs,
-                         status_static_cache_))
+                         kStatusStaticCacheTtlMs, status_static_cache_))
     return;
   if (!buildStatusStaticCache()) {
     if (status_static_cache_.body.length() > 0) {
       sendTracked(200, "application/json", status_static_cache_.body);
       return;
     }
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_static_build_failed\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"status_static_build_failed\"}");
     return;
   }
   sendTracked(200, "application/json", status_static_cache_.body);
@@ -333,18 +344,17 @@ void WebConsole::handleStatusStatic() {
 
 void WebConsole::handleStatusLite() {
   HeapProbeGuard heapProbe(this, "/api/status-lite");
-  if (tryServeCachedJson("/api/status-lite",
-                         kApiLightLowHeapRejectFreeBytes,
+  if (tryServeCachedJson("/api/status-lite", kApiLightLowHeapRejectFreeBytes,
                          kApiLightLowHeapRejectMaxBlockBytes,
-                         kStatusLiteCacheTtlMs,
-                         status_lite_cache_))
+                         kStatusLiteCacheTtlMs, status_lite_cache_))
     return;
   if (!buildStatusLiteCache()) {
     if (status_lite_cache_.body.length() > 0) {
       sendTracked(200, "application/json", status_lite_cache_.body);
       return;
     }
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"status_lite_build_failed\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"status_lite_build_failed\"}");
     return;
   }
   sendTracked(200, "application/json", status_lite_cache_.body);

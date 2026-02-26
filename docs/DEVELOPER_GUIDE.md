@@ -59,13 +59,15 @@ This ordering keeps LoRa control priority above MQTT.
 
 ## 7. Web API
 - `GET /`
-- `GET /api/status`
-- `GET /api/remotes`
-- `GET /api/remotes/events` (SSE)
-- `POST /api/remotes/:addr/actions/poll-now`
-- `POST /api/remotes/:addr/actions/forget`
-- `POST /api/remotes/:addr/actions/poll-interval`
-- `POST /api/remotes/:addr/actions/schedule`
+- `GET /api/fleet`
+- `GET /api/status-live/events` (SSE)
+- `POST /api/fleet/:addr/actions/poll-now`
+- `POST /api/fleet/:addr/actions/forget`
+- `POST /api/fleet/:addr/actions/poll-interval`
+- `POST /api/fleet/:addr/actions/schedule`
+- `GET /api/status-lite`
+- `GET /api/status-static`
+- `GET /api/status-live`
 - `GET /api/settings`
 - `POST /api/settings`
 - `GET /api/factory`

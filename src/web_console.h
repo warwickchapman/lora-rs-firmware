@@ -11,15 +11,13 @@ class NodeStateMachine;
 class SensorManager;
 
 class WebConsole {
- public:
-  bool begin(ConfigStore *config,
-             NodeStateMachine *sm,
-             SensorManager *sensors,
+public:
+  bool begin(ConfigStore *config, NodeStateMachine *sm, SensorManager *sensors,
              std::function<void(bool, bool)> onApply,
              std::function<void()> onAutomationsSaved = {});
   void tick();
 
- private:
+private:
   ESP8266WebServer server_{80};
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
@@ -42,12 +40,14 @@ class WebConsole {
   void startSession();
   uint32_t sessionRemainingS() const;
   void routes();
-  void beginRequestLog(const char *path, bool api, bool poll = false, bool heapDiag = false);
+  void beginRequestLog(const char *path, bool api, bool poll = false,
+                       bool heapDiag = false);
   void finishRequestLog();
   void markResponseStatus(int status);
   void sendTracked(int code, const char *contentType, const char *body);
   void sendTracked(int code, const char *contentType, const String &body);
-  bool rejectApiIfLowHeap(const char *path, uint32_t minFreeBytes, uint32_t minMaxBlockBytes = 0);
+  bool rejectApiIfLowHeap(const char *path, uint32_t minFreeBytes,
+                          uint32_t minMaxBlockBytes = 0);
   bool isSoftApActive() const;
   void handleCaptiveProbe();
 
@@ -58,8 +58,6 @@ class WebConsole {
   void handleFleetSetupApi();
   void handleSetupCommissioningApi();
   void handleLogoutApi();
-  void handleSessionApi();
-  void handleStatus();
   void handleStatusLive();
   void handleStatusLiveEvents();
   void handleStatusStatic();
@@ -97,10 +95,8 @@ class WebConsole {
   };
 
   bool apiHeapHealthy(uint32_t minFreeBytes, uint32_t minMaxBlockBytes) const;
-  bool tryServeCachedJson(const char *path,
-                          uint32_t minFreeBytes,
-                          uint32_t minMaxBlockBytes,
-                          uint32_t ttlMs,
+  bool tryServeCachedJson(const char *path, uint32_t minFreeBytes,
+                          uint32_t minMaxBlockBytes, uint32_t ttlMs,
                           JsonResponseCache &cache);
   void initStatusCaches();
   void setUiNoStoreHeaders();
@@ -120,11 +116,12 @@ class WebConsole {
   HeapProbeSnapshot captureHeapProbe() const;
   void logHeapProbe(const char *path, const HeapProbeSnapshot &before);
   class HeapProbeGuard {
-   public:
-    HeapProbeGuard(WebConsole *owner, const char *path) : owner_(owner), path_(path), before_(owner->captureHeapProbe()) {}
+  public:
+    HeapProbeGuard(WebConsole *owner, const char *path)
+        : owner_(owner), path_(path), before_(owner->captureHeapProbe()) {}
     ~HeapProbeGuard() { owner_->logHeapProbe(path_, before_); }
 
-   private:
+  private:
     WebConsole *owner_;
     const char *path_;
     HeapProbeSnapshot before_;

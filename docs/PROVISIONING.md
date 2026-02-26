@@ -68,6 +68,6 @@ Suggested handoff block:
 - Hardware: ESP-12F + `<Ra-01|Ra-01H>`
 - Current state: state-machine runtime under `src/app.*`
 - Config path: LittleFS `/config.json`
-- Web API: `/api/status`, `/api/settings`, `/api/factory`, `/api/wifi/scan`, `/api/logs.csv`, `/api/logs.txt`
+- Web API: `/api/status-lite`, `/api/settings`, `/api/factory`, `/api/wifi/scan`, `/api/logs.csv`
 - Priority task: `<describe task>`
 - Constraints: maintain protocol compatibility unless explicitly approved
