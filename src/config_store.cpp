@@ -323,6 +323,13 @@ bool ConfigStore::begin() {
     ensureProvisionedDefaults();
     return save();
   }
+  if (cfg_.mode == kModePaired) {
+    if (cfg_.heartbeat_ms < 60000UL) cfg_.heartbeat_ms = 60000UL;
+    if (cfg_.heartbeat_ms > 3600000UL) cfg_.heartbeat_ms = 3600000UL;
+  } else {
+    // Heartbeat is only meaningful for paired-mode input-driven LoRa control.
+    cfg_.heartbeat_ms = 60000UL;
+  }
   if (cfg_.admin_password.length() < 8 || cfg_.factory_serial.length() < 4) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=identity_fields_invalid action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();

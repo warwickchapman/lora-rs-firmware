@@ -363,6 +363,7 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.mode = mode;
   cfg.role = role;
   cfg.role_tx = roleTx;
+  cfg.heartbeat_ms = 60000UL;
   cfg.fleet_passphrase = fleetKey;
   cfg.fleet_setup_prompt_dismissed = true;
   cfg.commissioned = true;

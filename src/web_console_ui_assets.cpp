@@ -823,7 +823,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <section class="card page" id="page-fleet">
 <h3>Fleet</h3>
 <div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div>
-<div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div>
+<div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div class="grid" style="margin-top:8px"><div><label>Scan start address</label><input id="fleetScanStart" type="number" min="1" max="254" value="1" /></div><div><label>Scan end address</label><input id="fleetScanEnd" type="number" min="1" max="254" value="80" /></div><div><label>Scan interval (ms)</label><input id="fleetScanIntervalMs" type="number" min="80" max="2000" value="120" /></div><div style="display:flex;align-items:end"><div class="actions"><button type="button" id="fleetScanBtn" onclick="toggleFleetScan()">Scan Fleet</button></div></div></div><div class="small" id="fleetScanSummary" style="margin-top:4px">Scan idle.</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div>
 <div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet in batches of up to 8 devices.</div><div class="grid"><div><label>Estimated devices (max 8)</label><input id="prov_estimated_count" type="number" min="1" max="8" value="8" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="searchMoreFleetProvisioning()" title="Search more" aria-label="Search more">↻</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur</th><th>New</th><th>FW</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div><div class="small">If more than 8 devices respond, provision this batch first, then run discovery again.</div></div></div></div></div>
 </section>
  )HTML"
@@ -860,14 +860,14 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div><label>Spreading factor</label><input id="lora_spreading_factor" type="number" min="6" max="12" /></div>
 <div><label>Bandwidth (Hz)</label><input id="lora_bandwidth_hz" type="number" /></div>
 <div><label>Coding rate (5-8)</label><input id="lora_coding_rate" type="number" min="5" max="8" /></div>
-<div><label>Heartbeat (seconds)</label><input id="heartbeat_s" type="number" min="60" max="3600" /></div>
+<div id="heartbeat_row"><label>Heartbeat (seconds)</label><input id="heartbeat_s" type="number" min="60" max="3600" /></div>
 <div><label>ACK timeout (seconds)</label><input id="ack_timeout_s" type="number" min="5" max="600" /></div>
 <div id="tx_mqtt_remote_retry_row"><label>MQTT remote retry timeout (seconds)</label><input id="mqtt_remote_retry_timeout_s" type="number" min="5" max="3600" /><div class="small">TX only. Retry remote MQTT LoRa commands until this timeout is reached.</div></div>
 <div id="tx_polling_enabled_row" style="grid-column:1/-1"><div class="check-row"><input id="tx_mqtt_remote_polling_enabled" type="checkbox" /><label for="tx_mqtt_remote_polling_enabled">Enable scheduled remote polling</label></div><div class="small">TX only. When disabled, `poll_interval_s` schedules are ignored but `poll_now` still works.</div></div>
 <div id="tx_polling_default_row"><label>Default remote poll interval (seconds)</label><input id="tx_mqtt_remote_default_poll_interval_s" type="number" min="60" max="3600" /><div class="small">TX only. Applied to newly discovered remote nodes. Minimum 60s to reduce LoRa duty-cycle risk.</div></div>
 <div id="rx_push_on_change_row" style="grid-column:1/-1"><div class="check-row"><input id="rx_push_on_change_enabled" type="checkbox" /><label for="rx_push_on_change_enabled">RX push on input change</label></div><div class="small">RX only. Sends a LoRa status update immediately on dry-contact change, rate-limited by minimum interval.</div></div>
 <div id="rx_push_interval_row"><label>RX push minimum interval (seconds)</label><input id="rx_push_min_interval_s" type="number" min="60" max="3600" /><div class="small">RX only. Guardrail range 60..3600 seconds.</div></div>
-</div><div class="small">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions action-commit"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
+</div><div class="small" id="heartbeat_guardrail_hint">Guardrail: heartbeat is limited to >= 60 seconds to reduce LoRa duty-cycle risk.</div></details><div class="actions action-commit"><button onclick="saveLora()">Save</button></div></div><div class="settings-pane active" id="settings-pane-network"><div class="grid">
 <div style="grid-column:1/-1"><div class="inline-row"><button id="wifiScanBtn" type="button" onclick="scanWifi()">Rescan SSIDs</button></div><div id="wifi_scan_list" class="wifi-list"></div></div>
 <div><label>STA SSID</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /></div><div><label>STA Password</label><div class="pass-field"><input id="wifi_sta_password" type="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" /><button class="pass-toggle" type="button" onclick="togglePasswordField('wifi_sta_password',this)" title="Show password" aria-label="Show password">👁</button></div></div>
 <div class="network-soft-ap"><label>Soft AP</label><div class="check-row"><input id="ap_always_on" type="checkbox" /><label for="ap_always_on">Keep Soft AP enabled</label></div></div><div></div>
@@ -946,6 +946,7 @@ let headerStatusRefreshInFlight = false;
 let sessionRefreshInFlight = false;
 let fleetRefreshInFlight = false;
 let fleetRefreshDebounceTimer = 0;
+let fleetScanState = {active:false,start_address:1,end_address:80,next_address:1,interval_ms:120,sent:0,total:0,scanned:0,progress_pct:0};
 let provStatusInFlight = false;
 let provLastStatusRefreshMs = 0;
 let provUiSessionActive = false;
@@ -1035,6 +1036,16 @@ function refreshRoleLabels(){
  if(rxPushOnChangeRow){ rxPushOnChangeRow.style.display = tx ? 'none' : ''; }
  const rxPushIntervalRow=document.getElementById('rx_push_interval_row');
  if(rxPushIntervalRow){ rxPushIntervalRow.style.display = tx ? 'none' : ''; }
+ const heartbeatRow=document.getElementById('heartbeat_row');
+ const heartbeatHint=document.getElementById('heartbeat_guardrail_hint');
+ const heartbeatInput=document.getElementById('heartbeat_s');
+ const heartbeatVisible = (mode === 'paired');
+ if(heartbeatRow){ heartbeatRow.style.display = heartbeatVisible ? '' : 'none'; }
+ if(heartbeatHint){ heartbeatHint.style.display = heartbeatVisible ? '' : 'none'; }
+ if(heartbeatInput){
+  heartbeatInput.disabled = !heartbeatVisible;
+  if(!heartbeatVisible){ heartbeatInput.value = '60'; }
+ }
 }
 function refreshHostnamePreview(){
  if(!LRS_ENABLE_MDNS) return;
@@ -2625,6 +2636,7 @@ async function postSettings(body, options){
  }
 }
 function collectLoraBody(){
+ const mode=String((document.getElementById('mode_select')||{}).value || 'paired');
  const local=parseAddress(document.getElementById('local_address').value);
  const remote=parseAddress(document.getElementById('remote_address').value);
  if(!Number.isInteger(local)||local<1||local>254){alert('Local address must be 1..254 (decimal or 0xHEX).'); return;}
@@ -2636,7 +2648,7 @@ function collectLoraBody(){
  const mqttRetrySec=Math.floor(Number(document.getElementById('mqtt_remote_retry_timeout_s').value));
  const txPollDefaultSec=Math.floor(Number(document.getElementById('tx_mqtt_remote_default_poll_interval_s').value));
  const rxPushMinSec=Math.floor(Number(document.getElementById('rx_push_min_interval_s').value));
- if(!Number.isFinite(hbSec)||hbSec<60||hbSec>3600){alert('Heartbeat must be between 60 and 3600 seconds.'); return;}
+ if(mode === 'paired' && (!Number.isFinite(hbSec)||hbSec<60||hbSec>3600)){alert('Heartbeat must be between 60 and 3600 seconds.'); return;}
  if(!Number.isFinite(ackSec)||ackSec<5||ackSec>600){alert('ACK timeout must be between 5 and 600 seconds.'); return;}
  if(!Number.isFinite(mqttRetrySec)||mqttRetrySec<5||mqttRetrySec>3600){alert('MQTT remote retry timeout must be between 5 and 3600 seconds.'); return;}
  if(!Number.isFinite(txPollDefaultSec)||txPollDefaultSec<60||txPollDefaultSec>3600){alert('Default poll interval must be between 60 and 3600 seconds.'); return;}
@@ -2655,7 +2667,6 @@ function collectLoraBody(){
   }
   body.fleet_passphrase=fleetPassphrase;
  }
- const mode=String((document.getElementById('mode_select')||{}).value || 'paired');
  const roleName=String((document.getElementById('role_name')||{}).value || 'transmitter');
  body.mode=mode;
  body.role=roleName;
@@ -2666,7 +2677,7 @@ function collectLoraBody(){
  body.tx_mqtt_remote_polling_enabled=document.getElementById('tx_mqtt_remote_polling_enabled').checked;
  body.rx_push_on_change_enabled=document.getElementById('rx_push_on_change_enabled').checked;
  body.lora_frequency_hz=Math.round(mhz*1000000);
- body.heartbeat_ms=hbSec*1000;
+ body.heartbeat_ms=(mode === 'paired') ? (hbSec*1000) : 60000;
  body.ack_timeout_ms=ackSec*1000;
  body.mqtt_remote_retry_timeout_ms=mqttRetrySec*1000;
  body.tx_mqtt_remote_default_poll_interval_ms=txPollDefaultSec*1000;

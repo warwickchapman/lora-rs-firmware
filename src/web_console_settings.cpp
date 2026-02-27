@@ -193,8 +193,13 @@ void WebConsole::handlePostSettings() {
   if (next.lora_frequency_hz < kMinFrequencyHz || next.lora_frequency_hz > kMaxFrequencyHz) {
     next.lora_frequency_hz = kDefaultFrequencyHz;
   }
-  if (next.heartbeat_ms < kMinHeartbeatMs) next.heartbeat_ms = kMinHeartbeatMs;
-  if (next.heartbeat_ms > kMaxHeartbeatMs) next.heartbeat_ms = kMaxHeartbeatMs;
+  if (next.mode == "paired") {
+    if (next.heartbeat_ms < kMinHeartbeatMs) next.heartbeat_ms = kMinHeartbeatMs;
+    if (next.heartbeat_ms > kMaxHeartbeatMs) next.heartbeat_ms = kMaxHeartbeatMs;
+  } else {
+    // Heartbeat setting is paired-mode only; keep a stable default elsewhere.
+    next.heartbeat_ms = 60000UL;
+  }
   if (next.ack_timeout_ms < kMinAckTimeoutMs) next.ack_timeout_ms = kMinAckTimeoutMs;
   if (next.ack_timeout_ms > kMaxAckTimeoutMs) next.ack_timeout_ms = kMaxAckTimeoutMs;
   if (next.mqtt_remote_retry_timeout_ms < kMinMqttRemoteRetryTimeoutMs) next.mqtt_remote_retry_timeout_ms = kMinMqttRemoteRetryTimeoutMs;
