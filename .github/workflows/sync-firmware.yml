@@ -32,15 +32,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload to Public Repo
+      - name: Create Public Release
         if: env.NO_ASSETS != 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: warwickchapman/lora-rs-firmware
-          tag_name: ${{ github.event.release.tag_name || github.event.inputs.tag }}
-          name: ${{ github.event.release.name || github.event.inputs.tag }}
-          body: ${{ github.event.release.body }}
-          draft: false
-          prerelease: ${{ github.event.release.prerelease || false }}
-          files: assets/*.bin
-          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          NAME="${{ github.event.release.name || github.event.inputs.tag }}"
+          
+          # Delete existing release in public repo to ensure clean sync
+          gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
+          
+          # Create new release and upload assets
+          gh release create $TAG assets/*.bin \
+            --repo warwickchapman/lora-rs-firmware \
+            --title "$NAME" \
+            --notes "Synced from private lora-rs repository." \
+            --prerelease=${{ github.event.release.prerelease || 'false' }} 
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
