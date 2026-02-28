@@ -64,14 +64,17 @@ class FlasherLogic:
         f = io.StringIO()
         with redirect_stdout(f), redirect_stderr(f):
             try:
+                # Use esptool's main entry point as a library
                 esptool.main(full_args)
                 return f.getvalue()
             except SystemExit as e:
                 if e.code != 0:
-                    raise RuntimeError(f"esptool error: {f.getvalue()}")
+                    output = f.getvalue()
+                    raise RuntimeError(f"esptool error {e.code}:\n{output}")
                 return f.getvalue()
             except Exception as e:
-                raise RuntimeError(f"esptool error: {str(e)}\n{f.getvalue()}")
+                output = f.getvalue()
+                raise RuntimeError(f"esptool exception: {str(e)}\n{output}")
 
     def get_chip_info(self, port):
         chip_out = self.run_esptool(["--port", port, "chip_id"])

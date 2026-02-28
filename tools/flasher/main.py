@@ -274,7 +274,15 @@ def main(page: ft.Page):
     def read_info():
         if not devices_dropdown.value: return
         log("Reading chip info...")
-        threading.Thread(target=lambda: (show_sticker(flasher_logic.get_chip_info(devices_dropdown.value)), log("Retrieved info.")), daemon=True).start()
+        def run_read():
+            try:
+                info = flasher_logic.get_chip_info(devices_dropdown.value)
+                show_sticker(info)
+                log("Retrieved info.")
+            except Exception as ex:
+                log(f"READ ERROR: {ex}")
+        
+        threading.Thread(target=run_read, daemon=True).start()
 
     # --- UI Layout ---
     flash_btn = ft.ElevatedButton(
@@ -331,7 +339,13 @@ def main(page: ft.Page):
     page.add(bg_stack)
     refresh_ports()
     # Fetch firmwares in background thread to avoid UI freeze
-    threading.Thread(target=refresh_firmwares, daemon=True).start()
+    def initial_refresh():
+        try:
+            refresh_firmwares()
+        except Exception as ex:
+            log(f"STARTUP ERROR: {ex}")
+    
+    threading.Thread(target=initial_refresh, daemon=True).start()
 
 if __name__ == "__main__":
     ft.app(target=main)
