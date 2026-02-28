@@ -109,15 +109,16 @@ jobs:
           
           # 2. Mirror All Release Assets to Public Repo
           cd ..
-          # Fetch title and notes from private repo
-          gh release view $TAG --repo warwickchapman/lora-rs --json name,body > release_info.json
+          # Fetch title, notes, AND pre-release status from private repo
+          gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json
           TITLE=$(jq -r '.name' release_info.json)
+          IS_PRE=$(jq -r '.isPrerelease' release_info.json)
           jq -r '.body' release_info.json > release_notes.md
           
-          # Delete if exists and recreate public release with ALL assets (bins + flasher tools)
+          # Delete if exists and recreate public release with ALL assets
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
-          # Download all assets from the CURRENT release (including the newly uploaded ones)
+          # Download all assets from the CURRENT release
           mkdir public_assets
           gh release download $TAG --dir public_assets --repo warwickchapman/lora-rs
           
@@ -131,24 +132,19 @@ jobs:
           done
           cd ..
           
-          IS_PRE=false
-          if [[ "$TAG" == *alpha* || "$TAG" == *beta* ]]; then
-            IS_PRE=true
-          fi
-
+          LATEST_FLAG=""
           if [[ "$IS_PRE" == "true" ]]; then
-            gh release create $TAG public_assets/* \
-              --repo warwickchapman/lora-rs-firmware \
-              --title "$TITLE" \
-              --notes-file release_notes.md \
-              --prerelease
+            LATEST_FLAG="--latest=false"
           else
-            gh release create $TAG public_assets/* \
-              --repo warwickchapman/lora-rs-firmware \
-              --title "$TITLE" \
-              --notes-file release_notes.md \
-              --latest
+            LATEST_FLAG="--latest"
           fi
+          
+          gh release create $TAG public_assets/* \
+            --repo warwickchapman/lora-rs-firmware \
+            --title "$TITLE" \
+            --notes-file release_notes.md \
+            --prerelease=$IS_PRE \
+            $LATEST_FLAG
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
