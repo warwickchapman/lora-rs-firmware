@@ -1,0 +1,32 @@
+name: Sync Firmware to Public Repo
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Private Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Release Assets
+        run: |
+          gh release download ${{ github.event.release.tag_name }} --pattern "*.bin" --dir assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to Public Repo
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: warwickchapman/lora-rs-firmware
+          tag_name: ${{ github.event.release.tag_name }}
+          name: ${{ github.event.release.name }}
+          body: ${{ github.event.release.body }}
+          draft: false
+          prerelease: ${{ github.event.release.prerelease }}
+          files: assets/*.bin
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
