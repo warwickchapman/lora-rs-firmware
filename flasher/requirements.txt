@@ -1,0 +1,5 @@
+flet==0.28.3
+pyserial==3.5
+esptool==4.8.1
+requests==2.32.3
+urllib3<2.0.0
