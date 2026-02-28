@@ -131,15 +131,16 @@ def main(page: ft.Page):
             # Stricter filtering rules
             is_us = "-us.bin" in filename
             is_za = "-za.bin" in filename
-            is_generic = not (is_us or is_za)
+            is_eu = "-eu.bin" in filename
             
             if region == "US" and is_us:
                 options.append(ft.dropdown.Option(key=fw['url'], text=name))
-            elif (region == "ZA" or region == "EU") and is_za:
+            elif region == "ZA" and is_za:
                 options.append(ft.dropdown.Option(key=fw['url'], text=name))
-            # Generic files are hidden per user request
+            elif region == "EU" and is_eu:
+                options.append(ft.dropdown.Option(key=fw['url'], text=name))
+            # Generic files or mismatched regions are hidden
             
-        firmware_dropdown.options = options
         firmware_dropdown.options = options
         if len(options) > 1:
             firmware_dropdown.value = options[1].key

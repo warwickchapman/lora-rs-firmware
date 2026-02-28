@@ -97,6 +97,16 @@ jobs:
           mkdir public_assets
           gh release download $TAG --dir public_assets --repo warwickchapman/lora-rs
           
+          # 3. Duplicate ZA firmware for EU region
+          cd public_assets
+          for f in *-za.bin; do
+            if [ -f "$f" ]; then
+              cp "$f" "${f%-za.bin}-eu.bin"
+              echo "Cloned $f to ${f%-za.bin}-eu.bin"
+            fi
+          done
+          cd ..
+          
           gh release create $TAG public_assets/* \
             --repo warwickchapman/lora-rs-firmware \
             --title "$TAG" \
