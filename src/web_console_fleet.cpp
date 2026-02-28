@@ -23,6 +23,38 @@ void WebConsole::handleFleet() {
   doc["tx_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
   const uint32_t now = millis();
   doc["uptime_ms"] = now;
+  if (cfg.role_tx && sm_ != nullptr) {
+    FleetScanSnapshot scan{};
+    sm_->fleetScanSnapshot(scan);
+    JsonObject s = doc.createNestedObject("scan");
+    s["active"] = scan.active;
+    s["start_address"] = scan.start_address;
+    s["end_address"] = scan.end_address;
+    s["next_address"] = scan.next_address;
+    s["interval_ms"] = scan.interval_ms;
+    s["started_ms"] = scan.started_ms;
+    s["last_tx_ms"] = scan.last_tx_ms;
+    s["sent"] = scan.sent;
+    const uint32_t total = (scan.end_address >= scan.start_address) ? static_cast<uint32_t>(scan.end_address - scan.start_address + 1U) : 0U;
+    s["total"] = total;
+    uint32_t scanned = 0;
+    if (total > 0) {
+      if (scan.active) {
+        if (scan.next_address <= scan.start_address) {
+          scanned = 0;
+        } else if (scan.next_address > scan.end_address) {
+          scanned = total;
+        } else {
+          scanned = static_cast<uint32_t>(scan.next_address - scan.start_address);
+        }
+      } else {
+        scanned = scan.sent;
+        if (scanned > total) scanned = total;
+      }
+    }
+    s["scanned"] = scanned;
+    s["progress_pct"] = (total > 0) ? static_cast<uint32_t>((scanned * 100U) / total) : 0U;
+  }
   JsonArray arr = doc.createNestedArray("devices");
   if (cfg.role_tx && sm_ != nullptr) {
     for (size_t i = 0; i < peerCount; ++i) {
@@ -143,4 +175,60 @@ bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
   }
   server_.send(200, "application/json", "{\"ok\":true}");
   return true;
+}
+
+void WebConsole::handleFleetScan() {
+  if (!requireAuth(true)) return;
+  auto &cfg = config_->settings();
+  if (!cfg.role_tx || sm_ == nullptr) {
+    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"tx_only\"}");
+    return;
+  }
+
+  DynamicJsonDocument body(256);
+  StaticJsonDocument<96> filter;
+  filter["start_address"] = true;
+  filter["end_address"] = true;
+  filter["interval_ms"] = true;
+  filter["cancel"] = true;
+  if (server_.arg("plain").length() > 0) {
+    auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
+    if (err) {
+      sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return;
+    }
+  }
+
+  const bool cancel = parseBoolField(body["cancel"], false);
+  if (cancel) {
+    sm_->fleetScanCancel();
+  } else {
+    const uint8_t startAddress = parseAddressField(body["start_address"], 1);
+    const uint8_t endAddress = parseAddressField(body["end_address"], 80);
+    uint16_t intervalMs = body["interval_ms"] | 120;
+    if (intervalMs < 80U) intervalMs = 80U;
+    if (intervalMs > 2000U) intervalMs = 2000U;
+    if (!sm_->fleetScanStart(startAddress, endAddress, intervalMs)) {
+      sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"start_failed\"}");
+      return;
+    }
+  }
+
+  FleetScanSnapshot scan{};
+  sm_->fleetScanSnapshot(scan);
+  DynamicJsonDocument out(256);
+  out["ok"] = true;
+  out["active"] = scan.active;
+  out["start_address"] = scan.start_address;
+  out["end_address"] = scan.end_address;
+  out["next_address"] = scan.next_address;
+  out["interval_ms"] = scan.interval_ms;
+  out["sent"] = scan.sent;
+  const uint32_t total = (scan.end_address >= scan.start_address) ? static_cast<uint32_t>(scan.end_address - scan.start_address + 1U) : 0U;
+  out["total"] = total;
+  const size_t len = measureJson(out);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(out, server_.client());
 }

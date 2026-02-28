@@ -234,6 +234,15 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
   }
+  fleet_scan_active_ = false;
+  fleet_scan_start_address_ = 1;
+  fleet_scan_end_address_ = 80;
+  fleet_scan_next_address_ = 1;
+  fleet_scan_interval_ms_ = 120;
+  fleet_scan_next_ms_ = 0;
+  fleet_scan_started_ms_ = 0;
+  fleet_scan_last_tx_ms_ = 0;
+  fleet_scan_sent_ = 0;
   wifi_prov_rx_ = WifiProvisionRxTransfer{};
   wifi_prov_pending_ = false;
   wifi_prov_pending_ssid_ = "";
@@ -285,6 +294,11 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
   }
+  fleet_scan_active_ = false;
+  fleet_scan_next_ms_ = 0;
+  fleet_scan_started_ms_ = 0;
+  fleet_scan_last_tx_ms_ = 0;
+  fleet_scan_sent_ = 0;
   wifi_prov_rx_ = WifiProvisionRxTransfer{};
   wifi_prov_pending_ = false;
   wifi_prov_pending_ssid_ = "";
@@ -595,6 +609,45 @@ bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
   {
     lrslog::event("mqtt_remote_forget", 0, 0, dstAddress);
   }
+  return true;
+}
+
+bool NodeStateMachine::fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs) {
+  if (!runtime_.role_tx) return false;
+  if (startAddress == 0 || startAddress == 255 || endAddress == 0 || endAddress == 255) return false;
+  if (startAddress > endAddress) return false;
+  if (intervalMs < 80U) intervalMs = 80U;
+  if (intervalMs > 2000U) intervalMs = 2000U;
+
+  fleet_scan_start_address_ = startAddress;
+  fleet_scan_end_address_ = endAddress;
+  fleet_scan_next_address_ = startAddress;
+  fleet_scan_interval_ms_ = intervalMs;
+  fleet_scan_started_ms_ = millis();
+  fleet_scan_last_tx_ms_ = 0;
+  fleet_scan_sent_ = 0;
+  fleet_scan_next_ms_ = fleet_scan_started_ms_;
+  fleet_scan_active_ = true;
+  lrslog::event("fleet_scan_start", 0, startAddress, endAddress);
+  return true;
+}
+
+void NodeStateMachine::fleetScanCancel() {
+  if (!fleet_scan_active_) return;
+  fleet_scan_active_ = false;
+  fleet_scan_next_ms_ = 0;
+  lrslog::event("fleet_scan_cancel", 0, fleet_scan_sent_, fleet_scan_next_address_);
+}
+
+bool NodeStateMachine::fleetScanSnapshot(FleetScanSnapshot &out) const {
+  out.active = fleet_scan_active_;
+  out.start_address = fleet_scan_start_address_;
+  out.end_address = fleet_scan_end_address_;
+  out.next_address = fleet_scan_next_address_;
+  out.interval_ms = fleet_scan_interval_ms_;
+  out.started_ms = fleet_scan_started_ms_;
+  out.last_tx_ms = fleet_scan_last_tx_ms_;
+  out.sent = fleet_scan_sent_;
   return true;
 }
 
@@ -1163,6 +1216,41 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
   }
 }
 
+void NodeStateMachine::tickFleetScan(uint32_t now) {
+  if (!runtime_.role_tx) {
+    fleet_scan_active_ = false;
+    fleet_scan_next_ms_ = 0;
+    return;
+  }
+  if (!fleet_scan_active_) return;
+  if (static_cast<int32_t>(now - fleet_scan_next_ms_) < 0) return;
+  if (!radioTxBudgetAvailable()) return;
+  if (fleet_scan_next_address_ < fleet_scan_start_address_ || fleet_scan_next_address_ > fleet_scan_end_address_) {
+    fleet_scan_active_ = false;
+    fleet_scan_next_ms_ = 0;
+    lrslog::event("fleet_scan_done", 0, fleet_scan_sent_, 0);
+    return;
+  }
+
+  uint32_t sentCounter = 0;
+  if (!sendPollRequest(fleet_scan_next_address_, &sentCounter)) {
+    fleet_scan_next_ms_ = now + 250U;
+    return;
+  }
+
+  fleet_scan_sent_++;
+  fleet_scan_last_tx_ms_ = now;
+  lrslog::event("fleet_scan_probe", 0, sentCounter, fleet_scan_next_address_);
+  fleet_scan_next_address_++;
+  if (fleet_scan_next_address_ > fleet_scan_end_address_) {
+    fleet_scan_active_ = false;
+    fleet_scan_next_ms_ = 0;
+    lrslog::event("fleet_scan_done", 0, fleet_scan_sent_, 0);
+    return;
+  }
+  fleet_scan_next_ms_ = now + fleet_scan_interval_ms_;
+}
+
 void NodeStateMachine::tickTransmitter() {
   const uint32_t now = millis();
 
@@ -1243,6 +1331,7 @@ void NodeStateMachine::tickTransmitter() {
 
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
+  tickFleetScan(now);
   startupTxPhaseTrace("after_peer_polling");
 
   if (link_state_ == LinkState::WaitAck && (now - wait_ack_since_ms_) >= runtime_.ack_timeout_ms) {

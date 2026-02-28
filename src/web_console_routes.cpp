@@ -101,6 +101,11 @@ void WebConsole::routes() {
     handleFleet();
     finishRequestLog();
   });
+  server_.on("/api/fleet/scan", HTTP_POST, [this]() {
+    beginRequestLog("/api/fleet/scan", true, false, true);
+    handleFleetScan();
+    finishRequestLog();
+  });
 #if LRS_ENABLE_AUTOMATIONS
   server_.on("/api/automation-rules", HTTP_GET, [this]() {
     beginRequestLog("/api/automation-rules", true, false, true);

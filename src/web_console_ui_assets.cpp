@@ -3307,6 +3307,69 @@ function renderFleetDeviceDetail(){
   </div>
   ${fleetDeviceDetailTab==='state' ? stateView : manageView}`;
 }
+function updateFleetScanUi(scan){
+ const st = scan && typeof scan === 'object' ? scan : {};
+ fleetScanState = Object.assign({}, fleetScanState || {}, st);
+ const active = !!fleetScanState.active;
+ const start = Number(fleetScanState.start_address||1);
+ const end = Number(fleetScanState.end_address||80);
+ const nextAddr = Number(fleetScanState.next_address||start);
+ const intervalMs = Number(fleetScanState.interval_ms||120);
+ const sent = Number(fleetScanState.sent||0);
+ const total = Number(fleetScanState.total||Math.max(0, end - start + 1));
+ const scanned = Number(fleetScanState.scanned||0);
+ const pct = Number(fleetScanState.progress_pct||0);
+ const startEl=document.getElementById('fleetScanStart');
+ const endEl=document.getElementById('fleetScanEnd');
+ const intEl=document.getElementById('fleetScanIntervalMs');
+ const btn=document.getElementById('fleetScanBtn');
+ const summary=document.getElementById('fleetScanSummary');
+ if(startEl && !active && Number.isFinite(start) && start>=1 && start<=254) startEl.value = start;
+ if(endEl && !active && Number.isFinite(end) && end>=1 && end<=254) endEl.value = end;
+ if(intEl && !active && Number.isFinite(intervalMs)) intEl.value = intervalMs;
+ if(startEl) startEl.disabled = active;
+ if(endEl) endEl.disabled = active;
+ if(intEl) intEl.disabled = active;
+ if(btn) btn.innerText = active ? 'Cancel Scan' : 'Scan Fleet';
+ if(summary){
+  if(active){
+   summary.innerText = `Scan running: ${Math.max(0, Math.min(100, pct))}% · sent ${sent}/${Math.max(0, total)} · next ${toHexByte(Math.max(1, Math.min(254, nextAddr)))}`;
+  }else{
+   summary.innerText = (sent > 0 && total > 0)
+    ? `Last scan: ${Math.max(0, Math.min(100, pct))}% · sent ${sent}/${total}.`
+    : 'Scan idle.';
+  }
+ }
+}
+async function toggleFleetScan(){
+ const active = !!(fleetScanState && fleetScanState.active);
+ const body = {};
+ if(active){
+  body.cancel = true;
+ }else{
+  const startEl=document.getElementById('fleetScanStart');
+  const endEl=document.getElementById('fleetScanEnd');
+  const intEl=document.getElementById('fleetScanIntervalMs');
+  let startAddr=Math.floor(Number(startEl && startEl.value));
+  let endAddr=Math.floor(Number(endEl && endEl.value));
+  let intervalMs=Math.floor(Number(intEl && intEl.value));
+  if(!Number.isFinite(startAddr) || startAddr<1 || startAddr>254){ alert('Start address must be 1..254.'); return; }
+  if(!Number.isFinite(endAddr) || endAddr<1 || endAddr>254){ alert('End address must be 1..254.'); return; }
+  if(startAddr > endAddr){ alert('Start address must be <= end address.'); return; }
+  if(!Number.isFinite(intervalMs) || intervalMs < 80 || intervalMs > 2000){ alert('Scan interval must be 80..2000 ms.'); return; }
+  body.start_address = startAddr;
+  body.end_address = endAddr;
+  body.interval_ms = intervalMs;
+ }
+ const out=await apiJson('/api/fleet/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),silent:true,allowHttpError:true});
+ if(!out || out.ok !== true){
+  const err=(out && out.error) ? out.error : 'request_failed';
+  showToast(`Fleet scan failed: ${err}`, true);
+  return;
+ }
+ updateFleetScanUi(out);
+ await refreshFleet();
+}
 async function refreshFleet(){
  if(!(activePage==='fleet' && activeFleetTab==='devices')) return;
  if(fleetRefreshInFlight) return;
@@ -3324,6 +3387,7 @@ async function refreshFleet(){
   return;
  }
  const role=String(out.role||'').toLowerCase();
+ updateFleetScanUi(out.scan || {});
  if(role!=='tx'){
   summary.innerText='Fleet view is TX-only in this firmware.';
   host.innerHTML='Switch role to TX to manage discovered devices.';

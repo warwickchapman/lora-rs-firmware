@@ -56,6 +56,17 @@ struct PeerStatusSnapshot {
   bool poll_pending = false;
 };
 
+struct FleetScanSnapshot {
+  bool active = false;
+  uint8_t start_address = 0;
+  uint8_t end_address = 0;
+  uint8_t next_address = 0;
+  uint16_t interval_ms = 0;
+  uint32_t started_ms = 0;
+  uint32_t last_tx_ms = 0;
+  uint32_t sent = 0;
+};
+
 enum class ProvisioningSessionState : uint8_t {
   Idle,
   Discovering,
@@ -142,6 +153,9 @@ class NodeStateMachine {
   bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
   bool mqttPollPeerNow(uint8_t dstAddress);
   bool mqttForgetPeer(uint8_t dstAddress);
+  bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
+  void fleetScanCancel();
+  bool fleetScanSnapshot(FleetScanSnapshot &out) const;
   bool sendFleetWifiProvision(const String &ssid, const String &password);
   bool hasPendingWifiProvision() const;
   bool consumePendingWifiProvision(String &ssid, String &password, uint8_t &src);
@@ -272,6 +286,16 @@ class NodeStateMachine {
   PeerRuntime peers_[kMaxPeers]{};
   size_t peer_count_ = 0;
 
+  bool fleet_scan_active_ = false;
+  uint8_t fleet_scan_start_address_ = 1;
+  uint8_t fleet_scan_end_address_ = 80;
+  uint8_t fleet_scan_next_address_ = 1;
+  uint16_t fleet_scan_interval_ms_ = 120;
+  uint32_t fleet_scan_next_ms_ = 0;
+  uint32_t fleet_scan_started_ms_ = 0;
+  uint32_t fleet_scan_last_tx_ms_ = 0;
+  uint32_t fleet_scan_sent_ = 0;
+
   struct WifiProvisionRxTransfer {
     bool active = false;
     uint8_t src = 0;
@@ -364,6 +388,7 @@ class NodeStateMachine {
   void tickTransmitter();
   void tickReceiver();
   void tickReceive();
+  void tickFleetScan(uint32_t now);
   void tickLed();
   void tickProvisioningCoordinator(uint32_t now);
   void tickProvisioningTarget(uint32_t now);

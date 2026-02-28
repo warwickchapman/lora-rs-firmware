@@ -68,6 +68,7 @@ private:
   void handleExportSettings();
   void handleImportSettings();
   void handleFleet();
+  void handleFleetScan();
   void handleGetAutomationRules();
   void handlePostAutomationRules();
   bool handleFleetDeviceActionRoute(const String &uri);
