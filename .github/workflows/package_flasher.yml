@@ -35,20 +35,20 @@ jobs:
         run: |
           cd tools/flasher
           # Use flet pack for better bundling of runtime components
-          flet pack main.py --name "LRS-Flasher" || flet pack main.py --name "LRS-Flasher"
+          flet pack main.py --name "thanda-lora-flasher" || flet pack main.py --name "thanda-lora-flasher"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv dist/LRS-Flasher.exe final_dist/lrs-flasher-windows.exe
+            mv dist/thanda-lora-flasher.exe final_dist/thanda-lora-flasher.exe
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
             # Create DMG for macOS
             mkdir -p dmg_root
-            cp -r dist/LRS-Flasher.app dmg_root/
-            hdiutil create -volname "LRS Flasher" -srcfolder dmg_root -ov -format UDZO lrs-flasher-macos.dmg
-            mv lrs-flasher-macos.dmg final_dist/
+            cp -r dist/thanda-lora-flasher.app dmg_root/
+            hdiutil create -volname "thanda-lora-flasher" -srcfolder dmg_root -ov -format UDZO thanda-lora-flasher.dmg
+            mv thanda-lora-flasher.dmg final_dist/
           else
-            mv dist/LRS-Flasher final_dist/lrs-flasher-linux
+            mv dist/thanda-lora-flasher final_dist/thanda-lora-flasher-linux
           fi
 
       - name: Upload Artifact

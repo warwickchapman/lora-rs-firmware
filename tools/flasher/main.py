@@ -30,7 +30,7 @@ def get_region_guess():
 
 def main(page: ft.Page):
     # v3.9: Branding and Region Selector
-    page.title = "LoRa Relay Switcher"
+    page.title = "Thanda LoRa Flasher"
     page.theme_mode = ft.ThemeMode.DARK
     page.window_width = 1100
     page.bgcolor = BG_COLOR
@@ -296,7 +296,7 @@ def main(page: ft.Page):
             padding=15,
             content=ft.Column([
                 ft.Column([
-                    ft.Text("LoRa Relay Switcher", size=32, weight="bold", color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
+                    ft.Text("Thanda LoRa Flasher", size=32, weight="bold", color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
                     ft.Text("Firmware Updater", size=18, color=ft.Colors.BLUE_200, text_align=ft.TextAlign.CENTER),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, width=page.window_width),
                 ft.Row([
