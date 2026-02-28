@@ -26,14 +26,14 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flet
+          pip install flet pyinstaller
           pip install -r tools/flasher/requirements.txt
 
       - name: Build with Flet Pack
         run: |
           cd tools/flasher
           # Use flet pack for better bundling of runtime components
-          flet pack main.py --name "LRS-Flasher" --icon icon.png || flet pack main.py --name "LRS-Flasher"
+          python -m flet pack main.py --name "LRS-Flasher" --icon icon.png || python -m flet pack main.py --name "LRS-Flasher"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
