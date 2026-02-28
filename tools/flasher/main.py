@@ -224,8 +224,9 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker(on_result=pick_files_result)
     page.overlay.append(file_picker)
-    page.window.title_bar_buttons_color = ft.colors.WHITE
+    page.window.title_bar_buttons_color = ft.Colors.WHITE
     page.window.icon = get_asset_path("assets/icon_128.png")
+    page.window.maximized = True
     
     # --- UI Generators ---
     def show_sticker(info):
@@ -318,7 +319,7 @@ def main(page: ft.Page):
         width=64,
         height=64,
         fit=ft.ImageFit.CONTAIN,
-        error_content=ft.Icon(ft.icons.BOLT_SHARP, color="white", size=48)
+        error_content=ft.Icon(ft.Icons.BOLT_SHARP, color="white", size=48)
     )
 
     header = ft.Container(
@@ -346,34 +347,54 @@ def main(page: ft.Page):
         ft.Container(width=400, height=400, bgcolor="#1e3a8a", left=-100, bottom=-100, border_radius=200, blur=80, opacity=0.3),
         ft.Container(
             padding=15,
+            expand=True,
             content=ft.Column([
-                header, # Replaced the original header column with the new 'header' container
+                header,
                 ft.Row([
-                ft.Column([
-                    ft.Text("LRS Log", size=20, weight="bold", color=ft.Colors.BLUE_200),
-                    ft.Container(content=log_box, expand=True, bgcolor=CARD_BG, blur=24, border=ft.border.all(1, GLASS_BORDER), border_radius=16),
-                ], expand=True, spacing=10),
-                ft.Column([
+                    # Left: Log
                     ft.Container(
-                        content=ft.Column([
-                            ft.Text("Interface Controls", size=15, weight="bold", color=ft.Colors.GREY_100),
-                            ft.Row([region_dropdown], spacing=5),
-                            ft.Row([devices_dropdown, ft.IconButton(ft.Icons.REFRESH, on_click=refresh_ports, icon_size=18)], spacing=5),
-                            ft.Row([firmware_dropdown, ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=lambda _: refresh_firmwares(), icon_size=18, tooltip="Refresh Cloud")], spacing=5),
-                            ft.Row([flash_btn, info_btn], spacing=10),
-                        ], spacing=10),
-                        padding=15, bgcolor=CARD_BG, blur=24, border=ft.border.all(1, GLASS_BORDER), border_radius=16,
+                        content=log_box,
+                        expand=True,
+                        bgcolor=CARD_BG,
+                        blur=24,
+                        border=ft.border.all(1, GLASS_BORDER),
+                        border_radius=16,
+                        padding=10
                     ),
-                    ft.Container(
-                        content=ft.Column([
-                            ft.Row([ft.Text("Device Configuration", size=15, weight="bold", color=ft.Colors.BLUE_200, expand=True), ft.IconButton(ft.Icons.COPY, icon_size=16, on_click=copy_all_device_info)]),
-                            sticker_content
-                        ], scroll=ft.ScrollMode.AUTO, spacing=5),
-                        expand=True, padding=ft.padding.only(left=15, right=5, top=10, bottom=15), bgcolor=CARD_BG, blur=24, border=ft.border.all(1, GLASS_BORDER), border_radius=16,
-                    )
-                ], width=420, spacing=15)
-                ], expand=True, spacing=15),
-            ], expand=True, spacing=20)
+                    # Right: Controls
+                    ft.Column([
+                        ft.Container(
+                            padding=15,
+                            bgcolor=CARD_BG,
+                            blur=24,
+                            border=ft.border.all(1, GLASS_BORDER),
+                            border_radius=16,
+                            content=ft.Column([
+                                ft.Text("Interface Controls", size=15, weight="bold", color=ft.Colors.GREY_100),
+                                ft.Row([region_dropdown], spacing=5),
+                                ft.Row([devices_dropdown, ft.IconButton(ft.Icons.REFRESH, on_click=refresh_ports, icon_size=18)], spacing=5),
+                                ft.Row([firmware_dropdown, ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=lambda _: refresh_firmwares(), icon_size=18, tooltip="Refresh Cloud")], spacing=5),
+                                ft.Row([flash_btn, info_btn], spacing=10),
+                            ], spacing=10)
+                        ),
+                        ft.Container(
+                            expand=True,
+                            padding=ft.padding.only(left=15, right=5, top=10, bottom=15),
+                            bgcolor=CARD_BG,
+                            blur=24,
+                            border=ft.border.all(1, GLASS_BORDER),
+                            border_radius=16,
+                            content=ft.Column([
+                                ft.Row([
+                                    ft.Text("Device Configuration", size=15, weight="bold", color=ft.Colors.BLUE_200, expand=True),
+                                    ft.IconButton(ft.Icons.COPY, icon_size=16, on_click=copy_all_device_info)
+                                ]),
+                                sticker_content
+                            ], scroll=ft.ScrollMode.AUTO, spacing=5)
+                        )
+                    ], width=420, spacing=15, alignment=ft.MainAxisAlignment.START)
+                ], expand=True, spacing=15, vertical_alignment=ft.CrossAxisAlignment.START)
+            ], spacing=20)
         )
     ], expand=True)
 
