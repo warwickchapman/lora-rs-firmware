@@ -43,20 +43,21 @@ jobs:
           
           # Use flet pack for better bundling of runtime components
           # Include esptool targets (stubs) in the bundle
-          flet pack main.py --name "thanda-lora-flasher" --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" || flet pack main.py --name "thanda-lora-flasher"
+          flet pack main.py --name "Thanda LoRa Flasher" --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" || flet pack main.py --name "Thanda LoRa Flasher"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv dist/thanda-lora-flasher.exe final_dist/thanda-lora-flasher.exe
+            mv "dist/Thanda LoRa Flasher.exe" "final_dist/Thanda LoRa Flasher.exe"
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            # Create DMG for macOS
+            # Create DMG for macOS with Applications shortcut
             mkdir -p dmg_root
-            cp -r dist/thanda-lora-flasher.app dmg_root/
-            hdiutil create -volname "thanda-lora-flasher" -srcfolder dmg_root -ov -format UDZO thanda-lora-flasher.dmg
-            mv thanda-lora-flasher.dmg final_dist/
+            cp -r "dist/Thanda LoRa Flasher.app" dmg_root/
+            ln -s /Applications dmg_root/Applications
+            hdiutil create -volname "Thanda LoRa Flasher" -srcfolder dmg_root -ov -format UDZO "Thanda LoRa Flasher.dmg"
+            mv "Thanda LoRa Flasher.dmg" final_dist/
           else
-            mv dist/thanda-lora-flasher final_dist/thanda-lora-flasher-linux
+            mv "dist/Thanda LoRa Flasher" "final_dist/Thanda LoRa Flasher-linux"
           fi
 
       - name: Upload Artifact
