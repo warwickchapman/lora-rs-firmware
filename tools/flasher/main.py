@@ -5,15 +5,26 @@ import os
 import sys
 import subprocess
 import pathlib
+import datetime
 
 # Glassmorphism Theme Constants
 BG_COLOR = "#0f172a"
 CARD_BG = "rgba(15, 23, 42, 0.4)"
 GLASS_BORDER = "rgba(255, 255, 255, 0.1)"
 
+def get_region_guess():
+    """Guess region based on timezone."""
+    try:
+        tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzname()
+        if tz in ["SAST", "CAT", "EAT"]: return "ZA"
+        if any(us_tz in tz for us_tz in ["EST", "CST", "MST", "PST", "EDT", "CDT", "MDT", "PDT"]): return "US"
+        return "EU"
+    except:
+        return "EU"
+
 def main(page: ft.Page):
-    # v3.6: Public Firmware Repository Integration
-    page.title = "LRS Flasher v3.8"
+    # v3.9: Branding and Region Selector
+    page.title = "LoRa Relay Switcher"
     page.theme_mode = ft.ThemeMode.DARK
     page.window_width = 1100
     page.bgcolor = BG_COLOR
@@ -57,6 +68,23 @@ def main(page: ft.Page):
         on_change=lambda e: handle_firmware_change(e)
     )
     
+    # Region Dropdown
+    region_dropdown = ft.Dropdown(
+        label="Region",
+        options=[
+            ft.dropdown.Option("ZA"),
+            ft.dropdown.Option("EU"),
+            ft.dropdown.Option("US"),
+        ],
+        value=get_region_guess(),
+        expand=True,
+        text_size=11,
+        bgcolor="rgba(255, 255, 255, 0.03)",
+        border_color=GLASS_BORDER,
+        border_radius=8,
+        on_change=lambda _: refresh_firmwares()
+    )
+
     devices_dropdown = ft.Dropdown(
         label="Serial Port",
         hint_text="Scanning...",
@@ -93,17 +121,31 @@ def main(page: ft.Page):
         nonlocal available_firmwares
         available_firmwares = firmware_manager.get_available_firmwares()
         
+        region = region_dropdown.value
         options = [ft.dropdown.Option(key="local", text="[ Local File... Browse ]")]
+        
         for fw in available_firmwares:
-            options.append(ft.dropdown.Option(key=fw['url'], text=fw['name']))
+            filename = fw['filename'].lower()
+            name = fw['name']
+            
+            # Stricter filtering rules
+            is_us = "-us.bin" in filename
+            is_za = "-za.bin" in filename
+            is_generic = not (is_us or is_za)
+            
+            if region == "US" and is_us:
+                options.append(ft.dropdown.Option(key=fw['url'], text=name))
+            elif (region == "ZA" or region == "EU") and is_za:
+                options.append(ft.dropdown.Option(key=fw['url'], text=name))
+            # Generic files are hidden per user request
             
         firmware_dropdown.options = options
-        if available_firmwares:
-            firmware_dropdown.value = available_firmwares[0]['url']
-            log(f"Found {len(available_firmwares)} cloud versions.")
+        firmware_dropdown.options = options
+        if len(options) > 1:
+            firmware_dropdown.value = options[1].key
         else:
-            firmware_dropdown.hint_text = "No versions found on GitHub"
             firmware_dropdown.value = "local"
+            firmware_dropdown.hint_text = "No compatible versions found"
         page.update()
 
     def handle_firmware_change(e):
@@ -245,7 +287,12 @@ def main(page: ft.Page):
         ft.Container(width=400, height=400, bgcolor="#1e3a8a", left=-100, bottom=-100, border_radius=200, blur=80, opacity=0.3),
         ft.Container(
             padding=15,
-            content=ft.Row([
+            content=ft.Column([
+                ft.Column([
+                    ft.Text("LoRa Relay Switcher", size=32, weight="bold", color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
+                    ft.Text("Firmware Updater", size=18, color=ft.Colors.BLUE_200, text_align=ft.TextAlign.CENTER),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, width=page.window_width),
+                ft.Row([
                 ft.Column([
                     ft.Text("LRS Log", size=20, weight="bold", color=ft.Colors.BLUE_200),
                     ft.Container(content=log_box, expand=True, bgcolor=CARD_BG, blur=24, border=ft.border.all(1, GLASS_BORDER), border_radius=16),
@@ -254,6 +301,7 @@ def main(page: ft.Page):
                     ft.Container(
                         content=ft.Column([
                             ft.Text("Interface Controls", size=15, weight="bold", color=ft.Colors.GREY_100),
+                            ft.Row([region_dropdown], spacing=5),
                             ft.Row([devices_dropdown, ft.IconButton(ft.Icons.REFRESH, on_click=refresh_ports, icon_size=18)], spacing=5),
                             ft.Row([firmware_dropdown, ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=lambda _: refresh_firmwares(), icon_size=18, tooltip="Refresh Cloud")], spacing=5),
                             ft.Row([flash_btn, info_btn], spacing=10),
@@ -268,7 +316,8 @@ def main(page: ft.Page):
                         expand=True, padding=ft.padding.only(left=15, right=5, top=10, bottom=15), bgcolor=CARD_BG, blur=24, border=ft.border.all(1, GLASS_BORDER), border_radius=16,
                     )
                 ], width=420, spacing=15)
-            ], expand=True, spacing=15)
+                ], expand=True, spacing=15),
+            ], expand=True, spacing=20)
         )
     ], expand=True)
 

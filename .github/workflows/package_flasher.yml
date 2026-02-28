@@ -67,3 +67,41 @@ jobs:
             ubuntu-latest-artifact/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror to Public Hub
+        run: |
+          TAG=${{ github.ref_name }}
+          
+          # 1. Sync Source Code to 'flasher/' subdirectory
+          git clone https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/warwickchapman/lora-rs-firmware.git public_repo
+          rm -rf public_repo/flasher
+          mkdir -p public_repo/flasher
+          cp tools/flasher/main.py tools/flasher/logic.py tools/flasher/requirements.txt tools/flasher/run.sh public_repo/flasher/
+          
+          cd public_repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add flasher/
+          git commit -m "Update Flasher source code for $TAG" || echo "No changes"
+          git push origin main
+          
+          # 2. Mirror All Release Assets to Public Repo
+          cd ..
+          # Fetch notes from private repo
+          gh release view $TAG --repo warwickchapman/lora-rs --json body --jq '.body' > release_notes.md
+          
+          # Delete if exists and recreate public release with ALL assets (bins + flasher tools)
+          gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
+          
+          # Download all assets from the CURRENT release (including the newly uploaded ones)
+          mkdir public_assets
+          gh release download $TAG --dir public_assets --repo warwickchapman/lora-rs
+          
+          gh release create $TAG public_assets/* \
+            --repo warwickchapman/lora-rs-firmware \
+            --title "$TAG" \
+            --notes-file release_notes.md \
+            --prerelease=${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
