@@ -33,7 +33,7 @@ jobs:
         run: |
           cd tools/flasher
           # Use flet pack for better bundling of runtime components
-          python -m flet pack main.py --name "LRS-Flasher" --icon icon.png || python -m flet pack main.py --name "LRS-Flasher"
+          flet pack main.py --name "LRS-Flasher" || flet pack main.py --name "LRS-Flasher"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
