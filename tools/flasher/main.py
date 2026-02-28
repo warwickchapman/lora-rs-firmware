@@ -328,4 +328,6 @@ def main(page: ft.Page):
     threading.Thread(target=refresh_firmwares, daemon=True).start()
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     ft.app(target=main)
