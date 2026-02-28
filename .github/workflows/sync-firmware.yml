@@ -23,10 +23,11 @@ jobs:
         id: download
         run: |
           TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          gh release download $TAG --pattern "*.bin" --dir assets
-          # Check if assets directory is empty or contains no .bin files
+          # Download all assets
+          gh release download $TAG --dir assets
+          # Check if assets directory is empty
           if [ -z "$(ls -A assets 2>/dev/null)" ]; then
-            echo "No .bin assets found for tag $TAG"
+            echo "No assets found for tag $TAG"
             echo "NO_ASSETS=true" >> $GITHUB_ENV
           fi
         env:
@@ -44,8 +45,8 @@ jobs:
           # Delete existing release in public repo to ensure clean sync
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
-          # Create new release using the notes file
-          gh release create $TAG assets/*.bin \
+          # Create new release using the notes file and ALL assets
+          gh release create $TAG assets/* \
             --repo warwickchapman/lora-rs-firmware \
             --title "$NAME" \
             --notes-file release_notes.md \
