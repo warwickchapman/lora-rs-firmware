@@ -1,5 +1,11 @@
 import multiprocessing
 import sys
+import os
+import subprocess
+import pathlib
+import datetime
+import webbrowser
+import platform
 
 # Standard requirement for PyInstaller bundled apps on Windows
 if __name__ == "__main__":
@@ -8,10 +14,19 @@ if __name__ == "__main__":
 import flet as ft
 import logic
 import threading
-import os
-import subprocess
-import pathlib
-import datetime
+
+# --- Logic and Constants ---
+def get_asset_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller bundle"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+# Global instance for firmware management
+firmware_manager_global = logic.FirmwareManager()
 
 # Glassmorphism Theme Constants
 BG_COLOR = "#0f172a"
@@ -36,9 +51,8 @@ def main(page: ft.Page):
     page.bgcolor = BG_COLOR
     page.padding = 0 
     
-    # Logic instances
+    # Logic instances (flasher_logic remains local as it's tied to page actions)
     flasher_logic = logic.FlasherLogic()
-    firmware_manager = logic.FirmwareManager()
     
     current_device_info = {}
     available_firmwares = [] # List of dicts from GitHub
@@ -125,7 +139,7 @@ def main(page: ft.Page):
     def refresh_firmwares():
         log("Fetching releases from GitHub...")
         nonlocal available_firmwares
-        available_firmwares = firmware_manager.get_available_firmwares()
+        available_firmwares = firmware_manager_global.get_available_firmwares()
         
         region = region_dropdown.value
         options = [ft.dropdown.Option(key="local", text="[ Local File... Browse ]")]
@@ -210,7 +224,9 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker(on_result=pick_files_result)
     page.overlay.append(file_picker)
-
+    page.window.title_bar_buttons_color = ft.colors.WHITE
+    page.window.icon = get_asset_path("assets/icon_128.png")
+    
     # --- UI Generators ---
     def show_sticker(info):
         nonlocal current_device_info
@@ -258,7 +274,7 @@ def main(page: ft.Page):
                 # Cloud version
                 selected_fw = next(fw for fw in available_firmwares if fw['url'] == firmware_dropdown.value)
                 log(f"Downloading {selected_fw['filename']}...")
-                final_path = firmware_manager.download_firmware(selected_fw['url'], selected_fw['filename'])
+                final_path = firmware_manager_global.download_firmware(selected_fw['url'], selected_fw['filename'])
                 log("Download complete.")
             
             log(f"Flashing {os.path.basename(final_path)}...")
@@ -297,16 +313,41 @@ def main(page: ft.Page):
         on_click=lambda _: read_info()
     )
 
+    logo_img = ft.Image(
+        src=get_asset_path("assets/icon_128.png"),
+        width=64,
+        height=64,
+        fit=ft.ImageFit.CONTAIN,
+        error_content=ft.Icon(ft.icons.BOLT_SHARP, color="white", size=48)
+    )
+
+    header = ft.Container(
+        margin=ft.margin.only(bottom=10),
+        content=ft.Column(
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=2,
+            controls=[
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=15,
+                    controls=[
+                        logo_img,
+                        ft.Text("Thanda LoRa Flasher", size=32, weight="bold")
+                    ]
+                ),
+                ft.Text("Firmware Updater", size=18, color="secondary")
+            ]
+        )
+    )
+
     bg_stack = ft.Stack([
         ft.Container(width=400, height=400, bgcolor="#4c1d95", right=-100, top=-100, border_radius=200, blur=80, opacity=0.3),
         ft.Container(width=400, height=400, bgcolor="#1e3a8a", left=-100, bottom=-100, border_radius=200, blur=80, opacity=0.3),
         ft.Container(
             padding=15,
             content=ft.Column([
-                ft.Column([
-                    ft.Text("Thanda LoRa Flasher", size=32, weight="bold", color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
-                    ft.Text("Firmware Updater", size=18, color=ft.Colors.BLUE_200, text_align=ft.TextAlign.CENTER),
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, width=page.window_width),
+                header, # Replaced the original header column with the new 'header' container
                 ft.Row([
                 ft.Column([
                     ft.Text("LRS Log", size=20, weight="bold", color=ft.Colors.BLUE_200),

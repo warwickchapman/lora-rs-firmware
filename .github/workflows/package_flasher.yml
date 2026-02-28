@@ -27,8 +27,13 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install flet pyinstaller
+          pip install flet pyinstaller Pillow
           pip install -r tools/flasher/requirements.txt
+
+      - name: Generate Icons
+        shell: bash
+        run: |
+          python tools/flasher/generate_icons.py
 
       - name: Build with Flet Pack
         shell: bash
@@ -41,9 +46,17 @@ jobs:
           SEP=":"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then SEP=";"; fi
           
+          # Set platform-specific icon
+          ICON_ARG="--icon assets/icon_512.png"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
+          
           # Use flet pack for better bundling of runtime components
-          # Include esptool targets (stubs) in the bundle
-          flet pack main.py --name "Thanda LoRa Flasher" --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" || flet pack main.py --name "Thanda LoRa Flasher"
+          # Include esptool targets (stubs) and application assets (logo)
+          flet pack main.py --name "Thanda LoRa Flasher" \
+            $ICON_ARG \
+            --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
+            --add-data "assets${SEP}assets" \
+            || flet pack main.py --name "Thanda LoRa Flasher"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
