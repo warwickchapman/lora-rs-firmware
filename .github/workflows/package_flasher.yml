@@ -131,12 +131,24 @@ jobs:
           done
           cd ..
           
-          gh release create $TAG public_assets/* \
-            --repo warwickchapman/lora-rs-firmware \
-            --title "$TITLE" \
-            --notes-file release_notes.md \
-            --prerelease=${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }} \
-            --latest
+          IS_PRE=false
+          if [[ "$TAG" == *alpha* || "$TAG" == *beta* ]]; then
+            IS_PRE=true
+          fi
+
+          if [[ "$IS_PRE" == "true" ]]; then
+            gh release create $TAG public_assets/* \
+              --repo warwickchapman/lora-rs-firmware \
+              --title "$TITLE" \
+              --notes-file release_notes.md \
+              --prerelease
+          else
+            gh release create $TAG public_assets/* \
+              --repo warwickchapman/lora-rs-firmware \
+              --title "$TITLE" \
+              --notes-file release_notes.md \
+              --latest
+          fi
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
