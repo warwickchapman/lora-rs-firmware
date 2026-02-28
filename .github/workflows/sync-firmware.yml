@@ -38,14 +38,20 @@ jobs:
           TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
           NAME="${{ github.event.release.name || github.event.inputs.tag }}"
           
+          # Fetch notes from private repo and set as ENV for safe multi-line handling
+          echo "NOTES<<EOF" >> $GITHUB_ENV
+          gh release view $TAG --repo warwickchapman/lora-rs --json body --jq '.body' >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
           # Delete existing release in public repo to ensure clean sync
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
-          # Create new release and upload assets
+          # Use local env for notes
           gh release create $TAG assets/*.bin \
             --repo warwickchapman/lora-rs-firmware \
             --title "$NAME" \
-            --notes "Synced from private lora-rs repository." \
+            --notes "$NOTES" \
             --prerelease=${{ github.event.release.prerelease || 'false' }} 
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
