@@ -1,8 +1,14 @@
+import multiprocessing
+import sys
+
+# Standard requirement for PyInstaller bundled apps on Windows
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
 import flet as ft
 import logic
 import threading
 import os
-import sys
 import subprocess
 import pathlib
 import datetime
@@ -328,6 +334,4 @@ def main(page: ft.Page):
     threading.Thread(target=refresh_firmwares, daemon=True).start()
 
 if __name__ == "__main__":
-    import multiprocessing
-    multiprocessing.freeze_support()
     ft.app(target=main)
