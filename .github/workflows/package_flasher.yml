@@ -104,31 +104,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Mirror to Public Hub
+      - name: Mirror Release Assets to Public Hub
         run: |
           TAG=${{ github.ref_name }}
           
-          # 1. Sync Source Code to 'flasher/' subdirectory
-          git clone https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/warwickchapman/lora-rs-firmware.git public_repo
-          rm -rf public_repo/flasher
-          mkdir -p public_repo/flasher
-          cp tools/flasher/main.py tools/flasher/logic.py tools/flasher/requirements.txt tools/flasher/run.sh public_repo/flasher/
-          
-          cd public_repo
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add flasher/
-          git commit -m "Update Flasher source code for $TAG" || echo "No changes"
-          git push origin main
-          
-          # 2. Mirror All Release Assets to Public Repo
-          cd ..
-          # Fetch title, notes, AND pre-release status from private repo
+          # 1. Fetch title, notes, AND pre-release status from private repo
           gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json
           TITLE=$(jq -r '.name' release_info.json)
           IS_PRE=$(jq -r '.isPrerelease' release_info.json)
           jq -r '.body' release_info.json > release_notes.md
           
+          # 2. Mirror All Release Assets to Public Repo
           # Delete if exists and recreate public release with ALL assets
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
