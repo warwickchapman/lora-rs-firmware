@@ -3,6 +3,12 @@ name: Sync Firmware to Public Repo
 on:
   release:
     types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to sync'
+        required: true
+        default: 'v0.2.4-alpha'
 
 jobs:
   sync:
@@ -16,8 +22,9 @@ jobs:
       - name: Download Release Assets
         id: download
         run: |
-          # Only fail if download truly fails, not if 0 files match pattern
-          gh release download ${{ github.event.release.tag_name }} --pattern "*.bin" --dir assets || echo "NO_ASSETS=true" >> $GITHUB_ENV
+          # Use release tag if available, otherwise trigger input tag
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          gh release download $TAG --pattern "*.bin" --dir assets || echo "NO_ASSETS=true" >> $GITHUB_ENV
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -26,10 +33,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           repository: warwickchapman/lora-rs-firmware
-          tag_name: ${{ github.event.release.tag_name }}
-          name: ${{ github.event.release.name }}
+          tag_name: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          name: ${{ github.event.release.name || github.event.inputs.tag }}
           body: ${{ github.event.release.body }}
           draft: false
-          prerelease: ${{ github.event.release.prerelease }}
+          prerelease: ${{ github.event.release.prerelease || false }}
           files: assets/*.bin
           token: ${{ secrets.PUBLIC_REPO_TOKEN }}
