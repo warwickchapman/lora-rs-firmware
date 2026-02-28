@@ -38,19 +38,17 @@ jobs:
           TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
           NAME="${{ github.event.release.name || github.event.inputs.tag }}"
           
-          # Fetch notes from private repo and set as ENV for safe multi-line handling
-          echo "NOTES<<EOF" >> $GITHUB_ENV
-          gh release view $TAG --repo warwickchapman/lora-rs --json body --jq '.body' >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # Fetch notes from private repo and save to a temporary file for safe handling
+          gh release view $TAG --repo warwickchapman/lora-rs --json body --jq '.body' > release_notes.md
           
           # Delete existing release in public repo to ensure clean sync
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
-          # Use local env for notes
+          # Create new release using the notes file
           gh release create $TAG assets/*.bin \
             --repo warwickchapman/lora-rs-firmware \
             --title "$NAME" \
-            --notes "$NOTES" \
+            --notes-file release_notes.md \
             --prerelease=${{ github.event.release.prerelease || 'false' }} 
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
