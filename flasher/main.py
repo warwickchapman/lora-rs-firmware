@@ -1,8 +1,14 @@
+import multiprocessing
+import sys
+
+# Standard requirement for PyInstaller bundled apps on Windows
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
 import flet as ft
 import logic
 import threading
 import os
-import sys
 import subprocess
 import pathlib
 import datetime
@@ -24,7 +30,7 @@ def get_region_guess():
 
 def main(page: ft.Page):
     # v3.9: Branding and Region Selector
-    page.title = "LoRa Relay Switcher"
+    page.title = "Thanda LoRa Flasher"
     page.theme_mode = ft.ThemeMode.DARK
     page.window_width = 1100
     page.bgcolor = BG_COLOR
@@ -268,7 +274,15 @@ def main(page: ft.Page):
     def read_info():
         if not devices_dropdown.value: return
         log("Reading chip info...")
-        threading.Thread(target=lambda: (show_sticker(flasher_logic.get_chip_info(devices_dropdown.value)), log("Retrieved info.")), daemon=True).start()
+        def run_read():
+            try:
+                info = flasher_logic.get_chip_info(devices_dropdown.value)
+                show_sticker(info)
+                log("Retrieved info.")
+            except Exception as ex:
+                log(f"READ ERROR: {ex}")
+        
+        threading.Thread(target=run_read, daemon=True).start()
 
     # --- UI Layout ---
     flash_btn = ft.ElevatedButton(
@@ -290,7 +304,7 @@ def main(page: ft.Page):
             padding=15,
             content=ft.Column([
                 ft.Column([
-                    ft.Text("LoRa Relay Switcher", size=32, weight="bold", color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
+                    ft.Text("Thanda LoRa Flasher", size=32, weight="bold", color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER),
                     ft.Text("Firmware Updater", size=18, color=ft.Colors.BLUE_200, text_align=ft.TextAlign.CENTER),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, width=page.window_width),
                 ft.Row([
@@ -325,7 +339,13 @@ def main(page: ft.Page):
     page.add(bg_stack)
     refresh_ports()
     # Fetch firmwares in background thread to avoid UI freeze
-    threading.Thread(target=refresh_firmwares, daemon=True).start()
+    def initial_refresh():
+        try:
+            refresh_firmwares()
+        except Exception as ex:
+            log(f"STARTUP ERROR: {ex}")
+    
+    threading.Thread(target=initial_refresh, daemon=True).start()
 
 if __name__ == "__main__":
     ft.app(target=main)

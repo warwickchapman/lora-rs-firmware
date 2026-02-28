@@ -8,6 +8,9 @@ import requests
 import os
 import pathlib
 import json
+import io
+from contextlib import redirect_stdout, redirect_stderr
+import esptool
 
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 
@@ -55,14 +58,23 @@ class FlasherLogic:
         self.python_path = python_path
 
     def run_esptool(self, args):
-        # Add reset strategy for more reliable syncing
-        cmd = [self.python_path, "-m", "esptool", "--before", "default_reset", "--after", "hard_reset"] + args
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else e.stdout
-            raise RuntimeError(f"esptool error: {error_msg.strip()}")
+        # Redirect stdout/stderr to capture output without spawning a new process
+        # that might re-trigger the bundled executable logic.
+        full_args = ["--before", "default_reset", "--after", "hard_reset"] + args
+        f = io.StringIO()
+        with redirect_stdout(f), redirect_stderr(f):
+            try:
+                # Use esptool's main entry point as a library
+                esptool.main(full_args)
+                return f.getvalue()
+            except SystemExit as e:
+                if e.code != 0:
+                    output = f.getvalue()
+                    raise RuntimeError(f"esptool error {e.code}:\n{output}")
+                return f.getvalue()
+            except Exception as e:
+                output = f.getvalue()
+                raise RuntimeError(f"esptool exception: {str(e)}\n{output}")
 
     def get_chip_info(self, port):
         chip_out = self.run_esptool(["--port", port, "chip_id"])
@@ -81,15 +93,27 @@ class FlasherLogic:
 
     def flash_firmware(self, port, baud, firmware_path, callback=None):
         args = ["--port", port, "--baud", str(baud), "write_flash", "0x0", firmware_path]
-        process = subprocess.Popen(
-            [self.python_path, "-m", "esptool"] + args,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-        )
-        for line in process.stdout:
-            if callback: callback(line)
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, process.args)
+        
+        # Capture output in real-time by wrapping esptool.main
+        # We'll use a custom stream to pass lines to the callback
+        class CallbackStream:
+            def __init__(self, cb):
+                self.cb = cb
+            def write(self, data):
+                if self.cb and data.strip():
+                    self.cb(data)
+            def flush(self):
+                pass
+
+        stream = CallbackStream(callback)
+        with redirect_stdout(stream), redirect_stderr(stream):
+            try:
+                esptool.main(args)
+            except SystemExit as e:
+                if e.code != 0:
+                    raise RuntimeError("Flash failed")
+            except Exception as e:
+                raise RuntimeError(f"Flash error: {e}")
 
 class FirmwareManager:
     def __init__(self, cache_dir="firmware_cache"):
