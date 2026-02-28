@@ -144,14 +144,18 @@ void WebConsole::handlePostSettings() {
   next.input_control_paired_lora_enabled = parseBoolField(doc["input_control_paired_lora_enabled"], next.input_control_paired_lora_enabled);
   next.wifi_sta_ssid = doc["wifi_sta_ssid"] | next.wifi_sta_ssid.c_str();
   next.wifi_sta_password = doc["wifi_sta_password"] | next.wifi_sta_password.c_str();
-  const char *postedLanHost = doc["lan_hostname"] | next.lan_hostname.c_str();
-  const bool wasDefaultHostname = (prev.lan_hostname == oldDefaultHost) || (prev.lan_hostname == oldLegacyDefaultHost) ||
-                                  (prev.lan_hostname == oldLegacyRoleTxHost) || (prev.lan_hostname == oldLegacyRoleRxHost);
-  if (wasDefaultHostname && (oldDefaultHost.equals(postedLanHost) || oldLegacyDefaultHost.equals(postedLanHost) ||
-                             oldLegacyRoleTxHost.equals(postedLanHost) || oldLegacyRoleRxHost.equals(postedLanHost))) {
-    next.lan_hostname = config_->defaultLanHostnameForRole(next.role_tx);
-  } else {
-    next.lan_hostname = postedLanHost;
+  const bool hasLanHostnameField = !doc["lan_hostname"].isNull();
+  if (hasLanHostnameField) {
+    const char *postedLanHost = doc["lan_hostname"] | next.lan_hostname.c_str();
+    const bool wasDefaultHostname =
+        (prev.lan_hostname == oldDefaultHost) || (prev.lan_hostname == oldLegacyDefaultHost) ||
+        (prev.lan_hostname == oldLegacyRoleTxHost) || (prev.lan_hostname == oldLegacyRoleRxHost);
+    if (wasDefaultHostname && (oldDefaultHost.equals(postedLanHost) || oldLegacyDefaultHost.equals(postedLanHost) ||
+                               oldLegacyRoleTxHost.equals(postedLanHost) || oldLegacyRoleRxHost.equals(postedLanHost))) {
+      next.lan_hostname = config_->defaultLanHostnameForRole(next.role_tx);
+    } else {
+      next.lan_hostname = postedLanHost;
+    }
   }
   next.fleet_passphrase = doc["fleet_passphrase"] | next.fleet_passphrase.c_str();
   next.ap_always_on = parseBoolField(doc["ap_always_on"], next.ap_always_on);
