@@ -127,7 +127,8 @@ jobs:
             --repo warwickchapman/lora-rs-firmware \
             --title "$TITLE" \
             --notes-file release_notes.md \
-            --prerelease=${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+            --prerelease=${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }} \
+            --latest
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
