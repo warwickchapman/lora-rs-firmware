@@ -7,3 +7,9 @@
 __pycache__/
 .pycache_tmp/
 .DS_Store
+venv/
+tools/venv/
+tools/.venv/
+tools/flasher/venv/
+tools/flasher/firmware_cache/
+lrs-firmware-*.bin

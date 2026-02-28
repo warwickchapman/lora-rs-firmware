@@ -30,6 +30,19 @@ Direct `esptool` fallback:
 
 Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
 
+## Desktop Flasher App
+The repository now includes a desktop flasher utility at `/Users/warwick/Code/LoRa/lora_rs/tools/flasher` for installers who want a GUI workflow.
+
+What it does:
+- Detects available serial ports.
+- Reads chip identity and derives installer fields (`ssid`, admin/AP password, local/remote addresses).
+- Lists available firmware binaries from the public firmware release repository.
+- Supports local `.bin` override selection.
+- Flashes selected firmware via `esptool` and shows live operation logs.
+
+Main entrypoint:
+- `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/main.py`
+
 ## Start Here
 - User/operator quickstart: `/Users/warwick/Code/LoRa/lora_rs/docs/USER_GUIDE.md`
 - Developer onboarding and architecture: `/Users/warwick/Code/LoRa/lora_rs/docs/DEVELOPER_GUIDE.md`
