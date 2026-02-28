@@ -1,0 +1,69 @@
+name: Build LRS Flasher
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags (e.g., v1.0.0)
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            artifact_name: lrs-flasher-windows.exe
+            pyinstaller_args: --onefile --noconsole
+          - os: macos-latest
+            artifact_name: lrs-flasher-macos
+            pyinstaller_args: --onefile --noconsole
+          - os: ubuntu-latest
+            artifact_name: lrs-flasher-linux
+            pyinstaller_args: --onefile
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet pyserial esptool pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          cd tools/flasher
+          pyinstaller ${{ matrix.pyinstaller_args }} --collect-all flet --name ${{ matrix.artifact_name }} main.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-artifact
+          path: tools/flasher/dist/${{ matrix.artifact_name }}*
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-latest-artifact/*
+            macos-latest-artifact/*
+            ubuntu-latest-artifact/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
