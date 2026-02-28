@@ -2,7 +2,7 @@ name: Sync Firmware to Public Repo
 
 on:
   release:
-    types: [published]
+    types: [published, edited]
 
 jobs:
   sync:
@@ -14,12 +14,15 @@ jobs:
           fetch-depth: 0
 
       - name: Download Release Assets
+        id: download
         run: |
-          gh release download ${{ github.event.release.tag_name }} --pattern "*.bin" --dir assets
+          # Only fail if download truly fails, not if 0 files match pattern
+          gh release download ${{ github.event.release.tag_name }} --pattern "*.bin" --dir assets || echo "NO_ASSETS=true" >> $GITHUB_ENV
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to Public Repo
+        if: env.NO_ASSETS != 'true'
         uses: softprops/action-gh-release@v2
         with:
           repository: warwickchapman/lora-rs-firmware
