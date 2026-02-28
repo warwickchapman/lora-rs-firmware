@@ -22,9 +22,13 @@ jobs:
       - name: Download Release Assets
         id: download
         run: |
-          # Use release tag if available, otherwise trigger input tag
           TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          gh release download $TAG --pattern "*.bin" --dir assets || echo "NO_ASSETS=true" >> $GITHUB_ENV
+          gh release download $TAG --pattern "*.bin" --dir assets
+          # Check if assets directory is empty or contains no .bin files
+          if [ -z "$(ls -A assets 2>/dev/null)" ]; then
+            echo "No .bin assets found for tag $TAG"
+            echo "NO_ASSETS=true" >> $GITHUB_ENV
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
