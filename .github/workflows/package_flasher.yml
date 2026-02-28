@@ -94,8 +94,10 @@ jobs:
           
           # 2. Mirror All Release Assets to Public Repo
           cd ..
-          # Fetch notes from private repo
-          gh release view $TAG --repo warwickchapman/lora-rs --json body --jq '.body' > release_notes.md
+          # Fetch title and notes from private repo
+          gh release view $TAG --repo warwickchapman/lora-rs --json name,body > release_info.json
+          TITLE=$(jq -r '.name' release_info.json)
+          jq -r '.body' release_info.json > release_notes.md
           
           # Delete if exists and recreate public release with ALL assets (bins + flasher tools)
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
@@ -116,7 +118,7 @@ jobs:
           
           gh release create $TAG public_assets/* \
             --repo warwickchapman/lora-rs-firmware \
-            --title "$TAG" \
+            --title "$TITLE" \
             --notes-file release_notes.md \
             --prerelease=${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
         env:
