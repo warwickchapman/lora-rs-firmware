@@ -34,8 +34,16 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher
+          # Dynamically find esptool path to include stubs
+          ESPTOOL_DIR=$(python -c "import esptool, os; print(os.path.dirname(esptool.__file__))")
+          
+          # Set platform-specific separator for --add-data
+          SEP=":"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then SEP=";"; fi
+          
           # Use flet pack for better bundling of runtime components
-          flet pack main.py --name "thanda-lora-flasher" || flet pack main.py --name "thanda-lora-flasher"
+          # Include esptool targets (stubs) in the bundle
+          flet pack main.py --name "thanda-lora-flasher" --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" || flet pack main.py --name "thanda-lora-flasher"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
