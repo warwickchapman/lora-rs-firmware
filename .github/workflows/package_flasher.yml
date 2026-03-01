@@ -78,7 +78,7 @@ jobs:
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv "dist/Thanda LoRa Flasher.exe" "final_dist/Thanda LoRa Flasher.exe"
+            mv "dist/Thanda LoRa Flasher.exe" "final_dist/Thanda LoRa Flasher-x64.exe"
           elif [[ "${{ matrix.os }}" == macos-* ]]; then
             # Create DMG for macOS with Applications shortcut
             mkdir -p dmg_root
