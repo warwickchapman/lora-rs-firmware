@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-13, macos-14, ubuntu-latest]
 
     steps:
       - name: Checkout Code
@@ -77,13 +77,17 @@ jobs:
           mkdir -p final_dist
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             mv "dist/Thanda LoRa Flasher.exe" "final_dist/Thanda LoRa Flasher.exe"
-          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+          elif [[ "${{ matrix.os }}" == macos-* ]]; then
             # Create DMG for macOS with Applications shortcut
             mkdir -p dmg_root
             cp -r "dist/Thanda LoRa Flasher.app" dmg_root/
             ln -s /Applications dmg_root/Applications
             hdiutil create -volname "Thanda LoRa Flasher" -srcfolder dmg_root -ov -format UDZO "Thanda LoRa Flasher.dmg"
-            mv "Thanda LoRa Flasher.dmg" final_dist/
+            
+            # Add architecture suffix
+            ARCH="intel"
+            if [[ "${{ matrix.os }}" == "macos-14" ]]; then ARCH="silicon"; fi
+            mv "Thanda LoRa Flasher.dmg" "final_dist/Thanda LoRa Flasher-$ARCH.dmg"
           else
             mv "dist/Thanda LoRa Flasher" "final_dist/Thanda LoRa Flasher-linux"
           fi
@@ -114,7 +118,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: |
             windows-latest-artifact/*
-            macos-latest-artifact/*
+            macos-13-artifact/*
+            macos-14-artifact/*
             ubuntu-latest-artifact/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
