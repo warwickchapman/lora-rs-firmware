@@ -152,9 +152,21 @@ void WebConsole::handleLoginPage() {
   }
   markResponseStatus(200);
   setUiNoStoreHeaders();
-  if (!sendProgmemHtml(server_, 200, "text/html", kLoginHtml)) {
-    LRS_LOGW(WEB, "event=login_html_partial");
-  }
+
+  const String chipIdSlug = config_->defaultLanHostnameForRole(true);
+  const String metaTag =
+      String("<meta name=\"lrs-device-id\" content=\"") + chipIdSlug + "\">\n";
+
+  const size_t len1 = strlen_P(kLoginHtml_Part1);
+  const size_t len2 = strlen_P(kLoginHtml_Part2);
+  const size_t totalLen = len1 + metaTag.length() + len2;
+
+  server_.setContentLength(totalLen);
+  server_.send(200, "text/html", "");
+
+  server_.sendContent_P(kLoginHtml_Part1);
+  server_.sendContent(metaTag);
+  server_.sendContent_P(kLoginHtml_Part2);
 }
 
 void WebConsole::handleFleetSetupPage() {
