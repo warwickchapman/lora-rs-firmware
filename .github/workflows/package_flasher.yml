@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-13, macos-14, ubuntu-latest]
+        os: [windows-latest, macos-12, macos-14, ubuntu-latest]
 
     steps:
       - name: Checkout Code
@@ -127,7 +127,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: |
             windows-latest-artifact/*
-            macos-13-artifact/*
+            macos-12-artifact/*
             macos-14-artifact/*
             ubuntu-latest-artifact/*
         env:

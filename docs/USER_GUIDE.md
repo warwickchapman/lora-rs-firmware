@@ -61,9 +61,9 @@ Prerequisites:
 
 Use helper tool (recommended):
 - Windows:
-  - `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.4.2-alpha.bin`
+  - `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.4.3-alpha.bin`
 - macOS:
-  - `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.4.2-alpha.bin`
+  - `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.4.3-alpha.bin`
 
 What it prints:
 - `chip_id`
@@ -75,8 +75,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash image at `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.2-alpha.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.2-alpha.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
 
 ## OTA Update Test
 Prerequisites:

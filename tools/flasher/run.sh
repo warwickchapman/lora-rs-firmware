@@ -1,5 +1,5 @@
 #!/bin/bash
-# Thanda LoRa Flasher Launcher v0.4.2-alpha
+# Thanda LoRa Flasher Launcher v0.4.3-alpha
 
 # Get the absolute directory of the script
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -26,5 +26,5 @@ fi
 
 # Launch app
 export PYTHONPATH="$DIR/.."
-echo "Launching Thanda LoRa Flasher v0.4.2-alpha..."
+echo "Launching Thanda LoRa Flasher v0.4.3-alpha..."
 python3 main.py

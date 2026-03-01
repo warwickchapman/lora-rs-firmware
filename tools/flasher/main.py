@@ -404,7 +404,7 @@ def main(page: ft.Page):
                         ft.Text("Thanda LoRa Flasher", size=32, weight="bold")
                     ]
                 ),
-                ft.Text("Firmware Updater v0.4.2-alpha", size=18, color="secondary")
+                ft.Text("Firmware Updater v0.4.3-alpha", size=18, color="secondary")
             ]
         )
     )
