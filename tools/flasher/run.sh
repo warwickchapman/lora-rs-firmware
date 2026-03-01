@@ -5,10 +5,11 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
-# Check if venv exists, create if not
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment in $DIR/venv..."
-    python3 -m venv venv
+# Check if venv is valid, create/re-create if not
+if [ ! -f "venv/bin/activate" ]; then
+    echo "Virtual environment missing or broken. Initializing..."
+    rm -rf venv
+    python3 -m venv venv || { echo "ERROR: Failed to create venv. Is 'python3-venv' installed?"; exit 1; }
 fi
 
 # Activate venv

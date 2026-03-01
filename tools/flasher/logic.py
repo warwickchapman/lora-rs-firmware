@@ -10,7 +10,7 @@ import pathlib
 import json
 import io
 from contextlib import redirect_stdout, redirect_stderr
-import esptool
+# esptool is imported inside the class methods to avoid PyInstaller recursion loops on Linux
 
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 
@@ -64,6 +64,8 @@ class FlasherLogic:
         f = io.StringIO()
         with redirect_stdout(f), redirect_stderr(f):
             try:
+                # Import esptool here to avoid PyInstaller recursion loops
+                import esptool
                 # Use esptool's main entry point as a library
                 esptool.main(full_args)
                 return f.getvalue()
@@ -108,6 +110,7 @@ class FlasherLogic:
         stream = CallbackStream(callback)
         with redirect_stdout(stream), redirect_stderr(stream):
             try:
+                import esptool
                 esptool.main(args)
             except SystemExit as e:
                 if e.code != 0:
