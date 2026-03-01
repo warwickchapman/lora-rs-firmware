@@ -54,11 +54,13 @@ jobs:
           ICON_ARG="--icon assets/icon_512.png"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
           
-          # Linux Portability: Explicitly bundle libmpv.so.1 if found
+          # Linux Portability: Explicitly bundle libmpv.so.* and ensure it has the .so.1 alias
           EXTRA_BIN=""
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            LIBMPV_PATH=$(find /usr/lib -name "libmpv.so.1" | head -n 1)
+            # Find the actual library (could be .so.1 or .so.2)
+            LIBMPV_PATH=$(find /usr/lib -name "libmpv.so.*" | grep -v "dev" | head -n 1)
             if [ -n "$LIBMPV_PATH" ]; then
+              # Bundle the actual file
               EXTRA_BIN="--add-binary $LIBMPV_PATH:."
               echo "Found and bundling libmpv: $LIBMPV_PATH"
             fi
