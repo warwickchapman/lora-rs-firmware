@@ -404,7 +404,7 @@ def main(page: ft.Page):
                         ft.Text("Thanda LoRa Flasher", size=32, weight="bold")
                     ]
                 ),
-                ft.Text("Firmware Updater", size=18, color="secondary")
+                ft.Text("Firmware Updater v0.4.2-alpha", size=18, color="secondary")
             ]
         )
     )
@@ -437,7 +437,7 @@ def main(page: ft.Page):
                             border=ft.border.all(1, GLASS_BORDER),
                             border_radius=16,
                             content=ft.Column([
-                                ft.Text("Interface Controls", size=15, weight="bold", color=ft.Colors.GREY_100),
+                                ft.Text("Device Configuration", size=15, weight="bold", color=ft.Colors.GREY_100),
                                 ft.Row([region_dropdown], spacing=5),
                                 ft.Row([devices_dropdown, ft.IconButton(ft.Icons.REFRESH, on_click=refresh_ports, icon_size=18)], spacing=5),
                                 ft.Row([firmware_dropdown, ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=lambda _: refresh_firmwares(), icon_size=18, tooltip="Refresh Cloud")], spacing=5),
@@ -453,7 +453,7 @@ def main(page: ft.Page):
                             border_radius=16,
                             content=ft.Column([
                                 ft.Row([
-                                    ft.Text("Device Configuration", size=15, weight="bold", color=ft.Colors.BLUE_200, expand=True),
+                                    ft.Text("Device Details", size=15, weight="bold", color=ft.Colors.BLUE_200, expand=True),
                                     ft.IconButton(ft.Icons.COPY, icon_size=16, on_click=copy_all_device_info)
                                 ]),
                                 sticker_content

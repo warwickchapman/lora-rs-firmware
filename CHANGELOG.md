@@ -9,6 +9,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [0.4.2-alpha] - 2026-03-01
 
 ### Changed
+- **UI Refinements**: Added version number (`v0.4.2-alpha`) to the application subtitle.
+- **UI Labeling**: Renamed "Interface Controls" to "Device Configuration" and the bottom "Device Configuration" to "Device Details" for clearer section grouping.
 - **Documentation Alignment Pass**: Refreshed provisioning/automation/role references across manuals, including canonical `standalone|paired|mesh` roles and `input_control_paired_lora_enabled` naming.
 - **Automation Execution**: Rules now execute only when `execution_mode` is `standalone`.
 
