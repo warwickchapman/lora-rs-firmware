@@ -6,9 +6,12 @@ Firmware baseline: current state-machine firmware in this repository (`/Users/wa
 ## 1. Product Overview
 LRS extends a control signal over LoRa between identical ESP8266-based boards.
 
-- TX (Transmitter): reads local dry-contact input, sends LoRa control packets.
-- RX (Receiver): applies received state to onboard relay, returns ACK.
-- TX relay follows RX confirmation with a 500 ms intentional delay.
+Mode/role model:
+- `standalone` mode with role `none`
+- `paired` mode with roles `transmitter` / `receiver`
+- `mesh` mode with roles `coordinator` / `node`
+
+Operationally, TX/coordinator behavior and RX/node behavior are selected from the commissioned role.
 
 Primary use: reliable remote control signaling (generator start/stop interfaces, contactor coil control, remote dry-contact extension).
 
@@ -34,12 +37,12 @@ Important ESP8266 constraints:
 
 ## 3. Core Features
 - LoRa relay control with ACK/timeout behavior.
-- Configurable TX/RX role (same hardware).
+- Configurable commissioning mode/role on identical hardware (`standalone`, `paired`, `mesh`).
 - SoftAP + web configuration console (password protected).
 - LittleFS persistent settings.
 - Optional MQTT bridge (STA mode).
 - OTA support in STA mode.
-- Diagnostic log FIFO with CSV/text export.
+- Structured logs available through serial plus `GET /api/logs.csv` and `GET /api/logs.txt`.
 - DS18B20 support (local + remote telemetry over LoRa).
 
 ## 4. Networking and Access
@@ -60,20 +63,20 @@ Tabs:
 - MQTT
 - Sensors
 - Factory
-- Logs
 
 Minimum required settings:
-- Role (TX or RX)
+- Mode and role (mode-aware)
 - Local address
 - Remote address
 - LoRa Fleet Key (encryption passphrase)
 
 ## 6. Topologies
-- 1-to-1
-- 1-to-many (multiple RX share same local RX address)
-- many-to-1 (multiple TX share same source TX address)
+- `paired` mode: classic TX/RX behavior with heartbeat + ACK semantics.
+- `mesh` mode: coordinator/node role naming with the same underlying TX/RX branch behavior.
+- `standalone` mode: local-only role (`none`) for non-paired local operation.
+- Addressing still defines 1-to-1, 1-to-many, and many-to-1 layouts.
 
-Addressing defines topology; no special firmware mode is required.
+Addressing and mode/role together define effective behavior and control ownership.
 
 ## 7. Timing and Safety
 Current defaults:
@@ -105,7 +108,7 @@ Performance protections:
 
 TX LoRa input-control gate:
 - LoRa tab includes `Input drives LoRa relay control` when role is TX.
-- Enabled (default): TX input and heartbeat drive paired RX relay state.
+- Enabled: TX input and heartbeat drive paired RX relay state.
 - Disabled: TX input is still available for telemetry/status, but TX does not send input-driven LoRa relay changes.
 
 MQTT deployment note:
@@ -124,8 +127,8 @@ Planned (not yet implemented):
 - Additional I2C/analog sensor models
 
 ## 11. Compatibility Note
-Current LoRa payload format includes expanded sensor fields (8-byte encrypted payload).
-This is not wire-compatible with old 4-byte payload firmware.
+Current LoRa payload format is 12 encrypted bytes.
+This is not wire-compatible with older 8-byte or 4-byte payload firmware.
 Update paired TX/RX devices together.
 
 ## 12. Field Diagnostics
@@ -143,6 +146,7 @@ Logs:
 ## 13. Provisioning and Sticker Data
 Provisioning tooling:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py`
+- `/Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py`
 - `/Users/warwick/Code/LoRa/lora_rs/tools/post_upload_sticker.py`
 
 Factory metadata includes:

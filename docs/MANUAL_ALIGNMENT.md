@@ -24,9 +24,8 @@ Sources reviewed:
 ## Important Behavior Differences
 - AP SSID is now role-independent: `lrs-<chipid>`.
 - Default credentials and serial are deterministic, derived from chip ID + product secret.
-- Packet payload format has expanded (8-byte encrypted payload with sensor fields).
+- Packet payload format has expanded (12-byte encrypted payload with sensor/time fields).
 
 ## Hardware Constraint Notes Added
 - CN1 includes GPIO0/GPIO2/AIN but GPIO0/GPIO2 are strap/LED-linked pins.
 - ESP8266 analog path is limited; advanced multi-sensor analog support remains future work.
-

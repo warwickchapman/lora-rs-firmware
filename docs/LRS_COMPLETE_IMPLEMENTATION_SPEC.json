@@ -176,7 +176,7 @@
       {"name": "lora_coding_rate", "type": "uint8", "default": 5},
       {"name": "heartbeat_ms", "type": "uint32", "default": 60000, "constraints": "60000..3600000"},
       {"name": "ack_timeout_ms", "type": "uint32", "default": 5000, "constraints": "5000..600000"},
-      {"name": "tx_input_lora_control_enabled", "type": "bool", "default": true},
+      {"name": "input_control_paired_lora_enabled", "type": "bool", "default": false},
       {"name": "wifi_sta_ssid", "type": "string", "default": ""},
       {"name": "wifi_sta_password", "type": "string", "default": ""},
       {"name": "lan_hostname", "type": "string", "default": "lrs-<chipid>"},
@@ -366,10 +366,10 @@
         "debounce_ms": 50,
         "ack_echo_delay_ms": 500,
         "ack_retry_schedule_ms": [3000, 5000, 8000, 13000, 21000, 34000, 55000],
-        "input_transition_behavior": "On debounced input change and tx_input_lora_control_enabled=true, send Change with relay=input and input=input.",
-        "startup_sync_behavior": "On boot/applyConfig when tx_input_lora_control_enabled=true, send one Change sync if no command pending.",
+        "input_transition_behavior": "On debounced input change and input_control_paired_lora_enabled=true, send Change with relay=input and input=input.",
+        "startup_sync_behavior": "On boot/applyConfig when input_control_paired_lora_enabled=true, send one Change sync if no command pending.",
         "retry_behavior": "If command pending and retry deadline reached, resend Change with last pending states.",
-        "heartbeat_behavior": "Every heartbeat_ms send Heartbeat. heartbeat relay field = input_state if tx_input_lora_control_enabled else relay_state.",
+        "heartbeat_behavior": "Every heartbeat_ms send Heartbeat. heartbeat relay field = input_state if input_control_paired_lora_enabled else relay_state.",
         "ack_timeout_behavior": "If in wait_ack and elapsed >= ack_timeout_ms, force local relay OFF and enter timeout.",
         "ack_receive_behavior": "On Ack from remote peer: schedule local relay apply after 500ms, clear pending retries, enter idle."
       },
@@ -756,8 +756,8 @@
       "src/web_console.cpp"
     ],
     "logs": [
-      "src/log_buffer.h",
-      "src/log_buffer.cpp"
+      "src/logger.h",
+      "src/logger.cpp"
     ],
     "build_and_factory_tooling": [
       "platformio.ini",

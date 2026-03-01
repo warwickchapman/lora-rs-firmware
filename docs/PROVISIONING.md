@@ -4,14 +4,21 @@
 - Flash firmware for target region.
 - Capture deterministic device metadata for sticker/traceability.
 - Ensure first field login is predictable.
+- Commission mode/role and fleet key correctly on first login.
 
 ## Tooling
 Factory script:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py`
 
+API-first provisioning helper:
+- `/Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py`
+
 Example:
 - `python3 /Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py --port /dev/cu.usbserial-XXXX --env lrs_za --flash --csv factory_sticker.csv`
 - Optional: generate deployment key per batch automatically by passing `--batch-id <YYMMDD>` (or explicit `--deployment-key <value>`).
+
+Example (API-first coordinator workflow):
+- `python3 /Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py run --host 192.168.4.1 --admin-password <pwd> --fleet-key <key> --role tx --local-address 1 --remote-address 2`
 
 ## What the Script Produces
 A CSV row with:
@@ -37,6 +44,17 @@ A CSV row with:
 - AP SSID: `lrs-<chipid>` (role-independent so TX/RX changes do not force AP SSID changes)
 - Deployment key: generated as readable three-word key per batch run unless explicitly provided
 
+## Commissioning Modes and Roles
+Commissioning enforces canonical mode/role pairs:
+- `standalone` mode -> role `none`
+- `paired` mode -> roles `transmitter` / `receiver`
+- `mesh` mode -> roles `coordinator` / `node`
+
+Notes:
+- Runtime still uses `role_tx` internally (`true` = transmitter/coordinator behavior, `false` = receiver/node behavior).
+- `input_control_paired_lora_enabled` is valid only for paired TX.
+- Current LoRa provisioning apply path configures `mode=paired` with role `transmitter` or `receiver`.
+
 ## Pair Provisioning (Current Manual)
 For a TX/RX pair:
 1. Provision device A as TX.
@@ -46,6 +64,18 @@ For a TX/RX pair:
 - RX local=`B`, remote=`A`
 4. Set identical fleet passphrase and radio parameters.
 5. Validate ACK behavior and relay mirror.
+
+## Fleet Provisioning APIs (Coordinator/TX)
+Provisioning endpoints in current firmware:
+- `POST /api/provisioning/start`
+- `GET /api/provisioning/status`
+- `POST /api/provisioning/provision-all`
+- `POST /api/provisioning/cancel`
+- `POST /api/network/provision-fleet` (broadcast STA WiFi credentials over LoRa)
+
+CLI mirrors:
+- `run`, `status`, `cancel`
+- `udp-log-start`, `udp-log-stop` (temporary UDP log mirror while provisioning/debugging)
 
 ## Planned Improvement
 Add explicit pair mode in factory script:

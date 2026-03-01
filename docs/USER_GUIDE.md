@@ -125,6 +125,7 @@ Control authority is enforced as follows:
 - If `Local input drives LoRa control of paired relay` is enabled on paired TX, local automation and MQTT relay writes are blocked on that TX.
 - RX slave mode (set by paired TX over LoRa flags) blocks manual/API, MQTT, automation writes, and LoRa control writes from peers other than the paired TX address.
 - If `MQTT control enabled` is active, local automations are disabled.
+- Automations execute only when rules `execution_mode` is `standalone`.
 - MQTT-over-LoRa control from shared-fleet peers is accepted only from addresses listed in `MQTT controller addresses`.
 
 Per-device topics:

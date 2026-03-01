@@ -1,7 +1,7 @@
 # Developer Guide
 
 ## 1. Scope
-Current production firmware for ESP8266 LRS devices (TX/RX on identical hardware), including:
+Current production firmware for ESP8266 LRS devices (identical hardware; mode/role selected in commissioning), including:
 - LoRa relay control and ACK logic
 - Web configuration console
 - MQTT bridge
@@ -27,7 +27,7 @@ Commands:
 - `src/mqtt_bridge.*`: MQTT publish/subscribe bridge
 - `src/sensor_manager.*`: DS18B20 detection/reads
 - `src/web_console.*`: embedded UI + REST endpoints
-- `src/log_buffer.*`: FIFO logs, CSV/text export
+- `src/logger.*`: structured serial logs + optional UDP mirror
 
 ## 4. Critical Defaults
 - AP SSID: `lrs-<chipid>`
@@ -36,6 +36,12 @@ Commands:
 - ACK timeout default: 5 s
 - DS18B20 default pin: GPIO0
 - MQTT host default: `venus.local`
+
+Mode/role mapping:
+- `standalone` mode: role `none`
+- `paired` mode: role `transmitter` or `receiver`
+- `mesh` mode: role `coordinator` or `node`
+- Runtime behavior still branches on `role_tx` (`true` => TX/coordinator path, `false` => RX/node path).
 
 ## 5. Tick Order and Performance
 In `App::tick`:
@@ -59,21 +65,41 @@ This ordering keeps LoRa control priority above MQTT.
 
 ## 7. Web API
 - `GET /`
-- `GET /api/fleet`
+- `GET /setup`
+- `POST /api/login`
+- `POST /api/logout`
+- `POST /api/setup/fleet-key`
+- `POST /api/setup/commissioning`
+- `GET /api/status-live`
 - `GET /api/status-live/events` (SSE)
+- `GET /api/status-static`
+- `GET /api/status-lite`
+- `GET /api/fleet`
+- `POST /api/fleet/scan`
 - `POST /api/fleet/:addr/actions/poll-now`
 - `POST /api/fleet/:addr/actions/forget`
 - `POST /api/fleet/:addr/actions/poll-interval`
 - `POST /api/fleet/:addr/actions/schedule`
-- `GET /api/status-lite`
-- `GET /api/status-static`
-- `GET /api/status-live`
+- `GET /api/automation-rules` (`LRS_ENABLE_AUTOMATIONS`)
+- `POST /api/automation-rules` (`LRS_ENABLE_AUTOMATIONS`)
 - `GET /api/settings`
 - `POST /api/settings`
+- `GET /api/settings/export`
+- `POST /api/settings/import`
 - `GET /api/factory`
 - `GET /api/wifi/scan`
+- `POST /api/network/test`
+- `POST /api/network/provision-fleet`
+- `POST /api/provisioning/start`
+- `GET /api/provisioning/status`
+- `POST /api/provisioning/provision-all`
+- `POST /api/provisioning/cancel`
+- `POST /api/mqtt/test`
+- `POST /api/logging/udp`
+- `POST /api/ota`
 - `GET /api/logs.csv`
 - `GET /api/logs.txt`
+- `POST /api/system/factory-reset`
 - `POST /api/reboot`
 
 ## 8. Packet and Compatibility
@@ -116,8 +142,8 @@ Subscribed control topics:
   - `<root>/lrs-<tx_chipid>/peer/0xNN/forget` (payload `1` removes runtime node and clears retained peer subtree topics)
 
 TX input-to-LoRa control gate:
-- Setting: `tx_input_lora_control_enabled` (LoRa tab).
-- `true` (default): TX input transitions send `Change`; heartbeat relay field follows TX input state.
+- Setting: `input_control_paired_lora_enabled` (LoRa tab).
+- `true`: TX input transitions send `Change`; heartbeat relay field follows TX input state.
 - `false`: TX still reports local input status, but does not send paired input-driven `Change`/`Heartbeat`; MQTT remote control remains active.
 - MQTT deployments should avoid targeting RX nodes at the TX-paired `remote_address` unless this gate is `false`.
 

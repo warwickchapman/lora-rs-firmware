@@ -37,7 +37,7 @@ This document describes the current reimplementation scope and guardrails for th
 ## Runtime Guardrails (v1 path)
 
 - `execution_mode` must be `standalone` for runtime to proceed
-- TX units are blocked only when `tx_input_lora_control_enabled=true`
+- TX units are blocked when `input_control_paired_lora_enabled=true`
 - No JSON parsing occurs in the runtime tick path
 - Rule compilation/reload happens outside the hot state machine path
 
