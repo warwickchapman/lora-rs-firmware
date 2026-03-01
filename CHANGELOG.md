@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.4.2-alpha] - 2026-03-01
+
+### Changed
+- **Documentation Alignment Pass**: Refreshed provisioning/automation/role references across manuals, including canonical `standalone|paired|mesh` roles and `input_control_paired_lora_enabled` naming.
+- **Automation Execution**: Rules now execute only when `execution_mode` is `standalone`.
+
 ## [0.4.1-alpha] - 2026-03-01
 
 ### Added
