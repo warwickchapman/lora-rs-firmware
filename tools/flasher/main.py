@@ -14,8 +14,24 @@ if __name__ == "__main__":
 import flet as ft
 import logic
 import threading
+try:
+    import grp
+    import getpass
+except ImportError:
+    grp = None
+    getpass = None
 
 # --- Logic and Constants ---
+def check_linux_permissions():
+    """Check if the current Linux user is in the 'dialout' group."""
+    if platform.system() != "Linux":
+        return True
+    try:
+        user = getpass.getuser()
+        groups = [g.gr_name for g in grp.getgrall() if user in g.gr_mem]
+        return "dialout" in groups or os.geteuid() == 0
+    except:
+        return True # Fallback to true to not block if grp is weird
 def get_asset_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller bundle"""
     try:
@@ -137,6 +153,10 @@ def main(page: ft.Page):
         page.update()
 
     def refresh_firmwares():
+        if platform.system() == "Linux" and not check_linux_permissions():
+             show_permission_dialog()
+             return
+
         log("Fetching releases from GitHub...")
         nonlocal available_firmwares
         available_firmwares = firmware_manager_global.get_available_firmwares()
@@ -228,7 +248,35 @@ def main(page: ft.Page):
     page.window.icon = get_asset_path("assets/icon_128.png")
     page.window.maximized = True
     
-    # --- UI Generators ---
+    def show_permission_dialog():
+        def close_and_exit(e):
+            page.window.destroy()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Linux Permissions Required", color=ft.Colors.RED_400),
+            content=ft.Column([
+                ft.Text("To access serial ports, your user must be in the 'dialout' group."),
+                ft.Container(
+                    content=ft.Text("sudo usermod -a -G dialout $USER", 
+                                  font_family="monospace", size=12, weight="bold"),
+                    padding=10, bgcolor="rgba(255, 255, 255, 0.05)", border_radius=5
+                ),
+                ft.Text("Important: You must Log Out and Log Back In after running this command for it to take effect.", 
+                        size=11, italic=True, color=ft.Colors.GREY_400)
+            ], tight=True, spacing=15),
+            actions=[
+                ft.TextButton("Exit Application", on_click=close_and_exit),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.overlay.append(dialog)
+        dialog.open = True
+        page.update()
+
+    if platform.system() == "Linux" and not check_linux_permissions():
+        # Delay slightly to ensure page is ready
+        threading.Timer(0.5, show_permission_dialog).start()
     def show_sticker(info):
         nonlocal current_device_info
         current_device_info = info

@@ -1,5 +1,5 @@
 #!/bin/bash
-# LRS Flasher Launcher v3.5
+# Thanda LoRa Flasher Launcher v0.4.1-alpha
 
 # Get the absolute directory of the script
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
