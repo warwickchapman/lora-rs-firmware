@@ -29,6 +29,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install flet pyinstaller Pillow
           pip install -r tools/flasher/requirements.txt
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libmpv-dev
+          fi
 
       - name: Generate Icons
         shell: bash
@@ -50,13 +54,24 @@ jobs:
           ICON_ARG="--icon assets/icon_512.png"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
           
+          # Linux Portability: Explicitly bundle libmpv.so.1 if found
+          EXTRA_BIN=""
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            LIBMPV_PATH=$(find /usr/lib -name "libmpv.so.1" | head -n 1)
+            if [ -n "$LIBMPV_PATH" ]; then
+              EXTRA_BIN="--add-binary $LIBMPV_PATH:."
+              echo "Found and bundling libmpv: $LIBMPV_PATH"
+            fi
+          fi
+
           # Use flet pack for better bundling of runtime components
           # Include esptool targets (stubs) and application assets (logo)
           flet pack main.py --name "Thanda LoRa Flasher" \
             $ICON_ARG \
+            $EXTRA_BIN \
             --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
             --add-data "assets${SEP}assets" \
-            || flet pack main.py --name "Thanda LoRa Flasher"
+            || flet pack main.py --name "Thanda LoRa Flasher" --add-data "assets${SEP}assets"
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist
