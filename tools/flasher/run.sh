@@ -26,5 +26,5 @@ fi
 
 # Launch app
 export PYTHONPATH="$DIR/.."
-echo "Launching LRS Flasher v3.8..."
+echo "Launching Thanda LoRa Flasher v0.4.1-alpha..."
 python3 main.py

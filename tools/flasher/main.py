@@ -265,11 +265,20 @@ def main(page: ft.Page):
             title=ft.Text("Linux Permissions Required", color=ft.Colors.RED_400),
             content=ft.Column([
                 ft.Text("To access serial ports, your user must have 'dialout' permissions."),
-                ft.Container(
-                    content=ft.Text("sudo usermod -a -G dialout $USER", 
-                                  font_family="monospace", size=12, weight="bold"),
-                    padding=10, bgcolor="rgba(255, 255, 255, 0.05)", border_radius=5
-                ),
+                ft.Row([
+                    ft.Container(
+                        content=ft.Text("sudo usermod -a -G dialout $USER", 
+                                      font_family="monospace", size=12, weight="bold"),
+                        padding=10, bgcolor="rgba(255, 255, 255, 0.05)", border_radius=5,
+                        expand=True
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.COPY_ROUNDED,
+                        icon_size=20,
+                        tooltip="Copy command",
+                        on_click=lambda _: page.set_clipboard("sudo usermod -a -G dialout $USER")
+                    ),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Text("CRITICAL: You MUST restart your computer or Log Out and Log Back In for this change to take effect.", 
                         size=12, weight="bold", color=ft.Colors.ORANGE_300),
                 ft.Text("If you just ran the command, the app will still see 'Permission Denied' until you re-login.", 
