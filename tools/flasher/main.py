@@ -23,15 +23,23 @@ except ImportError:
 
 # --- Logic and Constants ---
 def check_linux_permissions():
-    """Check if the current Linux user is in the 'dialout' group."""
+    """Check if the current process actually has dialout permissions."""
     if platform.system() != "Linux":
         return True
     try:
-        user = getpass.getuser()
-        groups = [g.gr_name for g in grp.getgrall() if user in g.gr_mem]
-        return "dialout" in groups or os.geteuid() == 0
-    except:
-        return True # Fallback to true to not block if grp is weird
+        # Check if we are root
+        if os.geteuid() == 0:
+            return True
+            
+        # Get the ID for dialout
+        dialout_gid = grp.getgrnam("dialout").gr_gid
+        # Get the groups the CURRENT process belongs to
+        effective_groups = os.getgroups()
+        
+        return dialout_gid in effective_groups
+    except Exception as e:
+        # If group doesn't exist or other error, don't block
+        return True
 def get_asset_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller bundle"""
     try:
@@ -256,14 +264,16 @@ def main(page: ft.Page):
             modal=True,
             title=ft.Text("Linux Permissions Required", color=ft.Colors.RED_400),
             content=ft.Column([
-                ft.Text("To access serial ports, your user must be in the 'dialout' group."),
+                ft.Text("To access serial ports, your user must have 'dialout' permissions."),
                 ft.Container(
                     content=ft.Text("sudo usermod -a -G dialout $USER", 
                                   font_family="monospace", size=12, weight="bold"),
                     padding=10, bgcolor="rgba(255, 255, 255, 0.05)", border_radius=5
                 ),
-                ft.Text("Important: You must Log Out and Log Back In after running this command for it to take effect.", 
-                        size=11, italic=True, color=ft.Colors.GREY_400)
+                ft.Text("CRITICAL: You MUST restart your computer or Log Out and Log Back In for this change to take effect.", 
+                        size=12, weight="bold", color=ft.Colors.ORANGE_300),
+                ft.Text("If you just ran the command, the app will still see 'Permission Denied' until you re-login.", 
+                        size=11, color=ft.Colors.GREY_400)
             ], tight=True, spacing=15),
             actions=[
                 ft.TextButton("Exit Application", on_click=close_and_exit),
