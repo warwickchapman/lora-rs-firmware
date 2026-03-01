@@ -28,6 +28,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install flet pyinstaller Pillow
+          if [[ "${{ matrix.os }}" == macos-* ]]; then
+            pip install pyobjc
+          fi
           pip install -r tools/flasher/requirements.txt
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             sudo apt-get update
@@ -72,8 +75,12 @@ jobs:
             $ICON_ARG \
             $EXTRA_BIN \
             --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
-            --add-data "assets${SEP}assets" \
-            || flet pack main.py --name "Thanda LoRa Flasher" --add-data "assets${SEP}assets"
+            --add-data "assets${SEP}assets"
+          
+          # Verification step: ensure the build output exists
+          if [ "${{ matrix.os }}" = "windows-latest" ] && [ ! -f "dist/Thanda LoRa Flasher.exe" ]; then echo "ERROR: EXE not found"; exit 1; fi
+          if [[ "${{ matrix.os }}" == macos-* ]] && [ ! -d "dist/Thanda LoRa Flasher.app" ]; then echo "ERROR: APP bundle not found"; exit 1; fi
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]] && [ ! -f "dist/Thanda LoRa Flasher" ]; then echo "ERROR: Linux binary not found"; exit 1; fi
           
           # Move to a predictable name for the artifact upload
           mkdir -p final_dist

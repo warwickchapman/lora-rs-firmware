@@ -1,10 +1,11 @@
-# LoRa Remote Switch (LRS) Firmware
+# Thanda LoRa Remote Switch (LRS) Firmware
 
-This repository contains ESP8266 firmware for paired LoRa relay control devices.
+This repository contains ESP8266 firmware for LoRa relay control devices with mode-aware role semantics.
 
-Both hardware units are identical. Behavior is selected by configuration:
-- `TX` unit: reads digital input and transmits state.
-- `RX` unit: receives state and drives relay output.
+Both hardware units are identical. Behavior is selected by commissioning mode/role:
+- `Standalone` mode: role `none` (local-only control, no paired LoRa role split)
+- `Paired` mode: roles `transmitter` and `receiver`
+- `Mesh` mode: roles `coordinator` and `node`
 
 The codebase has been rebuilt as a modular state-machine firmware with a protected web console, LittleFS settings, OTA support, and factory metadata generation.
 
@@ -12,8 +13,8 @@ The codebase has been rebuilt as a modular state-machine firmware with a protect
 For shipped release `.bin` files, use `esptool` and the included helper:
 
 - Helper script (recommended):
-  - Windows: `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.2.2-alpha.bin`
-  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.2.2-alpha.bin`
+  - Windows: `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.4.1-alpha.bin`
+  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.4.1-alpha.bin`
 
 The helper reads chip ID, flashes firmware, and prints:
 - SoftAP SSID: `lrs-<chipid>`
@@ -25,8 +26,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash at address `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.2-alpha.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.2.2-alpha.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.1-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.1-alpha.bin`
 
 Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
 
@@ -36,9 +37,10 @@ The repository now includes a desktop flasher utility at `/Users/warwick/Code/Lo
 What it does:
 - Detects available serial ports.
 - Reads chip identity and derives installer fields (`ssid`, admin/AP password, local/remote addresses).
-- Lists available firmware binaries from the public firmware release repository.
+- Lists available firmware binaries from the public firmware release repository ([lora-rs-firmware](https://github.com/warwickchapman/lora-rs-firmware)).
 - Supports local `.bin` override selection.
 - Flashes selected firmware via `esptool` and shows live operation logs.
+- **Linux Users**: Ensure you are in the `dialout` group (`sudo usermod -a -G dialout $USER`) and log out/in.
 
 Main entrypoint:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/main.py`

@@ -6,6 +6,26 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.4.1-alpha] - 2026-03-01
+
+### Added
+- **Thanda Branding**: Integrated official "Thanda" logo and lightning bolt iconography across UI, icons, and bundles.
+- **Multi-Architecture macOS Support**: Automated CI builds for both Intel (x86_64) and Apple Silicon (arm64) using dedicated DMGs.
+- **Linux Portability**: Bundled `libmpv` directly into the Linux binary for out-of-the-box compatibility on Ubuntu 25.10+ and others.
+- **Linux Permissions Guard**: Added a startup check for `dialout` group membership with a guided "Copy Command" fix UI.
+- **Desktop Flasher UI Polish**: Removed redundant headers, implemented glassmorphism aesthetics, and enabled maximized startup.
+
+### Fixed
+- **PyInstaller Recursion Loop**: Resolved a critical `RecursionError` on Linux by delaying `esptool` imports.
+- **Environment Hardening**: Updated `run.sh` to automatically detect and repair broken virtual environments.
+- **Logo Transparency**: Fixed "fake transparency" artifacts by converting background colors to true alpha channels.
+
+### Security
+- **Source Code Protection**: Modified CI/CD to prevent proprietary password generation logic from syncing to public repositories.
+
+## [0.4.0-alpha] - 2026-02-28
+- Integrated initial Thanda branding and Desktop Flasher v1.0 features.
+
 ### Added
 - API-first provisioning helper CLI: `tools/lrs_provisioning_cli.py` for logging into a coordinator, applying local settings (role/addresses/WiFi), running LoRa provisioning discovery + provision-all, and optionally broadcasting fleet WiFi credentials without relying on the embedded web UI.
 - Example provisioning profile file: `tools/lrs_provisioning_profile.example.json`.
