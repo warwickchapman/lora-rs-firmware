@@ -61,6 +61,7 @@ jobs:
           export LRS_VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION = '${LRS_VERSION}'" > version.py
           export CODESIGN_IDENTITY="-"
+          ESPTOOL_DIR=$(python -c "import esptool, os; print(os.path.dirname(esptool.__file__))")
 
           ICON_ARG="--icon assets/icon_512.png"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
@@ -97,8 +98,7 @@ jobs:
           flet pack main.py --name "Thanda LoRa Flasher" \
             $ICON_ARG \
             $EXTRA_BIN \
-            --hidden-import esptool \
-            --collect-all esptool \
+            --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
             --add-data "../../VERSION${SEP}VERSION" \
             --add-data "assets${SEP}assets"
           
