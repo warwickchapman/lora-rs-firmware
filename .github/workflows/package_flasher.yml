@@ -22,9 +22,7 @@ jobs:
         if: startsWith(matrix.os, 'macos-')
         run: |
           sudo rm -rf /Applications/Xcode*
-          sudo rm -rf /Library/Developer/CommandLineTools
           sudo rm -rf /Users/runner/Library/Android
-          sudo rm -rf /opt/homebrew
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -95,7 +93,6 @@ jobs:
           flet pack main.py --name "Thanda LoRa Flasher" \
             $ICON_ARG \
             $EXTRA_BIN \
-            --codesign-identity "" \
             --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
             --add-data "../../VERSION${SEP}VERSION" \
             --add-data "assets${SEP}assets"
