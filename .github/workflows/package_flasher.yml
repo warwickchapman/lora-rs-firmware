@@ -22,7 +22,11 @@ jobs:
         if: startsWith(matrix.os, 'macos-')
         run: |
           sudo rm -rf /Applications/Xcode*
+          sudo rm -rf /Library/Developer/CoreSimulator
           sudo rm -rf /Users/runner/Library/Android
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /Users/runner/Library/Caches/Homebrew
 
       - name: Set up Python
         uses: actions/setup-python@v5
