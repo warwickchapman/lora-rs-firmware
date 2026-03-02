@@ -82,6 +82,12 @@ jobs:
     needs: [build-frontend, setup]
     runs-on: ${{ matrix.os }}
     continue-on-error: true
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
@@ -148,7 +154,7 @@ jobs:
           chmod +x bin/esptool*
 
       - name: Install Apple Certificate
-        if: startsWith(matrix.os, 'macos') && secrets.APPLE_CERTIFICATE != ''
+        if: startsWith(matrix.os, 'macos') && env.APPLE_CERTIFICATE != ''
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
@@ -158,7 +164,10 @@ jobs:
         run: |
           cd tools/flasher
           npm install
-          npm run tauri build -- --target ${{ matrix.platform == 'macos-arm64' && 'aarch64-apple-darwin' || matrix.platform == 'macos-x86_64' && 'x86_64-apple-darwin' || '' }}
+          TARGET_ARGS=""
+          if [[ "${{ matrix.platform }}" == "macos-arm64" ]]; then TARGET_ARGS="--target aarch64-apple-darwin"; fi
+          if [[ "${{ matrix.platform }}" == "macos-x86_64" ]]; then TARGET_ARGS="--target x86_64-apple-darwin"; fi
+          npm run tauri build -- $TARGET_ARGS
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
