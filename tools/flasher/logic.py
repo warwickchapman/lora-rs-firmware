@@ -55,6 +55,7 @@ def parse_mac(output: str) -> str:
         raise RuntimeError("Unable to parse MAC from esptool output")
     return match.group(1).lower()
 
+class FlasherLogic:
     def _get_esptool_path(self):
         """Determine the path to the bundled or system esptool binary."""
         # 1. Check for bundled binary in _MEIPASS (PyInstaller)
