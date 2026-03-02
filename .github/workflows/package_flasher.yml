@@ -32,6 +32,7 @@ jobs:
     name: Build for ${{ matrix.platform }}
     needs: build-frontend
     runs-on: ${{ matrix.os }}
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -39,9 +40,9 @@ jobs:
           - platform: windows-x64
             os: windows-latest
           - platform: macos-arm64
-            os: macos-14
+            os: macos-latest
           - platform: macos-x86_64
-            os: macos-13
+            os: macos-latest
           - platform: linux-x64
             os: ubuntu-22.04
 
@@ -85,15 +86,15 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher/src-tauri
-          mkdir -p bin
+          mkdir -p bin bin_tmp
           VERSION_ESP="v4.8.1"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip
             unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool.exe bin/esptool-x86_64-pc-windows-msvc.exe && rm -rf bin_tmp esptool.zip
-          elif [[ "${{ matrix.os }}" == "macos-14" ]]; then
+          elif [[ "${{ matrix.platform }}" == "macos-arm64" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
             unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/esptool-aarch64-apple-darwin && rm -rf bin_tmp esptool.zip
-          elif [[ "${{ matrix.os }}" == "macos-13" ]]; then
+          elif [[ "${{ matrix.platform }}" == "macos-x86_64" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
             unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/esptool-x86_64-apple-darwin && rm -rf bin_tmp esptool.zip
           else
@@ -101,6 +102,13 @@ jobs:
             tar -xzf esptool.tar.gz -C bin_tmp && mv bin_tmp/*/esptool bin/esptool-x86_64-unknown-linux-gnu && rm -rf bin_tmp esptool.tar.gz
           fi
           chmod +x bin/esptool*
+
+      - name: Install Apple Certificate
+        if: startsWith(matrix.os, 'macos')
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
       - name: Build Tauri App
         run: |
@@ -177,9 +185,12 @@ jobs:
       - name: Collect Assets
         run: |
           mkdir all_assets
-          # Download firmware binaries built during build jobs (Need to upload them too)
-          # Actually, I'll just gather them from the build artifacts
-          cp flasher-*/thanda-lora-flasher-* all_assets/
+          # Collect successfully built flasher binaries
+          shopt -s nullglob
+          for f in flasher-*/thanda-lora-flasher-*; do
+            cp "$f" all_assets/
+          done
+          shopt -u nullglob
 
       - name: Build Firmware for Release
         shell: bash
@@ -187,16 +198,36 @@ jobs:
           pip install platformio
           pio run -e lrs_za -e lrs_us
           VERSION=${GITHUB_REF_NAME#v}
-          cp .pio/build/lrs_za/firmware.bin "all_assets/lrs-firmware-${VERSION}-za.bin"
-          cp .pio/build/lrs_us/firmware.bin "all_assets/lrs-firmware-${VERSION}-us.bin"
+          ZA_BIN=".pio/build/lrs_za/firmware.bin"
+          US_BIN=".pio/build/lrs_us/firmware.bin"
+          
+          # Copy binaries
+          cp "$ZA_BIN" "all_assets/lrs-firmware-${VERSION}-za.bin"
+          cp "$US_BIN" "all_assets/lrs-firmware-${VERSION}-us.bin"
+          
+          # Generate Checksums
+          echo "### SHA256 Checksums" >> $GITHUB_STEP_SUMMARY
+          echo "| File | SHA256 |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          
+          ZA_HASH=$(shasum -a 256 "$ZA_BIN" | cut -d ' ' -f 1)
+          US_HASH=$(shasum -a 256 "$US_BIN" | cut -d ' ' -f 1)
+          
+          echo "| lrs-firmware-${VERSION}-za.bin | $ZA_HASH |" >> $GITHUB_STEP_SUMMARY
+          echo "| lrs-firmware-${VERSION}-us.bin | $US_HASH |" >> $GITHUB_STEP_SUMMARY
+          
+          # Store hashes for release body
+          echo "ZA_HASH=$ZA_HASH" >> $GITHUB_ENV
+          echo "US_HASH=$US_HASH" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }} Creation
           files: all_assets/*
           body: |
-            ## Thanda LoRa v0.5.0-alpha
+            ## Thanda LoRa v0.5.0-alpha Creation
             
             ### Native Flasher (Tauri)
             The flasher has been completely rebuilt as a native application for professional performance and stability.
@@ -204,11 +235,19 @@ jobs:
             **Legacy Note**: The Python/Flet-based flasher is now **DEPRECATED** and no longer included in releases.
             
             ### Changes
-            - ⚡️ New high-performance native core.
+            - ⚡️ New high-performance native core (Tauri/Vue.js).
             - 🔍 Dedicated Activity Log with real-time progress.
             - 🖥 Immersive Monitor Mode.
             - 🔄 Auto-Monitor after successful flash.
             - 🪄 Polished Glassmorphism aesthetics.
+            - 📂 Native System File Pickers.
+            
+            ### Firmware Checksums
+            - **ZA Region**: `${{ env.ZA_HASH }}`
+            - **US Region**: `${{ env.US_HASH }}`
+            
+            > "Imagination is the beginning of creation. You imagine what you desire, you will what you imagine, and at last, you create what you will."
+            > — **George Bernard Shaw**
             
             Please download the appropriate version for your operating system below.
         env:
@@ -217,14 +256,22 @@ jobs:
       - name: Mirror Release Assets to Public Hub
         run: |
           TAG=${{ github.ref_name }}
-          gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json
-          TITLE=$(jq -r '.name' release_info.json)
-          IS_PRE=$(jq -r '.isPrerelease' release_info.json)
+          # Check if assets exist before creating release
+          if [ -z "$(ls -A all_assets)" ]; then
+            echo "No assets to mirror, skipping."
+            exit 0
+          fi
+
+          gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json || true
+          TITLE=$(jq -r '.name // empty' release_info.json)
+          IS_PRE=$(jq -r '.isPrerelease // "false"' release_info.json)
+          
+          [ -z "$TITLE" ] && TITLE="$TAG Creation"
           
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
           mkdir public_assets
-          cp all_assets/* public_assets/
+          cp all_assets/* public_assets/ || true
           
           # Clone ZA firmware for EU region
           cd public_assets
