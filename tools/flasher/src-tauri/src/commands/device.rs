@@ -1,0 +1,113 @@
+use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use tauri_plugin_shell::ShellExt;
+use sha2::{Sha256, Digest};
+use chrono::prelude::*;
+
+const PRODUCT_SECRET: &str = "LRS-v1-rotate-this-secret";
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct DeviceInfo {
+    pub chip_id: String,
+    pub mac: String,
+    pub serial: String,
+    pub password: String,
+    pub local_addr: u8,
+    pub remote_addr: u8,
+    pub ssid: String,
+}
+
+#[tauri::command]
+pub async fn get_device_info(app: AppHandle, port: String) -> Result<DeviceInfo, String> {
+    let shell = app.shell();
+    
+    // 1. Get Chip ID
+    let sidecar = shell.sidecar("esptool")
+        .map_err(|e| format!("Failed to find sidecar: {}", e))?;
+    
+    let output = sidecar
+        .args(["--port", &port, "chip_id"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to execute esptool: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{}\n{}", stdout, stderr);
+    
+    let chip_id = parse_chip_id(&combined)?;
+
+    // 2. Get MAC
+    let sidecar_mac = shell.sidecar("esptool")
+        .map_err(|e| format!("Failed to find sidecar: {}", e))?;
+    
+    let output_mac = sidecar_mac
+        .args(["--port", &port, "read_mac"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to execute esptool: {}", e))?;
+
+    let stdout_mac = String::from_utf8_lossy(&output_mac.stdout).to_string();
+    let stderr_mac = String::from_utf8_lossy(&output_mac.stderr).to_string();
+    let combined_mac = format!("{}\n{}", stdout_mac, stderr_mac);
+    
+    let mac = parse_mac(&combined_mac)?;
+
+    // 3. Derive Info
+    let (local_addr, remote_addr) = derive_addresses(&chip_id);
+    
+    Ok(DeviceInfo {
+        chip_id: chip_id.clone(),
+        mac,
+        serial: derive_serial(&chip_id),
+        password: derive_password(&chip_id),
+        local_addr,
+        remote_addr,
+        ssid: format!("lrs-{}", chip_id),
+    })
+}
+
+fn parse_chip_id(output: &str) -> Result<String, String> {
+    let re = regex::Regex::new(r"Chip ID:\s*0x([0-9A-Fa-f]+)").unwrap();
+    if let Some(caps) = re.captures(output) {
+        let hex = caps.get(1).unwrap().as_str().to_lowercase();
+        Ok(format!("{:0>8}", hex))
+    } else {
+        Err("Unable to parse chip ID from esptool output".into())
+    }
+}
+
+fn parse_mac(output: &str) -> Result<String, String> {
+    let re = regex::Regex::new(r"MAC:\s*([0-9A-Fa-f:]{17})").unwrap();
+    if let Some(caps) = re.captures(output) {
+        Ok(caps.get(1).unwrap().as_str().to_lowercase())
+    } else {
+        Err("Unable to parse MAC from esptool output".into())
+    }
+}
+
+fn derive_password(chip_hex: &str) -> String {
+    let input = format!("{}:{}", PRODUCT_SECRET, chip_hex);
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    let hex = hex::encode(result);
+    hex[..8].to_string()
+}
+
+fn derive_serial(chip_hex: &str) -> String {
+    let now = Local::now();
+    let yy = now.year() % 100;
+    let ww = now.iso_week().week();
+    format!("lrs{:02}{:02}-{}", yy, ww, chip_hex)
+}
+
+fn derive_addresses(chip_hex: &str) -> (u8, u8) {
+    let chip = u32::from_str_radix(chip_hex, 16).unwrap_or(0);
+    let local_addr = ((chip & 0xFF) % 254 + 1) as u8;
+    let mut remote_addr = (((chip >> 8) & 0xFF) % 254 + 1) as u8;
+    if remote_addr == local_addr {
+        remote_addr = (local_addr % 254) + 1;
+    }
+    (local_addr, remote_addr)
+}

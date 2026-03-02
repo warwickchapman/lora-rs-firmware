@@ -1,166 +1,164 @@
-name: Build LRS Flasher
+name: Build Thanda LoRa Flasher
 
 on:
   push:
     tags:
-      - 'v*' # Trigger on version tags (e.g., v1.0.0)
+      - 'v*' # Trigger on version tags (e.g., v0.5.0-alpha)
   workflow_dispatch: # Allow manual trigger
 
 jobs:
+  build-frontend:
+    name: Build Vue Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: tools/flasher/package-lock.json
+      - name: Install dependencies
+        run: cd tools/flasher && npm install
+      - name: Build frontend
+        run: cd tools/flasher && npm run build
+      - name: Upload frontend assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: tools/flasher/dist
+
   build:
-    name: Build for ${{ matrix.os }}
+    name: Build for ${{ matrix.platform }}
+    needs: build-frontend
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, macos-15-intel, macos-14, ubuntu-22.04]
+        include:
+          - platform: windows-x64
+            os: windows-latest
+          - platform: macos-arm64
+            os: macos-14
+          - platform: macos-x86_64
+            os: macos-13
+          - platform: linux-x64
+            os: ubuntu-22.04
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Clean Disk Space (macOS)
-        if: startsWith(matrix.os, 'macos-')
-        run: |
-          sudo rm -rf /Applications/Xcode*
-          sudo rm -rf /Library/Developer/CoreSimulator
-          sudo rm -rf /Users/runner/Library/Android
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/local/share/powershell
-          sudo rm -rf /Users/runner/Library/Caches/Homebrew
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: ${{ startsWith(matrix.os, 'macos-') && '3.10' || '3.12' }}
+          targets: ${{ matrix.platform == 'macos-x86_64' && 'x86_64-apple-darwin' || matrix.platform == 'macos-arm64' && 'aarch64-apple-darwin' || '' }}
 
-      - name: Install Dependencies
+      - name: Install System Dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download Frontend Assets
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: tools/flasher/dist
+
+      - name: Build Firmware Binaries
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -U flet pyinstaller Pillow platformio
-          if [[ "${{ matrix.os }}" == macos-* ]]; then
-            pip install pyobjc
-            brew install create-dmg
-          fi
-          pip install -r tools/flasher/requirements.txt
-          if [[ "${{ matrix.os }}" == ubuntu-* ]]; then
-            sudo apt-get update
-            sudo apt-get install -y libmpv-dev
-          fi
-
-      - name: Generate Icons
-        shell: bash
-        run: |
-          python tools/flasher/generate_icons.py
-
-      - name: Build Firmware
-        shell: bash
-        run: |
-          # Build both ZA and US firmware environments
+          pip install platformio
           pio run -e lrs_za -e lrs_us
-          mkdir -p tools/flasher/final_dist
-          cp .pio/build/lrs_za/firmware.bin tools/flasher/final_dist/lrs-firmware-${GITHUB_REF_NAME#v}-za.bin
-          cp .pio/build/lrs_us/firmware.bin tools/flasher/final_dist/lrs-firmware-${GITHUB_REF_NAME#v}-us.bin
+          mkdir -p tools/flasher/src-tauri/resources
+          cp .pio/build/lrs_za/firmware.bin tools/flasher/src-tauri/resources/firmware-za.bin
+          cp .pio/build/lrs_us/firmware.bin tools/flasher/src-tauri/resources/firmware-us.bin
+          cp VERSION tools/flasher/src-tauri/resources/VERSION
 
-      - name: Build with Flet Pack
+      - name: Install esptool Sidecars
         shell: bash
         run: |
-          cd tools/flasher
-          # Download standalone esptool binary to avoid PyInstaller recursion bugs
+          cd tools/flasher/src-tauri
           mkdir -p bin
           VERSION_ESP="v4.8.1"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip
-            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool.exe bin/ && rm -rf bin_tmp esptool.zip
-          elif [[ "${{ matrix.os }}" == macos-* ]]; then
+            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool.exe bin/esptool-x86_64-pc-windows-msvc.exe && rm -rf bin_tmp esptool.zip
+          elif [[ "${{ matrix.os }}" == "macos-14" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
-            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/ && rm -rf bin_tmp esptool.zip
+            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/esptool-aarch64-apple-darwin && rm -rf bin_tmp esptool.zip
+          elif [[ "${{ matrix.os }}" == "macos-13" ]]; then
+            curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
+            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/esptool-x86_64-apple-darwin && rm -rf bin_tmp esptool.zip
           else
             curl -L -o esptool.tar.gz https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz
-            tar -xzf esptool.tar.gz -C bin_tmp && mv bin_tmp/*/esptool bin/ && rm -rf bin_tmp esptool.tar.gz
+            tar -xzf esptool.tar.gz -C bin_tmp && mv bin_tmp/*/esptool bin/esptool-x86_64-unknown-linux-gnu && rm -rf bin_tmp esptool.tar.gz
           fi
           chmod +x bin/esptool*
 
-          # Set platform-specific icon
-          export LRS_VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION = '${LRS_VERSION}'" > version.py
-          export CODESIGN_IDENTITY="-"
-          ESPTOOL_DIR=$(python -c "import esptool, os; print(os.path.dirname(esptool.__file__))")
+      - name: Build Tauri App
+        run: |
+          cd tools/flasher
+          npm install
+          npm run tauri build -- --target ${{ matrix.platform == 'macos-arm64' && 'aarch64-apple-darwin' || matrix.platform == 'macos-x86_64' && 'x86_64-apple-darwin' || '' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
 
-          ICON_ARG="--icon assets/icon_512.png"
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
-          
-          # Configure PyInstaller target architecture for macOS
-          EXTRA_BIN=""
-          if [[ "${{ matrix.os }}" == "macos-15-intel" ]]; then
-            export EXTRA_BIN="--target-arch x86_64"
-          elif [[ "${{ matrix.os }}" == "macos-14" ]]; then
-            export EXTRA_BIN="--target-arch arm64"
-          fi
-          
-          # Set platform-specific separator for --add-data
-          SEP=":"
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then SEP=";"; fi
-          
-          # Set platform-specific icon
-          ICON_ARG="--icon assets/icon_512.png"
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
-          
-          # Linux Portability: Explicitly bundle libmpv.so.* and ensure it has the .so.1 alias
-          EXTRA_BIN=""
-          if [[ "${{ matrix.os }}" == ubuntu-* ]]; then
-            # Find the actual library (could be .so.1 or .so.2)
-            LIBMPV_PATH=$(find /usr/lib -name "libmpv.so.*" | grep -v "dev" | head -n 1)
-            if [ -n "$LIBMPV_PATH" ]; then
-              # Bundle the actual file
-              EXTRA_BIN="--add-binary $LIBMPV_PATH:."
-              echo "Found and bundling libmpv: $LIBMPV_PATH"
-            fi
-          fi
+      - name: Package Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir final_dist
+          mv tools/flasher/src-tauri/target/release/bundle/msi/*.msi "final_dist/thanda-lora-flasher-${VERSION}-windows-x64.msi"
+          mv tools/flasher/src-tauri/target/release/bundle/nsis/*.exe "final_dist/thanda-lora-flasher-${VERSION}-windows-x64-setup.exe"
 
-          # Use flet pack for better bundling of runtime components
-          flet pack main.py --name "Thanda LoRa Flasher" \
-            $ICON_ARG \
-            $EXTRA_BIN \
-            --add-data "bin${SEP}bin" \
-            --add-data "../../VERSION${SEP}VERSION" \
-            --add-data "assets${SEP}assets"
+      - name: Package MacOS
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ARCH="x64"
+          if [[ "${{ matrix.os }}" == "macos-14" ]]; then ARCH="arm64"; fi
+          mkdir final_dist
+          brew install create-dmg
           
-          # Verification step: ensure the build output exists
-          if [ "${{ matrix.os }}" = "windows-latest" ] && [ ! -f "dist/Thanda LoRa Flasher.exe" ]; then echo "ERROR: EXE not found"; exit 1; fi
-          if [[ "${{ matrix.os }}" == macos-* ]] && [ ! -d "dist/Thanda LoRa Flasher.app" ]; then echo "ERROR: APP bundle not found"; exit 1; fi
-          if [[ "${{ matrix.os }}" == ubuntu-* ]] && [ ! -f "dist/Thanda LoRa Flasher" ]; then echo "ERROR: Linux binary not found"; exit 1; fi
+          APP_PATH=$(find tools/flasher/src-tauri/target -name "thanda-lora-flasher.app" -type d | head -n 1)
           
-          # Move to a predictable name for the artifact upload
-          mkdir -p final_dist
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv "dist/Thanda LoRa Flasher.exe" "final_dist/thanda-lora-flasher-x64.exe"
-          elif [[ "${{ matrix.os }}" == macos-* ]]; then
-            # Create polished DMG for macOS with Applications shortcut layout (Left-to-Right)
-            create-dmg \
-              --volname "Thanda LoRa Flasher" \
-              --window-pos 200 120 \
-              --window-size 600 400 \
-              --icon-size 100 \
-              --icon "Thanda LoRa Flasher.app" 150 150 \
-              --app-drop-link 450 150 \
-              "Thanda LoRa Flasher-tmp.dmg" \
-              "dist/Thanda LoRa Flasher.app"
-            
-            # Find the generated dmg and rename it with architecture suffix
-            DMG_FILE="Thanda LoRa Flasher-tmp.dmg"
-            ARCH="amd64"
-            if [[ "${{ matrix.os }}" == "macos-14" ]]; then ARCH="arm64"; fi
-            mv "$DMG_FILE" "final_dist/thanda-lora-flasher-$ARCH.dmg"
-          else
-            mv "dist/Thanda LoRa Flasher" "final_dist/thanda-lora-flasher-linux"
-          fi
+          create-dmg \
+            --volname "Thanda LoRa Flasher" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "Thanda LoRa Flasher.app" 150 150 \
+            --app-drop-link 450 150 \
+            "final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg" \
+            "$APP_PATH"
 
-      - name: Upload Artifact
+      - name: Package Linux
+        if: matrix.os == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir final_dist
+          mv tools/flasher/src-tauri/target/release/bundle/appimage/*.AppImage "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage"
+          mv tools/flasher/src-tauri/target/release/bundle/deb/*.deb "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.deb"
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-artifact
-          path: tools/flasher/final_dist/*
+          name: flasher-${{ matrix.platform }}
+          path: final_dist/*
 
   release:
     name: Create Release
@@ -176,43 +174,63 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
+      - name: Collect Assets
+        run: |
+          mkdir all_assets
+          # Download firmware binaries built during build jobs (Need to upload them too)
+          # Actually, I'll just gather them from the build artifacts
+          cp flasher-*/thanda-lora-flasher-* all_assets/
+
+      - name: Build Firmware for Release
+        shell: bash
+        run: |
+          pip install platformio
+          pio run -e lrs_za -e lrs_us
+          VERSION=${GITHUB_REF_NAME#v}
+          cp .pio/build/lrs_za/firmware.bin "all_assets/lrs-firmware-${VERSION}-za.bin"
+          cp .pio/build/lrs_us/firmware.bin "all_assets/lrs-firmware-${VERSION}-us.bin"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: |
-            windows-latest-artifact/*
-            macos-15-intel-artifact/*
-            macos-14-artifact/*
-            ubuntu-22.04-artifact/*
-            *.bin
+          files: all_assets/*
+          body: |
+            ## Thanda LoRa v0.5.0-alpha
+            
+            ### Native Flasher (Tauri)
+            The flasher has been completely rebuilt as a native application for professional performance and stability.
+            
+            **Legacy Note**: The Python/Flet-based flasher is now **DEPRECATED** and no longer included in releases.
+            
+            ### Changes
+            - ⚡️ New high-performance native core.
+            - 🔍 Dedicated Activity Log with real-time progress.
+            - 🖥 Immersive Monitor Mode.
+            - 🔄 Auto-Monitor after successful flash.
+            - 🪄 Polished Glassmorphism aesthetics.
+            
+            Please download the appropriate version for your operating system below.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Mirror Release Assets to Public Hub
         run: |
           TAG=${{ github.ref_name }}
-          
-          # 1. Fetch title, notes, AND pre-release status from private repo
           gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json
           TITLE=$(jq -r '.name' release_info.json)
           IS_PRE=$(jq -r '.isPrerelease' release_info.json)
-          jq -r '.body' release_info.json > release_notes.md
           
-          # 2. Mirror All Release Assets to Public Repo
-          # Delete if exists and recreate public release with ALL assets
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
-          # Download all assets from the CURRENT release
           mkdir public_assets
-          gh release download $TAG --dir public_assets --repo warwickchapman/lora-rs
+          cp all_assets/* public_assets/
           
-          # 3. Duplicate ZA firmware for EU region
+          # Clone ZA firmware for EU region
           cd public_assets
           for f in *-za.bin; do
             if [ -f "$f" ]; then
               cp "$f" "${f%-za.bin}-eu.bin"
-              echo "Cloned $f to ${f%-za.bin}-eu.bin"
             fi
           done
           cd ..
@@ -227,7 +245,7 @@ jobs:
           gh release create $TAG public_assets/* \
             --repo warwickchapman/lora-rs-firmware \
             --title "$TITLE" \
-            --notes-file release_notes.md \
+            --notes "See private repository for full details. v0.5.0-alpha Native Release." \
             --prerelease=$IS_PRE \
             $LATEST_FLAG
         env:
