@@ -119,8 +119,8 @@ jobs:
       - name: Build Firmware Binaries
         shell: bash
         run: |
-          pip install platformio
-          pio run -e lrs_za -e lrs_us
+          python -m pip install --upgrade platformio
+          python -m platformio run -e lrs_za -e lrs_us
           mkdir -p tools/flasher/src-tauri/resources
           cp .pio/build/lrs_za/firmware.bin tools/flasher/src-tauri/resources/firmware-za.bin
           cp .pio/build/lrs_us/firmware.bin tools/flasher/src-tauri/resources/firmware-us.bin
@@ -137,18 +137,18 @@ jobs:
             unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool.exe bin/esptool-x86_64-pc-windows-msvc.exe && rm -rf bin_tmp esptool.zip
           elif [[ "${{ matrix.platform }}" == "macos-arm64" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
-            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/esptool-aarch64-apple-darwin && rm -rf bin_tmp esptool.zip
+            unzip esptool.zip -d bin_tmp && find bin_tmp -name esptool -type f -exec cp {} bin/esptool-aarch64-apple-darwin \; && rm -rf bin_tmp esptool.zip
           elif [[ "${{ matrix.platform }}" == "macos-x86_64" ]]; then
             curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
-            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/esptool-x86_64-apple-darwin && rm -rf bin_tmp esptool.zip
+            unzip esptool.zip -d bin_tmp && find bin_tmp -name esptool -type f -exec cp {} bin/esptool-x86_64-apple-darwin \; && rm -rf bin_tmp esptool.zip
           else
             curl -L -o esptool.tar.gz https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz
-            tar -xzf esptool.tar.gz -C bin_tmp && mv bin_tmp/*/esptool bin/esptool-x86_64-unknown-linux-gnu && rm -rf bin_tmp esptool.tar.gz
+            tar -xzf esptool.tar.gz -C bin_tmp && find bin_tmp -name esptool -type f -exec cp {} bin/esptool-x86_64-unknown-linux-gnu \; && rm -rf bin_tmp esptool.tar.gz
           fi
           chmod +x bin/esptool*
 
       - name: Install Apple Certificate
-        if: startsWith(matrix.os, 'macos')
+        if: startsWith(matrix.os, 'macos') && secrets.APPLE_CERTIFICATE != ''
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
