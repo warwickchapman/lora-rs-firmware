@@ -113,7 +113,7 @@ jobs:
           elif [[ "${{ matrix.os }}" == macos-* ]]; then
             # Create DMG for macOS with Applications shortcut
             mkdir -p dmg_root
-            cp -r "dist/Thanda LoRa Flasher.app" dmg_root/
+            ditto "dist/Thanda LoRa Flasher.app" "dmg_root/Thanda LoRa Flasher.app"
             ln -s /Applications dmg_root/Applications
             hdiutil create -volname "Thanda LoRa Flasher" -srcfolder dmg_root -ov -format UDZO "Thanda LoRa Flasher.dmg"
             
