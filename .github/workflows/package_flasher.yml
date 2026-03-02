@@ -12,14 +12,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-15-intel, macos-14, ubuntu-latest]
+        os: [windows-latest, macos-13, macos-14, ubuntu-latest]
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Clean Disk Space (macOS Intel)
-        if: matrix.os == 'macos-15-intel'
+        if: matrix.os == 'macos-13'
         run: |
           sudo rm -rf /Applications/Xcode*
           sudo rm -rf /Library/Developer/CommandLineTools
@@ -137,7 +137,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: |
             windows-latest-artifact/*
-            macos-15-intel-artifact/*
+            macos-13-artifact/*
             macos-14-artifact/*
             ubuntu-latest-artifact/*
         env:
