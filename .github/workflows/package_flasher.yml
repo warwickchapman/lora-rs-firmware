@@ -29,7 +29,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install Dependencies
         shell: bash
@@ -54,10 +54,21 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher
+          # Set platform-specific icon
           export LRS_VERSION="${GITHUB_REF_NAME#v}"
           export CODESIGN_IDENTITY="-"
-          # Dynamically find esptool path to include stubs
           ESPTOOL_DIR=$(python -c "import esptool, os; print(os.path.dirname(esptool.__file__))")
+
+          ICON_ARG="--icon assets/icon_512.png"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then ICON_ARG="--icon assets/thanda_lora.ico"; fi
+          
+          # Configure PyInstaller target architecture for macOS
+          EXTRA_BIN=""
+          if [[ "${{ matrix.os }}" == "macos-15-intel" ]]; then
+            export EXTRA_BIN="--target-arch x86_64"
+          elif [[ "${{ matrix.os }}" == "macos-14" ]]; then
+            export EXTRA_BIN="--target-arch arm64"
+          fi
           
           # Set platform-specific separator for --add-data
           SEP=":"
