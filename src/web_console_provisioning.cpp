@@ -11,9 +11,11 @@
 using namespace webconsole_internal;
 
 void WebConsole::handleProvisionFleetWifi() {
-  if (!requireAuth(true)) return;
+  if (!requireAuth(true))
+    return;
   if (sm_ == nullptr) {
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
 
@@ -29,9 +31,11 @@ void WebConsole::handleProvisionFleetWifi() {
   JsonDocument filter;
   filter["wifi_sta_ssid"] = true;
   filter["wifi_sta_password"] = true;
-  auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
+  auto err = deserializeJson(body, server_.arg("plain"),
+                             DeserializationOption::Filter(filter));
   if (err) {
-    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+    sendTracked(400, "application/json",
+                "{\"ok\":false,\"error\":\"invalid_json\"}");
     return;
   }
   const auto &cfg = config_->settings();
@@ -40,19 +44,23 @@ void WebConsole::handleProvisionFleetWifi() {
   const size_t ssidLen = (ssid != nullptr) ? strlen(ssid) : 0U;
   const size_t passLen = (pass != nullptr) ? strlen(pass) : 0U;
   if (ssidLen == 0U) {
-    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"ssid_required\"}");
+    sendTracked(400, "application/json",
+                "{\"ok\":false,\"error\":\"ssid_required\"}");
     return;
   }
   if (ssidLen > 32U || passLen > 64U) {
-    sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"credentials_too_long\"}");
+    sendTracked(400, "application/json",
+                "{\"ok\":false,\"error\":\"credentials_too_long\"}");
     return;
   }
   if (isDefaultDeploymentKey(cfg.fleet_passphrase)) {
-    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"fleet_key_default\"}");
+    sendTracked(409, "application/json",
+                "{\"ok\":false,\"error\":\"fleet_key_default\"}");
     return;
   }
 
-  const uint32_t cooldownRemainingMs = sm_->fleetWifiProvisionCooldownRemainingMs();
+  const uint32_t cooldownRemainingMs =
+      sm_->fleetWifiProvisionCooldownRemainingMs();
   if (cooldownRemainingMs > 0) {
     JsonDocument cooldown;
     cooldown["ok"] = false;
@@ -64,7 +72,8 @@ void WebConsole::handleProvisionFleetWifi() {
   }
 
   if (!sm_->sendFleetWifiProvision(String(ssid), String(pass))) {
-    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"send_failed\"}");
+    sendTracked(409, "application/json",
+                "{\"ok\":false,\"error\":\"send_failed\"}");
     return;
   }
 
@@ -72,20 +81,18 @@ void WebConsole::handleProvisionFleetWifi() {
   const size_t chunks = (totalLen + 6U) / 7U;
   JsonDocument out;
   out["ok"] = true;
-  out["packets"] = static_cast<uint32_t>(chunks + 2U);  // start + chunks + commit
+  out["packets"] =
+      static_cast<uint32_t>(chunks + 2U); // start + chunks + commit
   sendJsonDoc(200, out);
-  LRS_LOGI(API,
-           "event=fleet_wifi_provision_tx ssid=%s password=%s packets=%lu",
-           ssid,
-           lrslog::maskSecret(String(pass)).c_str(),
+  LRS_LOGI(API, "event=fleet_wifi_provision_tx ssid=%s password=%s packets=%lu",
+           ssid, lrslog::maskSecret(String(pass)).c_str(),
            static_cast<unsigned long>(chunks + 2U));
 }
 
-void WebConsole::handleProvisioningStatus() {
-  HeapProbeGuard heapProbe(this, "/api/provisioning/status");
-  if (!requireAuth(true)) return;
+void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
   if (sm_ == nullptr) {
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    doc["ok"] = false;
+    doc["error"] = "state_machine_unavailable";
     return;
   }
   ProvisioningSessionSnapshot sess{};
@@ -94,21 +101,18 @@ void WebConsole::handleProvisioningStatus() {
 
   const uint32_t heapFree = lrslog::heapFree();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-  const bool veryLowHeap =
-      (heapFree < kApiProvStatusCompactFreeBytes || maxBlock < kApiProvStatusCompactMaxBlockBytes);
-  if (veryLowHeap &&
-      rejectApiIfLowHeap("/api/provisioning/status",
-                         kApiProvStatusCompactFreeBytes,
-                         kApiProvStatusCompactMaxBlockBytes)) {
-    return;
-  }
-  JsonDocument doc;
+  const bool veryLowHeap = (heapFree < kApiProvStatusCompactFreeBytes ||
+                            maxBlock < kApiProvStatusCompactMaxBlockBytes);
+
   doc["ok"] = true;
+
   constexpr size_t maxCompactRows = 8;
   const bool activeSession = sess.active;
   bool compact = activeSession || veryLowHeap;
   const size_t returnedDevices =
-      compact ? ((totalDevices < maxCompactRows) ? totalDevices : maxCompactRows) : totalDevices;
+      compact
+          ? ((totalDevices < maxCompactRows) ? totalDevices : maxCompactRows)
+          : totalDevices;
   const bool truncated = returnedDevices < totalDevices;
   const char *compactReason = nullptr;
   if (compact) {
@@ -143,7 +147,8 @@ void WebConsole::handleProvisioningStatus() {
   if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
     last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
     LRS_LOGI(API,
-             "event=provisioning_phase state=%s discovered=%u conflicts=%u verified=%u failed=%u",
+             "event=provisioning_phase state=%s discovered=%u conflicts=%u "
+             "verified=%u failed=%u",
              provisioningSessionStateText(sess.state),
              static_cast<unsigned>(sess.discovered_count),
              static_cast<unsigned>(sess.conflict_count),
@@ -154,10 +159,12 @@ void WebConsole::handleProvisioningStatus() {
   JsonArray arr = doc["devices"].to<JsonArray>();
   for (size_t i = 0; i < returnedDevices; ++i) {
     ProvisioningDeviceSnapshot d{};
-    if (!sm_->provisioningDeviceByIndex(i, d)) continue;
+    if (!sm_->provisioningDeviceByIndex(i, d))
+      continue;
     JsonObject o = arr.add<JsonObject>();
     char chipHex[11];
-    snprintf(chipHex, sizeof(chipHex), "0x%08lX", static_cast<unsigned long>(d.chip_id));
+    snprintf(chipHex, sizeof(chipHex), "0x%08lX",
+             static_cast<unsigned long>(d.chip_id));
     o["chip_id_hex"] = chipHex;
     o["current_address"] = d.current_address;
     o["assigned_address"] = d.assigned_address;
@@ -168,14 +175,10 @@ void WebConsole::handleProvisioningStatus() {
     o["state"] = provisioningDeviceStateText(d.state);
     o["address_conflict"] = d.address_conflict;
   }
-  const size_t len = measureJson(doc);
-  server_.setContentLength(len);
-  markResponseStatus(200);
-  server_.send(200, "application/json", "");
-  serializeJson(doc, server_.client());
   if (compact) {
     LRS_LOGW(API,
-             "event=provisioning_status_compact reason=%s heap_free=%lu heap_frag=%u max_free_block=%lu",
+             "event=provisioning_status_compact reason=%s heap_free=%lu "
+             "heap_frag=%u max_free_block=%lu",
              compactReason ? compactReason : "unknown",
              static_cast<unsigned long>(heapFree),
              static_cast<unsigned>(lrslog::heapFragPercent()),
@@ -183,10 +186,39 @@ void WebConsole::handleProvisioningStatus() {
   }
 }
 
-void WebConsole::handleProvisioningStart() {
-  if (!requireAuth(true)) return;
+void WebConsole::handleProvisioningStatus() {
+  HeapProbeGuard heapProbe(this, "/api/provisioning/status");
+  if (!requireAuth(true))
+    return;
   if (sm_ == nullptr) {
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    return;
+  }
+  const uint32_t heapFree = lrslog::heapFree();
+  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  const bool veryLowHeap = (heapFree < kApiProvStatusCompactFreeBytes ||
+                            maxBlock < kApiProvStatusCompactMaxBlockBytes);
+  if (veryLowHeap && rejectApiIfLowHeap("/api/provisioning/status",
+                                        kApiProvStatusCompactFreeBytes,
+                                        kApiProvStatusCompactMaxBlockBytes)) {
+    return;
+  }
+  JsonDocument doc;
+  buildProvisioningStatusJson(doc);
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
+}
+
+void WebConsole::handleProvisioningStart() {
+  if (!requireAuth(true))
+    return;
+  if (sm_ == nullptr) {
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
   JsonDocument body;
@@ -194,28 +226,33 @@ void WebConsole::handleProvisioningStart() {
     JsonDocument filter;
     filter["estimated_count"] = true;
     filter["retry_once"] = true;
-    auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
+    auto err = deserializeJson(body, server_.arg("plain"),
+                               DeserializationOption::Filter(filter));
     if (err) {
-      sendTracked(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+      sendTracked(400, "application/json",
+                  "{\"ok\":false,\"error\":\"invalid_json\"}");
       return;
     }
   }
   uint16_t estimated = 8;
   if (!body["estimated_count"].isNull()) {
     int v = body["estimated_count"].as<int>();
-    if (v < 1) v = 1;
-    if (v > 8) v = 8;
+    if (v < 1)
+      v = 1;
+    if (v > 8)
+      v = 8;
     estimated = static_cast<uint16_t>(v);
   }
   const bool retryOnce = parseBoolField(body["retry_once"], true);
   if (!sm_->provisioningStartDiscovery(estimated, retryOnce)) {
-    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"start_failed\"}");
+    sendTracked(409, "application/json",
+                "{\"ok\":false,\"error\":\"start_failed\"}");
     return;
   }
   LRS_LOGI(API,
-           "event=provisioning_start estimated=%u retry_once=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
-           static_cast<unsigned>(estimated),
-           retryOnce ? 1U : 0U,
+           "event=provisioning_start estimated=%u retry_once=%u heap_free=%lu "
+           "heap_frag=%u max_free_block=%lu",
+           static_cast<unsigned>(estimated), retryOnce ? 1U : 0U,
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
            static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
@@ -223,17 +260,21 @@ void WebConsole::handleProvisioningStart() {
 }
 
 void WebConsole::handleProvisioningProvisionAll() {
-  if (!requireAuth(true)) return;
+  if (!requireAuth(true))
+    return;
   if (sm_ == nullptr) {
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
   if (!sm_->provisioningStartProvisionAll()) {
-    sendTracked(409, "application/json", "{\"ok\":false,\"error\":\"invalid_state\"}");
+    sendTracked(409, "application/json",
+                "{\"ok\":false,\"error\":\"invalid_state\"}");
     return;
   }
   LRS_LOGI(API,
-           "event=provisioning_provision_all heap_free=%lu heap_frag=%u max_free_block=%lu",
+           "event=provisioning_provision_all heap_free=%lu heap_frag=%u "
+           "max_free_block=%lu",
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
            static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
@@ -241,9 +282,11 @@ void WebConsole::handleProvisioningProvisionAll() {
 }
 
 void WebConsole::handleProvisioningCancel() {
-  if (!requireAuth(true)) return;
+  if (!requireAuth(true))
+    return;
   if (sm_ == nullptr) {
-    sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
+    sendTracked(500, "application/json",
+                "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
   sm_->provisioningCancel();

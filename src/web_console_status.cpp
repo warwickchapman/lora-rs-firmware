@@ -232,40 +232,72 @@ void WebConsole::tickStatusLiveSse() {
     status_live_sse_last_keepalive_ms_ = now;
   }
 
-  if (status_live_sse_last_push_ms_ != 0 &&
-      (now - status_live_sse_last_push_ms_) < pushIntervalMs) {
-    return;
-  }
+  bool sendStatus = (status_live_sse_last_push_ms_ == 0 ||
+                     (now - status_live_sse_last_push_ms_) >= pushIntervalMs);
+  if (sendStatus) {
+    bool cacheUpdated = false;
+    if (status_live_cache_.body.length() == 0 ||
+        (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) {
+      if (apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes,
+                         kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
+        cacheUpdated = buildStatusLiveCache();
+      }
+    }
 
-  bool cacheUpdated = false;
-  if (status_live_cache_.body.length() == 0 ||
-      (now - status_live_cache_.built_ms) >= kStatusLiveCacheTtlMs) {
-    if (apiHeapHealthy(kApiStatusLiveLowHeapRejectFreeBytes,
-                       kApiStatusLiveLowHeapRejectMaxBlockBytes)) {
-      cacheUpdated = buildStatusLiveCache();
+    if (status_live_cache_.body.length() > 0 &&
+        (cacheUpdated ||
+         status_live_cache_.built_ms != status_live_sse_last_sent_cache_ms_)) {
+      if (status_live_sse_client_.print(F("event: status\nid: ")) == 0 ||
+          status_live_sse_client_.print(status_live_cache_.built_ms) == 0 ||
+          status_live_sse_client_.print(F("\ndata: ")) == 0 ||
+          status_live_sse_client_.print(status_live_cache_.body) == 0 ||
+          status_live_sse_client_.print(F("\n\n")) == 0) {
+        closeStatusLiveSse();
+        return;
+      }
+      status_live_sse_last_push_ms_ = now;
+      status_live_sse_last_sent_cache_ms_ = status_live_cache_.built_ms;
     }
   }
 
-  if (status_live_cache_.body.length() == 0) {
-    return;
+  if (status_live_sse_page_ == "fleet") {
+    if (status_live_sse_last_fleet_push_ms_ == 0 ||
+        (now - status_live_sse_last_fleet_push_ms_) >= 1500) {
+      if (apiHeapHealthy(kApiFleetLowHeapRejectFreeBytes,
+                         kApiFleetLowHeapRejectMaxBlockBytes)) {
+        JsonDocument doc;
+        buildFleetJson(doc);
+        if (status_live_sse_client_.print(F("event: fleet\nid: ")) == 0 ||
+            status_live_sse_client_.print(now) == 0 ||
+            status_live_sse_client_.print(F("\ndata: ")) == 0 ||
+            serializeJson(doc, status_live_sse_client_) == 0 ||
+            status_live_sse_client_.print(F("\n\n")) == 0) {
+          closeStatusLiveSse();
+          return;
+        }
+        status_live_sse_last_fleet_push_ms_ = now;
+      }
+    }
+  } else if (status_live_sse_page_ == "provisioning") {
+    if (status_live_sse_last_prov_push_ms_ == 0 ||
+        (now - status_live_sse_last_prov_push_ms_) >= 1500) {
+      if (apiHeapHealthy(kApiProvStatusCompactFreeBytes,
+                         kApiProvStatusCompactMaxBlockBytes)) {
+        JsonDocument doc;
+        buildProvisioningStatusJson(doc);
+        if (status_live_sse_client_.print(F("event: provisioning\nid: ")) ==
+                0 ||
+            status_live_sse_client_.print(now) == 0 ||
+            status_live_sse_client_.print(F("\ndata: ")) == 0 ||
+            serializeJson(doc, status_live_sse_client_) == 0 ||
+            status_live_sse_client_.print(F("\n\n")) == 0) {
+          closeStatusLiveSse();
+          return;
+        }
+        status_live_sse_last_prov_push_ms_ = now;
+      }
+    }
   }
-
-  if (!cacheUpdated &&
-      status_live_cache_.built_ms == status_live_sse_last_sent_cache_ms_) {
-    return;
-  }
-
-  if (status_live_sse_client_.print(F("event: status\nid: ")) == 0 ||
-      status_live_sse_client_.print(status_live_cache_.built_ms) == 0 ||
-      status_live_sse_client_.print(F("\ndata: ")) == 0 ||
-      status_live_sse_client_.print(status_live_cache_.body) == 0 ||
-      status_live_sse_client_.print(F("\n\n")) == 0) {
-    closeStatusLiveSse();
-    return;
-  }
-
-  status_live_sse_last_push_ms_ = now;
-  status_live_sse_last_sent_cache_ms_ = status_live_cache_.built_ms;
 }
 
 void WebConsole::handleStatusLive() {
@@ -306,10 +338,13 @@ void WebConsole::handleStatusLiveEvents() {
   client.setNoDelay(true);
   client.setSync(true);
   status_live_sse_client_ = client;
+  status_live_sse_page_ = server_.arg("page");
   status_live_sse_active_ = true;
   status_live_sse_last_push_ms_ = 0;
   status_live_sse_last_keepalive_ms_ = 0;
   status_live_sse_last_sent_cache_ms_ = 0;
+  status_live_sse_last_fleet_push_ms_ = 0;
+  status_live_sse_last_prov_push_ms_ = 0;
 
   server_.setContentLength(CONTENT_LENGTH_UNKNOWN);
   markResponseStatus(200);

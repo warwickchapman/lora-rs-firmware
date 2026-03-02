@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <ESP8266WebServer.h>
 #include <functional>
 
@@ -68,6 +69,7 @@ private:
   void handleExportSettings();
   void handleImportSettings();
   void handleFleet();
+  void buildFleetJson(ArduinoJson::JsonDocument &doc);
   void handleFleetScan();
   void handleGetAutomationRules();
   void handlePostAutomationRules();
@@ -78,6 +80,7 @@ private:
   void handleProvisionFleetWifi();
   void handleProvisioningStart();
   void handleProvisioningStatus();
+  void buildProvisioningStatusJson(ArduinoJson::JsonDocument &doc);
   void handleProvisioningProvisionAll();
   void handleProvisioningCancel();
   void handleTestMqtt();
@@ -151,11 +154,14 @@ private:
   JsonResponseCache status_static_cache_{};
   JsonResponseCache status_lite_cache_{};
   WiFiClient status_live_sse_client_{};
+  String status_live_sse_page_;
   bool status_live_sse_active_ = false;
   uint32_t status_live_sse_last_push_ms_ = 0;
   uint32_t status_live_sse_last_keepalive_ms_ = 0;
   uint32_t status_live_sse_last_sent_cache_ms_ = 0;
   uint32_t status_live_sse_last_interval_ms_ = 0;
+  uint32_t status_live_sse_last_fleet_push_ms_ = 0;
+  uint32_t status_live_sse_last_prov_push_ms_ = 0;
   uint32_t last_web_pressure_ms_ = 0;
   bool status_live_cache_building_ = false;
   bool status_static_cache_building_ = false;
