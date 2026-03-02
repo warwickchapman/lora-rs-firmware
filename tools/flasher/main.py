@@ -59,10 +59,19 @@ GLASS_BORDER = "rgba(255, 255, 255, 0.1)"
 
 
 def load_release_version(default="0.0.0-dev"):
+    # 1. Try to import the generated version.py file (used in PyInstaller bundles)
+    try:
+        import version
+        return version.VERSION
+    except ImportError:
+        pass
+        
+    # 2. Check environment variable
     env_version = os.getenv("LRS_VERSION", "").strip()
     if env_version:
         return env_version[1:] if env_version.startswith("v") else env_version
 
+    # 3. Check for physical VERSION files (used strictly in development)
     candidates = [
         pathlib.Path(__file__).resolve().parents[2] / "VERSION",
         pathlib.Path.cwd() / "VERSION",
@@ -80,8 +89,8 @@ def load_release_version(default="0.0.0-dev"):
             pass
     return default
 
-
 RELEASE_VERSION = load_release_version()
+
 
 def get_region_guess():
     """Guess region based on timezone."""
