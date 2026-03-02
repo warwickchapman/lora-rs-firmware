@@ -18,8 +18,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Clean Disk Space (macOS Intel)
-        if: matrix.os == 'macos-15-intel'
+      - name: Clean Disk Space (macOS)
+        if: startsWith(matrix.os, 'macos-')
         run: |
           sudo rm -rf /Applications/Xcode*
           sudo rm -rf /Library/Developer/CommandLineTools
