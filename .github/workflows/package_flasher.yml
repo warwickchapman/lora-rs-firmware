@@ -115,7 +115,9 @@ jobs:
             mkdir -p dmg_root
             ditto "dist/Thanda LoRa Flasher.app" "dmg_root/Thanda LoRa Flasher.app"
             ln -s /Applications dmg_root/Applications
-            hdiutil create -volname "Thanda LoRa Flasher" -srcfolder dmg_root -ov -format UDZO "Thanda LoRa Flasher.dmg"
+            echo "App Size before DMG packaging:"
+            du -sh "dmg_root/Thanda LoRa Flasher.app"
+            hdiutil create -volname "Thanda LoRa Flasher" -srcfolder dmg_root -ov -format UDZO -fs HFS+ "Thanda LoRa Flasher.dmg"
             
             # Add architecture suffix
             ARCH="intel"
