@@ -231,7 +231,7 @@ bool AutomationRulesEngine::loadAndCompile() {
     }
   };
 
-  DynamicJsonDocument doc(docCap);
+  JsonDocument doc;
   if (!automation_rules::Store::exists()) {
     auto err = deserializeJson(doc, "{\"schema_version\":1,\"enabled\":false,\"execution_mode\":\"standalone\",\"rules\":[]}");
     if (err) {

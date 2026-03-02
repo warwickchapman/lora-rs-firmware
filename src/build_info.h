@@ -1,7 +1,8 @@
 #pragma once
 
 #ifndef LRS_FW_VERSION
-#define LRS_FW_VERSION "0.2.2-alpha"
+// Fallback only. Normal builds inject VERSION via tools/build_metadata.py.
+#define LRS_FW_VERSION "0.0.0-dev"
 #endif
 
 #ifndef LRS_GIT_SHA

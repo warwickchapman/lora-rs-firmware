@@ -197,7 +197,7 @@ Future fields already reserved in payload for additional sensor telemetry.
 - `PRERELEASE`: use suffixes like `-alpha`, `-beta`, `-rc.1` for non-final builds.
 
 Build identity at runtime includes:
-- `fw_version` (from `platformio.ini` `custom_fw_version`)
+- `fw_version` (from repo root `VERSION`; `platformio.ini` value is fallback-only)
 - `fw_git_sha`, `fw_git_branch`, `fw_dirty`
 - `build_date`, `build_time`
 
@@ -206,3 +206,7 @@ Visibility:
 - `/api/status`
 - `/api/factory`
 - MQTT discovery topic (`<root>/discovery/lrs-<chipid>`)
+
+Release alignment policy:
+- Keep firmware, flasher UI label, docs/release notes, and factory helper scripts on the same value from `VERSION`.
+- Use release tags in `v<version>` form (for example `v0.4.3-alpha`) while `VERSION` remains plain (for example `0.4.3-alpha`).

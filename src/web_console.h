@@ -35,7 +35,7 @@ private:
   bool requireAuth(bool api = true);
   bool hasSession() const;
   void clearSession();
-  String cookieValue(const String &name) const;
+  String cookieValue(const char *name) const;
   String randomToken() const;
   void startSession();
   uint32_t sessionRemainingS() const;

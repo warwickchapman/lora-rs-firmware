@@ -196,8 +196,8 @@ void WebConsole::handleLoginApi() {
     return;
   }
 
-  DynamicJsonDocument doc(256);
-  StaticJsonDocument<64> filter;
+  JsonDocument doc;
+  JsonDocument filter;
   filter["password"] = true;
   auto err = deserializeJson(doc, server_.arg("plain"),
                              DeserializationOption::Filter(filter));
@@ -222,7 +222,7 @@ void WebConsole::handleLoginApi() {
   failed_auth_ = 0;
   locked_until_ms_ = 0;
   startSession();
-  DynamicJsonDocument out(128);
+  JsonDocument out;
   out["ok"] = true;
   out["setup_required"] = needsFleetSetupPrompt();
   const size_t len = measureJson(out);
@@ -238,8 +238,8 @@ void WebConsole::handleFleetSetupApi() {
   if (!requireAuth(true))
     return;
 
-  DynamicJsonDocument doc(256);
-  StaticJsonDocument<96> filter;
+  JsonDocument doc;
+  JsonDocument filter;
   filter["skip"] = true;
   filter["fleet_passphrase"] = true;
   auto err = deserializeJson(doc, server_.arg("plain"),
@@ -299,8 +299,8 @@ void WebConsole::handleSetupCommissioningApi() {
   if (!requireAuth(true))
     return;
 
-  DynamicJsonDocument doc(640);
-  StaticJsonDocument<256> filter;
+  JsonDocument doc;
+  JsonDocument filter;
   filter["fleet_passphrase"] = true;
   filter["mode"] = true;
   filter["role"] = true;

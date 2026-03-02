@@ -14,7 +14,7 @@
 using namespace webconsole_internal;
 
 void WebConsole::handleFactory() {
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   auto &cfg = config_->settings();
   doc["serial"] = cfg.factory_serial;
   doc["chip_id"] = config_->chipIdHex();
@@ -49,7 +49,7 @@ void WebConsole::handleDiagnostics() {
   const uint32_t heapFree = lrslog::heapFree();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
   const bool compact = (heapFree < kApiLowHeapRejectFreeBytes || maxBlock < kApiLowHeapRejectMaxBlockBytes);
-  DynamicJsonDocument doc(compact ? 320 : 768);
+  JsonDocument doc;
   auto &cfg = config_->settings();
   const wl_status_t st = WiFi.status();
   doc["compact"] = compact;
@@ -93,8 +93,8 @@ void WebConsole::handleDiagnostics() {
 }
 void WebConsole::handleTestMqtt() {
   if (!requireAuth(true)) return;
-  DynamicJsonDocument body(256);
-  StaticJsonDocument<160> filter;
+  JsonDocument body;
+  JsonDocument filter;
   filter["mqtt_host"] = true;
   filter["mqtt_port"] = true;
   filter["mqtt_user"] = true;
@@ -137,7 +137,7 @@ void WebConsole::handleTestMqtt() {
   } else {
     ok = mqtt.connect(clientId.c_str());
   }
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   doc["ok"] = ok;
   doc["state"] = mqtt.state();
   doc["host"] = host;
@@ -152,8 +152,8 @@ void WebConsole::handleTestMqtt() {
 void WebConsole::handleUdpLogging() {
   if (!requireAuth(true)) return;
 
-  DynamicJsonDocument body(256);
-  StaticJsonDocument<128> filter;
+  JsonDocument body;
+  JsonDocument filter;
   filter["enabled"] = true;
   filter["host"] = true;
   filter["port"] = true;
@@ -279,8 +279,8 @@ void WebConsole::handleLogsText() {
 void WebConsole::handleFactoryReset() {
   if (!requireAuth(true)) return;
 
-  DynamicJsonDocument body(256);
-  StaticJsonDocument<128> filter;
+  JsonDocument body;
+  JsonDocument filter;
   filter["admin_password"] = true;
   filter["keep_shared_fleet_key"] = true;
   filter["keep_wifi_credentials"] = true;

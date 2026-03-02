@@ -1,6 +1,7 @@
 import hashlib
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 Import("env")
 
@@ -50,7 +51,18 @@ def _deterministic_tree_id(git_sha, dirty):
     return f"{git_sha}-dirty-{dirty_fingerprint[:7]}"
 
 
-fw_version = env.GetProjectOption("custom_fw_version", "0.2.2-alpha")
+def _read_repo_version(default):
+    try:
+        version_path = Path(env.subst("$PROJECT_DIR")) / "VERSION"
+        raw = version_path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return default
+        return raw[1:] if raw.startswith("v") else raw
+    except Exception:
+        return default
+
+
+fw_version = _read_repo_version(env.GetProjectOption("custom_fw_version", "0.0.0-dev"))
 git_sha = _run_git(["rev-parse", "--short", "HEAD"], "nogit")
 git_branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
 dirty = _git_dirty_flag()

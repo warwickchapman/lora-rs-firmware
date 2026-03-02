@@ -22,16 +22,16 @@ void WebConsole::handleWifiScan() {
     return;
   }
 
-  DynamicJsonDocument doc(2048);
+  JsonDocument doc;
   doc["ok"] = true;
   doc["status"] = "ready";
-  JsonArray arr = doc.createNestedArray("networks");
+  JsonArray arr = doc["networks"].to<JsonArray>();
   const int count = scanState;
   for (int i = 0; i < count; i++) {
     const String ssid = WiFi.SSID(i);
     if (ssid.length() == 0) continue;
     if (isOwnLrsSoftApLike(ssid)) continue;
-    JsonObject n = arr.createNestedObject();
+    JsonObject n = arr.add<JsonObject>();
     n["ssid"] = ssid;
     n["rssi"] = WiFi.RSSI(i);
     n["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
@@ -51,8 +51,8 @@ void WebConsole::handleTestSta() {
     server_.send(403, "application/json", "{\"ok\":false,\"error\":\"setup_only\"}");
     return;
   }
-  DynamicJsonDocument body(256);
-  StaticJsonDocument<96> filter;
+  JsonDocument body;
+  JsonDocument filter;
   filter["wifi_sta_ssid"] = true;
   filter["wifi_sta_password"] = true;
   auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
@@ -72,7 +72,7 @@ void WebConsole::handleTestSta() {
   const bool alreadyConnectedSameSsid = WiFi.isConnected() && WiFi.SSID().equals(ssid);
   const bool sameAsConfigured = cfg.wifi_sta_ssid.equals(ssid) && cfg.wifi_sta_password.equals(pass);
   if (alreadyConnectedSameSsid && sameAsConfigured) {
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["ok"] = true;
     doc["status_code"] = static_cast<int>(WL_CONNECTED);
     doc["status_text"] = wifiStatusText(WL_CONNECTED);
@@ -95,7 +95,7 @@ void WebConsole::handleTestSta() {
     if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) break;
   }
 
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   const bool ok = (st == WL_CONNECTED);
   doc["ok"] = ok;
   doc["status_code"] = static_cast<int>(st);

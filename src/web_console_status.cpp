@@ -19,7 +19,7 @@ bool WebConsole::buildStatusLiveCache() {
     return status_live_cache_.body.length() > 0;
   status_live_cache_building_ = true;
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   auto &cfg = config_->settings();
   doc["chip_id"] = config_->chipIdHex();
   doc["factory_serial"] = cfg.factory_serial;
@@ -40,8 +40,13 @@ bool WebConsole::buildStatusLiveCache() {
   doc["lora_remote_temp_valid"] = sm_->remoteTemperatureValid();
   doc["lora_remote_temp_c"] = sm_->remoteTemperatureC();
   doc["lora_remote_temp_ms"] = sm_->remoteTemperatureMs();
-  doc["sta_connected"] = WiFi.isConnected();
-  doc["sta_ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : "";
+  char staIpBuf[16] = "";
+  if (WiFi.isConnected()) {
+    IPAddress ip = WiFi.localIP();
+    snprintf(staIpBuf, sizeof(staIpBuf), "%u.%u.%u.%u", ip[0], ip[1], ip[2],
+             ip[3]);
+  }
+  doc["sta_ip"] = staIpBuf;
   doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
   doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
   doc["sta_status_code"] = static_cast<int>(st);
@@ -51,7 +56,7 @@ bool WebConsole::buildStatusLiveCache() {
   doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
   doc["uptime_ms"] = millis();
 
-  String relayReason = "boot";
+  const char *relayReason = "boot";
   if (cfg.role_tx) {
     if (sm_->relayState() == 0) {
       if (sm_->inputState() == 0) {
@@ -109,7 +114,7 @@ bool WebConsole::buildStatusStaticCache() {
     return status_static_cache_.body.length() > 0;
   status_static_cache_building_ = true;
 
-  StaticJsonDocument<768> doc;
+  JsonDocument doc;
   auto &cfg = config_->settings();
   doc["chip_id"] = config_->chipIdHex();
   doc["factory_serial"] = cfg.factory_serial;
@@ -125,7 +130,11 @@ bool WebConsole::buildStatusStaticCache() {
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
   doc["fleet_setup_required"] = needsFleetSetupPrompt();
   doc["ap_ssid"] = config_->apSsid();
-  doc["ap_ip"] = WiFi.softAPIP().toString();
+  char apIpBuf[16];
+  IPAddress apIp = WiFi.softAPIP();
+  snprintf(apIpBuf, sizeof(apIpBuf), "%u.%u.%u.%u", apIp[0], apIp[1], apIp[2],
+           apIp[3]);
+  doc["ap_ip"] = apIpBuf;
 #if LRS_ENABLE_MDNS
   doc["mdns_ap"] = "lrs.local";
   doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
@@ -167,7 +176,7 @@ bool WebConsole::buildStatusLiteCache() {
     return status_lite_cache_.body.length() > 0;
   status_lite_cache_building_ = true;
 
-  StaticJsonDocument<384> doc;
+  JsonDocument doc;
   auto &cfg = config_->settings();
   doc["chip_id"] = config_->chipIdHex();
   doc["factory_serial"] = cfg.factory_serial;
@@ -184,8 +193,18 @@ bool WebConsole::buildStatusLiteCache() {
   doc["heap_free_bytes"] = ESP.getFreeHeap();
   doc["heap_frag_percent"] = lrslog::heapFragPercent();
   doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
-  doc["uptime_ms"] = millis();
+  char fwDisplay[96];
+  if (LRS_GIT_DIRTY == 0) {
+    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s)", LRS_FW_VERSION,
+             LRS_GIT_SHA);
+  } else {
+    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s, dirty)", LRS_FW_VERSION,
+             LRS_GIT_SHA);
+  }
+  doc["fw_display"] = fwDisplay;
+  doc["fw_version"] = LRS_FW_VERSION;
 
+  status_lite_cache_.body.clear();
   serializeJson(doc, status_lite_cache_.body);
   status_lite_cache_.built_ms = millis();
   status_lite_cache_building_ = false;

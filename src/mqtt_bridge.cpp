@@ -318,7 +318,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     auto err = deserializeJson(doc, payload, length);
     if (err) {
       {
@@ -635,7 +635,7 @@ void MqttBridge::publishDiscovery() {
     return;
   }
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   if (!settings_) return;
   doc["serial"] = settings_->factory_serial;
   doc["chip_id"] = chip_id_hex_;

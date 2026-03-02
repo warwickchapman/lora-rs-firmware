@@ -32,6 +32,16 @@ def run(cmd):
     return subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
 
 
+def read_repo_version(default: str = "0.0.0-dev") -> str:
+    try:
+        raw = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
+        if not raw:
+            return default
+        return raw[1:] if raw.startswith("v") else raw
+    except Exception:
+        return default
+
+
 def derive_password(chip_hex: str) -> str:
     digest = hashlib.sha256(f"{PRODUCT_SECRET}:{chip_hex}".encode()).hexdigest().upper()
     return digest[:12]
@@ -104,6 +114,7 @@ def main():
     deployment_key = args.fleet_key.strip() or three_word_key(f"{args.batch_id}:{args.env}:{chip}")
 
     record = {
+        "firmware_version": read_repo_version(),
         "serial": serial_for(chip),
         "chip_id": chip,
         "mac": mac,

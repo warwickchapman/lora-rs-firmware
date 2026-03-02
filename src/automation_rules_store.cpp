@@ -16,7 +16,8 @@ const char *Store::rulesPath() { return "/automation_rules.json"; }
 bool Store::exists() { return false; }
 size_t Store::defaultJsonLength() { return 74; }
 void Store::writeDefaultJson(Print &out) {
-  out.print("{\"schema_version\":1,\"enabled\":false,\"execution_mode\":\"standalone\",\"rules\":[]}\n");
+  out.print("{\"schema_version\":1,\"enabled\":false,\"execution_mode\":"
+            "\"standalone\",\"rules\":[]}\n");
 }
 SaveResult Store::validateAndSave(const String &) {
   SaveResult res{};
@@ -32,9 +33,11 @@ namespace {
 constexpr char kRulesPath[] = "/automation_rules.json";
 constexpr char kTempPath[] = "/automation_rules.tmp";
 constexpr char kDefaultJson[] =
-    "{\"schema_version\":1,\"enabled\":false,\"execution_mode\":\"standalone\",\"rules\":[]}\n";
+    "{\"schema_version\":1,\"enabled\":false,\"execution_mode\":\"standalone\","
+    "\"rules\":[]}\n";
 constexpr uint32_t kSchemaVersion = 1;
-void setError(SaveResult &res, uint16_t status, const char *code, const char *detail = nullptr) {
+void setError(SaveResult &res, uint16_t status, const char *code,
+              const char *detail = nullptr) {
   res.ok = false;
   res.http_status = status;
   res.error_code = code ? code : "invalid";
@@ -46,14 +49,18 @@ void setError(SaveResult &res, uint16_t status, const char *code, const char *de
 }
 
 bool isToken(const char *s, size_t maxLen = 32) {
-  if (s == nullptr || s[0] == '\0') return false;
+  if (s == nullptr || s[0] == '\0')
+    return false;
   size_t n = 0;
   while (s[n] != '\0') {
     const char c = s[n];
-    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
-    if (!ok) return false;
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '_' || c == '-';
+    if (!ok)
+      return false;
     ++n;
-    if (n > maxLen) return false;
+    if (n > maxLen)
+      return false;
   }
   return true;
 }
@@ -64,10 +71,14 @@ bool isAddressToken(JsonVariantConst v, bool allowSelf) {
     return n >= 1 && n <= 254;
   }
   const char *raw = v.as<const char *>();
-  if (!raw) return false;
-  while (*raw == ' ' || *raw == '\t' || *raw == '\r' || *raw == '\n') ++raw;
-  if (*raw == '\0') return false;
-  if (allowSelf && strcmp(raw, "self") == 0) return true;
+  if (!raw)
+    return false;
+  while (*raw == ' ' || *raw == '\t' || *raw == '\r' || *raw == '\n')
+    ++raw;
+  if (*raw == '\0')
+    return false;
+  if (allowSelf && strcmp(raw, "self") == 0)
+    return true;
   char *end = nullptr;
   long n = 0;
   if ((raw[0] == '0') && (raw[1] == 'x' || raw[1] == 'X')) {
@@ -75,71 +86,96 @@ bool isAddressToken(JsonVariantConst v, bool allowSelf) {
   } else {
     n = strtol(raw, &end, 10);
   }
-  if (end == nullptr || *end != '\0') return false;
+  if (end == nullptr || *end != '\0')
+    return false;
   return n >= 1 && n <= 254;
 }
 
 bool isNonNegativeInt(JsonVariantConst v) {
-  if (v.isNull()) return true;
-  if (v.is<int>() || v.is<unsigned int>() || v.is<uint32_t>() || v.is<unsigned long>()) {
+  if (v.isNull())
+    return true;
+  if (v.is<int>() || v.is<unsigned int>() || v.is<uint32_t>() ||
+      v.is<unsigned long>()) {
     return v.as<long>() >= 0;
   }
   const char *raw = v.as<const char *>();
-  if (!raw || *raw == '\0') return false;
+  if (!raw || *raw == '\0')
+    return false;
   char *end = nullptr;
   strtoul(raw, &end, 10);
   return end != nullptr && *end == '\0';
 }
 
 bool validatePredicate(JsonObjectConst pred) {
-  if (pred.isNull()) return false;
-  if (!isAddressToken(pred["peer"], true)) return false;
+  if (pred.isNull())
+    return false;
+  if (!isAddressToken(pred["peer"], true))
+    return false;
   const char *field = pred["field"] | "";
   const char *op = pred["op"] | "";
-  if (field[0] == '\0' || op[0] == '\0') return false;
-  if (pred["value"].isNull()) return false;
-  if (!pred["for_ms"].isNull() && !isNonNegativeInt(pred["for_ms"])) return false;
+  if (field[0] == '\0' || op[0] == '\0')
+    return false;
+  if (pred["value"].isNull())
+    return false;
+  if (!pred["for_ms"].isNull() && !isNonNegativeInt(pred["for_ms"]))
+    return false;
   return true;
 }
 
 bool validateAction(JsonVariantConst actionVar) {
   JsonObjectConst action = actionVar.as<JsonObjectConst>();
-  if (action.isNull()) return false;
+  if (action.isNull())
+    return false;
   const char *type = action["type"] | "";
-  if (strcmp(type, "set_relay") != 0) return false;
-  if (!isAddressToken(action["peer"], true)) return false;
-  if (action["value"].isNull()) return false;
+  if (strcmp(type, "set_relay") != 0)
+    return false;
+  if (!isAddressToken(action["peer"], true))
+    return false;
+  if (action["value"].isNull())
+    return false;
   return true;
 }
 
 bool validateRule(JsonVariantConst ruleVar) {
   JsonObjectConst rule = ruleVar.as<JsonObjectConst>();
-  if (rule.isNull()) return false;
-  if (!isToken(rule["id"] | "", 32)) return false;
+  if (rule.isNull())
+    return false;
+  if (!isToken(rule["id"] | "", 32))
+    return false;
 
   const char *name = rule["name"] | "";
-  if (name[0] != '\0' && strlen(name) > 64) return false;
-  if (!rule["for_ms"].isNull() && !isNonNegativeInt(rule["for_ms"])) return false;
-  if (!rule["cooldown_ms"].isNull() && !isNonNegativeInt(rule["cooldown_ms"])) return false;
+  if (name[0] != '\0' && strlen(name) > 64)
+    return false;
+  if (!rule["for_ms"].isNull() && !isNonNegativeInt(rule["for_ms"]))
+    return false;
+  if (!rule["cooldown_ms"].isNull() && !isNonNegativeInt(rule["cooldown_ms"]))
+    return false;
 
   JsonObjectConst when = rule["when"].as<JsonObjectConst>();
-  if (when.isNull()) return false;
+  if (when.isNull())
+    return false;
   JsonArrayConst all = when["all"].as<JsonArrayConst>();
-  if (all.isNull()) return false;
+  if (all.isNull())
+    return false;
   const size_t predCount = all.size();
-  if (predCount == 0 || predCount > kMaxPredicatesPerRule) return false;
+  if (predCount == 0 || predCount > kMaxPredicatesPerRule)
+    return false;
   for (JsonVariantConst pred : all) {
-    if (!validatePredicate(pred.as<JsonObjectConst>())) return false;
+    if (!validatePredicate(pred.as<JsonObjectConst>()))
+      return false;
   }
 
   JsonVariantConst thenVar = rule["then"];
-  if (thenVar.isNull()) return false;
+  if (thenVar.isNull())
+    return false;
   if (thenVar.is<JsonArrayConst>()) {
     JsonArrayConst arr = thenVar.as<JsonArrayConst>();
     const size_t n = arr.size();
-    if (n == 0 || n > kMaxActionsPerRule) return false;
+    if (n == 0 || n > kMaxActionsPerRule)
+      return false;
     for (JsonVariantConst action : arr) {
-      if (!validateAction(action)) return false;
+      if (!validateAction(action))
+        return false;
     }
     return true;
   }
@@ -147,7 +183,7 @@ bool validateRule(JsonVariantConst ruleVar) {
   return validateAction(thenVar);
 }
 
-bool validateRoot(DynamicJsonDocument &doc, SaveResult &res) {
+bool validateRoot(JsonDocument &doc, SaveResult &res) {
   JsonObjectConst root = doc.as<JsonObjectConst>();
   if (root.isNull()) {
     setError(res, 400, "bad_root");
@@ -168,17 +204,20 @@ bool validateRoot(DynamicJsonDocument &doc, SaveResult &res) {
 
   if (!root["peer_display"].isNull()) {
     const char *peerDisplay = root["peer_display"] | "";
-    if (strcmp(peerDisplay, "addresses") != 0 && strcmp(peerDisplay, "names") != 0) {
+    if (strcmp(peerDisplay, "addresses") != 0 &&
+        strcmp(peerDisplay, "names") != 0) {
       setError(res, 400, "bad_peer_display");
       return false;
     }
   }
 
-  if (!root["action_target"].isNull() && !isAddressToken(root["action_target"], true)) {
+  if (!root["action_target"].isNull() &&
+      !isAddressToken(root["action_target"], true)) {
     setError(res, 400, "bad_action_target");
     return false;
   }
-  if (!root["action_target_v1"].isNull() && !isAddressToken(root["action_target_v1"], true)) {
+  if (!root["action_target_v1"].isNull() &&
+      !isAddressToken(root["action_target_v1"], true)) {
     setError(res, 400, "bad_action_target");
     return false;
   }
@@ -189,7 +228,8 @@ bool validateRoot(DynamicJsonDocument &doc, SaveResult &res) {
     return false;
   }
   if (rules.size() > kMaxRules) {
-    snprintf(res.detail, sizeof(res.detail), "max=%u", static_cast<unsigned>(kMaxRules));
+    snprintf(res.detail, sizeof(res.detail), "max=%u",
+             static_cast<unsigned>(kMaxRules));
     setError(res, 400, "too_many_rules", res.detail);
     return false;
   }
@@ -197,7 +237,8 @@ bool validateRoot(DynamicJsonDocument &doc, SaveResult &res) {
   for (JsonVariantConst rule : rules) {
     if (!validateRule(rule)) {
       char detail[32];
-      snprintf(detail, sizeof(detail), "rule[%u]", static_cast<unsigned>(ruleIndex));
+      snprintf(detail, sizeof(detail), "rule[%u]",
+               static_cast<unsigned>(ruleIndex));
       setError(res, 400, "bad_rule", detail);
       return false;
     }
@@ -211,7 +252,8 @@ bool writeFileAtomic(const String &body, SaveResult &res) {
   File tmp = LittleFS.open(kTempPath, "w");
   if (!tmp) {
     setError(res, 500, "open_tmp");
-    LRS_LOGE(FS, "event=automation_rules_open_failed path=%s mode=w", kTempPath);
+    LRS_LOGE(FS, "event=automation_rules_open_failed path=%s mode=w",
+             kTempPath);
     return false;
   }
 
@@ -222,8 +264,7 @@ bool writeFileAtomic(const String &body, SaveResult &res) {
     LittleFS.remove(kTempPath);
     setError(res, 500, "write_failed");
     LRS_LOGE(FS, "event=automation_rules_write_failed path=%s want=%lu got=%lu",
-             kTempPath,
-             static_cast<unsigned long>(body.length()),
+             kTempPath, static_cast<unsigned long>(body.length()),
              static_cast<unsigned long>(bytes));
     return false;
   }
@@ -232,7 +273,8 @@ bool writeFileAtomic(const String &body, SaveResult &res) {
   if (!LittleFS.rename(kTempPath, kRulesPath)) {
     LittleFS.remove(kTempPath);
     setError(res, 500, "rename_failed");
-    LRS_LOGE(FS, "event=automation_rules_rename_failed tmp=%s dst=%s", kTempPath, kRulesPath);
+    LRS_LOGE(FS, "event=automation_rules_rename_failed tmp=%s dst=%s",
+             kTempPath, kRulesPath);
     return false;
   }
 
@@ -241,11 +283,12 @@ bool writeFileAtomic(const String &body, SaveResult &res) {
   res.error_code = "ok";
   res.saved_bytes = bytes;
   res.detail[0] = '\0';
-  LRS_LOGI(FS, "event=automation_rules_saved path=%s bytes=%lu", kRulesPath, static_cast<unsigned long>(bytes));
+  LRS_LOGI(FS, "event=automation_rules_saved path=%s bytes=%lu", kRulesPath,
+           static_cast<unsigned long>(bytes));
   return true;
 }
 
-}  // namespace
+} // namespace
 
 const char *Store::rulesPath() { return kRulesPath; }
 
@@ -263,24 +306,28 @@ SaveResult Store::validateAndSave(const String &body) {
   }
   if (body.length() > kMaxPayloadBytes) {
     char detail[48];
-    snprintf(detail, sizeof(detail), "max_bytes=%lu", static_cast<unsigned long>(kMaxPayloadBytes));
+    snprintf(detail, sizeof(detail), "max_bytes=%lu",
+             static_cast<unsigned long>(kMaxPayloadBytes));
     setError(res, 413, "payload_too_large", detail);
     return res;
   }
 
   size_t docCap = body.length() + 768U;
-  if (docCap < 1536U) docCap = 1536U;
-  if (docCap > 8192U) docCap = 8192U;
-  DynamicJsonDocument doc(docCap);
+  if (docCap < 1536U)
+    docCap = 1536U;
+  if (docCap > 8192U)
+    docCap = 8192U;
+  JsonDocument doc;
   auto err = deserializeJson(doc, body);
   if (err) {
     setError(res, 400, "invalid_json", err.c_str());
     return res;
   }
-  if (!validateRoot(doc, res)) return res;
+  if (!validateRoot(doc, res))
+    return res;
   writeFileAtomic(body, res);
   return res;
 }
 
 #endif
-}  // namespace automation_rules
+} // namespace automation_rules

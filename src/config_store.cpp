@@ -222,7 +222,7 @@ bool ConfigStore::begin() {
   if (docCapacity < 2048) {
     docCapacity = 2048;
   }
-  DynamicJsonDocument doc(docCapacity);
+  JsonDocument doc;
   auto err = deserializeJson(doc, f);
   f.close();
   if (err) {
@@ -353,7 +353,7 @@ bool ConfigStore::begin() {
 Settings &ConfigStore::settings() { return cfg_; }
 
 bool ConfigStore::save() {
-  DynamicJsonDocument doc(4096);
+  JsonDocument doc;
   doc["schema_version"] = cfg_.schema_version;
   doc["commissioned"] = cfg_.commissioned;
   doc["mode"] = cfg_.mode;

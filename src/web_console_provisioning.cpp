@@ -25,8 +25,8 @@ void WebConsole::handleProvisionFleetWifi() {
     serializeJson(doc, server_.client());
   };
 
-  DynamicJsonDocument body(512);
-  StaticJsonDocument<96> filter;
+  JsonDocument body;
+  JsonDocument filter;
   filter["wifi_sta_ssid"] = true;
   filter["wifi_sta_password"] = true;
   auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));
@@ -54,7 +54,7 @@ void WebConsole::handleProvisionFleetWifi() {
 
   const uint32_t cooldownRemainingMs = sm_->fleetWifiProvisionCooldownRemainingMs();
   if (cooldownRemainingMs > 0) {
-    DynamicJsonDocument cooldown(160);
+    JsonDocument cooldown;
     cooldown["ok"] = false;
     cooldown["error"] = "cooldown_active";
     cooldown["retry_after_ms"] = cooldownRemainingMs;
@@ -70,7 +70,7 @@ void WebConsole::handleProvisionFleetWifi() {
 
   const size_t totalLen = ssidLen + passLen;
   const size_t chunks = (totalLen + 6U) / 7U;
-  DynamicJsonDocument out(128);
+  JsonDocument out;
   out["ok"] = true;
   out["packets"] = static_cast<uint32_t>(chunks + 2U);  // start + chunks + commit
   sendJsonDoc(200, out);
@@ -102,7 +102,7 @@ void WebConsole::handleProvisioningStatus() {
                          kApiProvStatusCompactMaxBlockBytes)) {
     return;
   }
-  StaticJsonDocument<1536> doc;
+  JsonDocument doc;
   doc["ok"] = true;
   constexpr size_t maxCompactRows = 8;
   const bool activeSession = sess.active;
@@ -117,7 +117,7 @@ void WebConsole::handleProvisioningStatus() {
     compact = true;
     compactReason = "truncated_rows";
   }
-  JsonObject s = doc.createNestedObject("session");
+  JsonObject s = doc["session"].to<JsonObject>();
   s["active"] = sess.active;
   s["state"] = provisioningSessionStateText(sess.state);
   s["session_nonce"] = sess.session_nonce;
@@ -151,11 +151,11 @@ void WebConsole::handleProvisioningStatus() {
              static_cast<unsigned>(sess.failed_count));
   }
 
-  JsonArray arr = doc.createNestedArray("devices");
+  JsonArray arr = doc["devices"].to<JsonArray>();
   for (size_t i = 0; i < returnedDevices; ++i) {
     ProvisioningDeviceSnapshot d{};
     if (!sm_->provisioningDeviceByIndex(i, d)) continue;
-    JsonObject o = arr.createNestedObject();
+    JsonObject o = arr.add<JsonObject>();
     char chipHex[11];
     snprintf(chipHex, sizeof(chipHex), "0x%08lX", static_cast<unsigned long>(d.chip_id));
     o["chip_id_hex"] = chipHex;
@@ -189,9 +189,9 @@ void WebConsole::handleProvisioningStart() {
     sendTracked(500, "application/json", "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
     return;
   }
-  DynamicJsonDocument body(256);
+  JsonDocument body;
   if (server_.arg("plain").length() > 0) {
-    StaticJsonDocument<96> filter;
+    JsonDocument filter;
     filter["estimated_count"] = true;
     filter["retry_once"] = true;
     auto err = deserializeJson(body, server_.arg("plain"), DeserializationOption::Filter(filter));

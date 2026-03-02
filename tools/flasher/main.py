@@ -57,6 +57,32 @@ BG_COLOR = "#0f172a"
 CARD_BG = "rgba(15, 23, 42, 0.4)"
 GLASS_BORDER = "rgba(255, 255, 255, 0.1)"
 
+
+def load_release_version(default="0.0.0-dev"):
+    env_version = os.getenv("LRS_VERSION", "").strip()
+    if env_version:
+        return env_version[1:] if env_version.startswith("v") else env_version
+
+    candidates = [
+        pathlib.Path(__file__).resolve().parents[2] / "VERSION",
+        pathlib.Path.cwd() / "VERSION",
+    ]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, pathlib.Path(meipass) / "VERSION")
+
+    for path in candidates:
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+            if raw:
+                return raw[1:] if raw.startswith("v") else raw
+        except Exception:
+            pass
+    return default
+
+
+RELEASE_VERSION = load_release_version()
+
 def get_region_guess():
     """Guess region based on timezone."""
     try:
@@ -404,7 +430,7 @@ def main(page: ft.Page):
                         ft.Text("Thanda LoRa Flasher", size=32, weight="bold")
                     ]
                 ),
-                ft.Text("Firmware Updater v0.4.3-alpha", size=18, color="secondary")
+                ft.Text(f"Firmware Updater v{RELEASE_VERSION}", size=18, color="secondary")
             ]
         )
     )

@@ -89,7 +89,7 @@ void WebConsole::handlePostAutomationRules() {
   const String body = server_.arg("plain");
   automation_rules::SaveResult result = automation_rules::Store::validateAndSave(body);
   if (!result.ok) {
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["ok"] = false;
     doc["error"] = result.error_code;
     if (result.detail[0] != '\0') doc["detail"] = result.detail;
@@ -109,7 +109,7 @@ void WebConsole::handlePostAutomationRules() {
     return;
   }
 
-  DynamicJsonDocument doc(192);
+  JsonDocument doc;
   doc["ok"] = true;
   doc["saved_bytes"] = static_cast<uint32_t>(result.saved_bytes);
   doc["path"] = automation_rules::Store::rulesPath();

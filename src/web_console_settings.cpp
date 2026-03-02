@@ -9,7 +9,7 @@ using namespace webconsole_internal;
 
 void WebConsole::handleGetSettings() {
   HeapProbeGuard heapProbe(this, "/api/settings:get");
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   auto &cfg = config_->settings();
   doc["mode"] = cfg.mode;
   doc["role"] = cfg.role;
@@ -61,8 +61,8 @@ void WebConsole::handlePostSettings() {
   HeapProbeGuard heapProbe(this, "/api/settings:post");
   if (!requireAuth(true)) return;
 
-  DynamicJsonDocument doc(1536);
-  StaticJsonDocument<768> filter;
+  JsonDocument doc;
+  JsonDocument filter;
   filter["mode"] = true;
   filter["role"] = true;
   filter["role_tx"] = true;
@@ -245,7 +245,7 @@ void WebConsole::handlePostSettings() {
 void WebConsole::handleExportSettings() {
   if (!requireAuth(true)) return;
   server_.sendHeader("Content-Disposition", "attachment; filename=lrs-config.json");
-  DynamicJsonDocument doc(1536);
+  JsonDocument doc;
   auto &cfg = config_->settings();
   doc["mode"] = cfg.mode;
   doc["role"] = cfg.role;

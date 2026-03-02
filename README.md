@@ -59,6 +59,11 @@ Main entrypoint:
 - South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
 - USA (915 MHz): `python3 -m platformio run -e lrs_us`
 
+## Release Version Source
+- Single source of truth: `/Users/warwick/Code/LoRa/lora_rs/VERSION`
+- Firmware build metadata (`fw_version` shown in Web UI/API), flasher app version label, and factory/release helper scripts all read from this file.
+- For a new release, bump `VERSION` once (for example `0.4.4-alpha`) and keep release tag/title/assets aligned to that value.
+
 ## Flash
 - `python3 -m platformio run -e lrs_za -t upload --upload-port <PORT>`
 - `python3 -m platformio run -e lrs_us -t upload --upload-port <PORT>`

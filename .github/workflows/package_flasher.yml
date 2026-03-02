@@ -46,6 +46,7 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher
+          export LRS_VERSION="${GITHUB_REF_NAME#v}"
           # Dynamically find esptool path to include stubs
           ESPTOOL_DIR=$(python -c "import esptool, os; print(os.path.dirname(esptool.__file__))")
           
@@ -75,6 +76,7 @@ jobs:
             $ICON_ARG \
             $EXTRA_BIN \
             --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
+            --add-data "../../VERSION${SEP}VERSION" \
             --add-data "assets${SEP}assets"
           
           # Verification step: ensure the build output exists

@@ -1,9 +1,14 @@
 #!/bin/bash
-# Thanda LoRa Flasher Launcher v0.4.3-alpha
 
 # Get the absolute directory of the script
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
+VERSION_FILE="$DIR/../../VERSION"
+APP_VERSION="0.0.0-dev"
+if [ -f "$VERSION_FILE" ]; then
+    APP_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+    APP_VERSION="${APP_VERSION#v}"
+fi
 
 # Check if venv is valid, create/re-create if not
 if [ ! -f "venv/bin/activate" ]; then
@@ -26,5 +31,5 @@ fi
 
 # Launch app
 export PYTHONPATH="$DIR/.."
-echo "Launching Thanda LoRa Flasher v0.4.3-alpha..."
+echo "Launching Thanda LoRa Flasher v$APP_VERSION..."
 python3 main.py

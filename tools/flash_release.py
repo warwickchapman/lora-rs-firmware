@@ -9,6 +9,16 @@ from pathlib import Path
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 
 
+def _read_repo_version(default: str = "0.0.0-dev") -> str:
+    try:
+        raw = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
+        if not raw:
+            return default
+        return raw[1:] if raw.startswith("v") else raw
+    except Exception:
+        return default
+
+
 def _run_esptool(*args: str) -> str:
     return subprocess.check_output(
         [sys.executable, "-m", "esptool", *args],
@@ -72,6 +82,8 @@ def main() -> int:
     if not fw.exists():
         print(f"Firmware file not found: {fw}", file=sys.stderr)
         return 2
+
+    print(f"Expected repo release version: {_read_repo_version()}")
 
     _print_identity(args.port)
 

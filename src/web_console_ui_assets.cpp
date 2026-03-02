@@ -621,6 +621,13 @@ body.light .tabbtn:hover{background:rgba(255,255,255,0.8);color:var(--txt)}
 body.light .tabbtn.active{color:#fff}
 .page{display:none}
 .page.active{display:block;animation:fadeIn 0.3s cubic-bezier(0.19, 1, 0.22, 1)}
+.status-details{display:none;margin-top:20px;border-top:1px solid rgba(255,255,255,0.1);padding-top:20px}
+.status-details.active{display:block;animation:fadeIn 0.3s}
+.details-btn{width:100%;margin-top:20px;padding:12px;background:rgba(255,255,255,0.05);color:var(--txt);border:1px solid rgba(255,255,255,0.1);border-radius:12px;font-weight:700;cursor:pointer;}
+body.light .details-btn{background:rgba(0,0,0,0.05);border-color:rgba(0,0,0,0.1)}
+.sta-line{display:inline-flex;align-items:center;gap:6px}
+.sta-dot{width:8px;height:8px;border-radius:50%;background:#ef4444}
+.sta-dot.on{background:#22c55e}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .settings-tabs{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
 .settings-pane .grid{align-items:start}
@@ -805,7 +812,16 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 <div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div>
 <div class="status-grid">
 <div>
-<div id="statusTable">Loading status...</div>
+<div id="statusLiteTable" class="status-table">Loading metrics...</div>
+<button id="btnLoadStatusDetails" class="details-btn" onclick="toggleStatusDetails()">Load Full Details</button>
+<div id="statusDetailsPane" class="status-details">
+<div id="statusTable" class="status-table">Loading details...</div>
+<div class="sensor-grid" id="statusSensors">
+<div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div>
+<div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div>
+<div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div>
+</div>
+</div>
 </div>
 <div class="status-side">
 <div class="relay-card">
@@ -1988,12 +2004,26 @@ function togglePasswordField(id,btn){
   btn.setAttribute('aria-label', btn.title);
  }
 }
+let statusDetailsLoaded = false;
 async function ensureStatusStatic(silent){
  if(location.pathname !== '/') return statusStaticCache;
  if(statusStaticCache) return statusStaticCache;
  if(statusStaticLoadInFlight) return null;
  statusStaticLoadInFlight = true;
- const st = await apiJson('/api/status-static',{silent:!!silent});
+ 
+ // In M1, we fetch lite by default on page load.
+ const lite = await apiJson('/api/status-lite',{silent:true});
+ if(lite && lite.ok!==false){
+  applyStatusLiteDegraded(lite, null);
+ }
+ statusStaticLoadInFlight = false;
+ return statusStaticCache;
+}
+async function loadStatusDetails(){
+ if(statusDetailsLoaded) return;
+ const btn=document.getElementById('btnLoadStatusDetails');
+ if(btn) btn.innerText='Loading...';
+ const st = await apiJson('/api/status-static',{silent:false});
  if(st && st.ok!==false){
   statusStaticCache = st;
   statusDegradedLiteMode = false;
@@ -2001,15 +2031,16 @@ async function ensureStatusStatic(silent){
   if(footerFw){
    footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
   }
- }else{
-  const lite = await apiJson('/api/status-lite',{silent:true});
-  if(lite && lite.ok!==false){
-   applyStatusLiteDegraded(lite, 'Low-memory mode: limited status');
-  }
+  applyStatusPageState(statusStaticCache);
+  statusDetailsLoaded=true;
  }
- statusStaticLoadInFlight = false;
- return statusStaticCache;
+ if(btn) btn.style.display='none';
+ document.getElementById('statusDetailsPane').classList.add('active');
 }
+function toggleStatusDetails(){
+ loadStatusDetails();
+}
+
 function buildStatusFallbackFromLite(lite){
  const role = String((lite && lite.role) || (lastRoleIsTx ? 'tx' : 'rx') || 'tx').toLowerCase();
  return {
@@ -2211,7 +2242,7 @@ function syncStatusLiveSse(){
  }
  refreshStatusLiveNotice();
 }
-function applyStatusPageState(st){
+function applyStatusPageState(st){console.log("applyStatusPageState fired", st);
  if(!st) return;
  applyHeaderStatus(st);
  const relayOn = Number(st.relay_state) === 1;
@@ -2297,18 +2328,28 @@ function applyStatusPageState(st){
   rb.className = `relay-badge ${relayOn ? 'on' : 'off'}`;
   rb.innerText = relayOn ? 'RELAY ON' : 'RELAY OFF';
  }
- const rm=document.getElementById('relayMeta');
- if(rm){
-  const relayMeta = relaySource ? `Link: ${linkEmoji} ${st.link_state} • via ${relaySource}` : `Link: ${linkEmoji} ${st.link_state}`;
-  rm.innerText = relayMeta;
- }
- const table=document.getElementById('statusTable');
- const deployKey=String(st.deployment_key || '');
+  const rm=document.getElementById('relayMeta');
+  if(rm){
+   const relayMeta = relaySource ? `Link: ${linkEmoji} ${st.link_state || 'unknown'} • via ${relaySource}` : `Link: ${linkEmoji} ${st.link_state || 'unknown'}`;
+   rm.innerText = relayMeta;
+  }
+  const liteTable=document.getElementById('statusLiteTable');
+  if(liteTable){
+   liteTable.className='status-table';
+   liteTable.innerHTML=
+    `<div class="k">Role</div><div class="v">${escapeHtml(roleDisplay)}</div>
+     <div class="k">Link</div><div class="v">${escapeHtml(linkLine)}</div>
+     <div class="k">Activity</div><div class="v">${escapeHtml(loraActivityLine)}</div>
+     <div class="k">Relay reason</div><div class="v">${escapeHtml(reasonLabel(st.relay_reason))}</div>
+     <div class="k">WiFi</div><div class="v"><span class="sta-line">${escapeHtml(st.sta_ssid || st.sta_target_ssid || 'sta')}<span class="sta-dot ${st.sta_connected ? 'on' : 'off'}" title="${st.sta_connected ? 'connected' : 'not connected'}"></span></span><div class="small">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'disconnected')}</div></div>`;
+  }
+  const table=document.getElementById('statusTable');
+  const deployKey=String(st.deployment_key || '');
  const footerFw=document.getElementById('footerFw');
  if(footerFw){
   footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
  }
- if(table){
+ if(table&&statusDetailsLoaded){
  table.className='status-table';
   table.innerHTML=
    `<div class="section">LoRa</div>
@@ -2375,15 +2416,17 @@ function applyStatusPageState(st){
 function applyHeaderStatus(st){
  if(!st) return;
  const footerMem=document.getElementById('footerMem');
- const modeRaw = String(st.mode || 'paired').toLowerCase();
- const titleEl = document.getElementById('consoleTitle');
- const hostLabel = String(st.lan_hostname || st.mdns_lan || '').replace(/\.local$/i,'').trim();
- const headerTitle = hostLabel || `lrs-${String(st.chip_id || '').trim()}`;
- if(titleEl){ titleEl.innerText = headerTitle; }
- document.title = headerTitle || 'LRS Console';
- const chipId = String(st.chip_id || '').trim();
- const serial = String(st.factory_serial || '').trim();
- const identity = serial || (chipId ? `lrs-${chipId}` : '-');
+  const modeRaw = String(st.mode || 'paired').toLowerCase();
+  const titleEl = document.getElementById('consoleTitle');
+  const hLan = st.lan_hostname ? String(st.lan_hostname) : '';
+  const hMdns = st.mdns_lan ? String(st.mdns_lan) : '';
+  const hostLabel = String(hLan || hMdns || '').replace(/\.local$/i,'').trim();
+  const chipIdStr = st.chip_id ? String(st.chip_id).trim() : '';
+  const headerTitle = hostLabel || (chipIdStr ? `lrs-${chipIdStr}` : 'lrs-xxx');
+  if(titleEl){ titleEl.innerText = headerTitle; }
+  document.title = headerTitle || 'LRS Console';
+  const serialStr = st.factory_serial ? String(st.factory_serial).trim() : '';
+  const identity = serialStr || (chipIdStr ? `lrs-${chipIdStr}` : '-');
  const statusHeadText=document.getElementById('statusHeadDeviceText');
  const statusHeadCopy=document.getElementById('statusHeadDeviceCopy');
  if(statusHeadText){ statusHeadText.innerText = `Device: ${identity}`; }
@@ -2488,9 +2531,15 @@ async function load(){
   applyAutomationsFeatureVisibility();
   if(activePage==='status'){
    await ensureStatusStatic(true);
-   refreshStatusLiveNotice();
+   // Only sync SSE if details have been loaded to prevent heavy background work
+   if(statusDetailsLoaded) {
+     syncStatusLiveSse();
+   } else {
+     refreshStatusLiveNotice();
+   }
   }
 }
+
 async function loadSettingsPageData(force){
  if(settingsPageLoadInFlight) return;
  if(settingsPageLoaded && !force) return;

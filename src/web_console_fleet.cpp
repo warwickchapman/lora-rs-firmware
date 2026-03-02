@@ -17,7 +17,7 @@ void WebConsole::handleFleet() {
   size_t docCapacity = kFleetDocBaseBytes + (peerCount * kFleetDocPerPeerBytes);
   if (docCapacity < kFleetDocMinBytes) docCapacity = kFleetDocMinBytes;
   if (docCapacity > kFleetDocMaxBytes) docCapacity = kFleetDocMaxBytes;
-  DynamicJsonDocument doc(docCapacity);
+  JsonDocument doc;
   doc["role"] = cfg.role_tx ? "tx" : "rx";
   doc["tx_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
   doc["tx_default_poll_interval_ms"] = cfg.tx_mqtt_remote_default_poll_interval_ms;
@@ -26,7 +26,7 @@ void WebConsole::handleFleet() {
   if (cfg.role_tx && sm_ != nullptr) {
     FleetScanSnapshot scan{};
     sm_->fleetScanSnapshot(scan);
-    JsonObject s = doc.createNestedObject("scan");
+    JsonObject s = doc["scan"].to<JsonObject>();
     s["active"] = scan.active;
     s["start_address"] = scan.start_address;
     s["end_address"] = scan.end_address;
@@ -55,12 +55,12 @@ void WebConsole::handleFleet() {
     s["scanned"] = scanned;
     s["progress_pct"] = (total > 0) ? static_cast<uint32_t>((scanned * 100U) / total) : 0U;
   }
-  JsonArray arr = doc.createNestedArray("devices");
+  JsonArray arr = doc["devices"].to<JsonArray>();
   if (cfg.role_tx && sm_ != nullptr) {
     for (size_t i = 0; i < peerCount; ++i) {
       PeerStatusSnapshot node{};
       if (!sm_->peerByIndex(i, node)) continue;
-      JsonObject r = arr.createNestedObject();
+      JsonObject r = arr.add<JsonObject>();
       r["address"] = node.address;
       char addrHex[5];
       snprintf(addrHex, sizeof(addrHex), "0x%02X", node.address);
@@ -136,7 +136,7 @@ bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
   }
   const String action = tail.substring(actionPrefix.length());
 
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (server_.arg("plain").length() > 0) {
     auto err = deserializeJson(doc, server_.arg("plain"));
     if (err) {
@@ -185,8 +185,8 @@ void WebConsole::handleFleetScan() {
     return;
   }
 
-  DynamicJsonDocument body(256);
-  StaticJsonDocument<96> filter;
+  JsonDocument body;
+  JsonDocument filter;
   filter["start_address"] = true;
   filter["end_address"] = true;
   filter["interval_ms"] = true;
@@ -216,7 +216,7 @@ void WebConsole::handleFleetScan() {
 
   FleetScanSnapshot scan{};
   sm_->fleetScanSnapshot(scan);
-  DynamicJsonDocument out(256);
+  JsonDocument out;
   out["ok"] = true;
   out["active"] = scan.active;
   out["start_address"] = scan.start_address;

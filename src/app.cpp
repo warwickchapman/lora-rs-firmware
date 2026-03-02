@@ -17,7 +17,7 @@ constexpr uint32_t kApDisableDelayAfterStaMs = 60000;
 constexpr uint32_t kNtpPollNoFixMs = 5000;
 constexpr uint32_t kNtpPollFixedMs = 60000;
 constexpr uint32_t kNtpForceRefreshMs = 21600000;
-constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
+constexpr uint32_t kMinValidUnixTimeS = 1704067200UL; // 2024-01-01 UTC
 #if LRS_ENABLE_MDNS
 // mDNS should remain available during normal ESP8266 operation and only pause
 // under severe memory pressure.
@@ -35,7 +35,7 @@ constexpr uint32_t kOtaStartupMinMaxBlockBytes = 1200;
 constexpr uint32_t kSteadySlowPhaseWarnMs = 50;
 constexpr uint32_t kSteadySlowPhaseWarnRateLimitMs = 5000;
 constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
-constexpr uint32_t kStaReconnectMinFreeHeapBytes = 11000;
+constexpr uint32_t kStaReconnectMinFreeHeapBytes = 9000;
 constexpr uint32_t kStaReconnectMinMaxBlockBytes = 6000;
 constexpr uint32_t kStaReconnectHeapLogIntervalMs = 30000;
 constexpr uint8_t kStaFailureResetThreshold = 10;
@@ -43,43 +43,40 @@ constexpr uint8_t kStaStackResetLimit = 10;
 
 const char *wifiStatusText(wl_status_t st) {
   switch (st) {
-    case WL_IDLE_STATUS:
-      return "idle";
-    case WL_NO_SSID_AVAIL:
-      return "ssid_not_found";
-    case WL_SCAN_COMPLETED:
-      return "scan_completed";
-    case WL_CONNECTED:
-      return "connected";
-    case WL_CONNECT_FAILED:
-      return "connect_failed";
-    case WL_CONNECTION_LOST:
-      return "connection_lost";
-    case WL_DISCONNECTED:
-      return "disconnected";
+  case WL_IDLE_STATUS:
+    return "idle";
+  case WL_NO_SSID_AVAIL:
+    return "ssid_not_found";
+  case WL_SCAN_COMPLETED:
+    return "scan_completed";
+  case WL_CONNECTED:
+    return "connected";
+  case WL_CONNECT_FAILED:
+    return "connect_failed";
+  case WL_CONNECTION_LOST:
+    return "connection_lost";
+  case WL_DISCONNECTED:
+    return "disconnected";
 #ifdef WL_WRONG_PASSWORD
-    case WL_WRONG_PASSWORD:
-      return "wrong_password";
+  case WL_WRONG_PASSWORD:
+    return "wrong_password";
 #endif
 #ifdef WL_NO_SHIELD
-    case WL_NO_SHIELD:
-      return "no_shield";
+  case WL_NO_SHIELD:
+    return "no_shield";
 #endif
-    default:
-      return "unknown";
+  default:
+    return "unknown";
   }
 }
-}
+} // namespace
 
 void App::begin() {
   LRS_LOGI(SYS,
-           "event=boot_banner fw=%s git=%s branch=%s dirty=%d built=\"%s %s\" reset_reason=%s",
-           LRS_FW_VERSION,
-           LRS_GIT_SHA,
-           LRS_GIT_BRANCH,
-           static_cast<int>(LRS_GIT_DIRTY),
-           __DATE__,
-           __TIME__,
+           "event=boot_banner fw=%s git=%s branch=%s dirty=%d built=\"%s %s\" "
+           "reset_reason=%s",
+           LRS_FW_VERSION, LRS_GIT_SHA, LRS_GIT_BRANCH,
+           static_cast<int>(LRS_GIT_DIRTY), __DATE__, __TIME__,
            ESP.getResetReason().c_str());
   const bool fsReady = config_.begin();
   if (!fsReady) {
@@ -95,24 +92,26 @@ void App::begin() {
 
   sm_.begin(config_.settings(), &radio_);
   auto unixProvider = [this](uint32_t &unixTimeS) {
-    if (!sm_.sharedUnixTimeValid()) return false;
+    if (!sm_.sharedUnixTimeValid())
+      return false;
     unixTimeS = sm_.sharedUnixTime();
     return (unixTimeS != 0);
   };
-    lrslog::setUnixTimeProvider(unixProvider);
+  lrslog::setUnixTimeProvider(unixProvider);
   mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_);
 #if LRS_ENABLE_AUTOMATIONS
   automations_.begin();
 #endif
-  web_.begin(&config_, &sm_, &sensors_,
-             [this](bool restartNetwork, bool restartOtaAuth) {
-               applyUpdatedConfig(restartNetwork, restartOtaAuth);
-             },
-             [this]() {
+  web_.begin(
+      &config_, &sm_, &sensors_,
+      [this](bool restartNetwork, bool restartOtaAuth) {
+        applyUpdatedConfig(restartNetwork, restartOtaAuth);
+      },
+      [this]() {
 #if LRS_ENABLE_AUTOMATIONS
-               automations_.requestReload();
+        automations_.requestReload();
 #endif
-             });
+      });
 
   startOta();
   startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
@@ -126,32 +125,37 @@ void App::begin() {
 
 void App::tick() {
   const uint32_t tickStartMs = millis();
-  const bool startupTrace = static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
+  const bool startupTrace =
+      static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
   bool emitStartupBreadcrumb = false;
   auto phaseSlowWarn = [&](const char *phase, uint32_t phaseStartMs) {
     const uint32_t endMs = millis();
     const uint32_t durMs = endMs - phaseStartMs;
     if (startupTrace) {
-      if (durMs < kStartupSlowTickWarnMs) return;
+      if (durMs < kStartupSlowTickWarnMs)
+        return;
       const uint32_t freeHeap = lrslog::heapFree();
       const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-      const uint32_t ratioPct = (freeHeap != 0U) ? ((maxBlock * 100UL) / freeHeap) : 0U;
+      const uint32_t ratioPct =
+          (freeHeap != 0U) ? ((maxBlock * 100UL) / freeHeap) : 0U;
       LRS_LOGW(SYS,
-               "event=startup_tick_slow phase=%s dur_ms=%lu heap_free=%lu max_free_block=%lu max_block_ratio_pct=%lu",
-               phase,
-               static_cast<unsigned long>(durMs),
+               "event=startup_tick_slow phase=%s dur_ms=%lu heap_free=%lu "
+               "max_free_block=%lu max_block_ratio_pct=%lu",
+               phase, static_cast<unsigned long>(durMs),
                static_cast<unsigned long>(freeHeap),
                static_cast<unsigned long>(maxBlock),
                static_cast<unsigned long>(ratioPct));
       return;
     }
 
-    if (durMs < kSteadySlowPhaseWarnMs) return;
+    if (durMs < kSteadySlowPhaseWarnMs)
+      return;
 
     const bool severe = durMs >= kSteadySlowPhaseWarnImmediateMs;
     const bool rateLimitActive =
         (slow_phase_last_log_ms_ != 0U) &&
-        (static_cast<uint32_t>(endMs - slow_phase_last_log_ms_) < kSteadySlowPhaseWarnRateLimitMs);
+        (static_cast<uint32_t>(endMs - slow_phase_last_log_ms_) <
+         kSteadySlowPhaseWarnRateLimitMs);
     if (!severe && rateLimitActive) {
       if (slow_phase_suppressed_count_ != 0xFFFFU) {
         ++slow_phase_suppressed_count_;
@@ -161,11 +165,12 @@ void App::tick() {
 
     const uint32_t freeHeap = lrslog::heapFree();
     const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-    const uint32_t ratioPct = (freeHeap != 0U) ? ((maxBlock * 100UL) / freeHeap) : 0U;
+    const uint32_t ratioPct =
+        (freeHeap != 0U) ? ((maxBlock * 100UL) / freeHeap) : 0U;
     LRS_LOGW(SYS,
-             "event=slow_phase phase=%s dur_ms=%lu heap_free=%lu max_free_block=%lu max_block_ratio_pct=%lu suppressed=%u",
-             phase,
-             static_cast<unsigned long>(durMs),
+             "event=slow_phase phase=%s dur_ms=%lu heap_free=%lu "
+             "max_free_block=%lu max_block_ratio_pct=%lu suppressed=%u",
+             phase, static_cast<unsigned long>(durMs),
              static_cast<unsigned long>(freeHeap),
              static_cast<unsigned long>(maxBlock),
              static_cast<unsigned long>(ratioPct),
@@ -173,11 +178,17 @@ void App::tick() {
     slow_phase_last_log_ms_ = endMs;
     slow_phase_suppressed_count_ = 0;
   };
-  if (startupTrace && (startup_trace_next_breadcrumb_ms_ == 0 || static_cast<int32_t>(tickStartMs - startup_trace_next_breadcrumb_ms_) >= 0)) {
+  if (startupTrace &&
+      (startup_trace_next_breadcrumb_ms_ == 0 ||
+       static_cast<int32_t>(tickStartMs - startup_trace_next_breadcrumb_ms_) >=
+           0)) {
     startup_trace_next_breadcrumb_ms_ = tickStartMs + kStartupTraceBreadcrumbMs;
     emitStartupBreadcrumb = true;
-    LRS_LOGD(SYS, "event=startup_tick phase=begin ms=%lu heap_free=%lu max_free_block=%lu",
-             static_cast<unsigned long>(tickStartMs), static_cast<unsigned long>(lrslog::heapFree()),
+    LRS_LOGD(SYS,
+             "event=startup_tick phase=begin ms=%lu heap_free=%lu "
+             "max_free_block=%lu",
+             static_cast<unsigned long>(tickStartMs),
+             static_cast<unsigned long>(lrslog::heapFree()),
              static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
   }
 
@@ -199,7 +210,8 @@ void App::tick() {
   const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   if (emitStartupBreadcrumb) {
-    LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu", static_cast<unsigned long>(millis()));
+    LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu",
+             static_cast<unsigned long>(millis()));
   }
   phaseStartMs = millis();
   sm_.tick();
@@ -216,15 +228,19 @@ void App::tick() {
       uint8_t provSrc = 0;
       if (sm_.consumePendingWifiProvision(provSsid, provPassword, provSrc)) {
         auto &cfg = config_.settings();
-        const bool changed = (cfg.wifi_sta_ssid != provSsid) || (cfg.wifi_sta_password != provPassword);
+        const bool changed = (cfg.wifi_sta_ssid != provSsid) ||
+                             (cfg.wifi_sta_password != provPassword);
         cfg.wifi_sta_ssid = provSsid;
         cfg.wifi_sta_password = provPassword;
         cfg.audit_last_saved_by = "lora_wifi_provision";
         cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
-          lrslog::event("wifi_prov_applied", 0, provSrc, static_cast<uint8_t>(provSsid.length() & 0xFFU));
+          lrslog::event("wifi_prov_applied", 0, provSrc,
+                        static_cast<uint8_t>(provSsid.length() & 0xFFU));
           if (!changed) {
-            LRS_LOGI(WIFI, "event=wifi_prov_reapply reason=unchanged_credentials action=restart_network");
+            LRS_LOGI(WIFI,
+                     "event=wifi_prov_reapply reason=unchanged_credentials "
+                     "action=restart_network");
           }
           // LoRa-driven WiFi provisioning must always restart networking so a
           // previously disabled/failed WiFi stack can recover without reboot.
@@ -239,7 +255,9 @@ void App::tick() {
     bool keepFleetKey = true;
     uint8_t resetSrc = 0;
     if (sm_.consumePendingFactoryReset(keepFleetKey, resetSrc)) {
-      lrslog::event(keepFleetKey ? "factory_reset_exec_keep" : "factory_reset_exec_full", 0, resetSrc, 0);
+      lrslog::event(keepFleetKey ? "factory_reset_exec_keep"
+                                 : "factory_reset_exec_full",
+                    0, resetSrc, 0);
       if (config_.factoryReset(keepFleetKey)) {
         delay(100);
         ESP.restart();
@@ -254,9 +272,12 @@ void App::tick() {
       uint8_t provAddr = 0;
       bool provRoleTx = false;
       String provFleetKey;
-      if (sm_.consumePendingFleetProvisionApply(provSession, provAddr, provRoleTx, provFleetKey)) {
+      if (sm_.consumePendingFleetProvisionApply(provSession, provAddr,
+                                                provRoleTx, provFleetKey)) {
         auto &cfg = config_.settings();
-        const bool changed = (cfg.local_address != provAddr) || (cfg.role_tx != provRoleTx) || (cfg.fleet_passphrase != provFleetKey);
+        const bool changed = (cfg.local_address != provAddr) ||
+                             (cfg.role_tx != provRoleTx) ||
+                             (cfg.fleet_passphrase != provFleetKey);
         cfg.local_address = provAddr;
         cfg.role_tx = provRoleTx;
         cfg.mode = "paired";
@@ -277,11 +298,14 @@ void App::tick() {
       }
     }
   }
-  const bool startupDeferNonEssential = !WiFi.isConnected() && (millis() < kStartupNonEssentialDeferralMs);
+  const bool startupDeferNonEssential =
+      !WiFi.isConnected() && (millis() < kStartupNonEssentialDeferralMs);
   if (startupDeferNonEssential) {
     if (!startup_defer_logged_) {
       startup_defer_logged_ = true;
-      LRS_LOGI(SYS, "event=startup_defer_nonessential until_ms=%lu reason=wifi_not_connected",
+      LRS_LOGI(SYS,
+               "event=startup_defer_nonessential until_ms=%lu "
+               "reason=wifi_not_connected",
                static_cast<unsigned long>(kStartupNonEssentialDeferralMs));
     }
   } else {
@@ -294,12 +318,14 @@ void App::tick() {
   sensors_.tick();
   phaseSlowWarn("sensors_tick", phaseStartMs);
   if (emitStartupBreadcrumb) {
-    LRS_LOGD(SYS, "event=startup_tick phase=web_enter ms=%lu", static_cast<unsigned long>(millis()));
+    LRS_LOGD(SYS, "event=startup_tick phase=web_enter ms=%lu",
+             static_cast<unsigned long>(millis()));
   }
   phaseStartMs = millis();
   web_.tick();
   phaseSlowWarn("web_tick", phaseStartMs);
-  // Re-check mDNS after web handlers because API requests can drop heap quickly.
+  // Re-check mDNS after web handlers because API requests can drop heap
+  // quickly.
   phaseStartMs = millis();
   refreshMdns();
   phaseSlowWarn("refresh_mdns_post", phaseStartMs);
@@ -375,10 +401,8 @@ void App::updateNetworking() {
       sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
       lrslog::event("sta_connected", rssi, 0, 0);
-      LRS_LOGI(WIFI,
-               "event=sta_connected ssid=%s ip=%s rssi=%d",
-               cfg.wifi_sta_ssid.c_str(),
-               WiFi.localIP().toString().c_str(),
+      LRS_LOGI(WIFI, "event=sta_connected ssid=%s ip=%s rssi=%d",
+               cfg.wifi_sta_ssid.c_str(), WiFi.localIP().toString().c_str(),
                rssi);
       startNtpClient();
       maybeDisableAp();
@@ -395,9 +419,9 @@ void App::updateNetworking() {
       }
       lrslog::event("sta_connect_failed_fallback_ap", 0, 0, 0);
       LRS_LOGW(WIFI,
-               "event=sta_connect_failed ssid=%s reason=%s status=%d ap_fallback=1 consecutive_failures=%u",
-               cfg.wifi_sta_ssid.c_str(),
-               wifiStatusText(st),
+               "event=sta_connect_failed ssid=%s reason=%s status=%d "
+               "ap_fallback=1 consecutive_failures=%u",
+               cfg.wifi_sta_ssid.c_str(), wifiStatusText(st),
                static_cast<int>(st),
                static_cast<unsigned>(sta_connect_consecutive_failures_));
       ensureApEnabled();
@@ -405,7 +429,8 @@ void App::updateNetworking() {
         if (sta_stack_reset_count_ < kStaStackResetLimit) {
           ++sta_stack_reset_count_;
           LRS_LOGW(WIFI,
-                   "event=sta_stack_reset reason=consecutive_failures failures=%u reset_count=%u",
+                   "event=sta_stack_reset reason=consecutive_failures "
+                   "failures=%u reset_count=%u",
                    static_cast<unsigned>(sta_connect_consecutive_failures_),
                    static_cast<unsigned>(sta_stack_reset_count_));
           WiFi.disconnect(true);
@@ -436,7 +461,8 @@ void App::updateNetworking() {
           wifi_sta_connecting_ = false;
           sta_connected_ = false;
           LRS_LOGE(WIFI,
-                   "event=sta_stack_disabled reason=reset_limit_reached reset_count=%u",
+                   "event=sta_stack_disabled reason=reset_limit_reached "
+                   "reset_count=%u",
                    static_cast<unsigned>(sta_stack_reset_count_));
           lrslog::event("sta_stack_disabled", 0, sta_stack_reset_count_, 0);
         }
@@ -454,10 +480,8 @@ void App::updateNetworking() {
       sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
       lrslog::event("sta_connected", rssi, 0, 0);
-      LRS_LOGI(WIFI,
-               "event=sta_connected ssid=%s ip=%s rssi=%d",
-               cfg.wifi_sta_ssid.c_str(),
-               WiFi.localIP().toString().c_str(),
+      LRS_LOGI(WIFI, "event=sta_connected ssid=%s ip=%s rssi=%d",
+               cfg.wifi_sta_ssid.c_str(), WiFi.localIP().toString().c_str(),
                rssi);
       startNtpClient();
     }
@@ -473,17 +497,21 @@ void App::updateNetworking() {
     wifi_sta_retry_ms_ = millis();
   }
 
-  if (cfg.wifi_sta_ssid.length() >= 1 && millis() - wifi_sta_retry_ms_ >= kStaReconnectIntervalMs) {
+  if (cfg.wifi_sta_ssid.length() >= 1 &&
+      millis() - wifi_sta_retry_ms_ >= kStaReconnectIntervalMs) {
     const uint32_t freeHeap = lrslog::heapFree();
     const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-    const bool lowHeapForScan = (freeHeap < kStaReconnectMinFreeHeapBytes) || (maxBlock < kStaReconnectMinMaxBlockBytes);
+    const bool lowHeapForScan = (freeHeap < kStaReconnectMinFreeHeapBytes) ||
+                                (maxBlock < kStaReconnectMinMaxBlockBytes);
     if (lowHeapForScan) {
       const uint32_t nowMs = millis();
       if (sta_reconnect_heap_block_log_ms_ == 0U ||
-          static_cast<int32_t>(nowMs - sta_reconnect_heap_block_log_ms_) >= static_cast<int32_t>(kStaReconnectHeapLogIntervalMs)) {
+          static_cast<int32_t>(nowMs - sta_reconnect_heap_block_log_ms_) >=
+              static_cast<int32_t>(kStaReconnectHeapLogIntervalMs)) {
         sta_reconnect_heap_block_log_ms_ = nowMs;
         LRS_LOGW(WIFI,
-                 "event=sta_reconnect_deferred reason=low_heap heap_free=%lu max_free_block=%lu min_free=%lu min_max_block=%lu",
+                 "event=sta_reconnect_deferred reason=low_heap heap_free=%lu "
+                 "max_free_block=%lu min_free=%lu min_max_block=%lu",
                  static_cast<unsigned long>(freeHeap),
                  static_cast<unsigned long>(maxBlock),
                  static_cast<unsigned long>(kStaReconnectMinFreeHeapBytes),
@@ -510,7 +538,8 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
     // ESP8266 ArduinoOTA cannot replace password once initialized in-process.
     // Reboot is required to apply new OTA credentials reliably.
     lrslog::event("ota_auth_changed_reboot", 0, 0, 0);
-    LRS_LOGI(SYS, "event=config_apply restart_network=0 restart_ota_auth=1 action=reboot");
+    LRS_LOGI(SYS, "event=config_apply restart_network=0 restart_ota_auth=1 "
+                  "action=reboot");
     delay(100);
     ESP.restart();
     return;
@@ -534,7 +563,9 @@ void App::startNtpClient() {
   ntp_started_ = true;
   ntp_last_check_ms_ = 0;
   lrslog::event("ntp_start", 0, 0, 0);
-  LRS_LOGI(NTP, "event=ntp_start servers=pool.ntp.org,time.nist.gov,time.google.com");
+  LRS_LOGI(
+      NTP,
+      "event=ntp_start servers=pool.ntp.org,time.nist.gov,time.google.com");
 }
 
 void App::tickTimeSync() {
@@ -546,7 +577,8 @@ void App::tickTimeSync() {
   }
 
   const uint32_t nowMs = millis();
-  const uint32_t pollInterval = ntp_time_valid_ ? kNtpPollFixedMs : kNtpPollNoFixMs;
+  const uint32_t pollInterval =
+      ntp_time_valid_ ? kNtpPollFixedMs : kNtpPollNoFixMs;
   if ((nowMs - ntp_last_check_ms_) < pollInterval) {
     return;
   }
@@ -558,12 +590,14 @@ void App::tickTimeSync() {
   }
 
   const bool hadValidTime = ntp_time_valid_;
-  const bool refreshDue = ntp_time_valid_ && ((nowMs - ntp_last_sync_ms_) >= kNtpForceRefreshMs);
+  const bool refreshDue =
+      ntp_time_valid_ && ((nowMs - ntp_last_sync_ms_) >= kNtpForceRefreshMs);
   const uint32_t unixTimeS = static_cast<uint32_t>(nowUnix);
   bool shouldPushToStateMachine = !sm_.sharedUnixTimeValid();
   if (!shouldPushToStateMachine) {
     const uint32_t shared = sm_.sharedUnixTime();
-    const uint32_t delta = (shared > unixTimeS) ? (shared - unixTimeS) : (unixTimeS - shared);
+    const uint32_t delta =
+        (shared > unixTimeS) ? (shared - unixTimeS) : (unixTimeS - shared);
     shouldPushToStateMachine = delta > 2U;
   }
   ntp_time_valid_ = true;
@@ -574,11 +608,9 @@ void App::tickTimeSync() {
   }
 
   if (!hadValidTime || refreshDue) {
-    LRS_LOGI(NTP,
-             "event=ntp_sync_ok unix=%lu push_state=%u refresh_due=%u",
+    LRS_LOGI(NTP, "event=ntp_sync_ok unix=%lu push_state=%u refresh_due=%u",
              static_cast<unsigned long>(unixTimeS),
-             shouldPushToStateMachine ? 1U : 0U,
-             refreshDue ? 1U : 0U);
+             shouldPushToStateMachine ? 1U : 0U, refreshDue ? 1U : 0U);
   }
 
   if (refreshDue) {
@@ -587,12 +619,14 @@ void App::tickTimeSync() {
 }
 
 void App::ensureApEnabled() {
-  if (ap_enabled_) return;
+  if (ap_enabled_)
+    return;
   const String apSsid = config_.apSsid();
   const String apPass = config_.apPassword();
   WiFi.softAP(apSsid.c_str(), apPass.c_str());
   ap_enabled_ = true;
-  LRS_LOGI(WIFI, "event=ap_active ssid=%s ip=%s", apSsid.c_str(), WiFi.softAPIP().toString().c_str());
+  LRS_LOGI(WIFI, "event=ap_active ssid=%s ip=%s", apSsid.c_str(),
+           WiFi.softAPIP().toString().c_str());
 }
 
 void App::maybeDisableAp() {
@@ -619,15 +653,18 @@ void App::refreshCaptiveDns() {
     }
     return;
   }
-  if (dns_running_) return;
+  if (dns_running_)
+    return;
   dns_.start(53, "*", WiFi.softAPIP());
   dns_running_ = true;
 }
 
 void App::beginStaConnect() {
-  if (wifi_stack_disabled_) return;
+  if (wifi_stack_disabled_)
+    return;
   auto &cfg = config_.settings();
-  if (cfg.wifi_sta_ssid.length() == 0) return;
+  if (cfg.wifi_sta_ssid.length() == 0)
+    return;
   if (cached_sta_hostname_.length() == 0) {
     refreshCachedStaHostname();
   }
@@ -638,17 +675,20 @@ void App::beginStaConnect() {
   wifi_sta_started_ms_ = millis();
   wifi_sta_retry_ms_ = millis();
   lrslog::event("sta_connect_start", 0, 0, 0);
-  LRS_LOGI(WIFI, "event=sta_connect_start ssid=%s host=%s", cfg.wifi_sta_ssid.c_str(), host.c_str());
+  LRS_LOGI(WIFI, "event=sta_connect_start ssid=%s host=%s",
+           cfg.wifi_sta_ssid.c_str(), host.c_str());
 }
 
 void App::startOta() {
   ota_enabled_ = false;
   const uint32_t freeHeap = lrslog::heapFree();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-  if (freeHeap < kOtaStartupMinFreeHeapBytes || maxBlock < kOtaStartupMinMaxBlockBytes) {
+  if (freeHeap < kOtaStartupMinFreeHeapBytes ||
+      maxBlock < kOtaStartupMinMaxBlockBytes) {
     lrslog::event("ota_disabled_heap", 0, 0, 0);
     LRS_LOGW(SYS,
-             "event=ota_disabled reason=low_startup_heap heap_free=%lu max_free_block=%lu min_free=%lu min_max_block=%lu",
+             "event=ota_disabled reason=low_startup_heap heap_free=%lu "
+             "max_free_block=%lu min_free=%lu min_max_block=%lu",
              static_cast<unsigned long>(freeHeap),
              static_cast<unsigned long>(maxBlock),
              static_cast<unsigned long>(kOtaStartupMinFreeHeapBytes),
@@ -663,7 +703,8 @@ void App::startOta() {
   const String &host = cached_sta_hostname_;
   ArduinoOTA.setHostname(host.c_str());
   ArduinoOTA.setPassword(cfg.admin_password.c_str());
-  // Disable ArduinoOTA's internal mDNS to avoid extra heap pressure and mDNS parsing work.
+  // Disable ArduinoOTA's internal mDNS to avoid extra heap pressure and mDNS
+  // parsing work.
   ArduinoOTA.begin(false);
   ota_enabled_ = true;
   lrslog::event("ota_ready", 0, 0, 0);
@@ -675,18 +716,20 @@ void App::refreshMdns() {
 #else
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxBlock = ESP.getMaxFreeBlockSize();
-  const bool lowHeapNow = (freeHeap < kMdnsSuspendFreeHeapBytes) || (maxBlock < kMdnsSuspendMaxBlockBytes);
-  const bool heapRecovered = (freeHeap >= kMdnsResumeFreeHeapBytes) && (maxBlock >= kMdnsResumeMaxBlockBytes);
+  const bool lowHeapNow = (freeHeap < kMdnsSuspendFreeHeapBytes) ||
+                          (maxBlock < kMdnsSuspendMaxBlockBytes);
+  const bool heapRecovered = (freeHeap >= kMdnsResumeFreeHeapBytes) &&
+                             (maxBlock >= kMdnsResumeMaxBlockBytes);
   if (lowHeapNow) {
     if (!mdns_suspended_for_low_heap_) {
       MDNS.close();
       active_mdns_hostname_ = "";
       mdns_suspended_for_low_heap_ = true;
       lrslog::event("mdns_paused_heap", 0, 0, 0);
-      LRS_LOGW(MDNS,
-               "event=mdns_paused reason=low_heap heap_free=%lu max_free_block=%lu",
-               freeHeap,
-               maxBlock);
+      LRS_LOGW(
+          MDNS,
+          "event=mdns_paused reason=low_heap heap_free=%lu max_free_block=%lu",
+          freeHeap, maxBlock);
     }
     return;
   }
@@ -697,9 +740,9 @@ void App::refreshMdns() {
     mdns_suspended_for_low_heap_ = false;
     lrslog::event("mdns_resume_heap", 0, 0, 0);
     LRS_LOGI(MDNS,
-             "event=mdns_resumed reason=heap_recovered heap_free=%lu max_free_block=%lu",
-             freeHeap,
-             maxBlock);
+             "event=mdns_resumed reason=heap_recovered heap_free=%lu "
+             "max_free_block=%lu",
+             freeHeap, maxBlock);
   }
 
   {
@@ -711,7 +754,8 @@ void App::refreshMdns() {
         active_mdns_hostname_ = "";
         mdns_suspended_for_provisioning_ = true;
         lrslog::event("mdns_paused_prov", 0, prov.session_nonce, 0);
-        LRS_LOGI(MDNS, "event=mdns_paused reason=provisioning session=%u", prov.session_nonce);
+        LRS_LOGI(MDNS, "event=mdns_paused reason=provisioning session=%u",
+                 prov.session_nonce);
       }
       return;
     }
@@ -735,13 +779,16 @@ void App::refreshMdns() {
     desiredRef = &cached_sta_hostname_;
   }
 
-  const bool unchanged = (desiredLiteral != nullptr) ? (active_mdns_hostname_ == desiredLiteral)
-                                                     : (desiredRef != nullptr && active_mdns_hostname_ == *desiredRef);
+  const bool unchanged =
+      (desiredLiteral != nullptr)
+          ? (active_mdns_hostname_ == desiredLiteral)
+          : (desiredRef != nullptr && active_mdns_hostname_ == *desiredRef);
   if (unchanged) {
     return;
   }
 
-  const char *desiredName = (desiredLiteral != nullptr) ? desiredLiteral : desiredRef->c_str();
+  const char *desiredName =
+      (desiredLiteral != nullptr) ? desiredLiteral : desiredRef->c_str();
 
   MDNS.close();
   if (!MDNS.begin(desiredName)) {
@@ -772,16 +819,21 @@ String App::normalizeHostname(const String &input) const {
   out.reserve(input.length());
   for (size_t i = 0; i < input.length(); i++) {
     char c = input[i];
-    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    if (c >= 'A' && c <= 'Z')
+      c = static_cast<char>(c - 'A' + 'a');
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
       out += c;
     } else if (c == ' ' || c == '_' || c == '.') {
       out += '-';
     }
   }
-  while (out.startsWith("-")) out.remove(0, 1);
-  while (out.endsWith("-")) out.remove(out.length() - 1);
-  if (out.length() == 0) return "lrs";
-  if (out.length() > 31) out.remove(31);
+  while (out.startsWith("-"))
+    out.remove(0, 1);
+  while (out.endsWith("-"))
+    out.remove(out.length() - 1);
+  if (out.length() == 0)
+    return "lrs";
+  if (out.length() > 31)
+    out.remove(31);
   return out;
 }
