@@ -112,23 +112,35 @@ def main(page: ft.Page):
     
     # Logic instances (flasher_logic remains local as it's tied to page actions)
     flasher_logic = logic.FlasherLogic()
+    # Pre-define UI containers for scoping in callbacks
+    controls_panel = ft.Column()
+    expanded_toggle_btn = ft.IconButton(ft.Icons.FULLSCREEN)
     
     current_device_info = {}
     available_firmwares = [] # List of dicts from GitHub
-    selected_local_path = None # For "Local File..." override
+    selected_local_path = None # For "Local File... Browse" override
+    
+    # Monitor State
+    monitor_active = False
+    current_monitor = None
     
     # --- UI Components ---
-    
-    # Dense Log ListView
+    # Define these first so the log function can use them
     log_box = ft.ListView(expand=True, spacing=0, padding=5, auto_scroll=True)
+    monitor_log_box = ft.ListView(expand=True, spacing=0, padding=5, auto_scroll=True)
 
-    def log(message):
+    def log(message, system=True):
         msg_text = str(message).strip()
         if not msg_text: return
-        log_box.controls.append(
+        target = log_box if system else monitor_log_box
+        target.controls.append(
             ft.Container(
                 content=ft.Text(
-                    f"> {msg_text}", size=10, font_family="monospace", color=ft.Colors.GREY_300, no_wrap=True,
+                    f"{'> ' if system else ''}{msg_text}", 
+                    size=10 if system else 11, 
+                    font_family="monospace", 
+                    color=ft.Colors.GREY_300 if system else ft.Colors.GREEN_300, 
+                    no_wrap=True,
                 ),
                 padding=0, margin=0
             )
@@ -390,6 +402,38 @@ def main(page: ft.Page):
             flash_btn.disabled = False
             page.update()
 
+    def toggle_monitor(e=None):
+        nonlocal monitor_active, current_monitor
+        if monitor_active:
+            log("Stopping monitor...")
+            if current_monitor:
+                current_monitor.stop()
+            monitor_active = False
+            monitor_btn.text = "Start Monitor"
+            monitor_btn.icon = ft.Icons.PLAY_ARROW
+        else:
+            if not devices_dropdown.value:
+                log("Error: Select a port first.")
+                return
+            log(f"Starting monitor on {devices_dropdown.value}...")
+            monitor_log_box.controls.clear()
+            monitor_active = True
+            monitor_btn.text = "Stop Monitor"
+            monitor_btn.icon = ft.Icons.STOP
+            current_monitor = logic.SerialMonitor(
+                port=devices_dropdown.value,
+                baud=115200,
+                callback=lambda line: log(line, system=False)
+            )
+            current_monitor.start()
+        page.update()
+
+    def toggle_expanded_view(e=None):
+        controls_panel.visible = not controls_panel.visible
+        expanded_toggle_btn.icon = ft.Icons.FULLSCREEN_EXIT if not controls_panel.visible else ft.Icons.FULLSCREEN
+        expanded_toggle_btn.tooltip = "Exit Expanded View" if not controls_panel.visible else "Expand Monitor"
+        page.update()
+
     def read_info():
         if not devices_dropdown.value: return
         log("Reading chip info...")
@@ -410,8 +454,14 @@ def main(page: ft.Page):
         on_click=lambda _: start_flash()
     )
     
+    monitor_btn = ft.ElevatedButton(
+        "Start Monitor", icon=ft.Icons.PLAY_ARROW, expand=True,
+        style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor="#ec4899", shape=ft.RoundedRectangleBorder(radius=10)),
+        on_click=toggle_monitor
+    )
+    
     info_btn = ft.OutlinedButton(
-        "Read Device Info", icon=ft.Icons.INFO_OUTLINE, expand=True,
+        "Info", icon=ft.Icons.INFO_OUTLINE, width=120,
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10), side=ft.BorderSide(1, GLASS_BORDER)),
         on_click=lambda _: read_info()
     )
@@ -453,9 +503,27 @@ def main(page: ft.Page):
             content=ft.Column([
                 header,
                 ft.Row([
-                    # Left: Log
+                    # Left: Log & Monitor
                     ft.Container(
-                        content=log_box,
+                        content=ft.Column([
+                            ft.Tabs(
+                                selected_index=0,
+                                tabs=[
+                                    ft.Tab(text="System Log", icon=ft.Icons.TERMINAL, content=log_box),
+                                    ft.Tab(text="Serial Monitor", icon=ft.Icons.REMOVE_RED_EYE, content=monitor_log_box),
+                                ],
+                                expand=True,
+                                divider_color="transparent",
+                                indicator_color=ft.Colors.BLUE_400,
+                            ),
+                            ft.Row([
+                                expanded_toggle_btn := ft.IconButton(
+                                    ft.Icons.FULLSCREEN, 
+                                    on_click=toggle_expanded_view,
+                                    tooltip="Expand Monitor"
+                                )
+                            ], alignment=ft.MainAxisAlignment.END)
+                        ]),
                         expand=True,
                         bgcolor=CARD_BG,
                         blur=24,
@@ -464,7 +532,7 @@ def main(page: ft.Page):
                         padding=10
                     ),
                     # Right: Controls
-                    ft.Column([
+                    controls_panel := ft.Column([
                         ft.Container(
                             padding=15,
                             bgcolor=CARD_BG,
@@ -476,9 +544,11 @@ def main(page: ft.Page):
                                 ft.Row([region_dropdown], spacing=5),
                                 ft.Row([devices_dropdown, ft.IconButton(ft.Icons.REFRESH, on_click=refresh_ports, icon_size=18)], spacing=5),
                                 ft.Row([firmware_dropdown, ft.IconButton(ft.Icons.CLOUD_DOWNLOAD, on_click=lambda _: refresh_firmwares(), icon_size=18, tooltip="Refresh Cloud")], spacing=5),
-                                ft.Row([flash_btn, info_btn], spacing=10),
+                                ft.Row([flash_btn, monitor_btn], spacing=10),
+                                ft.Row([info_btn], alignment=ft.MainAxisAlignment.CENTER),
                             ], spacing=10)
                         ),
+                        # ... (sticker panel stays here)
                         ft.Container(
                             expand=True,
                             padding=ft.padding.only(left=15, right=5, top=10, bottom=15),

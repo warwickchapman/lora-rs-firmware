@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install -U flet pyinstaller Pillow
+          pip install -U flet pyinstaller Pillow platformio
           if [[ "${{ matrix.os }}" == macos-* ]]; then
             pip install pyobjc
             brew install create-dmg
@@ -53,10 +53,34 @@ jobs:
         run: |
           python tools/flasher/generate_icons.py
 
+      - name: Build Firmware
+        shell: bash
+        run: |
+          # Build both ZA and US firmware environments
+          pio run -e lrs_za -e lrs_us
+          mkdir -p tools/flasher/final_dist
+          cp .pio/build/lrs_za/firmware.bin tools/flasher/final_dist/lrs-firmware-${GITHUB_REF_NAME#v}-za.bin
+          cp .pio/build/lrs_us/firmware.bin tools/flasher/final_dist/lrs-firmware-${GITHUB_REF_NAME#v}-us.bin
+
       - name: Build with Flet Pack
         shell: bash
         run: |
           cd tools/flasher
+          # Download standalone esptool binary to avoid PyInstaller recursion bugs
+          mkdir -p bin
+          VERSION_ESP="v4.8.1"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip
+            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool.exe bin/ && rm -rf bin_tmp esptool.zip
+          elif [[ "${{ matrix.os }}" == macos-* ]]; then
+            curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
+            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool bin/ && rm -rf bin_tmp esptool.zip
+          else
+            curl -L -o esptool.tar.gz https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz
+            tar -xzf esptool.tar.gz -C bin_tmp && mv bin_tmp/*/esptool bin/ && rm -rf bin_tmp esptool.tar.gz
+          fi
+          chmod +x bin/esptool*
+
           # Set platform-specific icon
           export LRS_VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION = '${LRS_VERSION}'" > version.py
@@ -98,7 +122,7 @@ jobs:
           flet pack main.py --name "Thanda LoRa Flasher" \
             $ICON_ARG \
             $EXTRA_BIN \
-            --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
+            --add-data "bin${SEP}bin" \
             --add-data "../../VERSION${SEP}VERSION" \
             --add-data "assets${SEP}assets"
           
@@ -161,6 +185,7 @@ jobs:
             macos-15-intel-artifact/*
             macos-14-artifact/*
             ubuntu-22.04-artifact/*
+            *.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

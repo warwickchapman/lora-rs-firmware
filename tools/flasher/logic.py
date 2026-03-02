@@ -10,7 +10,9 @@ import pathlib
 import json
 import io
 from contextlib import redirect_stdout, redirect_stderr
-import esptool
+import threading
+import serial
+# We use subprocess to call standalone esptool binaries to avoid PyInstaller recursion bugs
 
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 
@@ -53,28 +55,40 @@ def parse_mac(output: str) -> str:
         raise RuntimeError("Unable to parse MAC from esptool output")
     return match.group(1).lower()
 
-class FlasherLogic:
-    def __init__(self, python_path=sys.executable):
-        self.python_path = python_path
+    def _get_esptool_path(self):
+        """Determine the path to the bundled or system esptool binary."""
+        # 1. Check for bundled binary in _MEIPASS (PyInstaller)
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            # We bundle as 'bin/esptool' (mac/linux) or 'bin/esptool.exe' (win)
+            binary = "esptool.exe" if os.name == "nt" else "esptool"
+            bundled_path = os.path.join(meipass, "bin", binary)
+            if os.path.exists(bundled_path):
+                return bundled_path
+        
+        # 2. Fallback to system path (development)
+        return "esptool.py" if os.name != "nt" else "esptool.exe"
 
     def run_esptool(self, args):
-        # Redirect stdout/stderr to capture output without spawning a new process
-        # that might re-trigger the bundled executable logic.
-        full_args = ["--before", "default_reset", "--after", "hard_reset"] + args
-        f = io.StringIO()
-        with redirect_stdout(f), redirect_stderr(f):
-            try:
-                # Use esptool's main entry point as a library
-                esptool.main(full_args)
-                return f.getvalue()
-            except SystemExit as e:
-                if e.code != 0:
-                    output = f.getvalue()
-                    raise RuntimeError(f"esptool error {e.code}:\n{output}")
-                return f.getvalue()
-            except Exception as e:
-                output = f.getvalue()
-                raise RuntimeError(f"esptool exception: {str(e)}\n{output}")
+        esptool_bin = self._get_esptool_path()
+        full_args = [esptool_bin, "--before", "default_reset", "--after", "hard_reset"] + args
+        
+        try:
+            # Use subprocess to avoid the recursion bug in PyInstaller's importer
+            result = subprocess.run(
+                full_args,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            output = result.stdout + "\n" + result.stderr
+            if result.returncode != 0:
+                raise RuntimeError(f"esptool error {result.returncode}:\n{output}")
+            return output
+        except FileNotFoundError:
+            raise RuntimeError(f"esptool binary not found: {esptool_bin}")
+        except Exception as e:
+            raise RuntimeError(f"esptool exception: {str(e)}")
 
     def get_chip_info(self, port):
         chip_out = self.run_esptool(["--port", port, "chip_id"])
@@ -92,28 +106,69 @@ class FlasherLogic:
         }
 
     def flash_firmware(self, port, baud, firmware_path, callback=None):
-        args = ["--port", port, "--baud", str(baud), "write_flash", "0x0", firmware_path]
+        esptool_bin = self._get_esptool_path()
+        args = [esptool_bin, "--port", port, "--baud", str(baud), "write_flash", "0x0", firmware_path]
         
-        # Capture output in real-time by wrapping esptool.main
-        # We'll use a custom stream to pass lines to the callback
-        class CallbackStream:
-            def __init__(self, cb):
-                self.cb = cb
-            def write(self, data):
-                if self.cb and data.strip():
-                    self.cb(data)
-            def flush(self):
-                pass
+        try:
+            # Forward output to callback in real-time
+            process = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            for line in process.stdout:
+                if callback:
+                    callback(line)
+            
+            process.wait()
+            if process.returncode != 0:
+                raise RuntimeError("Flash failed")
+                
+        except Exception as e:
+            raise RuntimeError(f"Flash error: {e}")
 
-        stream = CallbackStream(callback)
-        with redirect_stdout(stream), redirect_stderr(stream):
-            try:
-                esptool.main(args)
-            except SystemExit as e:
-                if e.code != 0:
-                    raise RuntimeError("Flash failed")
-            except Exception as e:
-                raise RuntimeError(f"Flash error: {e}")
+class SerialMonitor:
+    def __init__(self, port, baud=115200, callback=None):
+        self.port = port
+        self.baud = baud
+        self.callback = callback
+        self.running = False
+        self._thread: threading.Thread | None = None
+        self._serial: serial.Serial | None = None
+
+    def start(self):
+        if self.running: return
+        self.running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self.running = False
+        ser = self._serial
+        if ser:
+            try: 
+                self._serial = None
+                ser.close()
+            except: pass
+
+    def _run(self):
+        try:
+            self._serial = serial.Serial(self.port, self.baud, timeout=0.1)
+            ser = self._serial
+            while self.running and ser:
+                if ser.in_waiting:
+                    line = ser.readline().decode('utf-8', errors='replace')
+                    if self.callback and line:
+                        self.callback(line)
+        except Exception as e:
+            if self.callback:
+                self.callback(f"Monitor Error: {e}")
+        finally:
+            self.stop()
 
 class FirmwareManager:
     def __init__(self, cache_dir="firmware_cache"):
