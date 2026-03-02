@@ -65,16 +65,16 @@ jobs:
         run: |
           PLATFORM="${{ github.event.inputs.platform || 'all' }}"
           # Full matrix
-          ALL_MATRIX='{"include":[{"platform":"windows-x64","os":"windows-latest"},{"platform":"macos-arm64","os":"macos-latest"},{"platform":"macos-x86_64","os":"macos-latest"},{"platform":"linux-x64","os":"ubuntu-22.04"}]}'
+          ALL_MATRIX='{"include":[{"platform":"windows-x64","os":"windows-latest","target_triple":"x86_64-pc-windows-msvc"},{"platform":"macos-arm64","os":"macos-latest","target_triple":"aarch64-apple-darwin"},{"platform":"macos-x86_64","os":"macos-latest","target_triple":"x86_64-apple-darwin"},{"platform":"linux-x64","os":"ubuntu-22.04","target_triple":"x86_64-unknown-linux-gnu"}]}'
           
           if [[ "$PLATFORM" == "all" ]]; then
             echo "matrix=$ALL_MATRIX" >> $GITHUB_OUTPUT
           elif [[ "$PLATFORM" == "windows" ]]; then
-            echo "matrix={\"include\":[{\"platform\":\"windows-x64\",\"os\":\"windows-latest\"}]}" >> $GITHUB_OUTPUT
+            echo "matrix={\"include\":[{\"platform\":\"windows-x64\",\"os\":\"windows-latest\",\"target_triple\":\"x86_64-pc-windows-msvc\"}]}" >> $GITHUB_OUTPUT
           elif [[ "$PLATFORM" == "linux" ]]; then
-            echo "matrix={\"include\":[{\"platform\":\"linux-x64\",\"os\":\"ubuntu-22.04\"}]}" >> $GITHUB_OUTPUT
+            echo "matrix={\"include\":[{\"platform\":\"linux-x64\",\"os\":\"ubuntu-22.04\",\"target_triple\":\"x86_64-unknown-linux-gnu\"}]}" >> $GITHUB_OUTPUT
           elif [[ "$PLATFORM" == "macos" ]]; then
-            echo "matrix={\"include\":[{\"platform\":\"macos-arm64\",\"os\":\"macos-latest\"},{\"platform\":\"macos-x86_64\",\"os\":\"macos-latest\"}]}" >> $GITHUB_OUTPUT
+            echo "matrix={\"include\":[{\"platform\":\"macos-arm64\",\"os\":\"macos-latest\",\"target_triple\":\"aarch64-apple-darwin\"},{\"platform\":\"macos-x86_64\",\"os\":\"macos-latest\",\"target_triple\":\"x86_64-apple-darwin\"}]}" >> $GITHUB_OUTPUT
           fi
 
   build:
@@ -98,7 +98,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-x86_64' && 'x86_64-apple-darwin' || matrix.platform == 'macos-arm64' && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ matrix.target_triple }}
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -110,6 +110,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -138,19 +143,25 @@ jobs:
           cd tools/flasher/src-tauri
           mkdir -p bin bin_tmp
           VERSION_ESP="v4.8.1"
+          TRIPLE="${{ matrix.target_triple }}"
+          
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip
-            unzip esptool.zip -d bin_tmp && mv bin_tmp/*/esptool.exe bin/esptool-x86_64-pc-windows-msvc.exe && rm -rf bin_tmp esptool.zip
-          elif [[ "${{ matrix.platform }}" == "macos-arm64" ]]; then
-            curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
-            unzip esptool.zip -d bin_tmp && find bin_tmp -name esptool -type f -exec cp {} bin/esptool-aarch64-apple-darwin \; && rm -rf bin_tmp esptool.zip
-          elif [[ "${{ matrix.platform }}" == "macos-x86_64" ]]; then
-            curl -L -o esptool.zip https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip
-            unzip esptool.zip -d bin_tmp && find bin_tmp -name esptool -type f -exec cp {} bin/esptool-x86_64-apple-darwin \; && rm -rf bin_tmp esptool.zip
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip"
+            curl -L -o esptool.zip "$URL"
+            unzip esptool.zip -d bin_tmp
+            find bin_tmp -name esptool.exe -exec cp {} "bin/esptool-${TRIPLE}.exe" \;
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip"
+            curl -L -o esptool.zip "$URL"
+            unzip esptool.zip -d bin_tmp
+            find bin_tmp -name esptool -type f -exec cp {} "bin/esptool-${TRIPLE}" \;
           else
-            curl -L -o esptool.tar.gz https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz
-            tar -xzf esptool.tar.gz -C bin_tmp && find bin_tmp -name esptool -type f -exec cp {} bin/esptool-x86_64-unknown-linux-gnu \; && rm -rf bin_tmp esptool.tar.gz
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz"
+            curl -L -o esptool.tar.gz "$URL"
+            tar -xzf esptool.tar.gz -C bin_tmp
+            find bin_tmp -name esptool -type f -exec cp {} "bin/esptool-${TRIPLE}" \;
           fi
+          rm -rf bin_tmp esptool.zip esptool.tar.gz
           chmod +x bin/esptool*
 
       - name: Install Apple Certificate
@@ -164,16 +175,7 @@ jobs:
         run: |
           cd tools/flasher
           npm install
-          TARGET_ARGS=""
-          if [[ "${{ matrix.platform }}" == "macos-arm64" ]]; then TARGET_ARGS="--target aarch64-apple-darwin"; fi
-          if [[ "${{ matrix.platform }}" == "macos-x86_64" ]]; then TARGET_ARGS="--target x86_64-apple-darwin"; fi
-          npm run tauri build -- $TARGET_ARGS
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          npm run tauri build -- --target ${{ matrix.target_triple }}
 
       - name: Package Windows
         if: matrix.os == 'windows-latest'
