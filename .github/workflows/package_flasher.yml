@@ -95,6 +95,7 @@ jobs:
           flet pack main.py --name "Thanda LoRa Flasher" \
             $ICON_ARG \
             $EXTRA_BIN \
+            --clean \
             --codesign-identity "" \
             --add-data "$ESPTOOL_DIR/targets${SEP}esptool/targets" \
             --add-data "../../VERSION${SEP}VERSION" \
