@@ -12,6 +12,7 @@ import io
 from contextlib import redirect_stdout, redirect_stderr
 import threading
 import serial
+from typing import Optional, Union, List, Dict
 # We use subprocess to call standalone esptool binaries to avoid PyInstaller recursion bugs
 
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
@@ -138,8 +139,8 @@ class SerialMonitor:
         self.baud = baud
         self.callback = callback
         self.running = False
-        self._thread: threading.Thread | None = None
-        self._serial: serial.Serial | None = None
+        self._thread: Optional[threading.Thread] = None
+        self._serial: Optional[serial.Serial] = None
 
     def start(self):
         if self.running: return

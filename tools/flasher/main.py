@@ -509,8 +509,8 @@ def main(page: ft.Page):
                             ft.Tabs(
                                 selected_index=0,
                                 tabs=[
-                                    ft.Tab(text="System Log", icon=ft.Icons.TERMINAL, content=log_box),
-                                    ft.Tab(text="Serial Monitor", icon=ft.Icons.REMOVE_RED_EYE, content=monitor_log_box),
+                                    ft.Tab(text="System Log", icon=ft.Icon(ft.Icons.TERMINAL), content=log_box),
+                                    ft.Tab(text="Serial Monitor", icon=ft.Icon(ft.Icons.REMOVE_RED_EYE), content=monitor_log_box),
                                 ],
                                 expand=True,
                                 divider_color="transparent",
