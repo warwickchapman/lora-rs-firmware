@@ -187,10 +187,9 @@ jobs:
         shell: bash
         run: |
           VERSION=${GITHUB_REF_NAME#v}
+          TRIPLE="${{ matrix.target_triple }}"
           ARCH="x64"
-          if [[ "${{ matrix.os }}" == "macos-14" ]]; then ARCH="arm64"; fi
-          TRIPLE="${{ matrix.target_triple }}"
-          TRIPLE="${{ matrix.target_triple }}"
+          if [[ "$TRIPLE" == "aarch64-apple-darwin" ]]; then ARCH="arm64"; fi
           mkdir final_dist
           brew install create-dmg
           
@@ -198,15 +197,20 @@ jobs:
           APP_NAME="thanda-lora-flasher.app"
           APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${APP_NAME}"
           
+          # Rename for final presentation inside DMG
+          NEW_APP_NAME="Thanda LoRa Flasher.app"
+          NEW_APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${NEW_APP_NAME}"
+          mv "$APP_PATH" "$NEW_APP_PATH"
+          
           create-dmg \
             --volname "Thanda LoRa Flasher" \
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "${APP_NAME}" 150 150 \
+            --icon "${NEW_APP_NAME}" 150 150 \
             --app-drop-link 450 150 \
             "final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg" \
-            "$APP_PATH"
+            "$NEW_APP_PATH"
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-22.04'
