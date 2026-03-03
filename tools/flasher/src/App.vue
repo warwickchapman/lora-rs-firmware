@@ -43,7 +43,7 @@ onMounted(() => {
           Thanda LoRa <span class="text-indigo-500">Flasher</span>
         </h1>
         <p class="text-slate-400 text-sm mt-1">{{ appVersion }}</p>
-      </div>
+      <div class="flex gap-4">
         <div :class="['glass-card px-3 py-2 flex items-center gap-2 text-sm transition-all', 
                      status.ready ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-red-500/10 border-red-500/20']"
              :title="status.message">
