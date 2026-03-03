@@ -11,7 +11,7 @@ pub struct SerialPortInfo {
 }
 
 pub fn list_ports() -> Vec<SerialPortInfo> {
-    available_ports()
+    let mut ports: Vec<SerialPortInfo> = available_ports()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|p| {
