@@ -12,6 +12,7 @@
     "dialog:allow-open",
     "shell:allow-spawn",
     "shell:allow-execute",
+    "process:allow-exit",
     {
       "identifier": "shell:allow-spawn",
       "allow": [
