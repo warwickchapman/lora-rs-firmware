@@ -24,7 +24,7 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
             }
 
             #[cfg(target_os = "linux")]
-            if name.contains("rfcomm") {
+            if name.contains("rfcomm") || (name.contains("ttys") && !name.contains("usb")) {
                 return None;
             }
 
@@ -89,5 +89,8 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
                 score,
             })
         })
-        .collect()
+        .collect();
+
+    ports.sort_by(|a, b| b.score.cmp(&a.score));
+    ports
 }

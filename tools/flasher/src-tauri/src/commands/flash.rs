@@ -65,7 +65,7 @@ pub async fn flash_firmware(
     
     // Command: esptool --port <PORT> --baud 460800 write-flash 0x0 <PATH>
     let (mut rx, _child) = sidecar
-        .args(["--port", &port, "--baud", "460800", "write-flash", "0x0", flash_file.to_str().unwrap()])
+        .args(["--port", &port, "--baud", "460800", "write_flash", "0x0", flash_file.to_str().unwrap()])
         .env("PYTHONUNBUFFERED", "1")
         .spawn()
         .map_err(|e| format!("Failed to spawn esptool: {}", e))?;
