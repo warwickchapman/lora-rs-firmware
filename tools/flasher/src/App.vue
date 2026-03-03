@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { exit } from '@tauri-apps/plugin-process';
 import Flasher from './components/Flasher.vue';
 
 interface SystemStatus {
@@ -43,12 +44,15 @@ onMounted(() => {
         </h1>
         <p class="text-slate-400 text-sm mt-1">{{ appVersion }}</p>
       </div>
-      <div class="flex gap-4">
         <div :class="['glass-card px-3 py-2 flex items-center gap-2 text-sm transition-all', 
                      status.ready ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-red-500/10 border-red-500/20']"
              :title="status.message">
           <span :class="['w-2 h-2 rounded-full', status.ready ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 animate-pulse']"></span>
         </div>
+        <button @click="exit()" class="glass-card px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          Exit
+        </button>
       </div>
     </header>
 
