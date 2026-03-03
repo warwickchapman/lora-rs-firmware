@@ -81,12 +81,6 @@ jobs:
     name: Build for ${{ matrix.platform }}
     needs: [build-frontend, setup]
     runs-on: ${{ matrix.os }}
-    env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
@@ -168,17 +162,11 @@ jobs:
           rm -rf bin_tmp esptool.zip
           chmod +x esptool*
 
-      - name: Install Apple Certificate
-        if: startsWith(matrix.os, 'macos') && env.APPLE_CERTIFICATE != ''
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-
       - name: Build Tauri App
         run: |
           cd tools/flasher
           npm install
+          # Note: MacOS handles ad-hoc signing (-) if no secrets provided
           npm run tauri build -- --target ${{ matrix.target_triple }}
 
       - name: Package Windows
