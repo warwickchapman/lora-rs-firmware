@@ -81,7 +81,6 @@ jobs:
     name: Build for ${{ matrix.platform }}
     needs: [build-frontend, setup]
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -141,7 +140,7 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher/src-tauri
-          mkdir -p bin bin_tmp
+          mkdir -p bin_tmp
           VERSION_ESP="v4.8.1"
           TRIPLE="${{ matrix.target_triple }}"
           
@@ -149,20 +148,20 @@ jobs:
             URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip"
             curl -L -o esptool.zip "$URL"
             unzip esptool.zip -d bin_tmp
-            find bin_tmp -name esptool.exe -exec cp {} "bin/esptool-${TRIPLE}.exe" \;
+            find bin_tmp -name esptool.exe -exec cp {} "esptool-${TRIPLE}.exe" \;
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
             URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip"
             curl -L -o esptool.zip "$URL"
             unzip esptool.zip -d bin_tmp
-            find bin_tmp -name esptool -type f -exec cp {} "bin/esptool-${TRIPLE}" \;
+            find bin_tmp -name esptool -type f -exec cp {} "esptool-${TRIPLE}" \;
           else
-            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz"
-            curl -L -o esptool.tar.gz "$URL"
-            tar -xzf esptool.tar.gz -C bin_tmp
-            find bin_tmp -name esptool -type f -exec cp {} "bin/esptool-${TRIPLE}" \;
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.zip"
+            curl -L -o esptool.zip "$URL"
+            unzip esptool.zip -d bin_tmp
+            find bin_tmp -name esptool -type f -exec cp {} "esptool-${TRIPLE}" \;
           fi
-          rm -rf bin_tmp esptool.zip esptool.tar.gz
-          chmod +x bin/esptool*
+          rm -rf bin_tmp esptool.zip
+          chmod +x esptool*
 
       - name: Install Apple Certificate
         if: startsWith(matrix.os, 'macos') && env.APPLE_CERTIFICATE != ''
