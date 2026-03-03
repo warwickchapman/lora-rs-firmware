@@ -126,15 +126,20 @@ jobs:
           name: frontend-dist
           path: tools/flasher/dist
 
-      - name: Build Firmware Binaries
+      - name: Prepare Sidecar Resources
         shell: bash
         run: |
-          python -m pip install --upgrade platformio
-          python -m platformio run -e lrs_za -e lrs_us
           mkdir -p tools/flasher/src-tauri/resources
-          cp .pio/build/lrs_za/firmware.bin tools/flasher/src-tauri/resources/firmware-za.bin
-          cp .pio/build/lrs_us/firmware.bin tools/flasher/src-tauri/resources/firmware-us.bin
+          # Copy VERSION
           cp VERSION tools/flasher/src-tauri/resources/VERSION
+          
+          # Note: Firmware .bin files are now expected to be pushed from local
+          # We search for them in the repo to bundle into the flasher if they exist
+          find . -name "firmware.bin" | while read -r bin; do
+            env_name=$(echo "$bin" | awk -F'/' '{print $(NF-1)}')
+            if [[ "$env_name" == "lrs_za" ]]; then cp "$bin" tools/flasher/src-tauri/resources/firmware-za.bin; fi
+            if [[ "$env_name" == "lrs_us" ]]; then cp "$bin" tools/flasher/src-tauri/resources/firmware-us.bin; fi
+          done
 
       - name: Install esptool Sidecars
         shell: bash
@@ -241,40 +246,36 @@ jobs:
       - name: Collect Assets
         run: |
           mkdir all_assets
-          # Collect successfully built flasher binaries
+          # 1. Collect successfully built flasher binaries from builds
           shopt -s nullglob
           for f in flasher-*/thanda-lora-flasher-*; do
             cp "$f" all_assets/
           done
+          
+          # 2. Collect firmware .bin files pushed from local machine
+          VERSION=${GITHUB_REF_NAME#v}
+          find . -name "firmware.bin" | while read -r bin; do
+             env_name=$(echo "$bin" | awk -F'/' '{print $(NF-1)}')
+             if [[ "$env_name" == "lrs_za" ]]; then cp "$bin" "all_assets/lrs-firmware-${VERSION}-za.bin"; fi
+             if [[ "$env_name" == "lrs_us" ]]; then cp "$bin" "all_assets/lrs-firmware-${VERSION}-us.bin"; fi
+          done
           shopt -u nullglob
 
-      - name: Build Firmware for Release
+      - name: Generate Release Summary
         shell: bash
         run: |
-          pip install platformio
-          pio run -e lrs_za -e lrs_us
-          VERSION=${GITHUB_REF_NAME#v}
-          ZA_BIN=".pio/build/lrs_za/firmware.bin"
-          US_BIN=".pio/build/lrs_us/firmware.bin"
-          
-          # Copy binaries
-          cp "$ZA_BIN" "all_assets/lrs-firmware-${VERSION}-za.bin"
-          cp "$US_BIN" "all_assets/lrs-firmware-${VERSION}-us.bin"
-          
-          # Generate Checksums
           echo "### SHA256 Checksums" >> $GITHUB_STEP_SUMMARY
           echo "| File | SHA256 |" >> $GITHUB_STEP_SUMMARY
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
           
-          ZA_HASH=$(shasum -a 256 "$ZA_BIN" | cut -d ' ' -f 1)
-          US_HASH=$(shasum -a 256 "$US_BIN" | cut -d ' ' -f 1)
-          
-          echo "| lrs-firmware-${VERSION}-za.bin | $ZA_HASH |" >> $GITHUB_STEP_SUMMARY
-          echo "| lrs-firmware-${VERSION}-us.bin | $US_HASH |" >> $GITHUB_STEP_SUMMARY
-          
-          # Store hashes for release body
-          echo "ZA_HASH=$ZA_HASH" >> $GITHUB_ENV
-          echo "US_HASH=$US_HASH" >> $GITHUB_ENV
+          cd all_assets
+          for f in *.bin; do
+            HASH=$(shasum -a 256 "$f" | cut -d ' ' -f 1)
+            echo "| $f | $HASH |" >> $GITHUB_STEP_SUMMARY
+            # Export hashes for release body (za/us specifically)
+            if [[ "$f" == *"za.bin" ]]; then echo "ZA_HASH=$HASH" >> $GITHUB_ENV; fi
+            if [[ "$f" == *"us.bin" ]]; then echo "US_HASH=$HASH" >> $GITHUB_ENV; fi
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -321,8 +322,9 @@ jobs:
           gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json || true
           TITLE=$(jq -r '.name // empty' release_info.json)
           IS_PRE=$(jq -r '.isPrerelease // "false"' release_info.json)
+          jq -r '.body' release_info.json > release_notes.md
           
-          [ -z "$TITLE" ] && TITLE="$TAG Creation"
+          [ -z "$TITLE" ] || [ "$TITLE" = "null" ] && TITLE="$TAG Creation"
           
           gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
           
@@ -348,7 +350,7 @@ jobs:
           gh release create $TAG public_assets/* \
             --repo warwickchapman/lora-rs-firmware \
             --title "$TITLE" \
-            --notes "See private repository for full details. v0.5.0-alpha Native Release." \
+            --notes-file release_notes.md \
             --prerelease=$IS_PRE \
             $LATEST_FLAG
         env:
