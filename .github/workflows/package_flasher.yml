@@ -245,6 +245,8 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: Collect Assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir all_assets
           # 1. Collect successfully built flasher binaries from builds
@@ -253,13 +255,10 @@ jobs:
             cp "$f" all_assets/
           done
           
-          # 2. Collect firmware .bin files pushed from local machine
-          VERSION=${GITHUB_REF_NAME#v}
-          find . -name "firmware.bin" | while read -r bin; do
-             env_name=$(echo "$bin" | awk -F'/' '{print $(NF-1)}')
-             if [[ "$env_name" == "lrs_za" ]]; then cp "$bin" "all_assets/lrs-firmware-${VERSION}-za.bin"; fi
-             if [[ "$env_name" == "lrs_us" ]]; then cp "$bin" "all_assets/lrs-firmware-${VERSION}-us.bin"; fi
-          done
+          # 2. Download existing firmware binaries from the Release (uploaded by release_manager.py)
+          TAG=${{ github.ref_name }}
+          # Attempt to download *.bin from the current tag's release
+          gh release download "$TAG" --pattern "*.bin" --dir all_assets --repo ${{ github.repository }} || echo "No existing firmware binaries found in release $TAG"
           shopt -u nullglob
 
       - name: Generate Release Summary
@@ -270,44 +269,21 @@ jobs:
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
           
           cd all_assets
-          for f in *.bin; do
+          shopt -s nullglob
+          for f in *; do
             HASH=$(shasum -a 256 "$f" | cut -d ' ' -f 1)
             echo "| $f | $HASH |" >> $GITHUB_STEP_SUMMARY
             # Export hashes for release body (za/us specifically)
             if [[ "$f" == *"za.bin" ]]; then echo "ZA_HASH=$HASH" >> $GITHUB_ENV; fi
             if [[ "$f" == *"us.bin" ]]; then echo "US_HASH=$HASH" >> $GITHUB_ENV; fi
           done
+          shopt -u nullglob
 
-      - name: Create GitHub Release
+      - name: Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }} Creation
           files: all_assets/*
-          body: |
-            ## Thanda LoRa v0.5.0-alpha Creation
-            
-            ### Native Flasher (Tauri)
-            The flasher has been completely rebuilt as a native application for professional performance and stability.
-            
-            **Legacy Note**: The Python/Flet-based flasher is now **DEPRECATED** and no longer included in releases.
-            
-            ### Changes
-            - ⚡️ New high-performance native core (Tauri/Vue.js).
-            - 🔍 Dedicated Activity Log with real-time progress.
-            - 🖥 Immersive Monitor Mode.
-            - 🔄 Auto-Monitor after successful flash.
-            - 🪄 Polished Glassmorphism aesthetics.
-            - 📂 Native System File Pickers.
-            
-            ### Firmware Checksums
-            - **ZA Region**: `${{ env.ZA_HASH }}`
-            - **US Region**: `${{ env.US_HASH }}`
-            
-            > "Imagination is the beginning of creation. You imagine what you desire, you will what you imagine, and at last, you create what you will."
-            > — **George Bernard Shaw**
-            
-            Please download the appropriate version for your operating system below.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
