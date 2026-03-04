@@ -225,26 +225,26 @@ jobs:
           TRIPLE="${{ matrix.target_triple }}"
           ARCH="x64"
           if [[ "$TRIPLE" == "aarch64-apple-darwin" ]]; then ARCH="arm64"; fi
-          mkdir final_dist
-          brew install create-dmg
           
-          # Use the actual productName from tauri.conf.json to find the bundle
-          APP_NAME="Thanda LoRa Flasher.app"
-          APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${APP_NAME}"
+          mkdir -p final_dist
           
-          # Architecture Verification (Prove architecture before packaging)
-          echo "### Architecture Verification for $TRIPLE ###"
-          file "${APP_PATH}/Contents/MacOS/Thanda LoRa Flasher"
+          # Native Tauri DMG location
+          # Usually: target/<triple>/release/bundle/dmg/<name>_<version>_<arch>.dmg
+          # Note: Tauri uses underscores and lowercase arch names (aarch64/x64)
+          TAURI_ARCH="x64"
+          if [[ "$ARCH" == "arm64" ]]; then TAURI_ARCH="aarch64"; fi
           
-          create-dmg \
-            --volname "Thanda LoRa Flasher" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "${APP_NAME}" 150 150 \
-            --app-drop-link 450 150 \
-            "final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg" \
-            "$APP_PATH"
+          # Find the native DMG (Tauri 2 naming: Thanda LoRa Flasher_0.5.4_aarch64.dmg)
+          # We use a glob to be safe with the exact version string
+          SOURCE_DMG=$(find "tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/dmg" -name "*.dmg" | head -n 1)
+          
+          if [[ -n "$SOURCE_DMG" ]]; then
+            echo "Found native DMG: $SOURCE_DMG"
+            cp "$SOURCE_DMG" "final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg"
+          else
+            echo "ERROR: Native Tauri DMG not found in tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/dmg"
+            exit 1
+          fi
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-22.04'
