@@ -62,6 +62,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       tag: ${{ steps.set-version.outputs.tag }}
       version: ${{ steps.set-version.outputs.version }}
+      skip_flasher: ${{ steps.check-skip.outputs.skip_flasher }}
     steps:
       - uses: actions/checkout@v4
       - id: set-version
@@ -92,9 +93,27 @@ jobs:
             echo "matrix={\"include\":[{\"platform\":\"macos-arm64\",\"os\":\"macos-latest\",\"target_triple\":\"aarch64-apple-darwin\"},{\"platform\":\"macos-x86_64\",\"os\":\"macos-latest\",\"target_triple\":\"x86_64-apple-darwin\"}]}" >> $GITHUB_OUTPUT
           fi
 
+      - id: check-skip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.set-version.outputs.tag }}"
+          SKIP="false"
+          # Check if the release already exists and has the SKIP flag in the body
+          BODY=$(gh release view "$TAG" --repo ${{ github.repository }} --json body --jq '.body' 2>/dev/null || echo "")
+          if [[ "$BODY" == *"SKIP_FLASHER_BUILD"* ]]; then
+            echo "Detected SKIP_FLASHER_BUILD flag in release notes."
+            SKIP="true"
+          fi
+          echo "skip_flasher=$SKIP" >> $GITHUB_OUTPUT
+
   build:
     name: Build for ${{ matrix.platform }}
     needs: [build-frontend, setup]
+    if: |
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.skip_flasher != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -246,12 +265,15 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [setup, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     if: |
-      always() && 
+      always() &&
+      needs.setup.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      needs.setup.outputs.skip_flasher != 'true' &&
       (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true')
     steps:
       - name: Checkout Code

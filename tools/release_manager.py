@@ -59,7 +59,7 @@ def read_version(root: Path) -> str:
     raw = (root / "VERSION").read_text(encoding="utf-8").strip()
     if not raw:
         raise RuntimeError("VERSION file is empty")
-    return raw[1:] if raw.startswith("v") else raw
+    return raw.lstrip('v')
 
 
 def ensure_clean_tracked_tree(root: Path) -> None:
@@ -223,6 +223,37 @@ def upsert_release(
         )
 
 
+def reuse_flasher_assets(repo: str, source_tag: str, target_version: str) -> List[Path]:
+    """Downloads flasher assets from source_tag and renames them for target_version."""
+    print(f"Reusing Flasher assets from {source_tag} for {target_version}...")
+    tmp_dir = Path(tempfile.mkdtemp())
+    
+    # Download matching flasher binaries
+    try:
+        run(["gh", "release", "download", source_tag, "--repo", repo, "--pattern", "thanda-lora-flasher-*-macos-*", "--dir", str(tmp_dir)])
+        run(["gh", "release", "download", source_tag, "--repo", repo, "--pattern", "thanda-lora-flasher-*-windows-*", "--dir", str(tmp_dir)])
+        run(["gh", "release", "download", source_tag, "--repo", repo, "--pattern", "thanda-lora-flasher-*-linux-*", "--dir", str(tmp_dir)])
+    except Exception as e:
+        print(f"Warning: Some flasher assets could not be downloaded from {source_tag}: {e}")
+    
+    inherited = []
+    # Rename them to the new version pattern
+    # Pattern: thanda-lora-flasher-{OLD_VER}-{OS}-{ARCH}.{EXT}
+    old_ver = source_tag.lstrip('v')
+    for f in tmp_dir.iterdir():
+        if f.is_file() and old_ver in f.name:
+            new_name = f.name.replace(old_ver, target_version)
+            new_path = f.parent / new_name
+            f.rename(new_path)
+            inherited.append(new_path)
+            print(f"  - Inherited: {new_name}")
+            
+    if not inherited:
+        print(f"Warning: No flasher binaries found for reuse in {source_tag}")
+            
+    return inherited
+
+
 def mirror_to_public(
     tag: str,
     title: str,
@@ -286,6 +317,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip tracked working-tree cleanliness check.",
     )
+    ap.add_argument(
+        "--reuse-flasher",
+        metavar="TAG",
+        help="Existing release tag to inherit Flasher binaries from (Binary Reuse).",
+    )
+    ap.add_argument(
+        "--no-build-flasher",
+        action="store_true",
+        help="Explicitly tell the CI to SKIP the flasher build (by setting release notes flag).",
+    )
     return ap.parse_args()
 
 
@@ -309,18 +350,32 @@ def main() -> int:
     print(f"Preparing release {tag}")
     build_firmware(root)
     assets = stage_assets(root, version)
+    
+    inherited_assets = []
+    if args.reuse_flasher:
+        inherited_assets = reuse_flasher_assets(args.repo, args.reuse_flasher, version)
+
     za_asset, us_asset, eu_asset = assets
     
     word, quote = pick_unique_quote(args.repo)
     title = f"{tag} {word}"
     commit = get_head_commit(root)
 
-    notes = build_release_notes(version, args.summary, args.highlight, za_asset, us_asset, quote)
+    # If reusing flasher, we add a flag to the release notes that the CI can check
+    # to skip the build steps.
+    summary_with_flags = args.summary
+    if args.no_build_flasher or args.reuse_flasher:
+        summary_with_flags += "\n\n<!-- SKIP_FLASHER_BUILD -->"
+
+    notes = build_release_notes(version, summary_with_flags, args.highlight, za_asset, us_asset, quote)
     notes_file = Path(tempfile.gettempdir()) / f"release-{tag}.md"
     notes_file.write_text(notes, encoding="utf-8")
 
+    # Final combined assets for main repo
+    all_release_assets = [a.path for a in assets] + inherited_assets
+
     # Main Repo Release
-    upsert_release(args.repo, tag, title, notes_file, commit, [a.path for a in assets])
+    upsert_release(args.repo, tag, title, notes_file, commit, all_release_assets)
 
     # Public Mirroring
     mirror_to_public(tag, title, notes_file, [a.path for a in assets], is_prerelease)
