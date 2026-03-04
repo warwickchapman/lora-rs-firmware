@@ -56,11 +56,26 @@ jobs:
           path: tools/flasher/dist
 
   setup:
-    name: Setup Matrix
+    name: Setup Matrix & Version
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      tag: ${{ steps.set-version.outputs.tag }}
+      version: ${{ steps.set-version.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
+      - id: set-version
+        run: |
+          VERSION_RAW=$(cat VERSION)
+          TAG="${VERSION_RAW}"
+          if [[ ! "$TAG" =~ ^v ]]; then TAG="v${VERSION_RAW}"; fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          # Also set for locally-running shell steps in this job
+          echo "CI_TAG=$TAG" >> $GITHUB_ENV
+          echo "CI_VERSION=$VERSION" >> $GITHUB_ENV
+
       - id: set-matrix
         run: |
           PLATFORM="${{ github.event.inputs.platform || 'all' }}"
@@ -176,7 +191,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION_RAW=$(cat VERSION)
+          VERSION=${VERSION_RAW#v}
           mkdir final_dist
           TRIPLE="${{ matrix.target_triple }}"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/msi/*.msi "final_dist/thanda-lora-flasher-${VERSION}-windows-x64.msi"
@@ -186,37 +202,37 @@ jobs:
         if: startsWith(matrix.os, 'macos')
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION="${{ needs.setup.outputs.version }}"
           TRIPLE="${{ matrix.target_triple }}"
           ARCH="x64"
           if [[ "$TRIPLE" == "aarch64-apple-darwin" ]]; then ARCH="arm64"; fi
           mkdir final_dist
           brew install create-dmg
           
-          # Find .app in the architecture-specific target folder
-          APP_NAME="thanda-lora-flasher.app"
+          # Use the actual productName from tauri.conf.json to find the bundle
+          APP_NAME="Thanda LoRa Flasher.app"
           APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${APP_NAME}"
           
-          # Rename for final presentation inside DMG
-          NEW_APP_NAME="Thanda LoRa Flasher.app"
-          NEW_APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${NEW_APP_NAME}"
-          mv "$APP_PATH" "$NEW_APP_PATH"
+          # Architecture Verification (Prove architecture before packaging)
+          echo "### Architecture Verification for $TRIPLE ###"
+          file "${APP_PATH}/Contents/MacOS/Thanda LoRa Flasher"
           
           create-dmg \
             --volname "Thanda LoRa Flasher" \
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "${NEW_APP_NAME}" 150 150 \
+            --icon "${APP_NAME}" 150 150 \
             --app-drop-link 450 150 \
             "final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg" \
-            "$NEW_APP_PATH"
+            "$APP_PATH"
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-22.04'
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION_RAW=$(cat VERSION)
+          VERSION=${VERSION_RAW#v}
           mkdir final_dist
           TRIPLE="${{ matrix.target_triple }}"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/appimage/*.AppImage "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage"
@@ -256,7 +272,8 @@ jobs:
       - name: Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ needs.setup.outputs.tag }}
           files: all_assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    services: {} # dummy to find where to put the env
