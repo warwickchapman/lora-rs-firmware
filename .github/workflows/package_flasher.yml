@@ -244,38 +244,12 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: Collect Assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Collect Flasher Assets
         run: |
           mkdir all_assets
-          # 1. Collect successfully built flasher binaries from builds
           shopt -s nullglob
           for f in flasher-*/thanda-lora-flasher-*; do
             cp "$f" all_assets/
-          done
-          
-          # 2. Download existing firmware binaries from the Release (uploaded by release_manager.py)
-          TAG=${{ github.ref_name }}
-          # Attempt to download *.bin from the current tag's release
-          gh release download "$TAG" --pattern "*.bin" --dir all_assets --repo ${{ github.repository }} || echo "No existing firmware binaries found in release $TAG"
-          shopt -u nullglob
-
-      - name: Generate Release Summary
-        shell: bash
-        run: |
-          echo "### SHA256 Checksums" >> $GITHUB_STEP_SUMMARY
-          echo "| File | SHA256 |" >> $GITHUB_STEP_SUMMARY
-          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
-          
-          cd all_assets
-          shopt -s nullglob
-          for f in *; do
-            HASH=$(shasum -a 256 "$f" | cut -d ' ' -f 1)
-            echo "| $f | $HASH |" >> $GITHUB_STEP_SUMMARY
-            # Export hashes for release body (za/us specifically)
-            if [[ "$f" == *"za.bin" ]]; then echo "ZA_HASH=$HASH" >> $GITHUB_ENV; fi
-            if [[ "$f" == *"us.bin" ]]; then echo "US_HASH=$HASH" >> $GITHUB_ENV; fi
           done
           shopt -u nullglob
 
@@ -285,51 +259,4 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: all_assets/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Mirror Release Assets to Public Hub
-        run: |
-          TAG=${{ github.ref_name }}
-          # Check if assets exist before creating release
-          if [ -z "$(ls -A all_assets)" ]; then
-            echo "No assets to mirror, skipping."
-            exit 0
-          fi
-
-          gh release view $TAG --repo warwickchapman/lora-rs --json name,body,isPrerelease > release_info.json || true
-          TITLE=$(jq -r '.name // empty' release_info.json)
-          IS_PRE=$(jq -r '.isPrerelease // "false"' release_info.json)
-          jq -r '.body' release_info.json > release_notes.md
-          
-          [ -z "$TITLE" ] || [ "$TITLE" = "null" ] && TITLE="$TAG Creation"
-          
-          gh release delete $TAG --repo warwickchapman/lora-rs-firmware -y || true
-          
-          mkdir public_assets
-          cp all_assets/* public_assets/ || true
-          
-          # Clone ZA firmware for EU region
-          cd public_assets
-          for f in *-za.bin; do
-            if [ -f "$f" ]; then
-              cp "$f" "${f%-za.bin}-eu.bin"
-            fi
-          done
-          cd ..
-          
-          LATEST_FLAG=""
-          if [[ "$IS_PRE" == "true" ]]; then
-            LATEST_FLAG="--latest=false"
-          else
-            LATEST_FLAG="--latest"
-          fi
-          
-          gh release create $TAG public_assets/* \
-            --repo warwickchapman/lora-rs-firmware \
-            --title "$TITLE" \
-            --notes-file release_notes.md \
-            --prerelease=$IS_PRE \
-            $LATEST_FLAG
-        env:
-          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
