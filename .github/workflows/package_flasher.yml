@@ -256,6 +256,7 @@ jobs:
           TRIPLE="${{ matrix.target_triple }}"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/appimage/*.AppImage "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/deb/*.deb "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.deb"
+          mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/rpm/*.rpm "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.rpm"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -296,6 +297,17 @@ jobs:
         with:
           tag_name: ${{ needs.setup.outputs.tag }}
           files: all_assets/*
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror Flasher to Public Hub
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: warwickchapman/lora-rs-firmware
+          tag_name: ${{ needs.setup.outputs.tag }}
+          files: all_assets/*
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
     services: {} # dummy to find where to put the env

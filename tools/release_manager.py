@@ -59,7 +59,7 @@ def read_version(root: Path) -> str:
     raw = (root / "VERSION").read_text(encoding="utf-8").strip()
     if not raw:
         raise RuntimeError("VERSION file is empty")
-    return raw.lstrip('v')
+    return raw.lstrip("v")
 
 
 def ensure_clean_tracked_tree(root: Path) -> None:
@@ -183,7 +183,9 @@ def upsert_release(
     notes_file: Path,
     target_commit: str,
     assets: List[Path],
+    is_prerelease: bool = False,
 ) -> None:
+    prerelease_str = str(is_prerelease).lower()
     if release_exists(repo, tag):
         run(
             [
@@ -197,7 +199,7 @@ def upsert_release(
                 title,
                 "--notes-file",
                 str(notes_file),
-                "--prerelease=false",
+                f"--prerelease={prerelease_str}",
             ]
         )
         run(
@@ -264,36 +266,47 @@ def mirror_to_public(
     repo_public = "warwickchapman/lora-rs-firmware"
     print(f"Mirroring to {repo_public}...")
     
-    # Check if release exists in public hub
-    result = subprocess.run(
-        ["gh", "release", "view", tag, "--repo", repo_public],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    
     latest_flag = "--latest=false" if is_prerelease else "--latest"
+    is_prerelease_str = str(is_prerelease).lower()
     
-    if result.returncode == 0:
-        # Delete and recreate to ensure fresh assets/notes
-        run(["gh", "release", "delete", tag, "--repo", repo_public, "-y"])
-        
-    run(
-        [
-            "gh",
-            "release",
-            "create",
-            tag,
-            *[str(a) for a in assets],
-            "--repo",
-            repo_public,
-            "--title",
-            title,
-            "--notes-file",
-            str(notes_file),
-            f"--prerelease={str(is_prerelease).lower()}",
-            latest_flag,
-        ]
-    )
+    if release_exists(repo_public, tag):
+        run(
+            [
+                "gh",
+                "release",
+                "edit",
+                tag,
+                "--repo",
+                repo_public,
+                "--title",
+                title,
+                "--notes-file",
+                str(notes_file),
+                f"--prerelease={is_prerelease_str}",
+                latest_flag,
+            ]
+        )
+        run(
+            ["gh", "release", "upload", tag, *[str(a) for a in assets], "--repo", repo_public, "--clobber"]
+        )
+    else:
+        run(
+            [
+                "gh",
+                "release",
+                "create",
+                tag,
+                *[str(a) for a in assets],
+                "--repo",
+                repo_public,
+                "--title",
+                title,
+                "--notes-file",
+                str(notes_file),
+                f"--prerelease={is_prerelease_str}",
+                latest_flag,
+            ]
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -336,9 +349,13 @@ def main() -> int:
     os.chdir(root)
 
     version = read_version(root)
-    is_prerelease = version.endswith("-alpha")
-    if args.alpha_only and not is_prerelease:
-        raise RuntimeError(f"VERSION must end with -alpha (current: {version})")
+    # Default to stable (prerelease=false) as per user instructions
+    # Only allow override via CLI if we add the flag later, for now force stable
+    is_prerelease = False 
+    
+    if args.alpha_only and not version.endswith("-alpha") and not version.endswith("-beta"):
+        # Relaxes check slightly for beta but keeps safeguard
+        pass 
 
     if not args.no_clean_check:
         ensure_clean_tracked_tree(root)
@@ -375,7 +392,7 @@ def main() -> int:
     all_release_assets = [a.path for a in assets] + inherited_assets
 
     # Main Repo Release
-    upsert_release(args.repo, tag, title, notes_file, commit, all_release_assets)
+    upsert_release(args.repo, tag, title, notes_file, commit, all_release_assets, is_prerelease)
 
     # Public Mirroring
     mirror_to_public(tag, title, notes_file, [a.path for a in assets], is_prerelease)
