@@ -221,3 +221,13 @@ Release alignment policy:
 - Use release tags in `v<version>` form (for example `v0.4.3-alpha`) while `VERSION` remains plain (for example `0.4.3-alpha`).
 - Flasher reuse guard: if `tools/flasher/**` changed, do not reuse prior flasher assets; rebuild all flasher installers from current source.
 - Flasher asset reuse is permitted only when `tools/flasher/**` is unchanged (for example firmware-only/documentation-only releases).
+
+Release execution guardrails:
+- Never trigger `package_flasher.yml` manually on `main` for standard releases.
+- Standard release path is tag-driven CI plus local macOS builds.
+- Mandatory release order:
+  1. Verify workflow matrix policy before tag push (tag-triggered path must exclude macOS CI).
+  2. Build and validate macOS installers locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
+  3. Push release tag and let CI publish Linux/Windows flasher artifacts.
+  4. Upload local macOS DMGs to the same release.
+- Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.

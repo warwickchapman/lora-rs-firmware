@@ -70,12 +70,22 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - builds fresh `lrs_za` + `lrs_us` firmware
 - generates named assets + SHA256 checksums
 - creates/updates GitHub release from `VERSION`
-- enforces non-repeated George Bernard Shaw quote + one-word release name
+- applies George Bernard Shaw quote + one-word release name (name reuse allowed when the quote bank is exhausted)
 
 Flasher rebuild policy (mandatory):
 - If any file under `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.
 - Reusing flasher binaries from an older tag is allowed only when `tools/flasher/**` is unchanged.
 - If in doubt, rebuild flasher binaries.
+
+Release safety guardrails (mandatory):
+- Do not run `gh workflow run package_flasher.yml` on `main` during normal releases.
+- Tag-triggered CI is the default release path; manual workflow dispatch is exception-only and requires explicit owner approval.
+- Enforce this order:
+  1. Confirm workflow policy is already correct before tagging (tag runs must not include macOS CI).
+  2. Build and verify macOS installers locally.
+  3. Push tag/release so CI builds Linux/Windows assets only.
+  4. Upload local macOS assets to the same release.
+- If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
 
 Example:
 ```bash
