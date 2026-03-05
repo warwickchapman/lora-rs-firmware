@@ -37,6 +37,16 @@ QUOTE_BANK: List[Tuple[str, str]] = [
     ("Reason", "The reasonable man adapts himself to the world: the unreasonable one persists in trying to adapt the world to himself."),
     ("Knowledge", "Beware of false knowledge; it is more dangerous than ignorance."),
     ("Discipline", "Without art, the crudeness of reality would make the world unbearable."),
+    ("Teaching", "He who can, does. He who cannot, teaches."),
+    ("Compassion", "The worst sin towards our fellow creatures is not to hate them, but to be indifferent to them."),
+    ("Food", "There is no love sincerer than the love of food."),
+    ("Observation", "The power of accurate observation is commonly called cynicism by those who have not got it."),
+    ("Rules", "The golden rule is that there are no golden rules."),
+    ("Jest", "My way of joking is to tell the truth. It's the funniest joke in the world."),
+    ("Service", "I want to be thoroughly used up when I die, for the harder I work the more I live."),
+    ("Value", "My specialty is being right when other people are wrong."),
+    ("Dignity", "Self-sacrifice enables us to sacrifice other people without blushing."),
+    ("Blasphemy", "All great truths begin as blasphemies."),
 ]
 
 
