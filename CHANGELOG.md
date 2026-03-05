@@ -9,6 +9,14 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ### Changed
 - None yet.
 
+## [0.5.9-alpha] - 2026-03-05
+
+### Changed
+- Flasher serial-port auto-selection now uses recency tracking and only auto-switches when no active operation is running (flash, monitor, or device info), reducing accidental port flips during live work.
+- Flasher fallback handling was tightened when a selected port disappears so reconnect/reset events recover more predictably without interrupting active workflows.
+- Windows UI dropdown readability was improved by enforcing high-contrast option styling for native select popups.
+- Windows portable package now includes an `esptool.exe` alias alongside the target-specific sidecar binary name, fixing portable runs that expect the plain executable filename.
+
 ## [0.5.8-alpha] - 2026-03-05
 
 ### Changed

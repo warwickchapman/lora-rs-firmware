@@ -272,6 +272,8 @@ jobs:
 
           if [[ -f "tools/flasher/src-tauri/esptool-${TRIPLE}.exe" ]]; then
             cp "tools/flasher/src-tauri/esptool-${TRIPLE}.exe" "$PORTABLE_ROOT/"
+            # Portable users may invoke esptool directly; keep a plain name alias.
+            cp "tools/flasher/src-tauri/esptool-${TRIPLE}.exe" "$PORTABLE_ROOT/esptool.exe"
           fi
 
           if [[ -d "tools/flasher/src-tauri/resources" ]]; then
