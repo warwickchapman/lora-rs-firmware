@@ -82,13 +82,14 @@ Release safety guardrails (mandatory):
 - Tag-triggered CI is the default release path; manual workflow dispatch is exception-only and requires explicit owner approval.
 - Enforce this order:
   1. Confirm workflow policy is already correct before tagging (tag runs must not include macOS CI).
-  2. Build and verify macOS installers locally.
+  2. Run `python3 tools/flasher/sync_version.py` and then build/verify macOS installers locally.
   3. Push tag/release so CI builds Linux/Windows assets only.
   4. Upload local macOS assets to the same release.
 - If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
 
 When flasher files changed (`tools/flasher/**`) in a release:
 - Rebuild flasher installers from current source (Windows x64 MSI/Setup/Portable ZIP, Linux x64, macOS arm64/x86_64).
+- Before any flasher build (local or CI), run `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` are aligned to `VERSION` (prevents stale `0.5.0`/`0.5.5` metadata leakage).
 - Verify macOS signed/notarized outputs with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
 - Update `lora-rs-firmware` README with:
   - brief flasher summary (what it is),

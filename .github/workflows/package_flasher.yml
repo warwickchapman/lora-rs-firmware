@@ -207,34 +207,12 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher
-          VERSION_RAW=$(cat ../../VERSION)
-          VERSION=${VERSION_RAW#v}
-          PACKAGE_VERSION="${VERSION}"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             # MSI internal app version must be numeric-only (no prerelease suffix).
-            PACKAGE_VERSION="${VERSION%%-*}"
+            python3 sync_version.py --windows-msi-safe
+          else
+            python3 sync_version.py
           fi
-
-          # Keep package metadata aligned with release VERSION so OS package upgrades work.
-          python3 - <<PY
-          from pathlib import Path
-          import json
-          import re
-          
-          version = "${PACKAGE_VERSION}"
-          
-          tauri_conf_path = Path("src-tauri/tauri.conf.json")
-          tauri_conf = json.loads(tauri_conf_path.read_text(encoding="utf-8"))
-          tauri_conf["version"] = version
-          tauri_conf_path.write_text(json.dumps(tauri_conf, indent=2) + "\n", encoding="utf-8")
-          
-          cargo_path = Path("src-tauri/Cargo.toml")
-          text = cargo_path.read_text(encoding="utf-8")
-          text_new = re.sub(r'(?m)^version = ".*"$', f'version = "{version}"', text, count=1)
-          if text_new == text:
-              raise SystemExit("Failed to update Cargo.toml version")
-          cargo_path.write_text(text_new, encoding="utf-8")
-          PY
 
           npm install
           # Unset PKG_CONFIG_PATH on Linux to avoid python-cache interference with system libs

@@ -227,13 +227,14 @@ Release execution guardrails:
 - Standard release path is tag-driven CI plus local macOS builds.
 - Mandatory release order:
   1. Verify workflow matrix policy before tag push (tag-triggered path must exclude macOS CI).
-  2. Build and validate macOS installers locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
+  2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS installers locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
   3. Push release tag and let CI publish Linux/Windows flasher artifacts.
   4. Upload local macOS DMGs to the same release.
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
 
 Conditional checklist: when `tools/flasher/**` changed in the release:
 - Rebuild flasher installers from current source for all supported targets (Windows x64 MSI/Setup/Portable ZIP, Linux x64, macOS arm64/x86_64).
+- Ensure flasher metadata is synchronized first via `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` match root `VERSION`.
 - Verify the signed/notarized macOS DMGs pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
 - Update the public firmware repository (`lora-rs-firmware`) README with:
   - A brief "what the desktop flasher is" summary.
