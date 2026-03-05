@@ -209,6 +209,11 @@ jobs:
           cd tools/flasher
           VERSION_RAW=$(cat ../../VERSION)
           VERSION=${VERSION_RAW#v}
+          PACKAGE_VERSION="${VERSION}"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # MSI internal app version must be numeric-only (no prerelease suffix).
+            PACKAGE_VERSION="${VERSION%%-*}"
+          fi
 
           # Keep package metadata aligned with release VERSION so OS package upgrades work.
           python3 - <<PY
@@ -216,7 +221,7 @@ jobs:
           import json
           import re
           
-          version = "${VERSION}"
+          version = "${PACKAGE_VERSION}"
           
           tauri_conf_path = Path("src-tauri/tauri.conf.json")
           tauri_conf = json.loads(tauri_conf_path.read_text(encoding="utf-8"))
