@@ -50,7 +50,8 @@ const toastMessage = ref('');
 const logContainer = ref<HTMLElement | null>(null);
 const monitorAfterFlash = ref(true);
 const lastPortSnapshot = ref<string[]>([]);
-const isWindowsHost = navigator.userAgent.toLowerCase().includes('windows');
+const portSeenSequence = ref<Record<string, number>>({});
+const portSeenCounter = ref(0);
 
 const LOCAL_OPTION = '__local_browse__';
 
@@ -107,17 +108,32 @@ async function refreshPorts() {
     const previousSet = new Set(lastPortSnapshot.value);
     const newPorts = currentNames.filter(name => !previousSet.has(name));
     const selectedExists = currentNames.includes(selectedPort.value);
+    const hasActiveOperation = isFlashing.value || isLoadingInfo.value || isMonitoring.value;
+
+    // Track first-seen order so Windows can prefer most recently connected devices.
+    for (const portName of newPorts) {
+      portSeenCounter.value += 1;
+      portSeenSequence.value[portName] = portSeenCounter.value;
+    }
+    for (const known of Object.keys(portSeenSequence.value)) {
+      if (!currentNames.includes(known)) {
+        delete portSeenSequence.value[known];
+      }
+    }
 
     if (currentNames.length === 0) {
       selectedPort.value = '';
     } else if (!selectedPort.value) {
       selectedPort.value = chooseDefaultPort(currentNames);
-    } else if (isWindowsHost && newPorts.length > 0) {
-      // Windows policy: only auto-switch when a newly detected port appears.
-      selectedPort.value = chooseDefaultPort(currentNames);
+    } else if (newPorts.length > 0 && !hasActiveOperation) {
+      // Cross-platform policy: only auto-switch when a new device appears and no operation is active.
+      // Prefer the most recently connected device.
+      selectedPort.value = chooseMostRecentPort(newPorts) ?? chooseDefaultPort(currentNames);
     } else if (!selectedExists) {
       // Selected port vanished (device removed/reset); choose a valid fallback.
-      selectedPort.value = chooseDefaultPort(currentNames);
+      if (!hasActiveOperation) {
+        selectedPort.value = chooseDefaultPort(currentNames);
+      }
     }
 
     lastPortSnapshot.value = currentNames;
@@ -128,15 +144,15 @@ async function refreshPorts() {
   }
 }
 
+function chooseMostRecentPort(candidates: string[]): string | null {
+  const ranked = candidates
+    .map(name => ({ name, seq: portSeenSequence.value[name] ?? -1 }))
+    .sort((a, b) => b.seq - a.seq);
+  return ranked.length > 0 ? ranked[0].name : null;
+}
+
 function chooseDefaultPort(portNames: string[]): string {
-  if (isWindowsHost) {
-    const withNumbers = portNames
-      .map(name => ({ name, match: /^COM(\d+)$/i.exec(name) }))
-      .filter(item => item.match)
-      .map(item => ({ name: item.name, n: Number(item.match?.[1] || 0) }))
-      .sort((a, b) => b.n - a.n);
-    if (withNumbers.length > 0) return withNumbers[0].name;
-  }
+  // Backend already returns score-sorted ports; default to top-ranked candidate.
   return portNames[0];
 }
 
@@ -234,14 +250,15 @@ async function startFlash() {
 async function toggleMonitor() {
   if (!selectedPort.value) return;
   const targetState = !isMonitoring.value;
+  const port = selectedPort.value;
   try {
     await invoke('toggle_serial_monitor', { 
-      port: selectedPort.value, 
+      port, 
       baud: 115200, 
       enable: targetState 
     });
     isMonitoring.value = targetState;
-    logs.value.push(targetState ? 'Serial monitor started' : 'Serial monitor stopped');
+    logs.value.push(targetState ? `Serial monitor started on ${port}` : 'Serial monitor stopped');
   } catch (e) {
     logs.value.push('Monitor error: ' + e);
   }
