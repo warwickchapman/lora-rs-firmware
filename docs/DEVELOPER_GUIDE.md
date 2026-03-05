@@ -231,3 +231,29 @@ Release execution guardrails:
   3. Push release tag and let CI publish Linux/Windows flasher artifacts.
   4. Upload local macOS DMGs to the same release.
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
+
+Conditional checklist: when `tools/flasher/**` changed in the release:
+- Rebuild flasher installers from current source for all supported targets (Windows x64, Linux x64, macOS arm64/x86_64).
+- Verify the signed/notarized macOS DMGs pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
+- Update the public firmware repository (`lora-rs-firmware`) README with:
+  - A brief "what the desktop flasher is" summary.
+  - Current supported OS/architecture list.
+  - At least one current UI screenshot (replace stale screenshot if UI changed).
+- Confirm release assets and README platform matrix stay aligned (no platform listed without a downloadable artifact).
+
+Apple signing/notarization policy for flasher macOS artifacts:
+- Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.
+- Release macOS artifacts must be Developer ID signed and notarized; release build fails if required secrets are missing.
+- Required certificate secrets:
+  - `APPLE_DEVELOPER_ID_CERT_P12_BASE64`
+  - `APPLE_DEVELOPER_ID_CERT_PASSWORD`
+  - Optional override: `APPLE_DEVELOPER_ID_IDENTITY` (certificate common name).
+- Required notarization secrets (choose one auth mode):
+  - Apple ID mode: `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
+  - API key mode: `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_PRIVATE_KEY_BASE64`
+- Packaging/signing verification checklist:
+  - Sign app with hardened runtime + timestamp.
+  - Sign DMG.
+  - Submit DMG with `xcrun notarytool submit --wait`.
+  - Staple with `xcrun stapler staple`.
+  - Verify with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.

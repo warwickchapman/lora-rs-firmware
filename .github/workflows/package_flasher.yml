@@ -207,6 +207,30 @@ jobs:
         shell: bash
         run: |
           cd tools/flasher
+          VERSION_RAW=$(cat ../../VERSION)
+          VERSION=${VERSION_RAW#v}
+
+          # Keep package metadata aligned with release VERSION so OS package upgrades work.
+          python3 - <<PY
+from pathlib import Path
+import json
+import re
+
+version = "${VERSION}"
+
+tauri_conf_path = Path("src-tauri/tauri.conf.json")
+tauri_conf = json.loads(tauri_conf_path.read_text(encoding="utf-8"))
+tauri_conf["version"] = version
+tauri_conf_path.write_text(json.dumps(tauri_conf, indent=2) + "\n", encoding="utf-8")
+
+cargo_path = Path("src-tauri/Cargo.toml")
+text = cargo_path.read_text(encoding="utf-8")
+text_new = re.sub(r'(?m)^version = ".*"$', f'version = "{version}"', text, count=1)
+if text_new == text:
+    raise SystemExit("Failed to update Cargo.toml version")
+cargo_path.write_text(text_new, encoding="utf-8")
+PY
+
           npm install
           # Unset PKG_CONFIG_PATH on Linux to avoid python-cache interference with system libs
           if [[ "${{ matrix.os }}" == "ubuntu-22.04" ]]; then unset PKG_CONFIG_PATH; fi
@@ -227,13 +251,101 @@ jobs:
       - name: Package MacOS
         if: startsWith(matrix.os, 'macos')
         shell: bash
+        env:
+          CREATE_RELEASE_INPUT: ${{ github.event.inputs.create_release || 'false' }}
+          APPLE_DEVELOPER_ID_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          APPLE_DEVELOPER_ID_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
         run: |
+          set -euo pipefail
+
           VERSION="${{ needs.setup.outputs.version }}"
           TRIPLE="${{ matrix.target_triple }}"
           ARCH="x64"
           if [[ "$TRIPLE" == "aarch64-apple-darwin" ]]; then ARCH="arm64"; fi
           
           mkdir -p final_dist
+
+          IS_RELEASE_BUILD="false"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
+            IS_RELEASE_BUILD="true"
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${CREATE_RELEASE_INPUT}" == "true" ]]; then
+            IS_RELEASE_BUILD="true"
+          fi
+
+          HAS_CERT="false"
+          if [[ -n "${APPLE_DEVELOPER_ID_CERT_P12_BASE64:-}" && -n "${APPLE_DEVELOPER_ID_CERT_PASSWORD:-}" ]]; then
+            HAS_CERT="true"
+          fi
+          HAS_NOTARY_APPLE_ID="false"
+          if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+            HAS_NOTARY_APPLE_ID="true"
+          fi
+          HAS_NOTARY_API="false"
+          if [[ -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_ISSUER_ID:-}" && -n "${APPLE_API_PRIVATE_KEY_BASE64:-}" ]]; then
+            HAS_NOTARY_API="true"
+          fi
+          HAS_NOTARY_CREDS="false"
+          if [[ "${HAS_NOTARY_APPLE_ID}" == "true" || "${HAS_NOTARY_API}" == "true" ]]; then
+            HAS_NOTARY_CREDS="true"
+          fi
+
+          if [[ "${IS_RELEASE_BUILD}" == "true" && ( "${HAS_CERT}" != "true" || "${HAS_NOTARY_CREDS}" != "true" ) ]]; then
+            echo "ERROR: Release macOS build requires Developer ID certificate + notarization credentials."
+            echo "Required cert secrets: APPLE_DEVELOPER_ID_CERT_P12_BASE64, APPLE_DEVELOPER_ID_CERT_PASSWORD"
+            echo "Required notarization secrets: APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID OR APPLE_API_KEY_ID + APPLE_API_ISSUER_ID + APPLE_API_PRIVATE_KEY_BASE64"
+            exit 1
+          fi
+
+          SIGN_MODE="adhoc"
+          if [[ "${HAS_CERT}" == "true" ]]; then
+            SIGN_MODE="developer-id"
+          fi
+          echo "macOS signing mode: ${SIGN_MODE} (release build: ${IS_RELEASE_BUILD})"
+
+          KEYCHAIN_PATH=""
+          KEYCHAIN_PASSWORD=""
+          CERT_P12_PATH=""
+          API_KEY_PATH=""
+          STAGE_DIR=""
+          MOUNT_POINT=""
+          cleanup() {
+            if [[ -n "${MOUNT_POINT}" ]]; then
+              hdiutil detach "${MOUNT_POINT}" -quiet >/dev/null 2>&1 || true
+            fi
+            [[ -n "${STAGE_DIR}" ]] && rm -rf "${STAGE_DIR}" || true
+            [[ -n "${MOUNT_POINT}" ]] && rm -rf "${MOUNT_POINT}" || true
+            [[ -n "${CERT_P12_PATH}" ]] && rm -f "${CERT_P12_PATH}" || true
+            [[ -n "${API_KEY_PATH}" ]] && rm -f "${API_KEY_PATH}" || true
+            if [[ -n "${KEYCHAIN_PATH}" ]]; then
+              security delete-keychain "${KEYCHAIN_PATH}" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          if [[ "${SIGN_MODE}" == "developer-id" ]]; then
+            KEYCHAIN_PATH="${RUNNER_TEMP}/flasher-signing.keychain-db"
+            KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+            CERT_P12_PATH="${RUNNER_TEMP}/developer-id-cert.p12"
+
+            if ! printf '%s' "${APPLE_DEVELOPER_ID_CERT_P12_BASE64}" | base64 --decode > "${CERT_P12_PATH}" 2>/dev/null; then
+              printf '%s' "${APPLE_DEVELOPER_ID_CERT_P12_BASE64}" | base64 -D > "${CERT_P12_PATH}"
+            fi
+
+            security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+            security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+            security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+            security list-keychains -d user -s "${KEYCHAIN_PATH}"
+            security import "${CERT_P12_PATH}" -k "${KEYCHAIN_PATH}" -P "${APPLE_DEVELOPER_ID_CERT_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security
+            security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          fi
           
           # App structure
           APP_NAME="Thanda LoRa Flasher.app"
@@ -252,9 +364,23 @@ jobs:
           fi
           
           # Sign app bundle and verify before packaging.
-          codesign --force --deep --sign - "$APP_PATH"
+          if [[ "${SIGN_MODE}" == "developer-id" ]]; then
+            SIGN_IDENTITY="${APPLE_DEVELOPER_ID_IDENTITY:-}"
+            if [[ -z "${SIGN_IDENTITY}" ]]; then
+              SIGN_IDENTITY="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+            fi
+            if [[ -z "${SIGN_IDENTITY}" ]]; then
+              echo "ERROR: Could not resolve Developer ID Application identity."
+              exit 1
+            fi
+            echo "Using signing identity: ${SIGN_IDENTITY}"
+            codesign --force --deep --options runtime --timestamp --sign "${SIGN_IDENTITY}" "$APP_PATH"
+          else
+            codesign --force --deep --sign - "$APP_PATH"
+          fi
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH"
+          spctl -a -vv "$APP_PATH" || true
 
           # Build UX-friendly DMG layout (large icon + Applications on right).
           brew install create-dmg
@@ -270,15 +396,31 @@ jobs:
             "$OUT_DMG" \
             "$STAGE_DIR/$APP_NAME"
 
+          if [[ "${SIGN_MODE}" == "developer-id" ]]; then
+            codesign --force --timestamp --sign "${SIGN_IDENTITY}" "$OUT_DMG"
+            codesign --verify --verbose=2 "$OUT_DMG"
+
+            if [[ "${HAS_NOTARY_API}" == "true" ]]; then
+              API_KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+              if ! printf '%s' "${APPLE_API_PRIVATE_KEY_BASE64}" | base64 --decode > "${API_KEY_PATH}" 2>/dev/null; then
+                printf '%s' "${APPLE_API_PRIVATE_KEY_BASE64}" | base64 -D > "${API_KEY_PATH}"
+              fi
+              xcrun notarytool submit "$OUT_DMG" --key "${API_KEY_PATH}" --key-id "${APPLE_API_KEY_ID}" --issuer "${APPLE_API_ISSUER_ID}" --wait
+            else
+              xcrun notarytool submit "$OUT_DMG" --apple-id "${APPLE_ID}" --password "${APPLE_APP_SPECIFIC_PASSWORD}" --team-id "${APPLE_TEAM_ID}" --wait
+            fi
+
+            xcrun stapler staple "$OUT_DMG"
+            xcrun stapler validate "$OUT_DMG"
+            spctl -a -vv "$OUT_DMG"
+          fi
+
           # Verify signature survived packaging by checking app inside the DMG.
           MOUNT_POINT=$(mktemp -d)
-          trap 'hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true; rm -rf "$MOUNT_POINT" "$STAGE_DIR"' EXIT
           hdiutil attach "$OUT_DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
           codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/$APP_NAME"
           codesign -dv --verbose=4 "$MOUNT_POINT/$APP_NAME"
-          hdiutil detach "$MOUNT_POINT" -quiet
-          rm -rf "$MOUNT_POINT" "$STAGE_DIR"
-          trap - EXIT
+          spctl -a -vv "$MOUNT_POINT/$APP_NAME" || true
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-22.04'

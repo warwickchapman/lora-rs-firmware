@@ -87,6 +87,15 @@ Release safety guardrails (mandatory):
   4. Upload local macOS assets to the same release.
 - If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
 
+When flasher files changed (`tools/flasher/**`) in a release:
+- Rebuild flasher installers from current source (Windows x64, Linux x64, macOS arm64/x86_64).
+- Verify macOS signed/notarized outputs with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
+- Update `lora-rs-firmware` README with:
+  - brief flasher summary (what it is),
+  - supported platforms list,
+  - at least one current screenshot.
+- Ensure README platform list matches actual uploaded assets.
+
 Example:
 ```bash
 cd /Users/warwick/Code/LoRa/lora_rs

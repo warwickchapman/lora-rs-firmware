@@ -21,6 +21,7 @@
 
 ## UX / API Cleanup
 - Unify `deployment_key` and `fleet_passphrase` terminology under user-facing `Shared Fleet Key` (short form: `Fleet Key` where space is tight); place helper text directly under the key input explaining it is the shared passphrase used to derive LoRa encryption/authentication keys; choose one canonical API field name and treat old names as temporary input aliases only.
+- Public firmware repo README update (`lora-rs-firmware`): add a brief desktop flasher summary covering what the app is, supported operating systems/architectures, and include at least one UI screenshot in the README.
 
 ## Logging / Observability
 - Build-time log level override (`LRS_LOG_LEVEL_DEFAULT`): set in `platformio.ini` via `build_flags` (e.g. `-DLRS_LOG_LEVEL_DEFAULT=3`) to change the default runtime verbosity for a build.
