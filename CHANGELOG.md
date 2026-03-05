@@ -7,6 +7,11 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Changed
+- None yet.
+
+## [0.5.8-alpha] - 2026-03-05
+
+### Changed
 - LoRa paired ACK handling now enforces explicit command correlation: RX includes the acknowledged command counter in ACK payload (`b8..b11`), and TX only clears pending state on counter match.
 - TX paired input-control retries are now bounded by `tx_command_retry_timeout_ms` (default `180000` ms) and use light retry jitter to reduce synchronization collisions under repeated loss.
 - Added RX fail-safe policy settings with default-safe behavior preserved:
