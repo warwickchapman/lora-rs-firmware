@@ -443,6 +443,7 @@ jobs:
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/appimage/*.AppImage "$APPIMAGE_OUT"
           chmod +x "$APPIMAGE_OUT"
           tar -C final_dist -czf "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage.tar.gz" "$(basename "$APPIMAGE_OUT")"
+          rm -f "$APPIMAGE_OUT"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/deb/*.deb "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.deb"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/rpm/*.rpm "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.rpm"
 
