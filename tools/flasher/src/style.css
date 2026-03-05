@@ -54,6 +54,12 @@ html, body, #app {
     box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.05);
 }
 
+/* Native dropdown lists on Windows can use light popups; force readable option contrast. */
+select.glass-input option {
+    background: #ffffff;
+    color: #0f172a;
+}
+
 .primary-btn {
     background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
     color: white;

@@ -49,6 +49,8 @@ const showToast = ref(false);
 const toastMessage = ref('');
 const logContainer = ref<HTMLElement | null>(null);
 const monitorAfterFlash = ref(true);
+const lastPortSnapshot = ref<string[]>([]);
+const isWindowsHost = navigator.userAgent.toLowerCase().includes('windows');
 
 const LOCAL_OPTION = '__local_browse__';
 
@@ -98,17 +100,44 @@ async function refreshPorts() {
   isRefreshingPorts.value = true;
   try {
     const fetchedPorts: SerialPort[] = await invoke('list_serial_ports');
-    ports.value = fetchedPorts.sort((a, b) => b.score - a.score);
-    if (ports.value.length > 0 && !ports.value.some(p => p.port_name === selectedPort.value)) {
-      selectedPort.value = ports.value[0].port_name;
-    } else if (ports.value.length === 0) {
+    const sortedPorts = fetchedPorts.sort((a, b) => b.score - a.score);
+    ports.value = sortedPorts;
+
+    const currentNames = sortedPorts.map(p => p.port_name);
+    const previousSet = new Set(lastPortSnapshot.value);
+    const newPorts = currentNames.filter(name => !previousSet.has(name));
+    const selectedExists = currentNames.includes(selectedPort.value);
+
+    if (currentNames.length === 0) {
       selectedPort.value = '';
+    } else if (!selectedPort.value) {
+      selectedPort.value = chooseDefaultPort(currentNames);
+    } else if (isWindowsHost && newPorts.length > 0) {
+      // Windows policy: only auto-switch when a newly detected port appears.
+      selectedPort.value = chooseDefaultPort(currentNames);
+    } else if (!selectedExists) {
+      // Selected port vanished (device removed/reset); choose a valid fallback.
+      selectedPort.value = chooseDefaultPort(currentNames);
     }
+
+    lastPortSnapshot.value = currentNames;
     // Artificial delay to ensure the spin is satisfyingly visible
     await new Promise(resolve => setTimeout(resolve, 300));
   } finally {
     isRefreshingPorts.value = false;
   }
+}
+
+function chooseDefaultPort(portNames: string[]): string {
+  if (isWindowsHost) {
+    const withNumbers = portNames
+      .map(name => ({ name, match: /^COM(\d+)$/i.exec(name) }))
+      .filter(item => item.match)
+      .map(item => ({ name: item.name, n: Number(item.match?.[1] || 0) }))
+      .sort((a, b) => b.n - a.n);
+    if (withNumbers.length > 0) return withNumbers[0].name;
+  }
+  return portNames[0];
 }
 
 async function fetchFirmware() {
