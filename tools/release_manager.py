@@ -136,7 +136,8 @@ def pick_unique_quote(repo: str) -> Tuple[str, str]:
         if quote not in used_quotes and word not in used_words:
             return word, quote
 
-    raise RuntimeError("No unique George Bernard Shaw quote/name left in QUOTE_BANK; extend the bank.")
+    # Reuse is allowed once the pool is exhausted.
+    return QUOTE_BANK[0]
 
 
 def get_head_commit(root: Path) -> str:

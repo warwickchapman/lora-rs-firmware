@@ -80,11 +80,18 @@ jobs:
       - id: set-matrix
         run: |
           PLATFORM="${{ github.event.inputs.platform || 'all' }}"
-          # Full matrix
+          # Default matrix for tag-triggered release builds (cost-controlled):
+          # macOS is intentionally excluded and handled by local/manual builds.
+          TAG_MATRIX='{"include":[{"platform":"windows-x64","os":"windows-latest","target_triple":"x86_64-pc-windows-msvc"},{"platform":"linux-x64","os":"ubuntu-22.04","target_triple":"x86_64-unknown-linux-gnu"}]}'
+          # Full matrix (manual only)
           ALL_MATRIX='{"include":[{"platform":"windows-x64","os":"windows-latest","target_triple":"x86_64-pc-windows-msvc"},{"platform":"macos-arm64","os":"macos-latest","target_triple":"aarch64-apple-darwin"},{"platform":"macos-x86_64","os":"macos-latest","target_triple":"x86_64-apple-darwin"},{"platform":"linux-x64","os":"ubuntu-22.04","target_triple":"x86_64-unknown-linux-gnu"}]}'
           
           if [[ "$PLATFORM" == "all" ]]; then
-            echo "matrix=$ALL_MATRIX" >> $GITHUB_OUTPUT
+            if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
+              echo "matrix=$TAG_MATRIX" >> $GITHUB_OUTPUT
+            else
+              echo "matrix=$ALL_MATRIX" >> $GITHUB_OUTPUT
+            fi
           elif [[ "$PLATFORM" == "windows" ]]; then
             echo "matrix={\"include\":[{\"platform\":\"windows-x64\",\"os\":\"windows-latest\",\"target_triple\":\"x86_64-pc-windows-msvc\"}]}" >> $GITHUB_OUTPUT
           elif [[ "$PLATFORM" == "linux" ]]; then
