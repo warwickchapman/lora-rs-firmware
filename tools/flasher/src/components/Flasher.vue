@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 interface SerialPort {
   port_name: string;
@@ -42,6 +43,7 @@ const isFlashing = ref(false);
 const isMonitoring = ref(false);
 const logs = ref<string[]>([]);
 const deviceInfo = ref<DeviceInfo | null>(null);
+const deviceInfoPort = ref('');
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
@@ -54,6 +56,9 @@ const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
 
 const LOCAL_OPTION = '__local_browse__';
+const hasActiveDeviceInfo = computed(() =>
+  !!deviceInfo.value && deviceInfoPort.value === selectedPort.value
+);
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -200,16 +205,45 @@ function copyAllDeviceInfo() {
   copyToClipboard(block, 'all device configuration');
 }
 
+function copyActivePassword() {
+  const password = deviceInfo.value?.password?.trim();
+  if (!password) {
+    notify('Load device info first to copy password');
+    return;
+  }
+  copyToClipboard(password, 'password');
+}
+
+async function openActiveDeviceMdns() {
+  const ssid = deviceInfo.value?.ssid?.trim();
+  if (!ssid) {
+    notify('Load device info first to open device URL');
+    return;
+  }
+  const url = `http://${ssid}.local`;
+  try {
+    await openUrl(url);
+    logs.value.push(`Opened ${url}`);
+  } catch (e) {
+    notify('Failed to open device URL: ' + e);
+  }
+}
+
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
+  const port = selectedPort.value;
   isLoadingInfo.value = true;
   deviceInfo.value = null;
+  deviceInfoPort.value = '';
   logs.value.push('Reading device information...');
   try {
-    deviceInfo.value = await invoke('get_device_info', { port: selectedPort.value });
+    deviceInfo.value = await invoke('get_device_info', { port });
+    deviceInfoPort.value = port;
     logs.value.push('Device info read successfully');
+    return true;
   } catch (e) {
     logs.value.push('Failed to read device info: ' + e);
+    return false;
   } finally {
     isLoadingInfo.value = false;
   }
@@ -222,6 +256,12 @@ async function startFlash() {
   logs.value.push('--- Preparing Firmware ---');
   
   try {
+    if (!hasActiveDeviceInfo.value) {
+      logs.value.push('Loading device information before flash...');
+      const loaded = await readDeviceInfo();
+      if (!loaded) throw new Error('Unable to read device information before flashing');
+    }
+
     const isLocal = selectedVersion.value.startsWith('Local: ');
     const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
     
@@ -345,6 +385,46 @@ function formatLabel(key: string) {
             Activity log
           </h2>
           <div class="flex items-center gap-4">
+            <button
+              v-if="isMonitoring"
+              @click="copyActivePassword"
+              :disabled="!hasActiveDeviceInfo"
+              :class="[
+                'p-1.5 rounded-md border transition-all',
+                hasActiveDeviceInfo
+                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
+              ]"
+              title="Copy active device password"
+              aria-label="Copy active device password"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7.5" cy="15.5" r="3.5"></circle>
+                <path d="m10.5 13 8-8"></path>
+                <path d="m16 5 3 3"></path>
+                <path d="m14 7 3 3"></path>
+              </svg>
+            </button>
+            <button
+              v-if="isMonitoring"
+              @click="openActiveDeviceMdns"
+              :disabled="!hasActiveDeviceInfo"
+              :class="[
+                'p-1.5 rounded-md border transition-all',
+                hasActiveDeviceInfo
+                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
+              ]"
+              title="Open active device web console"
+              aria-label="Open active device web console"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M3 12h18"></path>
+                <path d="M12 3a14 14 0 0 1 0 18"></path>
+                <path d="M12 3a14 14 0 0 0 0 18"></path>
+              </svg>
+            </button>
             <button @click="toggleMonitor" :class="['px-3 py-1 rounded-md text-xs font-bold transition-all border', isMonitoring ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500']">
               {{ isMonitoring ? 'Stop monitor' : 'Start monitor' }}
             </button>
