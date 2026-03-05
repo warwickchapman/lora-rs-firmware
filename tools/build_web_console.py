@@ -8,20 +8,10 @@ def minify_css(css):
     return css.strip()
 
 def minify_js(js):
-    js = re.sub(r'//(.*)', '', js)
-    js = re.sub(r'/\*.*?\*/', '', js, flags=re.DOTALL)
-    js = re.sub(r'\s+', ' ', js)
-    js = re.sub(r'\s*([\{\}\:\;\,\=\+\-\*\/\(\)\[\]\|\|\&\&])\s*', r'\1', js)
-    js = js.replace('return ', 'return ')
-    js = js.replace('const ', 'const ')
-    js = js.replace('let ', 'let ')
-    js = js.replace('var ', 'var ')
-    js = js.replace('function ', 'function ')
-    js = js.replace('await ', 'await ')
-    js = js.replace('typeof ', 'typeof ')
-    js = js.replace('new ', 'new ')
-    js = js.replace('throw ', 'throw ')
-    return js.strip()
+    # Keep JS syntax intact. The previous regex-based minifier corrupted valid
+    # code inside template literals/URLs (for example "http://..."), which can
+    # break the status page at runtime.
+    return "\n".join(line.rstrip() for line in js.splitlines()).strip()
 
 def build_web_assets(env, target, source):
     print("Building Web Console Assets...")

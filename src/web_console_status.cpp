@@ -47,6 +47,7 @@ bool WebConsole::buildStatusLiveCache() {
              ip[3]);
   }
   doc["sta_ip"] = staIpBuf;
+  doc["sta_connected"] = WiFi.isConnected();
   doc["sta_ssid"] = WiFi.isConnected() ? WiFi.SSID() : "";
   doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
   doc["sta_status_code"] = static_cast<int>(st);
