@@ -18,6 +18,10 @@ interface MonitorEvent {
   line: string;
 }
 
+interface PortsChangedEvent {
+  ports: string[];
+}
+
 interface DeviceInfo {
   chip_id: string;
   mac: string;
@@ -50,6 +54,7 @@ const LOCAL_OPTION = '__local_browse__';
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
+let unlistenPortsChanged: UnlistenFn | null = null;
 
 async function openLocalFileDialog() {
   try {
@@ -89,12 +94,15 @@ watch(selectedVersion, (newVal) => {
 });
 
 async function refreshPorts() {
+  if (isRefreshingPorts.value) return;
   isRefreshingPorts.value = true;
   try {
     const fetchedPorts: SerialPort[] = await invoke('list_serial_ports');
     ports.value = fetchedPorts.sort((a, b) => b.score - a.score);
-    if (ports.value.length > 0 && !selectedPort.value) {
+    if (ports.value.length > 0 && !ports.value.some(p => p.port_name === selectedPort.value)) {
       selectedPort.value = ports.value[0].port_name;
+    } else if (ports.value.length === 0) {
+      selectedPort.value = '';
     }
     // Artificial delay to ensure the spin is satisfyingly visible
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -252,11 +260,18 @@ onMounted(async () => {
       logs.value = logs.value.slice(-2000);
     }
   });
+
+  unlistenPortsChanged = await listen<PortsChangedEvent>('serial-ports-changed', () => {
+    if (!isFlashing.value) {
+      refreshPorts();
+    }
+  });
 });
 
 onUnmounted(() => {
   if (unlistenFlash) unlistenFlash();
   if (unlistenMonitor) unlistenMonitor();
+  if (unlistenPortsChanged) unlistenPortsChanged();
 });
 
 function formatLabel(key: string) {

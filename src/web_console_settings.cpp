@@ -29,6 +29,9 @@ void WebConsole::handleGetSettings() {
   doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["input_control_paired_lora_enabled"] = cfg.input_control_paired_lora_enabled;
+  doc["tx_command_retry_timeout_ms"] = cfg.tx_command_retry_timeout_ms;
+  doc["rx_failsafe_mode"] = cfg.rx_failsafe_mode;
+  doc["rx_failsafe_timeout_ms"] = cfg.rx_failsafe_timeout_ms;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = "";
   doc["wifi_sta_password_set"] = (cfg.wifi_sta_password.length() > 0);
@@ -81,6 +84,9 @@ void WebConsole::handlePostSettings() {
   filter["rx_push_on_change_enabled"] = true;
   filter["rx_push_min_interval_ms"] = true;
   filter["input_control_paired_lora_enabled"] = true;
+  filter["tx_command_retry_timeout_ms"] = true;
+  filter["rx_failsafe_mode"] = true;
+  filter["rx_failsafe_timeout_ms"] = true;
   filter["wifi_sta_ssid"] = true;
   filter["wifi_sta_password"] = true;
   filter["lan_hostname"] = true;
@@ -142,6 +148,9 @@ void WebConsole::handlePostSettings() {
   next.rx_push_on_change_enabled = parseBoolField(doc["rx_push_on_change_enabled"], next.rx_push_on_change_enabled);
   next.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | next.rx_push_min_interval_ms;
   next.input_control_paired_lora_enabled = parseBoolField(doc["input_control_paired_lora_enabled"], next.input_control_paired_lora_enabled);
+  next.tx_command_retry_timeout_ms = doc["tx_command_retry_timeout_ms"] | next.tx_command_retry_timeout_ms;
+  next.rx_failsafe_mode = doc["rx_failsafe_mode"] | next.rx_failsafe_mode.c_str();
+  next.rx_failsafe_timeout_ms = doc["rx_failsafe_timeout_ms"] | next.rx_failsafe_timeout_ms;
   next.wifi_sta_ssid = doc["wifi_sta_ssid"] | next.wifi_sta_ssid.c_str();
   next.wifi_sta_password = doc["wifi_sta_password"] | next.wifi_sta_password.c_str();
   const bool hasLanHostnameField = !doc["lan_hostname"].isNull();
@@ -216,6 +225,15 @@ void WebConsole::handlePostSettings() {
   }
   if (next.rx_push_min_interval_ms < kMinRxPushIntervalMs) next.rx_push_min_interval_ms = kMinRxPushIntervalMs;
   if (next.rx_push_min_interval_ms > kMaxRxPushIntervalMs) next.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
+  if (next.tx_command_retry_timeout_ms < 5000UL) next.tx_command_retry_timeout_ms = 5000UL;
+  if (next.tx_command_retry_timeout_ms > 3600000UL) next.tx_command_retry_timeout_ms = 3600000UL;
+  next.rx_failsafe_mode.trim();
+  next.rx_failsafe_mode.toLowerCase();
+  if (next.rx_failsafe_mode != "hold_last" && next.rx_failsafe_mode != "force_off" && next.rx_failsafe_mode != "force_on") {
+    next.rx_failsafe_mode = "hold_last";
+  }
+  if (next.rx_failsafe_timeout_ms < 5000UL) next.rx_failsafe_timeout_ms = 5000UL;
+  if (next.rx_failsafe_timeout_ms > 3600000UL) next.rx_failsafe_timeout_ms = 3600000UL;
   if (next.mqtt_port == 0) next.mqtt_port = 1883;
   if (next.mqtt_topic_root.length() == 0) next.mqtt_topic_root = "lora";
   if (next.mqtt_control_enabled && !next.mqtt_client_enabled) {
@@ -265,6 +283,9 @@ void WebConsole::handleExportSettings() {
   doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["input_control_paired_lora_enabled"] = cfg.input_control_paired_lora_enabled;
+  doc["tx_command_retry_timeout_ms"] = cfg.tx_command_retry_timeout_ms;
+  doc["rx_failsafe_mode"] = cfg.rx_failsafe_mode;
+  doc["rx_failsafe_timeout_ms"] = cfg.rx_failsafe_timeout_ms;
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg.wifi_sta_password;
   doc["lan_hostname"] = cfg.lan_hostname;

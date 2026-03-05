@@ -10,6 +10,7 @@ Packed fields:
 - `src` (1)
 - `type` (1)
 - `counter` (4)
+- `boot_nonce` (4)
 - `nonce` (8)
 - `encrypted payload` (12)
 - `mac` (8, truncated SHA-256 output)
@@ -24,6 +25,7 @@ Packed fields:
 - `PollResponse` (`'R'`)
 - `WifiProvision` (`'W'`)
 - `FactoryReset` (`'X'`)
+- `Provisioning` (`'V'`)
 
 ## Encrypted Payload Layout (12 bytes)
 - `b0`: `relay_state`
@@ -74,11 +76,13 @@ Otherwise packet is dropped and logged.
 - TX sends periodic `Heartbeat`.
 - RX applies `Change`/`Heartbeat`/`Mqtt` relay state.
 - RX sends `Ack` for `Change` and `Heartbeat`.
+- `Ack` carries the acknowledged command counter in payload bytes `b8..b11` (`unix_time_s` slot reused for ACK correlation).
 - RX sends `MqttStatus` for `Mqtt` with applied relay/input/temp state.
 - TX may send `PollRequest` to RX.
 - RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
+- TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.
 
 ## Provisioning and Reset LoRa Extensions
 - `WifiProvision` (`'W'`) carries segmented WiFi credentials (SSID + password) using custom payload bytes.
@@ -104,11 +108,15 @@ Otherwise packet is dropped and logged.
 - On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
+- Paired TX input-control retries use bounded Fibonacci-like backoff with small jitter and a hard retry deadline (`tx_command_retry_timeout_ms`).
 
 ## Timing Defaults
 - `heartbeat_ms`: 60000 (60 s)
 - `ack_timeout_ms`: 5000 (5 s)
 - `mqtt_remote_retry_timeout_ms`: 300000 (300 s)
+- `tx_command_retry_timeout_ms`: 180000 (180 s)
+- `rx_failsafe_mode`: `hold_last` (default), options: `force_off`, `force_on`
+- `rx_failsafe_timeout_ms`: 180000 (180 s)
 
 ## Compatibility
 The current 12-byte payload format is not wire-compatible with older 8-byte payload firmware.

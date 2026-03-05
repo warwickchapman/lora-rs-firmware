@@ -228,23 +228,50 @@ jobs:
           
           mkdir -p final_dist
           
-          # Native Tauri DMG location
-          # Usually: target/<triple>/release/bundle/dmg/<name>_<version>_<arch>.dmg
-          # Note: Tauri uses underscores and lowercase arch names (aarch64/x64)
-          TAURI_ARCH="x64"
-          if [[ "$ARCH" == "arm64" ]]; then TAURI_ARCH="aarch64"; fi
+          # App structure
+          APP_NAME="Thanda LoRa Flasher.app"
+          APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${APP_NAME}"
+          BINARY_PATH="${APP_PATH}/Contents/MacOS/thanda-lora-flasher"
+          OUT_DMG="final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg"
           
-          # Find the native DMG (Tauri 2 naming: Thanda LoRa Flasher_0.5.4_aarch64.dmg)
-          # We use a glob to be safe with the exact version string
-          SOURCE_DMG=$(find "tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/dmg" -name "*.dmg" | head -n 1)
-          
-          if [[ -n "$SOURCE_DMG" ]]; then
-            echo "Found native DMG: $SOURCE_DMG"
-            cp "$SOURCE_DMG" "final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg"
+          # Architecture Verification (Prove architecture before signing)
+          echo "### Architecture Verification for $TRIPLE ###"
+          FILE_OUT=$(file "$BINARY_PATH")
+          echo "$FILE_OUT"
+          if [[ "$ARCH" == "x64" ]]; then
+            echo "$FILE_OUT" | grep -q "x86_64" || { echo "ERROR: expected x86_64 binary for $TRIPLE"; exit 1; }
           else
-            echo "ERROR: Native Tauri DMG not found in tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/dmg"
-            exit 1
+            echo "$FILE_OUT" | grep -Eq "arm64|aarch64" || { echo "ERROR: expected arm64 binary for $TRIPLE"; exit 1; }
           fi
+          
+          # Sign app bundle and verify before packaging.
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH"
+
+          # Build UX-friendly DMG layout (large icon + Applications on right).
+          brew install create-dmg
+          STAGE_DIR=$(mktemp -d)
+          cp -R "$APP_PATH" "$STAGE_DIR/"
+          create-dmg \
+            --volname "Thanda LoRa Flasher" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "${APP_NAME}" 150 150 \
+            --app-drop-link 450 150 \
+            "$OUT_DMG" \
+            "$STAGE_DIR/$APP_NAME"
+
+          # Verify signature survived packaging by checking app inside the DMG.
+          MOUNT_POINT=$(mktemp -d)
+          trap 'hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true; rm -rf "$MOUNT_POINT" "$STAGE_DIR"' EXIT
+          hdiutil attach "$OUT_DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+          codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/$APP_NAME"
+          codesign -dv --verbose=4 "$MOUNT_POINT/$APP_NAME"
+          hdiutil detach "$MOUNT_POINT" -quiet
+          rm -rf "$MOUNT_POINT" "$STAGE_DIR"
+          trap - EXIT
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-22.04'
@@ -254,7 +281,10 @@ jobs:
           VERSION=${VERSION_RAW#v}
           mkdir final_dist
           TRIPLE="${{ matrix.target_triple }}"
-          mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/appimage/*.AppImage "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage"
+          APPIMAGE_OUT="final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage"
+          mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/appimage/*.AppImage "$APPIMAGE_OUT"
+          chmod +x "$APPIMAGE_OUT"
+          tar -C final_dist -czf "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.AppImage.tar.gz" "$(basename "$APPIMAGE_OUT")"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/deb/*.deb "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.deb"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/rpm/*.rpm "final_dist/thanda-lora-flasher-${VERSION}-linux-x64.rpm"
 

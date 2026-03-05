@@ -44,6 +44,9 @@ constexpr const char *kAllowedFields[] = {
     "rx_push_on_change_enabled",
     "rx_push_min_interval_ms",
     "input_control_paired_lora_enabled",
+    "tx_command_retry_timeout_ms",
+    "rx_failsafe_mode",
+    "rx_failsafe_timeout_ms",
     "wifi_sta_ssid",
     "wifi_sta_password",
     "lan_hostname",
@@ -280,6 +283,9 @@ bool ConfigStore::begin() {
   cfg_.rx_push_on_change_enabled = root["rx_push_on_change_enabled"] | false;
   cfg_.rx_push_min_interval_ms = root["rx_push_min_interval_ms"] | 60000;
   cfg_.input_control_paired_lora_enabled = root["input_control_paired_lora_enabled"] | false;
+  cfg_.tx_command_retry_timeout_ms = root["tx_command_retry_timeout_ms"] | 180000;
+  cfg_.rx_failsafe_mode = String(static_cast<const char *>(root["rx_failsafe_mode"] | "hold_last"));
+  cfg_.rx_failsafe_timeout_ms = root["rx_failsafe_timeout_ms"] | 180000;
 
   cfg_.wifi_sta_ssid = String(static_cast<const char *>(root["wifi_sta_ssid"] | ""));
   cfg_.wifi_sta_password = String(static_cast<const char *>(root["wifi_sta_password"] | ""));
@@ -330,6 +336,15 @@ bool ConfigStore::begin() {
     // Heartbeat is only meaningful for paired-mode input-driven LoRa control.
     cfg_.heartbeat_ms = 60000UL;
   }
+  if (cfg_.tx_command_retry_timeout_ms < 5000UL) cfg_.tx_command_retry_timeout_ms = 5000UL;
+  if (cfg_.tx_command_retry_timeout_ms > 3600000UL) cfg_.tx_command_retry_timeout_ms = 3600000UL;
+  cfg_.rx_failsafe_mode.trim();
+  cfg_.rx_failsafe_mode.toLowerCase();
+  if (cfg_.rx_failsafe_mode != "hold_last" && cfg_.rx_failsafe_mode != "force_off" && cfg_.rx_failsafe_mode != "force_on") {
+    cfg_.rx_failsafe_mode = "hold_last";
+  }
+  if (cfg_.rx_failsafe_timeout_ms < 5000UL) cfg_.rx_failsafe_timeout_ms = 5000UL;
+  if (cfg_.rx_failsafe_timeout_ms > 3600000UL) cfg_.rx_failsafe_timeout_ms = 3600000UL;
   if (cfg_.admin_password.length() < 8 || cfg_.factory_serial.length() < 4) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=identity_fields_invalid action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
@@ -375,6 +390,9 @@ bool ConfigStore::save() {
   doc["rx_push_on_change_enabled"] = cfg_.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg_.rx_push_min_interval_ms;
   doc["input_control_paired_lora_enabled"] = cfg_.input_control_paired_lora_enabled;
+  doc["tx_command_retry_timeout_ms"] = cfg_.tx_command_retry_timeout_ms;
+  doc["rx_failsafe_mode"] = cfg_.rx_failsafe_mode;
+  doc["rx_failsafe_timeout_ms"] = cfg_.rx_failsafe_timeout_ms;
 
   doc["wifi_sta_ssid"] = cfg_.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg_.wifi_sta_password;
@@ -536,6 +554,9 @@ void ConfigStore::setDefaults() {
   cfg_.rx_push_on_change_enabled = false;
   cfg_.rx_push_min_interval_ms = 60000;
   cfg_.input_control_paired_lora_enabled = false;
+  cfg_.tx_command_retry_timeout_ms = 180000;
+  cfg_.rx_failsafe_mode = "hold_last";
+  cfg_.rx_failsafe_timeout_ms = 180000;
 
   cfg_.wifi_sta_ssid = "";
   cfg_.wifi_sta_password = "";

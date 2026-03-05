@@ -34,6 +34,8 @@ Commands:
 - AP mDNS: `lrs.local`
 - Heartbeat default: 60 s
 - ACK timeout default: 5 s
+- TX command retry timeout default: 180 s
+- RX fail-safe default: `hold_last` (timeout 180 s; optional `force_off` / `force_on`)
 - DS18B20 default pin: GPIO0
 - MQTT host default: `venus.local`
 
@@ -108,6 +110,7 @@ Older 8-byte payload firmware is not wire-compatible.
 
 Current message types include control/status (`A/C/H/M/S/P/R`) plus provisioning/reset extensions (`W`/`X`).
 `W` (WiFi provisioning) and `X` (factory reset) reuse the same encrypted 12-byte payload slot with custom byte layouts via the radio layer raw-payload send path.
+- `Ack` frames carry acknowledged command counter in payload `b8..b11` and TX validates this before clearing pending command state.
 
 If payload semantics change again, add protocol-version signaling first.
 
@@ -160,6 +163,12 @@ MQTT remote retry control:
   - `rx_push_on_change_enabled` (default `false`)
   - `rx_push_min_interval_ms` (default `60000`, enforced range `60000..3600000`)
   - when enabled, RX sends unsolicited `PollResponse` on debounced local input change, rate-limited by `rx_push_min_interval_ms`.
+- Paired TX retry controls:
+  - `tx_command_retry_timeout_ms` (default `180000`, enforced range `5000..3600000`)
+  - retry spacing remains Fibonacci-like with added small jitter to reduce synchronization collisions.
+- RX fail-safe controls:
+  - `rx_failsafe_mode` (`hold_last` default; optional `force_off`, `force_on`)
+  - `rx_failsafe_timeout_ms` (default `180000`, enforced range `5000..3600000`)
 
 Discovery:
 - Topic: `<root>/discovery/lrs-<chipid>`

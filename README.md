@@ -41,6 +41,7 @@ What it does:
 - Supports local `.bin` override selection.
 - Flashes selected firmware via `esptool` and shows live operation logs.
 - **Linux Users**: Ensure you are in the `dialout` group (`sudo usermod -a -G dialout $USER`) and log out/in.
+- **Linux AppImage note**: prefer the `*.AppImage.tar.gz` release asset. Extracting it preserves executable permissions.
 
 Main entrypoint:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/main.py`
@@ -63,6 +64,22 @@ Main entrypoint:
 - Single source of truth: `/Users/warwick/Code/LoRa/lora_rs/VERSION`
 - Firmware build metadata (`fw_version` shown in Web UI/API), flasher app version label, and factory/release helper scripts all read from this file.
 - For a new release, bump `VERSION` once (for example `0.4.4-alpha`) and keep release tag/title/assets aligned to that value.
+
+## Release Automation Script
+Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same release flow end-to-end:
+- builds fresh `lrs_za` + `lrs_us` firmware
+- generates named assets + SHA256 checksums
+- creates/updates GitHub release from `VERSION`
+- enforces non-repeated George Bernard Shaw quote + one-word release name
+
+Example:
+```bash
+cd /Users/warwick/Code/LoRa/lora_rs
+python3 tools/release_manager.py \
+  --summary "Short release summary here." \
+  --highlight "Feature highlight one" \
+  --highlight "Feature highlight two"
+```
 
 ## Flash
 - `python3 -m platformio run -e lrs_za -t upload --upload-port <PORT>`

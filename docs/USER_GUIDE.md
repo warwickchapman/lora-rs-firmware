@@ -40,6 +40,9 @@ Recommended defaults:
 - Heartbeat: 60 s
 - ACK timeout: 5 s
 - MQTT remote retry timeout (TX): 300 s
+- TX command retry timeout: 180 s
+- RX fail-safe mode: `hold_last` (set `force_off` for strict fail-safe installations)
+- RX fail-safe timeout: 180 s
 - Scheduled remote polling (TX): disabled
 - Default remote poll interval (TX): 60 s minimum
 - RX push-on-change: optional, with minimum interval 60 s

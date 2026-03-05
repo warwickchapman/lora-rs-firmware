@@ -134,6 +134,10 @@ function refreshRoleLabels() {
   if (rxPushOnChangeRow) { rxPushOnChangeRow.style.display = tx ? 'none' : ''; }
   const rxPushIntervalRow = document.getElementById('rx_push_interval_row');
   if (rxPushIntervalRow) { rxPushIntervalRow.style.display = tx ? 'none' : ''; }
+  const rxFailsafeModeRow = document.getElementById('rx_failsafe_mode_row');
+  if (rxFailsafeModeRow) { rxFailsafeModeRow.style.display = tx ? 'none' : ''; }
+  const rxFailsafeTimeoutRow = document.getElementById('rx_failsafe_timeout_row');
+  if (rxFailsafeTimeoutRow) { rxFailsafeTimeoutRow.style.display = tx ? 'none' : ''; }
   const heartbeatRow = document.getElementById('heartbeat_row');
   const heartbeatHint = document.getElementById('heartbeat_guardrail_hint');
   const heartbeatInput = document.getElementById('heartbeat_s');
@@ -1704,6 +1708,8 @@ async function loadSettingsPageData(force) {
     document.getElementById('tx_mqtt_remote_default_poll_interval_s').value = Math.max(60, Math.round(Number(s.tx_mqtt_remote_default_poll_interval_ms || 60000) / 1000));
     document.getElementById('rx_push_on_change_enabled').checked = !!s.rx_push_on_change_enabled;
     document.getElementById('rx_push_min_interval_s').value = Math.max(60, Math.round(Number(s.rx_push_min_interval_ms || 60000) / 1000));
+    document.getElementById('rx_failsafe_mode').value = String(s.rx_failsafe_mode || 'hold_last');
+    document.getElementById('rx_failsafe_timeout_s').value = Math.max(5, Math.round(Number(s.rx_failsafe_timeout_ms || 180000) / 1000));
     document.getElementById('local_address').value = String(s.local_address);
     document.getElementById('remote_address').value = String(s.remote_address);
     refreshRoleLabels();
@@ -1808,11 +1814,15 @@ function collectLoraBody() {
   const mqttRetrySec = Math.floor(Number(document.getElementById('mqtt_remote_retry_timeout_s').value));
   const txPollDefaultSec = Math.floor(Number(document.getElementById('tx_mqtt_remote_default_poll_interval_s').value));
   const rxPushMinSec = Math.floor(Number(document.getElementById('rx_push_min_interval_s').value));
+  const rxFailsafeMode = String(document.getElementById('rx_failsafe_mode').value || 'hold_last').trim().toLowerCase();
+  const rxFailsafeTimeoutSec = Math.floor(Number(document.getElementById('rx_failsafe_timeout_s').value));
   if (mode === 'paired' && (!Number.isFinite(hbSec) || hbSec < 60 || hbSec > 3600)) { alert('Heartbeat must be between 60 and 3600 seconds.'); return; }
   if (!Number.isFinite(ackSec) || ackSec < 5 || ackSec > 600) { alert('ACK timeout must be between 5 and 600 seconds.'); return; }
   if (!Number.isFinite(mqttRetrySec) || mqttRetrySec < 5 || mqttRetrySec > 3600) { alert('MQTT remote retry timeout must be between 5 and 3600 seconds.'); return; }
   if (!Number.isFinite(txPollDefaultSec) || txPollDefaultSec < 60 || txPollDefaultSec > 3600) { alert('Default poll interval must be between 60 and 3600 seconds.'); return; }
   if (!Number.isFinite(rxPushMinSec) || rxPushMinSec < 60 || rxPushMinSec > 3600) { alert('RX push minimum interval must be between 60 and 3600 seconds.'); return; }
+  if (rxFailsafeMode !== 'hold_last' && rxFailsafeMode !== 'force_off' && rxFailsafeMode !== 'force_on') { alert('RX failsafe mode must be hold_last, force_off, or force_on.'); return; }
+  if (!Number.isFinite(rxFailsafeTimeoutSec) || rxFailsafeTimeoutSec < 5 || rxFailsafeTimeoutSec > 3600) { alert('RX failsafe timeout must be between 5 and 3600 seconds.'); return; }
   const ids = ['lora_tx_power', 'lora_spreading_factor', 'lora_bandwidth_hz', 'lora_coding_rate'];
   const body = {}; ids.forEach(id => body[id] = document.getElementById(id).value);
   const fleetPassphrase = String(document.getElementById('fleet_passphrase').value || '').trim();
@@ -1842,6 +1852,8 @@ function collectLoraBody() {
   body.mqtt_remote_retry_timeout_ms = mqttRetrySec * 1000;
   body.tx_mqtt_remote_default_poll_interval_ms = txPollDefaultSec * 1000;
   body.rx_push_min_interval_ms = rxPushMinSec * 1000;
+  body.rx_failsafe_mode = rxFailsafeMode;
+  body.rx_failsafe_timeout_ms = rxFailsafeTimeoutSec * 1000;
   return body;
 }
 function collectNetworkBody() {

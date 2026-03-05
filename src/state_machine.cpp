@@ -13,12 +13,17 @@ constexpr uint8_t kRelayPin = 5;
 constexpr uint32_t kDebounceMs = 50;
 constexpr uint32_t kTxRelayEchoDelayMs = 500;
 constexpr uint32_t kAckRetryScheduleMs[] = {3000, 5000, 8000, 13000, 21000, 34000, 55000};
+constexpr uint8_t kAckRetryJitterPct = 15;
 constexpr uint32_t kMqttRetryScheduleMs[] = {1000, 2000, 3000, 5000, 8000, 13000, 21000, 34000, 55000};
 constexpr uint32_t kDefaultRemotePollIntervalMs = 60000;
 constexpr uint32_t kMinRemotePollIntervalMs = 60000;
 constexpr uint32_t kMaxRemotePollIntervalMs = 3600000;
 constexpr uint8_t kFlagTimeAuthoritative = 0x01;
 constexpr uint8_t kFlagPairedInputSlave = 0x02;
+constexpr uint32_t kMinRetryTimeoutMs = 5000U;
+constexpr uint32_t kMaxRetryTimeoutMs = 3600000U;
+constexpr uint32_t kMinRxFailsafeTimeoutMs = 5000U;
+constexpr uint32_t kMaxRxFailsafeTimeoutMs = 3600000U;
 constexpr uint8_t kWifiProvisionOpStart = 1;
 constexpr uint8_t kWifiProvisionOpData = 2;
 constexpr uint8_t kWifiProvisionOpCommit = 3;
@@ -197,6 +202,24 @@ uint8_t encodeTempCode(bool valid, float celsius) {
   if (t > 126) t = 126;
   return static_cast<uint8_t>(static_cast<int8_t>(t));
 }
+
+RxFailsafeMode parseRxFailsafeMode(const String &rawMode) {
+  String mode = rawMode;
+  mode.trim();
+  mode.toLowerCase();
+  if (mode == "force_off") return RxFailsafeMode::ForceOff;
+  if (mode == "force_on") return RxFailsafeMode::ForceOn;
+  return RxFailsafeMode::HoldLast;
+}
+
+uint32_t jitteredDelayMs(uint32_t baseMs, uint8_t pct) {
+  if (baseMs == 0 || pct == 0) return baseMs;
+  const uint32_t span = (baseMs * static_cast<uint32_t>(pct)) / 100U;
+  if (span == 0) return baseMs;
+  const long jitter = random(-static_cast<long>(span), static_cast<long>(span) + 1L);
+  const int64_t adjusted = static_cast<int64_t>(baseMs) + static_cast<int64_t>(jitter);
+  return (adjusted < 1) ? 1U : static_cast<uint32_t>(adjusted);
+}
 }
 
 bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
@@ -224,11 +247,14 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   last_wifi_prov_tx_ms_ = 0;
   tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled;
   tx_command_pending_ = false;
+  tx_pending_command_counter_ = 0;
   tx_retry_step_ = 0;
   tx_next_retry_ms_ = 0;
+  tx_command_retry_deadline_ms_ = 0;
   paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
+  last_rx_control_ms_ = 0;
   last_wifi_prov_tx_ms_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
@@ -285,11 +311,14 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   tx_ack_pending_ = false;
   tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled;
   tx_command_pending_ = false;
+  tx_pending_command_counter_ = 0;
   tx_retry_step_ = 0;
   tx_next_retry_ms_ = 0;
+  tx_command_retry_deadline_ms_ = 0;
   paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
+  last_rx_control_ms_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
@@ -335,6 +364,13 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
   runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
+  runtime_.rx_failsafe_mode = parseRxFailsafeMode(cfg.rx_failsafe_mode);
+  runtime_.tx_command_retry_timeout_ms = cfg.tx_command_retry_timeout_ms;
+  runtime_.rx_failsafe_timeout_ms = cfg.rx_failsafe_timeout_ms;
+  if (runtime_.tx_command_retry_timeout_ms < kMinRetryTimeoutMs) runtime_.tx_command_retry_timeout_ms = kMinRetryTimeoutMs;
+  if (runtime_.tx_command_retry_timeout_ms > kMaxRetryTimeoutMs) runtime_.tx_command_retry_timeout_ms = kMaxRetryTimeoutMs;
+  if (runtime_.rx_failsafe_timeout_ms < kMinRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMinRxFailsafeTimeoutMs;
+  if (runtime_.rx_failsafe_timeout_ms > kMaxRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMaxRxFailsafeTimeoutMs;
 }
 
 bool NodeStateMachine::ensureProvisioningStorage() {
@@ -450,7 +486,7 @@ void NodeStateMachine::automationSetLocalRelay(uint8_t relayState) {
   lrslog::event("automation_local_relay", 0, last_counter_, relay_state_);
 }
 
-void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent) {
+void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent, bool resetRetryWindow) {
   const uint32_t now = millis();
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
@@ -459,8 +495,10 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
                     0, 0xFF, 0xFFFF, unixTimeS)) {
     link_state_ = LinkState::Idle;
     tx_command_pending_ = false;
+    tx_pending_command_counter_ = 0;
     tx_retry_step_ = 0;
     tx_next_retry_ms_ = 0;
+    tx_command_retry_deadline_ms_ = 0;
     return;
   }
   last_tx_ms_ = now;
@@ -469,12 +507,16 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
   link_state_ = LinkState::WaitAck;
 
   tx_command_pending_ = true;
+  tx_pending_command_counter_ = last_counter_;
+  if (resetRetryWindow || tx_command_retry_deadline_ms_ == 0) {
+    tx_command_retry_deadline_ms_ = now + runtime_.tx_command_retry_timeout_ms;
+  }
   tx_pending_relay_state_ = relayState ? 1 : 0;
   tx_pending_input_state_ = inputState ? 1 : 0;
   const uint8_t idx = tx_retry_step_ < (sizeof(kAckRetryScheduleMs) / sizeof(kAckRetryScheduleMs[0]))
                           ? tx_retry_step_
                           : (sizeof(kAckRetryScheduleMs) / sizeof(kAckRetryScheduleMs[0])) - 1;
-  tx_next_retry_ms_ = now + kAckRetryScheduleMs[idx];
+  tx_next_retry_ms_ = now + jitteredDelayMs(kAckRetryScheduleMs[idx], kAckRetryJitterPct);
   if (tx_retry_step_ < ((sizeof(kAckRetryScheduleMs) / sizeof(kAckRetryScheduleMs[0])) - 1)) {
     tx_retry_step_++;
   }
@@ -1300,12 +1342,24 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   if (runtime_.input_control_paired_lora_enabled && tx_command_pending_ && static_cast<int32_t>(now - tx_next_retry_ms_) >= 0) {
+    if (tx_command_retry_deadline_ms_ != 0 && static_cast<int32_t>(now - tx_command_retry_deadline_ms_) >= 0) {
+      tx_command_pending_ = false;
+      tx_pending_command_counter_ = 0;
+      tx_retry_step_ = 0;
+      tx_next_retry_ms_ = 0;
+      tx_command_retry_deadline_ms_ = 0;
+      relay_state_ = 0;
+      digitalWrite(kRelayPin, LOW);
+      link_state_ = LinkState::Timeout;
+      lrslog::event("tx_retry_deadline", 0, last_counter_, relay_state_);
+      return;
+    }
     if (!radioTxBudgetAvailable()) {
       return;
     }
     startupTxPhaseTrace("tx_retry_before_send");
     const uint32_t sendStartMs = millis();
-    sendTxState(MessageType::Change, tx_pending_relay_state_, tx_pending_input_state_, "tx_retry");
+    sendTxState(MessageType::Change, tx_pending_relay_state_, tx_pending_input_state_, "tx_retry", false);
     startupTxSendTimingTrace("tx_retry_after_send", sendStartMs);
     return;
   }
@@ -1346,6 +1400,7 @@ void NodeStateMachine::tickTransmitter() {
 
 void NodeStateMachine::tickReceiver() {
   const uint32_t now = millis();
+  applyReceiverFailsafe(now);
   int inputLogical = static_cast<int>(localDryContactState());
   if (inputLogical != last_input_raw_) {
     last_debounce_ms_ = now;
@@ -1452,12 +1507,22 @@ void NodeStateMachine::tickReceive() {
 
   if (runtime_.role_tx) {
     if (msg.type == MessageType::Ack) {
+      if (!ackMatchesPendingCommand(msg)) {
+        LRS_LOGW(LORA,
+                 "event=tx_ack_counter_mismatch acked=%lu pending=%lu rx_counter=%lu",
+                 static_cast<unsigned long>(msg.unix_time_s),
+                 static_cast<unsigned long>(tx_pending_command_counter_),
+                 static_cast<unsigned long>(msg.counter));
+        return;
+      }
       tx_ack_pending_ = true;
       tx_ack_apply_ms_ = millis() + kTxRelayEchoDelayMs;
       tx_ack_relay_state_ = msg.relay_state;
       tx_command_pending_ = false;
+      tx_pending_command_counter_ = 0;
       tx_retry_step_ = 0;
       tx_next_retry_ms_ = 0;
+      tx_command_retry_deadline_ms_ = 0;
       link_state_ = LinkState::Idle;
       lrslog::event("tx_ack", msg.rssi, msg.counter, msg.relay_state);
       return;
@@ -1542,6 +1607,7 @@ void NodeStateMachine::tickReceive() {
     }
     relay_state_ = msg.relay_state;
     input_state_ = msg.input_state;
+    last_rx_control_ms_ = millis();
     last_rx_control_source_ = (msg.type == MessageType::Mqtt) ? RxControlSource::Mqtt : RxControlSource::LoRa;
     digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
     if (msg.type != MessageType::Mqtt) {
@@ -1549,11 +1615,10 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("rx_apply_no_ack_budget", msg.rssi, msg.counter, msg.relay_state);
         return;
       }
-      const uint32_t unixTimeS = currentUnixTimeS(millis());
       last_counter_++;
       if (radio_->send(MessageType::Ack, relay_state_, input_state_, txFlags(), last_counter_, runtime_.local_address, msg.src,
                        local_temp_code_,
-                       0, 0xFF, 0xFFFF, unixTimeS)) {
+                       0, 0xFF, 0xFFFF, msg.counter)) {
         last_tx_ms_ = millis();
         markRadioTxSentThisTick();
       }
@@ -1664,6 +1729,27 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
 
   lrslog::event("wifi_prov_rx_unknown", msg.rssi, msg.counter, op);
   return false;
+}
+
+bool NodeStateMachine::ackMatchesPendingCommand(const ProtocolMessage &msg) const {
+  if (!tx_command_pending_) return false;
+  return msg.unix_time_s == tx_pending_command_counter_;
+}
+
+void NodeStateMachine::applyReceiverFailsafe(uint32_t now) {
+  if (runtime_.role_tx) return;
+  if (runtime_.rx_failsafe_mode == RxFailsafeMode::HoldLast) return;
+  if (last_rx_control_ms_ == 0) return;
+  if (runtime_.rx_failsafe_timeout_ms == 0) return;
+  if (static_cast<uint32_t>(now - last_rx_control_ms_) < runtime_.rx_failsafe_timeout_ms) return;
+
+  const uint8_t desiredRelay = (runtime_.rx_failsafe_mode == RxFailsafeMode::ForceOn) ? 1U : 0U;
+  if (relay_state_ == desiredRelay) return;
+
+  relay_state_ = desiredRelay;
+  digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
+  last_rx_control_source_ = RxControlSource::Failsafe;
+  lrslog::event("rx_failsafe_apply", 0, last_counter_, relay_state_);
 }
 
 bool NodeStateMachine::handleFactoryResetFrame(const ProtocolMessage &msg) {

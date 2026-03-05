@@ -26,6 +26,9 @@ struct Settings {
   bool rx_push_on_change_enabled;
   uint32_t rx_push_min_interval_ms;
   bool input_control_paired_lora_enabled;
+  uint32_t tx_command_retry_timeout_ms;
+  String rx_failsafe_mode;
+  uint32_t rx_failsafe_timeout_ms;
 
   String wifi_sta_ssid;
   String wifi_sta_password;

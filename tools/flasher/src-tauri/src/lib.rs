@@ -1,11 +1,50 @@
 pub mod commands;
 pub mod services;
 
+use serde::Serialize;
+use std::time::Duration;
+use tauri::Emitter;
+
+#[derive(Serialize, Clone)]
+struct SerialPortsChangedEvent {
+    ports: Vec<String>,
+}
+
+fn start_serial_port_watcher(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut last_ports: Vec<String> = Vec::new();
+
+        loop {
+            let mut current_ports: Vec<String> = crate::services::serial::list_ports()
+                .into_iter()
+                .map(|p| p.port_name)
+                .collect();
+            current_ports.sort();
+
+            if current_ports != last_ports {
+                let _ = app.emit(
+                    "serial-ports-changed",
+                    SerialPortsChangedEvent {
+                        ports: current_ports.clone(),
+                    },
+                );
+                last_ports = current_ports;
+            }
+
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(crate::commands::monitor::MonitorState {
             running: std::sync::Arc::new(tokio::sync::Mutex::new(false)),
+        })
+        .setup(|app| {
+            start_serial_port_watcher(app.handle().clone());
+            Ok(())
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())

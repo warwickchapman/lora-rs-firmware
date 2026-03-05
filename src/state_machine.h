@@ -30,6 +30,13 @@ enum class RxControlSource : uint8_t {
   LoRa,
   Mqtt,
   Automation,
+  Failsafe,
+};
+
+enum class RxFailsafeMode : uint8_t {
+  HoldLast,
+  ForceOff,
+  ForceOn,
 };
 
 enum class PeerAckState : uint8_t {
@@ -193,6 +200,9 @@ class NodeStateMachine {
     uint32_t rx_push_min_interval_ms = 60000;
     bool input_control_paired_lora_enabled = false;
     bool mqtt_control_enabled = false;
+    RxFailsafeMode rx_failsafe_mode = RxFailsafeMode::HoldLast;
+    uint32_t tx_command_retry_timeout_ms = 180000;
+    uint32_t rx_failsafe_timeout_ms = 180000;
   };
   static constexpr uint8_t kLedPin = 2;
 
@@ -248,10 +258,13 @@ class NodeStateMachine {
   bool tx_command_pending_ = false;
   uint8_t tx_pending_relay_state_ = 0;
   uint8_t tx_pending_input_state_ = 0;
+  uint32_t tx_pending_command_counter_ = 0;
   uint8_t tx_retry_step_ = 0;
   uint32_t tx_next_retry_ms_ = 0;
+  uint32_t tx_command_retry_deadline_ms_ = 0;
   bool rx_push_pending_ = false;
   uint32_t rx_last_push_ms_ = 0;
+  uint32_t last_rx_control_ms_ = 0;
 
   struct PeerRuntime {
     bool in_use = false;
@@ -401,7 +414,7 @@ class NodeStateMachine {
   void resetRadioTxBudgetForTick();
   void finishRadioTxBudgetForTick();
   void markRadioTxSentThisTick();
-  void sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent);
+  void sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent, bool resetRetryWindow = true);
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
@@ -423,4 +436,6 @@ class NodeStateMachine {
   bool sendProvisioningCoordinatorPacketFactory(const uint8_t payload[12], uint8_t dst);
   bool sendProvisioningAnnounce(uint16_t sessionNonce);
   bool sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8_t assignedAddress);
+  bool ackMatchesPendingCommand(const ProtocolMessage &msg) const;
+  void applyReceiverFailsafe(uint32_t now);
 };

@@ -83,6 +83,9 @@ bool WebConsole::buildStatusLiveCache() {
     case RxControlSource::LoRa:
       relayReason = relayOn ? "lora_on" : "lora_off";
       break;
+    case RxControlSource::Failsafe:
+      relayReason = relayOn ? "failsafe_on" : "failsafe_off";
+      break;
     default:
       relayReason = "boot";
       break;
