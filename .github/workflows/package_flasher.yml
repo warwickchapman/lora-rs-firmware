@@ -280,7 +280,17 @@ jobs:
 
           (
             cd "$PORTABLE_ROOT"
-            zip -r "../thanda-lora-flasher-${VERSION}-windows-x64-portable.zip" .
+            python3 - <<PY
+from pathlib import Path
+import zipfile
+
+root = Path(".")
+out = Path("../thanda-lora-flasher-${VERSION}-windows-x64-portable.zip")
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    for p in root.rglob("*"):
+        if p.is_file():
+            zf.write(p, p.relative_to(root))
+PY
           )
 
       - name: Package MacOS
