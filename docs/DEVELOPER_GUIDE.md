@@ -219,3 +219,5 @@ Visibility:
 Release alignment policy:
 - Keep firmware, flasher UI label, docs/release notes, and factory helper scripts on the same value from `VERSION`.
 - Use release tags in `v<version>` form (for example `v0.4.3-alpha`) while `VERSION` remains plain (for example `0.4.3-alpha`).
+- Flasher reuse guard: if `tools/flasher/**` changed, do not reuse prior flasher assets; rebuild all flasher installers from current source.
+- Flasher asset reuse is permitted only when `tools/flasher/**` is unchanged (for example firmware-only/documentation-only releases).

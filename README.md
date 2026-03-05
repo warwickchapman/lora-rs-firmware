@@ -72,6 +72,11 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - creates/updates GitHub release from `VERSION`
 - enforces non-repeated George Bernard Shaw quote + one-word release name
 
+Flasher rebuild policy (mandatory):
+- If any file under `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.
+- Reusing flasher binaries from an older tag is allowed only when `tools/flasher/**` is unchanged.
+- If in doubt, rebuild flasher binaries.
+
 Example:
 ```bash
 cd /Users/warwick/Code/LoRa/lora_rs
