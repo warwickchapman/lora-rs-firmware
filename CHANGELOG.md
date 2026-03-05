@@ -7,7 +7,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Changed
-- None yet.
+- Flasher Windows packaging policy simplified to `MSI + portable ZIP` (NSIS setup EXE removed from release workflow and asset contract).
 
 ## [0.5.9-alpha] - 2026-03-05
 

@@ -99,8 +99,8 @@ When flasher files changed (`tools/flasher/**`) in a release:
 
 Release asset contract:
 - Firmware binaries: 3 (`za`, `us`, `eu`)
-- Flasher binaries: 8 (`windows msi`, `windows setup exe`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg`)
-- Total binaries per release: 11
+- Flasher binaries: 7 (`windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg`)
+- Total binaries per release: 10
 
 Example:
 ```bash

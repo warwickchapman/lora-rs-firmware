@@ -244,8 +244,8 @@ Conditional checklist: when `tools/flasher/**` changed in the release:
 
 Release binary set contract:
 - Firmware: `za`, `us`, `eu` (`3` files)
-- Flasher: `windows msi`, `windows setup exe`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg` (`8` files)
-- Total release binaries: `11`
+- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg` (`7` files)
+- Total release binaries: `10`
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.

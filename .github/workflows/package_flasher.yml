@@ -218,7 +218,12 @@ jobs:
           # Unset PKG_CONFIG_PATH on Linux to avoid python-cache interference with system libs
           if [[ "${{ matrix.os }}" == "ubuntu-22.04" ]]; then unset PKG_CONFIG_PATH; fi
           # Note: MacOS handles ad-hoc signing (-) if no secrets provided
-          npm run tauri build -- --target ${{ matrix.target_triple }}
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # Windows release policy: ship MSI + portable ZIP only (no NSIS setup EXE).
+            npm run tauri build -- --target ${{ matrix.target_triple }} --bundles msi
+          else
+            npm run tauri build -- --target ${{ matrix.target_triple }}
+          fi
 
       - name: Package Windows
         if: matrix.os == 'windows-latest'
@@ -230,19 +235,8 @@ jobs:
           mkdir final_dist
           TRIPLE="${{ matrix.target_triple }}"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/msi/*.msi "final_dist/thanda-lora-flasher-${VERSION}-windows-x64.msi"
-          mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/nsis/*.exe "final_dist/thanda-lora-flasher-${VERSION}-windows-x64-setup.exe"
-
-          # Build a portable ZIP from the packaged app layout when available,
-          # falling back to the release exe + sidecar if needed.
           PORTABLE_ROOT="final_dist/windows-portable"
           mkdir -p "$PORTABLE_ROOT"
-          BUNDLE_DIR="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/nsis"
-          if compgen -G "${BUNDLE_DIR}/*" > /dev/null; then
-            APPDIR=$(find "$BUNDLE_DIR" -maxdepth 1 -type d -name "Thanda LoRa Flasher*" | head -n1 || true)
-            if [[ -n "${APPDIR}" ]]; then
-              cp -R "${APPDIR}/." "$PORTABLE_ROOT/"
-            fi
-          fi
 
           if [[ ! -f "$PORTABLE_ROOT/thanda-lora-flasher.exe" ]]; then
             cp "tools/flasher/src-tauri/target/${TRIPLE}/release/thanda-lora-flasher.exe" "$PORTABLE_ROOT/"
