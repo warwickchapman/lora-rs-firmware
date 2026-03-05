@@ -5,12 +5,12 @@ const char kLoginHtml_Part1[] PROGMEM = R"HTML(
 <!doctype html><html><head>
 )HTML";
 
-const char kLoginHtml_Part2[] PROGMEM = R"HTML(
-<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+const char kLoginHtml_Part2[] PROGMEM =
+    R"HTML(<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
 <title>LRS Login</title>
 <style>
-:root{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%230f172a"/><circle cx="80" cy="20" r="50" fill="%234c1d95" opacity="0.4" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%231e3a8a" opacity="0.4" filter="blur(30px)"/></svg>');--card:rgba(15,23,42,0.4);--txt:#f8fafc;--muted:#cbd5e1;--border:rgba(255,255,255,0.1);--field:rgba(255,255,255,0.03);--btn:linear-gradient(135deg,#6366f1,#8b5cf6);--btn-hover:linear-gradient(135deg,#4f46e5,#7c3aed);--focus:rgba(139,92,246,0.5);--glass-shadow:0 4px 16px 0 rgba(0,0,0,0.2);--glass-border:1px solid rgba(255,255,255,0.1)}
-body.light{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%23f8fafc"/><circle cx="80" cy="20" r="50" fill="%23c4b5fd" opacity="0.5" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%2393c5fd" opacity="0.5" filter="blur(30px)"/></svg>');--card:rgba(255,255,255,0.4);--txt:#0f172a;--muted:#475569;--border:rgba(255,255,255,0.3);--field:rgba(255,255,255,0.4);--btn:linear-gradient(135deg,#3b82f6,#6366f1);--btn-hover:linear-gradient(135deg,#2563eb,#4f46e5);--focus:rgba(99,102,241,0.5);--glass-shadow:0 4px 16px 0 rgba(31,38,135,0.1);--glass-border:1px solid rgba(255,255,255,0.4)}
+:root{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%230f172a"/><circle cx="80" cy="20" r="50" fill="%234c1d95" opacity="0.4" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%231e3a8a" opacity="0.4" filter="blur(30px)"/></svg>');--card:rgba(15,23,42,0.4);--txt:#f8fafc;--muted:#cbd5e1;--border:rgba(255,255,255,0.1);--field:rgba(255,255,255,0.03);--btn:linear-gradient(135deg,#6366f1,#8b5cf6);--btn-hover:linear-gradient(135deg,#4f46e5,#7c3aed);--focus:rgba(139,92,246,0.5);--glass-shadow:0 4px 16px 0 rgba(0,0,0,0.2);--glass-border:1px solid rgba(255,255,255,0.1);--slug-bg:#8b5cf6;--slug-txt:#fff}
+body.light{--bg:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="%23f8fafc"/><circle cx="80" cy="20" r="50" fill="%23c4b5fd" opacity="0.5" filter="blur(30px)"/><circle cx="20" cy="80" r="50" fill="%2393c5fd" opacity="0.5" filter="blur(30px)"/></svg>');--card:rgba(255,255,255,0.4);--txt:#0f172a;--muted:#475569;--border:rgba(255,255,255,0.3);--field:rgba(255,255,255,0.4);--btn:linear-gradient(135deg,#3b82f6,#6366f1);--btn-hover:linear-gradient(135deg,#2563eb,#4f46e5);--focus:rgba(99,102,241,0.5);--glass-shadow:0 4px 16px 0 rgba(31,38,135,0.1);--glass-border:1px solid rgba(255,255,255,0.4);--slug-bg:#3b82f6;--slug-txt:#fff}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);background-size:cover;background-position:center;background-attachment:fixed;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--txt);-webkit-text-size-adjust:100%}
 .card{width:min(90vw,360px);background:var(--card);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:var(--glass-border);border-radius:16px;padding:28px;box-shadow:var(--glass-shadow)}
 h1{margin:0 0 6px;font-size:1.5rem;font-weight:700;letter-spacing:-0.025em;background:linear-gradient(to right,var(--txt),var(--muted));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
@@ -34,8 +34,12 @@ button:active{transform:translateY(1px)}
 .theme-btn{width:auto;margin:0;padding:6px 12px;border:var(--glass-border);border-radius:999px;background:var(--field);color:var(--txt);cursor:pointer;font-size:0.85rem;box-shadow:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:all 0.2s ease}
 .theme-btn:hover{background:rgba(255,255,255,0.1);transform:translateY(-1px)}
 body.light .theme-btn:hover{background:rgba(255,255,255,0.6)}
+.slug{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--slug-bg);color:var(--slug-txt);font-size:0.75rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
 </style></head><body><div class="card">
 <div class="top"><button id="themeBtn" class="theme-btn" type="button" onclick="toggleTheme()">☀</button></div>
+<div class="slug">)HTML";
+
+const char kLoginHtml_Part3[] PROGMEM = R"HTML(</div>
 <h1>LRS Device Console Login</h1>
 <p id="hint">Use the device admin password. Username is not required.</p>
 <form id="loginForm" autocomplete="on">

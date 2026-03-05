@@ -159,7 +159,9 @@ void WebConsole::handleLoginPage() {
 
   const size_t len1 = strlen_P(kLoginHtml_Part1);
   const size_t len2 = strlen_P(kLoginHtml_Part2);
-  const size_t totalLen = len1 + metaTag.length() + len2;
+  const size_t len3 = strlen_P(kLoginHtml_Part3);
+  const size_t totalLen =
+      len1 + metaTag.length() + len2 + chipIdSlug.length() + len3;
 
   server_.setContentLength(totalLen);
   server_.send(200, "text/html", "");
@@ -167,6 +169,8 @@ void WebConsole::handleLoginPage() {
   server_.sendContent_P(kLoginHtml_Part1);
   server_.sendContent(metaTag);
   server_.sendContent_P(kLoginHtml_Part2);
+  server_.sendContent(chipIdSlug);
+  server_.sendContent_P(kLoginHtml_Part3);
 }
 
 void WebConsole::handleFleetSetupPage() {
