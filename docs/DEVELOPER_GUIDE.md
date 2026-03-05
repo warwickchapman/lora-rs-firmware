@@ -233,13 +233,18 @@ Release execution guardrails:
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
 
 Conditional checklist: when `tools/flasher/**` changed in the release:
-- Rebuild flasher installers from current source for all supported targets (Windows x64, Linux x64, macOS arm64/x86_64).
+- Rebuild flasher installers from current source for all supported targets (Windows x64 MSI/Setup/Portable ZIP, Linux x64, macOS arm64/x86_64).
 - Verify the signed/notarized macOS DMGs pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
 - Update the public firmware repository (`lora-rs-firmware`) README with:
   - A brief "what the desktop flasher is" summary.
   - Current supported OS/architecture list.
   - At least one current UI screenshot (replace stale screenshot if UI changed).
 - Confirm release assets and README platform matrix stay aligned (no platform listed without a downloadable artifact).
+
+Release binary set contract:
+- Firmware: `za`, `us`, `eu` (`3` files)
+- Flasher: `windows msi`, `windows setup exe`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg` (`8` files)
+- Total release binaries: `11`
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.

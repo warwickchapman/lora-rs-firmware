@@ -241,12 +241,42 @@ PY
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
+          set -euo pipefail
           VERSION_RAW=$(cat VERSION)
           VERSION=${VERSION_RAW#v}
           mkdir final_dist
           TRIPLE="${{ matrix.target_triple }}"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/msi/*.msi "final_dist/thanda-lora-flasher-${VERSION}-windows-x64.msi"
           mv tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/nsis/*.exe "final_dist/thanda-lora-flasher-${VERSION}-windows-x64-setup.exe"
+
+          # Build a portable ZIP from the packaged app layout when available,
+          # falling back to the release exe + sidecar if needed.
+          PORTABLE_ROOT="final_dist/windows-portable"
+          mkdir -p "$PORTABLE_ROOT"
+          BUNDLE_DIR="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/nsis"
+          if compgen -G "${BUNDLE_DIR}/*" > /dev/null; then
+            APPDIR=$(find "$BUNDLE_DIR" -maxdepth 1 -type d -name "Thanda LoRa Flasher*" | head -n1 || true)
+            if [[ -n "${APPDIR}" ]]; then
+              cp -R "${APPDIR}/." "$PORTABLE_ROOT/"
+            fi
+          fi
+
+          if [[ ! -f "$PORTABLE_ROOT/thanda-lora-flasher.exe" ]]; then
+            cp "tools/flasher/src-tauri/target/${TRIPLE}/release/thanda-lora-flasher.exe" "$PORTABLE_ROOT/"
+          fi
+
+          if [[ -f "tools/flasher/src-tauri/esptool-${TRIPLE}.exe" ]]; then
+            cp "tools/flasher/src-tauri/esptool-${TRIPLE}.exe" "$PORTABLE_ROOT/"
+          fi
+
+          if [[ -d "tools/flasher/src-tauri/resources" ]]; then
+            cp -R "tools/flasher/src-tauri/resources" "$PORTABLE_ROOT/resources"
+          fi
+
+          (
+            cd "$PORTABLE_ROOT"
+            zip -r "../thanda-lora-flasher-${VERSION}-windows-x64-portable.zip" .
+          )
 
       - name: Package MacOS
         if: startsWith(matrix.os, 'macos')

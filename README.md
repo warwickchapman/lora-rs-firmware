@@ -88,13 +88,18 @@ Release safety guardrails (mandatory):
 - If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
 
 When flasher files changed (`tools/flasher/**`) in a release:
-- Rebuild flasher installers from current source (Windows x64, Linux x64, macOS arm64/x86_64).
+- Rebuild flasher installers from current source (Windows x64 MSI/Setup/Portable ZIP, Linux x64, macOS arm64/x86_64).
 - Verify macOS signed/notarized outputs with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
 - Update `lora-rs-firmware` README with:
   - brief flasher summary (what it is),
   - supported platforms list,
   - at least one current screenshot.
 - Ensure README platform list matches actual uploaded assets.
+
+Release asset contract:
+- Firmware binaries: 3 (`za`, `us`, `eu`)
+- Flasher binaries: 8 (`windows msi`, `windows setup exe`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg`)
+- Total binaries per release: 11
 
 Example:
 ```bash

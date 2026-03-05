@@ -16,6 +16,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
   - `tx_command_retry_timeout_ms`
   - `rx_failsafe_mode`
   - `rx_failsafe_timeout_ms`
+- Flasher release packaging now includes a Windows portable ZIP (`thanda-lora-flasher-<version>-windows-x64-portable.zip`) alongside MSI and setup EXE.
 
 ## [0.4.3-alpha] - 2026-03-01
 
