@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import hashlib
+import http.client
 import os
 import subprocess
 import sys
@@ -50,6 +52,46 @@ def run_ota(espota: str, ip: str, password: str, firmware: str, port: int) -> No
     cmd = [sys.executable, espota, "-i", ip, "-p", str(port), "-a", password, "-f", firmware]
     subprocess.run(cmd, check=True)
 
+def build_multipart(fields, file_field, filename, file_bytes):
+    boundary = "----lrs-ota-boundary-1"
+    lines = []
+    for name, value in fields.items():
+        lines.append(f"--{boundary}")
+        lines.append(f'Content-Disposition: form-data; name="{name}"')
+        lines.append("")
+        lines.append(str(value))
+    lines.append(f"--{boundary}")
+    lines.append(
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"'
+    )
+    lines.append("Content-Type: application/octet-stream")
+    lines.append("")
+    body = "\r\n".join(lines).encode("utf-8") + b"\r\n" + file_bytes + b"\r\n"
+    body += f"--{boundary}--\r\n".encode("utf-8")
+    content_type = f"multipart/form-data; boundary={boundary}"
+    return content_type, body
+
+
+def run_ota_http(ip: str, admin_pass: str, firmware: str, flags: Dict[str, str]) -> None:
+    with open(firmware, "rb") as f:
+        fw_bytes = f.read()
+    content_type, body = build_multipart(
+        flags, "firmware", os.path.basename(firmware), fw_bytes
+    )
+    conn = http.client.HTTPConnection(ip, 80, timeout=30)
+    auth = ("admin:" + admin_pass).encode("utf-8")
+    headers = {
+        "Content-Type": content_type,
+        "Content-Length": str(len(body)),
+        "Authorization": "Basic " + base64.b64encode(auth).decode("utf-8"),
+    }
+    conn.request("POST", "/api/ota", body=body, headers=headers)
+    resp = conn.getresponse()
+    if resp.status < 200 or resp.status >= 300:
+        raise RuntimeError(f"HTTP OTA failed: {resp.status} {resp.reason}")
+    resp.read()
+    conn.close()
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batch OTA uploader")
@@ -58,6 +100,26 @@ def main() -> int:
     parser.add_argument("--espota", default=DEFAULT_ESPOTA, help="Path to espota.py")
     parser.add_argument("--port", type=int, default=8266, help="OTA port")
     parser.add_argument("--dry-run", action="store_true", help="Print actions only")
+    parser.add_argument(
+        "--factory-reset",
+        action="store_true",
+        help="Request factory reset after OTA (uses /api/ota)",
+    )
+    parser.add_argument(
+        "--keep-wifi",
+        action="store_true",
+        help="Keep WiFi credentials after update (uses /api/ota)",
+    )
+    parser.add_argument(
+        "--keep-fleet",
+        action="store_true",
+        help="Keep shared fleet key after update (uses /api/ota)",
+    )
+    parser.add_argument(
+        "--admin-pass",
+        default="",
+        help="Admin password for /api/ota when using flags",
+    )
     args = parser.parse_args()
 
     devices = LOCATIONS.get(args.location, [])
@@ -73,6 +135,11 @@ def main() -> int:
         return 1
 
     failures = 0
+    use_http = args.factory_reset or args.keep_wifi or args.keep_fleet
+    if use_http and not args.admin_pass:
+        print("Flags requested but --admin-pass not provided.")
+        return 1
+
     for dev in devices:
         host = dev["host"]
         ip = dev["ip"]
@@ -88,9 +155,20 @@ def main() -> int:
         if args.dry_run:
             continue
         try:
-            run_ota(args.espota, ip, pw, args.fw, args.port)
+            if use_http:
+                flags = {
+                    "factory_reset_after_update": "1" if args.factory_reset else "0",
+                    "keep_wifi_credentials_after_update": "1" if args.keep_wifi else "0",
+                    "keep_shared_fleet_key_after_update": "1" if args.keep_fleet else "0",
+                }
+                run_ota_http(ip, args.admin_pass, args.fw, flags)
+            else:
+                run_ota(args.espota, ip, pw, args.fw, args.port)
             print(f"OK  {host} {ip}")
         except subprocess.CalledProcessError as exc:
+            print(f"FAIL {host} {ip}: {exc}")
+            failures += 1
+        except Exception as exc:
             print(f"FAIL {host} {ip}: {exc}")
             failures += 1
 
