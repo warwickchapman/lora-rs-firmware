@@ -10,6 +10,9 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Windows packaging policy simplified to `MSI + portable ZIP` (NSIS setup EXE removed from release workflow and asset contract).
 - Fleet LoRa provisioning discovery now enables one automatic retry from the default web UI flow (`retry_once=true`), reducing missed first-pass discovery when a single announce frame is lost.
 - Fleet LoRa provisioning UI polish: clearer scan table labels (`Cur Addr`, `New Addr`, `FW Ver`), improved table presentation, inline disabled reason for `Provision All`, and compact session progress text with elapsed time.
+- LoRa discovery now runs as a two-phase cycle: short coordinator `DiscoverStart` broadcast burst followed by a silent randomized reply window on targets, reducing coordinator-talk collisions during announce collection.
+- Provisioning verify is now more resilient: coordinator probes the newly assigned address on fleet key before downgrade, and devices that applied but could not confirm are labeled `applied_unconfirmed` instead of hard-failed.
+- Provisioning auto-assignment is now constrained to address range `1..32`.
 - Provisioning target reliability improvement: each factory-key device now sends two discovery announce frames per `DiscoverStart` (second announce uses short jitter), while coordinator dedupe remains chip-ID-based.
 
 ## [0.5.9-alpha] - 2026-03-05

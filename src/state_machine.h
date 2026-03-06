@@ -90,6 +90,7 @@ enum class ProvisioningDeviceState : uint8_t {
   Keying,
   AwaitVerify,
   Verified,
+  AppliedUnconfirmed,
   Failed,
   Skipped,
 };
@@ -362,6 +363,7 @@ class NodeStateMachine {
     uint8_t key_next_chunk = 0;
     bool key_start_sent = false;
     bool key_commit_sent = false;
+    bool late_verify_probe_sent = false;
   };
   static constexpr size_t kMaxProvisioningDevices = static_cast<size_t>(LRS_PROVISIONING_MAX_DEVICES);
   ProvisioningDevice *prov_devices_ = nullptr;
@@ -381,6 +383,10 @@ class NodeStateMachine {
     bool provision_all_requested = false;
     size_t current_index = 0;
     uint8_t key_transfer_chunks = 0;
+    uint8_t discover_broadcast_remaining = 0;
+    uint32_t discover_broadcast_window_ms = 0;
+    uint32_t discover_reply_window_ms = 0;
+    uint32_t next_discover_rebroadcast_ms = 0;
   };
   ProvisioningSessionRuntime prov_{};
 
@@ -444,8 +450,10 @@ class NodeStateMachine {
   void freeProvisioningStorage();
   void recomputeProvisioningConflictsAndAssignments();
   bool sendProvisioningCoordinatorPacketFactory(const uint8_t payload[12], uint8_t dst);
+  bool sendProvisioningDiscoverStart(uint16_t sessionNonce, uint32_t replyWindowMs, uint32_t broadcastWindowMs);
   bool sendProvisioningAnnounce(uint16_t sessionNonce);
   bool sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8_t assignedAddress);
+  bool confirmProvisioningByFleetResponse(const ProtocolMessage &msg);
   bool ackMatchesPendingCommand(const ProtocolMessage &msg) const;
   void applyReceiverFailsafe(uint32_t now);
 };

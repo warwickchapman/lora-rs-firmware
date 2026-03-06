@@ -2102,6 +2102,7 @@ function provisioningDisabledReason(st, discovered, sessActive) {
 function provisioningDeviceStatusDisplay(d) {
   const state = String((d && d.state) || 'unknown');
   if (state === 'verified') return '🟢 verified';
+  if (state === 'applied_unconfirmed') return '🟠 applied (unconfirmed)';
   if (state === 'failed') {
     // If an address was assigned, this is often a verify-timeout/missed final ack on LoRa.
     // The target may already have applied provisioning successfully.

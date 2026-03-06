@@ -139,6 +139,7 @@ const char *provisioningDeviceStateText(ProvisioningDeviceState s) {
     case ProvisioningDeviceState::Keying: return "keying";
     case ProvisioningDeviceState::AwaitVerify: return "await_verify";
     case ProvisioningDeviceState::Verified: return "verified";
+    case ProvisioningDeviceState::AppliedUnconfirmed: return "applied_unconfirmed";
     case ProvisioningDeviceState::Failed: return "failed";
     case ProvisioningDeviceState::Skipped: return "skipped";
     case ProvisioningDeviceState::Discovered:
