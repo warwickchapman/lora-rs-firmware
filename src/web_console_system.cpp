@@ -232,6 +232,31 @@ void WebConsole::handleOtaUpload() {
     server_.send(500, "text/plain", ota_upload_error_.length() ? ota_upload_error_ : "OTA failed");
     return;
   }
+  auto formBool = [this](const char *name) {
+    String value = server_.arg(name);
+    value.trim();
+    value.toLowerCase();
+    return value == "1" || value == "true" || value == "on" || value == "yes";
+  };
+  const bool resetAfterUpdate = formBool("factory_reset_after_update");
+  const bool keepWifiAfterUpdate = formBool("keep_wifi_credentials_after_update");
+  const bool keepFleetAfterUpdate = formBool("keep_shared_fleet_key_after_update");
+  if (resetAfterUpdate) {
+    if (!config_->schedulePostOtaFactoryReset(keepFleetAfterUpdate, keepWifiAfterUpdate)) {
+      LRS_LOGE(API,
+               "event=ota_post_reset_schedule_failed keep_fleet_key=%u keep_wifi=%u",
+               keepFleetAfterUpdate ? 1U : 0U,
+               keepWifiAfterUpdate ? 1U : 0U);
+      server_.send(500,
+                   "text/plain",
+                   "OTA uploaded, but failed to schedule post-update factory reset");
+      return;
+    }
+    LRS_LOGW(API,
+             "event=ota_post_reset_scheduled keep_fleet_key=%u keep_wifi=%u",
+             keepFleetAfterUpdate ? 1U : 0U,
+             keepWifiAfterUpdate ? 1U : 0U);
+  }
   server_.send(200, "text/plain", "ok");
   delay(150);
   ESP.restart();

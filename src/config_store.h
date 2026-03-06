@@ -66,6 +66,8 @@ class ConfigStore {
   Settings &settings();
   bool save();
   bool factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials = false);
+  bool schedulePostOtaFactoryReset(bool keepSharedFleetKey = false, bool keepWifiCredentials = false);
+  bool consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials);
 
   String chipIdHex() const;
   String defaultLanHostnameForRole(bool roleTx) const;

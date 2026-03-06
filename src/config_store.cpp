@@ -11,7 +11,10 @@
 namespace {
 constexpr char kConfigPath[] = "/config.json";
 constexpr char kConfigTmpPath[] = "/config.tmp";
+constexpr char kPostOtaActionPath[] = "/post_ota_action.json";
+constexpr char kPostOtaActionTmpPath[] = "/post_ota_action.tmp";
 constexpr size_t kConfigMaxBytes = 8192;
+constexpr size_t kPostOtaActionMaxBytes = 256;
 constexpr uint16_t kConfigSchemaVersion = 2;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
@@ -509,6 +512,112 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
            lrslog::maskSecret(cfg_.fleet_passphrase).c_str(),
            cfg_.wifi_sta_ssid.c_str());
   return save();
+}
+
+bool ConfigStore::schedulePostOtaFactoryReset(bool keepSharedFleetKey, bool keepWifiCredentials) {
+  JsonDocument doc;
+  doc["factory_reset"] = true;
+  doc["keep_shared_fleet_key"] = keepSharedFleetKey;
+  doc["keep_wifi_credentials"] = keepWifiCredentials;
+
+  const size_t estimatedBytes = measureJson(doc);
+  if (estimatedBytes == 0 || estimatedBytes > kPostOtaActionMaxBytes) {
+    LRS_LOGE(FS,
+             "event=post_ota_action_set_failed reason=size_invalid estimated=%lu limit=%lu",
+             static_cast<unsigned long>(estimatedBytes),
+             static_cast<unsigned long>(kPostOtaActionMaxBytes));
+    return false;
+  }
+
+  LittleFS.remove(kPostOtaActionTmpPath);
+  File f = LittleFS.open(kPostOtaActionTmpPath, "w");
+  if (!f) {
+    LRS_LOGE(FS, "event=post_ota_action_set_failed reason=open_tmp_failed path=%s", kPostOtaActionTmpPath);
+    return false;
+  }
+
+  const size_t bytes = serializeJson(doc, f);
+  f.flush();
+  f.close();
+  if (bytes != estimatedBytes) {
+    LittleFS.remove(kPostOtaActionTmpPath);
+    LRS_LOGE(FS,
+             "event=post_ota_action_set_failed reason=serialize_mismatch estimated=%lu actual=%lu",
+             static_cast<unsigned long>(estimatedBytes),
+             static_cast<unsigned long>(bytes));
+    return false;
+  }
+
+  LittleFS.remove(kPostOtaActionPath);
+  if (!LittleFS.rename(kPostOtaActionTmpPath, kPostOtaActionPath)) {
+    LittleFS.remove(kPostOtaActionTmpPath);
+    LRS_LOGE(FS, "event=post_ota_action_set_failed reason=atomic_rename_failed path=%s", kPostOtaActionPath);
+    return false;
+  }
+
+  LRS_LOGW(SYS,
+           "event=post_ota_action_set action=factory_reset keep_fleet_key=%u keep_wifi=%u bytes=%lu",
+           keepSharedFleetKey ? 1U : 0U,
+           keepWifiCredentials ? 1U : 0U,
+           static_cast<unsigned long>(bytes));
+  return true;
+}
+
+bool ConfigStore::consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials) {
+  keepSharedFleetKey = false;
+  keepWifiCredentials = false;
+  if (!LittleFS.exists(kPostOtaActionPath)) {
+    return false;
+  }
+
+  File f = LittleFS.open(kPostOtaActionPath, "r");
+  if (!f) {
+    LRS_LOGE(FS, "event=post_ota_action_consume_failed reason=open_failed path=%s", kPostOtaActionPath);
+    return false;
+  }
+
+  const size_t fileSize = static_cast<size_t>(f.size());
+  if (fileSize == 0 || fileSize > kPostOtaActionMaxBytes) {
+    f.close();
+    LittleFS.remove(kPostOtaActionPath);
+    LRS_LOGW(FS,
+             "event=post_ota_action_consume_dropped reason=size_invalid bytes=%lu limit=%lu",
+             static_cast<unsigned long>(fileSize),
+             static_cast<unsigned long>(kPostOtaActionMaxBytes));
+    return false;
+  }
+
+  JsonDocument doc;
+  auto err = deserializeJson(doc, f);
+  f.close();
+  if (err) {
+    LittleFS.remove(kPostOtaActionPath);
+    LRS_LOGW(FS, "event=post_ota_action_consume_dropped reason=parse_failed err=%s", err.c_str());
+    return false;
+  }
+
+  const bool doFactoryReset = doc["factory_reset"] | false;
+  keepSharedFleetKey = doc["keep_shared_fleet_key"] | false;
+  keepWifiCredentials = doc["keep_wifi_credentials"] | false;
+
+  if (!LittleFS.remove(kPostOtaActionPath)) {
+    LRS_LOGE(FS, "event=post_ota_action_consume_failed reason=remove_failed path=%s", kPostOtaActionPath);
+    keepSharedFleetKey = false;
+    keepWifiCredentials = false;
+    return false;
+  }
+
+  if (!doFactoryReset) {
+    keepSharedFleetKey = false;
+    keepWifiCredentials = false;
+    return false;
+  }
+
+  LRS_LOGW(SYS,
+           "event=post_ota_action_consumed action=factory_reset keep_fleet_key=%u keep_wifi=%u",
+           keepSharedFleetKey ? 1U : 0U,
+           keepWifiCredentials ? 1U : 0U);
+  return true;
 }
 
 String ConfigStore::chipIdHex() const {

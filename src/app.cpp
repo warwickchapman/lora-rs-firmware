@@ -82,6 +82,25 @@ void App::begin() {
   if (!fsReady) {
     LRS_LOGE(FS, "event=config_store_init_failed");
   }
+  {
+    bool keepFleetKey = false;
+    bool keepWifiCredentials = false;
+    if (config_.consumePostOtaFactoryReset(keepFleetKey, keepWifiCredentials)) {
+      LRS_LOGW(SYS,
+               "event=post_ota_factory_reset_exec keep_fleet_key=%u keep_wifi=%u",
+               keepFleetKey ? 1U : 0U,
+               keepWifiCredentials ? 1U : 0U);
+      if (config_.factoryReset(keepFleetKey, keepWifiCredentials)) {
+        delay(100);
+        ESP.restart();
+        return;
+      }
+      LRS_LOGE(SYS,
+               "event=post_ota_factory_reset_exec_failed keep_fleet_key=%u keep_wifi=%u",
+               keepFleetKey ? 1U : 0U,
+               keepWifiCredentials ? 1U : 0U);
+    }
+  }
 
   startNetworking();
 
