@@ -73,6 +73,12 @@ Provisioning endpoints in current firmware:
 - `POST /api/provisioning/cancel`
 - `POST /api/network/provision-fleet` (broadcast STA WiFi credentials over LoRa)
 
+Web Console operator cues (Fleet -> Manage -> LoRa):
+- Provisioning results table uses explicit addressing/version labels: `Cur Addr`, `New Addr`, `FW Ver`.
+- `Provision All` now shows an inline reason whenever it is disabled (for example: discovery still running, no discovered devices, provisioning already in progress).
+- A compact session line is shown during active sessions with phase/progress and elapsed time (for example: `Discovering...`, `Verified x/y`, `Provisioned x/y`, `elapsed mm:ss`).
+- Discovery reliability: factory-key targets now transmit two announce frames per discover command (short jitter before the second frame). Coordinator device list remains deduped by `chip_id`.
+
 CLI mirrors:
 - `run`, `status`, `cancel`
 - `udp-log-start`, `udp-log-stop` (temporary UDP log mirror while provisioning/debugging)

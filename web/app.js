@@ -2042,10 +2042,62 @@ let suspendGlobalPollsUntilMs = 0;
 function stopProvisioningPolling() {
   if (provStatusPollTimer) { clearTimeout(provStatusPollTimer); provStatusPollTimer = 0; }
 }
+function ensureProvisioningUiScaffold() {
+  const table = document.querySelector('#fleet-manage-pane-lora table.table');
+  if (table) {
+    table.classList.add('prov-table');
+    const th = table.querySelectorAll('thead th');
+    if (th.length >= 6) {
+      th[1].innerText = 'Cur Addr';
+      th[2].innerText = 'New Addr';
+      th[3].innerText = 'FW Ver';
+    }
+    const wrap = table.parentElement;
+    if (wrap) wrap.classList.add('prov-table-wrap');
+  }
+  const summary = document.getElementById('provWizardSummary');
+  if (summary && !document.getElementById('provSessionLine')) {
+    const sessionLine = document.createElement('div');
+    sessionLine.id = 'provSessionLine';
+    sessionLine.className = 'small prov-session-line';
+    summary.parentNode.insertBefore(sessionLine, summary);
+  }
+  const provisionBtn = document.getElementById('provProvisionAllBtn');
+  const actionRow = provisionBtn && provisionBtn.parentElement;
+  if (actionRow && !document.getElementById('provProvisionAllReason')) {
+    const reason = document.createElement('div');
+    reason.id = 'provProvisionAllReason';
+    reason.className = 'small prov-provision-reason';
+    actionRow.insertAdjacentElement('afterend', reason);
+  }
+}
 function provisioningSessionStateLabel(s) {
   const key = String(s || 'idle');
-  if (key === 'provisioning') return 'devices';
-  return key.split('_').join(' ');
+  if (key === 'discovering') return 'Discovering';
+  if (key === 'discovery_retry') return 'Discovering (retry)';
+  if (key === 'ready') return 'Ready';
+  if (key === 'provisioning') return 'Provisioning';
+  if (key === 'complete') return 'Complete';
+  if (key === 'error') return 'Error';
+  return 'Idle';
+}
+function formatElapsedCompact(ms) {
+  const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+function provisioningDisabledReason(st, discovered, sessActive) {
+  if (st === 'ready' && discovered > 0) return 'Ready to provision discovered devices.';
+  if (st === 'discovering' || st === 'discovery_retry') return 'Provision All unlocks when discovery finishes.';
+  if (st === 'provisioning') return 'Provisioning is already in progress.';
+  if (st === 'complete') return 'Session complete. Run discovery again for another batch.';
+  if (st === 'error') return 'Session failed. Start discovery again.';
+  if (st === 'ready' && discovered === 0) return 'No discovered devices in this session.';
+  if (sessActive) return 'Provision All is not available in the current phase.';
+  return 'Start discovery to enable Provision All.';
 }
 function provisioningDeviceStatusDisplay(d) {
   const state = String((d && d.state) || 'unknown');
@@ -2060,10 +2112,13 @@ function provisioningDeviceStatusDisplay(d) {
   return state;
 }
 function renderProvisioningStatus(out) {
+  ensureProvisioningUiScaffold();
   const result = document.getElementById('provWizardResult');
+  const sessionLine = document.getElementById('provSessionLine');
   const summary = document.getElementById('provWizardSummary');
   const rows = document.getElementById('provWizardRows');
   const provisionBtn = document.getElementById('provProvisionAllBtn');
+  const provisionReason = document.getElementById('provProvisionAllReason');
   if (!summary || !rows) return;
   const sess = (out && out.session) || {};
   const devices = Array.isArray(out && out.devices) ? out.devices : [];
@@ -2073,16 +2128,47 @@ function renderProvisioningStatus(out) {
   if (provisionBtn) {
     const st = String(sess.state || 'idle');
     const discovered = Number(sess.discovered_count || 0);
-    provisionBtn.disabled = !(st === 'ready' && discovered > 0);
+    const canProvision = (st === 'ready' && discovered > 0);
+    provisionBtn.disabled = !canProvision;
+    if (provisionReason) {
+      provisionReason.innerText = provisioningDisabledReason(st, discovered, !!sess.active);
+      provisionReason.classList.toggle('ok', canProvision);
+    }
   }
   const now = Number(sess.now_ms || 0);
+  const started = Number(sess.started_ms || 0);
+  const elapsedMs = (now > 0 && started > 0 && now >= started) ? (now - started) : 0;
+  const elapsedTxt = formatElapsedCompact(elapsedMs);
+  const total = Math.max(1, Number(sess.estimated_count || 0) || Number(sess.discovered_count || 0) || devices.length || 1);
+  const verified = Number(sess.verified_count || 0);
+  const failed = Number(sess.failed_count || 0);
+  const discovered = Number(sess.discovered_count || 0);
+  const provisioned = Math.min(total, verified + failed);
+  const st = String(sess.state || 'idle');
+  if (sessionLine) {
+    if (!sess.active) {
+      sessionLine.innerText = 'No provisioning session active.';
+    } else if (st === 'discovering' || st === 'discovery_retry') {
+      sessionLine.innerText = `Discovering... ${discovered}/${total} found · elapsed ${elapsedTxt}`;
+    } else if (st === 'ready') {
+      sessionLine.innerText = `Verified ${verified}/${total} · ready to provision ${discovered}/${total} · elapsed ${elapsedTxt}`;
+    } else if (st === 'provisioning') {
+      sessionLine.innerText = `Provisioned ${provisioned}/${total} · verified ${verified}/${total} · elapsed ${elapsedTxt}`;
+    } else if (st === 'complete') {
+      sessionLine.innerText = `Complete · verified ${verified}/${total} · failed ${failed}/${total} · elapsed ${elapsedTxt}`;
+    } else if (st === 'error') {
+      sessionLine.innerText = `Error · verified ${verified}/${total} · failed ${failed}/${total} · elapsed ${elapsedTxt}`;
+    } else {
+      sessionLine.innerText = `${provisioningSessionStateLabel(st)} · elapsed ${elapsedTxt}`;
+    }
+  }
   let countdownTxt = '';
   if (sess.active && Number(sess.phase_deadline_ms || 0) > 0 && now > 0) {
     const rem = Math.max(0, Math.ceil((Number(sess.phase_deadline_ms) - now) / 1000));
     if (rem > 0 && (sess.state === 'discovering' || sess.state === 'discovery_retry' || sess.state === 'provisioning')) countdownTxt = ` · next phase in ~${rem}s`;
   }
   summary.innerText = sess.active
-    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${Number(sess.discovered_count || 0)} · conflicts ${Number(sess.conflict_count || 0)} · verified ${Number(sess.verified_count || 0)} · failed ${Number(sess.failed_count || 0)}${countdownTxt}`
+    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${Number(sess.discovered_count || 0)} · conflicts ${Number(sess.conflict_count || 0)}${countdownTxt}`
     : 'No provisioning session active.';
   if (result && sess.active) {
     result.className = 'result-line show';
@@ -2095,15 +2181,16 @@ function renderProvisioningStatus(out) {
       rows.innerHTML = provLastRowsHtml;
       return;
     }
-    rows.innerHTML = `<tr><td colspan="6" class="small">${compactMode ? 'Low-memory mode: showing counts only (keeping rows when available).' : 'No devices discovered yet.'}</td></tr>`;
+    rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${compactMode ? 'Low-memory mode: showing counts only (keeping rows when available).' : 'No devices discovered yet.'}</td></tr>`;
     return;
   }
   rows.innerHTML = devices.map((d) => {
     const cur = Number(d.current_address || 0);
     const nxt = Number(d.assigned_address || 0);
     const fw = d.fw_version || `${d.fw_major || 0}.${d.fw_minor || 0}.${d.fw_patch || 0}`;
-    const conflict = d.address_conflict ? ' conflict' : '';
-    return `<tr><td>${escapeHtml(String(d.chip_id_hex || d.chip_id || ''))}</td><td>${cur || '-'}</td><td>${nxt || '-'}</td><td>${escapeHtml(String(fw))}</td><td>${Number(d.rssi || 0)}</td><td>${escapeHtml(provisioningDeviceStatusDisplay(d))}${conflict}</td></tr>`;
+    const conflict = d.address_conflict ? '<span class="prov-conflict-tag">conflict</span>' : '';
+    const stateClass = String((d && d.state) || 'unknown').replace(/[^a-z_]/g, '');
+    return `<tr class="prov-row state-${stateClass}"><td class="mono">${escapeHtml(String(d.chip_id_hex || d.chip_id || ''))}</td><td class="num">${cur || '-'}</td><td class="num">${nxt || '-'}</td><td class="mono">${escapeHtml(String(fw))}</td><td class="num">${Number(d.rssi || 0)}</td><td class="prov-status-cell">${escapeHtml(provisioningDeviceStatusDisplay(d))}${conflict}</td></tr>`;
   }).join('');
   provLastRowsHtml = rows.innerHTML;
 }
@@ -2180,7 +2267,7 @@ async function startFleetProvisioningDiscoveryWithMode(searchMore) {
   const result = document.getElementById('provWizardResult');
   const estEl = document.getElementById('prov_estimated_count');
   const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 8) || 8));
-  const retry = false;
+  const retry = true;
   suspendGlobalPollsUntilMs = Date.now() + 5000;
   if (result) { result.className = 'result-line show'; result.innerText = searchMore ? 'Searching for more devices...' : 'Starting discovery...'; }
   const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est, retry_once: retry }), silent: true, allowHttpError: true });

@@ -6,14 +6,14 @@ import json
 import os
 import subprocess
 import sys
-from typing import Dict, List
+from typing import Any, Dict, List
 
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 DEFAULT_ESPOTA = "/Users/warwick/.platformio/packages/framework-arduinoespressif8266/tools/espota.py"
 DEFAULT_FW = "/Users/warwick/Code/LoRa/lora_rs/.pio/build/lrs_za/firmware.bin"
 
 # Edit these lists as needed.
-LOCATIONS: Dict[str, List[Dict[str, str]]] = {
+LOCATIONS: Dict[str, List[Dict[str, Any]]] = {
     "office": [
         {"host": "lrs-00af8e6", "ip": "192.168.133.21"},
         {"host": "lrs-0029ca6f", "ip": "192.168.133.22"},
@@ -26,8 +26,9 @@ LOCATIONS: Dict[str, List[Dict[str, str]]] = {
         {"host": "lrs-0048d1bb", "ip": "192.168.133.29"},
     ],
     "home": [
-        # Populate with the subset you take home.
-        # {"host": "lrs-00fc4f9c", "ip": "192.168.0.170"},
+        {"host": "lrs-004a9753", "ip": "192.168.0.170"},
+        {"host": "lrs-0048d1bb", "ip": "192.168.0.235", "factory_reset": True, "admin_pass": "ota"},
+        {"host": "lrs-00fc4f9c", "ip": "192.168.0.234", "factory_reset": True, "admin_pass": "ota"},
     ],
 }
 
@@ -118,6 +119,22 @@ def run_ota_http(ip: str, admin_pass: str, firmware: str, flags: Dict[str, str])
     conn.close()
 
 
+def as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("1", "true", "yes", "on"):
+            return True
+        if v in ("0", "false", "no", "off", ""):
+            return False
+    return default
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batch OTA uploader")
     parser.add_argument("--location", required=True, choices=sorted(LOCATIONS.keys()))
@@ -176,17 +193,28 @@ def main() -> int:
             failures += 1
             continue
 
-        print(f"OTA {host} {ip} chip={chip} pw={pw}")
+        dev_factory_reset = as_bool(dev.get("factory_reset"), args.factory_reset)
+        dev_keep_wifi = as_bool(dev.get("keep_wifi"), args.keep_wifi)
+        dev_keep_fleet = as_bool(dev.get("keep_fleet"), args.keep_fleet)
+        dev_use_http = dev_factory_reset or dev_keep_wifi or dev_keep_fleet
+        dev_admin_pass = str(dev.get("admin_pass", args.admin_pass or "")).strip()
+        print(
+            f"OTA {host} {ip} chip={chip} pw={pw} "
+            f"factory_reset={1 if dev_factory_reset else 0} "
+            f"keep_wifi={1 if dev_keep_wifi else 0} keep_fleet={1 if dev_keep_fleet else 0}"
+        )
         if args.dry_run:
             continue
         try:
-            if use_http:
+            if dev_use_http:
+                if not dev_admin_pass:
+                    raise RuntimeError("HTTP OTA requested but admin password is missing (set --admin-pass or device admin_pass)")
                 flags = {
-                    "factory_reset_after_update": "1" if args.factory_reset else "0",
-                    "keep_wifi_credentials_after_update": "1" if args.keep_wifi else "0",
-                    "keep_shared_fleet_key_after_update": "1" if args.keep_fleet else "0",
+                    "factory_reset_after_update": "1" if dev_factory_reset else "0",
+                    "keep_wifi_credentials_after_update": "1" if dev_keep_wifi else "0",
+                    "keep_shared_fleet_key_after_update": "1" if dev_keep_fleet else "0",
                 }
-                admin_pass = pw if args.admin_pass == "ota" else args.admin_pass
+                admin_pass = pw if dev_admin_pass == "ota" else dev_admin_pass
                 run_ota_http(ip, admin_pass, args.fw, flags)
             else:
                 run_ota(args.espota, ip, pw, args.fw, args.port)

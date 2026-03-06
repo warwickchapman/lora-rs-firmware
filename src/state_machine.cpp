@@ -46,6 +46,9 @@ constexpr uint8_t kProvHwRevA1 = 0xA1;
 constexpr uint8_t kProvRoleTxFlag = 0x01;
 constexpr uint32_t kProvVerifyTimeoutMs = 15000;
 constexpr uint8_t kProvMaxRetriesPerNode = 1;
+constexpr uint8_t kProvAnnounceRepeatCount = 2;
+constexpr uint16_t kProvAnnounceSecondJitterMinMs = 120;
+constexpr uint16_t kProvAnnounceSecondJitterMaxMs = 420;
 constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
 constexpr size_t kProvChunkBitmapMax = 31;
@@ -1840,9 +1843,19 @@ void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
   if (!radioTxBudgetAvailable()) return;
   if (!isDefaultFleetKey()) return;
   if (!prov_rx_.discover_pending) return;
+  if (prov_rx_.announce_remaining == 0) {
+    prov_rx_.discover_pending = false;
+    return;
+  }
   if (static_cast<int32_t>(now - prov_rx_.announce_at_ms) < 0) return;
   if (sendProvisioningAnnounce(prov_rx_.session_nonce)) {
-    prov_rx_.discover_pending = false;
+    if (prov_rx_.announce_remaining > 0) prov_rx_.announce_remaining--;
+    if (prov_rx_.announce_remaining == 0) {
+      prov_rx_.discover_pending = false;
+    } else {
+      prov_rx_.announce_at_ms =
+          now + static_cast<uint32_t>(random(kProvAnnounceSecondJitterMinMs, static_cast<long>(kProvAnnounceSecondJitterMaxMs + 1U)));
+    }
     lrslog::event("prov_announce_tx", 0, prov_rx_.session_nonce, runtime_.local_address);
   } else {
     prov_rx_.announce_at_ms = now + 500U;
@@ -2123,6 +2136,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     if (windowMs > 180000U) windowMs = 180000U;
     prov_rx_.session_nonce = sessionNonce;
     prov_rx_.discover_pending = true;
+    prov_rx_.announce_remaining = kProvAnnounceRepeatCount;
     prov_rx_.announce_at_ms = now + static_cast<uint32_t>(random(0, static_cast<long>(windowMs + 1U)));
     lrslog::event("prov_discover_rx", msg.rssi, sessionNonce, 0);
     return true;
@@ -2203,6 +2217,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     fleet_prov_apply_pending_ = (fleet_prov_apply_key_.length() > 0);
     prov_rx_.key_transfer_active = false;
     prov_rx_.discover_pending = false;
+    prov_rx_.announce_remaining = 0;
     lrslog::event("prov_apply_rx", msg.rssi, sessionNonce, newAddr);
     return fleet_prov_apply_pending_;
   }

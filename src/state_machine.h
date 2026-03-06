@@ -388,6 +388,7 @@ class NodeStateMachine {
     bool discover_pending = false;
     uint16_t session_nonce = 0;
     uint32_t announce_at_ms = 0;
+    uint8_t announce_remaining = 0;
     bool have_staged_assignment = false;
     uint8_t staged_address = 0;
     bool staged_role_tx = false;
