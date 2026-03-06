@@ -2083,9 +2083,10 @@ function ensureProvisioningUiScaffold() {
     table.classList.add('prov-table');
     const th = table.querySelectorAll('thead th');
     if (th.length >= 6) {
-      th[1].innerText = 'Cur Addr';
-      th[2].innerText = 'New Addr';
-      th[3].innerText = 'FW Ver';
+      th[0].innerText = 'Status';
+      th[2].innerText = 'Cur Addr';
+      th[3].innerText = 'New Addr';
+      th[4].innerText = 'FW Ver';
     }
     const wrap = table.parentElement;
     if (wrap) wrap.classList.add('prov-table-wrap');
@@ -2135,16 +2136,20 @@ function provisioningDisabledReason(st, discovered, sessActive) {
 }
 function provisioningDeviceStatusDisplay(d) {
   const state = String((d && d.state) || 'unknown');
+  if (state === 'discovered') return '🔵 discovered';
+  if (state === 'assigned') return '🧭 assigned';
+  if (state === 'keying') return '🔐 keying';
+  if (state === 'await_verify') return '🟠 await verify';
   if (state === 'verified') return '🟢 verified';
   if (state === 'applied_unconfirmed') return '🟠 applied (unconfirmed)';
+  if (state === 'skipped') return '⚪ skipped';
   if (state === 'failed') {
     // If an address was assigned, this is often a verify-timeout/missed final ack on LoRa.
     // The target may already have applied provisioning successfully.
     if (Number(d && d.assigned_address || 0) > 0) return '🟠 unverified';
     return '🔴 failed';
   }
-  if (state === 'await_verify') return '🟠 await verify';
-  return state;
+  return `❔ ${state}`;
 }
 function renderProvisioningStatus(out) {
   ensureProvisioningUiScaffold();
@@ -2229,7 +2234,7 @@ function renderProvisioningStatus(out) {
     const fw = d.fw_version || `${d.fw_major || 0}.${d.fw_minor || 0}.${d.fw_patch || 0}`;
     const conflict = d.address_conflict ? '<span class="prov-conflict-tag">conflict</span>' : '';
     const stateClass = String((d && d.state) || 'unknown').replace(/[^a-z_]/g, '');
-    return `<tr class="prov-row state-${stateClass}"><td class="mono">${escapeHtml(String(d.chip_id_hex || d.chip_id || ''))}</td><td class="num">${cur || '-'}</td><td class="num">${nxt || '-'}</td><td class="mono">${escapeHtml(String(fw))}</td><td class="num">${Number(d.rssi || 0)}</td><td class="prov-status-cell">${escapeHtml(provisioningDeviceStatusDisplay(d))}${conflict}</td></tr>`;
+    return `<tr class="prov-row state-${stateClass}"><td class="prov-status-cell">${escapeHtml(provisioningDeviceStatusDisplay(d))}${conflict}</td><td class="mono">${escapeHtml(String(d.chip_id_hex || d.chip_id || ''))}</td><td class="num">${cur || '-'}</td><td class="num">${nxt || '-'}</td><td class="mono">${escapeHtml(String(fw))}</td><td class="num">${Number(d.rssi || 0)}</td></tr>`;
   }).join('');
   provLastRowsHtml = rows.innerHTML;
 }
