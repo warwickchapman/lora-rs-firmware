@@ -2085,9 +2085,15 @@ function ensureProvisioningUiScaffold() {
     const th = table.querySelectorAll('thead th');
     if (th.length >= 6) {
       th[0].innerText = 'Status';
+      th[0].classList.add('prov-col-status');
+      th[1].classList.add('mono', 'prov-col-chip');
       th[2].innerText = 'Cur Addr';
+      th[2].classList.add('num', 'prov-col-cur');
       th[3].innerText = 'New Addr';
+      th[3].classList.add('num', 'prov-col-new');
       th[4].innerText = 'FW Ver';
+      th[4].classList.add('mono', 'prov-col-fw');
+      th[5].classList.add('num', 'prov-col-rssi');
     }
     const wrap = table.parentElement;
     if (wrap) wrap.classList.add('prov-table-wrap');

@@ -265,7 +265,7 @@ body.light .result-line.err{color:#b91c1c;background:rgba(248,113,113,0.1)}
 .prov-provision-reason.ok{color:#86efac}
 body.light .prov-provision-reason.ok{color:#15803d}
 .prov-table-wrap{overflow:auto;max-height:280px;border:1px solid var(--border);border-radius:10px;margin-top:8px}
-.prov-table{width:100%;margin:0;border-collapse:separate;border-spacing:0;font-size:.92rem}
+.prov-table{width:100%;margin:0;border-collapse:separate;border-spacing:0;font-size:.92rem;table-layout:fixed}
 .prov-table thead th{position:sticky;top:0;z-index:1;padding:10px 12px;text-align:left;font-weight:800;color:var(--muted);background:rgba(255,255,255,0.06);border-bottom:var(--glass-border);letter-spacing:.01em}
 body.light .prov-table thead th{background:rgba(255,255,255,0.72)}
 .prov-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.08);vertical-align:middle}
@@ -273,8 +273,14 @@ body.light .prov-table tbody td{border-bottom:1px solid rgba(15,23,42,0.08)}
 .prov-table tbody tr:last-child td{border-bottom:none}
 .prov-table tbody tr:nth-child(odd) td{background:rgba(255,255,255,0.02)}
 body.light .prov-table tbody tr:nth-child(odd) td{background:rgba(255,255,255,0.45)}
-.prov-table td.num{text-align:right;font-variant-numeric:tabular-nums}
-.prov-table td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums}
+.prov-table th.num,.prov-table td.num{text-align:right;font-variant-numeric:tabular-nums}
+.prov-table th.mono,.prov-table td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums}
+.prov-table th.prov-col-status,.prov-table td.prov-status-cell{width:18%}
+.prov-table th.prov-col-chip,.prov-table td:nth-child(2){width:22%}
+.prov-table th.prov-col-cur,.prov-table td:nth-child(3){width:14%}
+.prov-table th.prov-col-new,.prov-table td:nth-child(4){width:14%}
+.prov-table th.prov-col-fw,.prov-table td:nth-child(5){width:15%}
+.prov-table th.prov-col-rssi,.prov-table td:nth-child(6){width:11%}
 .prov-status-cell{white-space:nowrap}
 .prov-conflict-tag{display:inline-flex;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:.72rem;font-weight:700;background:rgba(251,191,36,0.2);color:#fde047;border:1px solid rgba(251,191,36,0.35)}
 body.light .prov-conflict-tag{color:#b45309}
