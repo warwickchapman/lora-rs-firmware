@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import base64
 import hashlib
 import http.client
+import json
 import os
 import subprocess
 import sys
@@ -72,18 +72,43 @@ def build_multipart(fields, file_field, filename, file_bytes):
     return content_type, body
 
 
+def login_and_get_cookie(ip: str, admin_pass: str) -> str:
+    conn = http.client.HTTPConnection(ip, 80, timeout=15)
+    payload = json.dumps({"password": admin_pass}).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Content-Length": str(len(payload))}
+    conn.request("POST", "/api/login", body=payload, headers=headers)
+    resp = conn.getresponse()
+    if resp.status < 200 or resp.status >= 300:
+        resp.read()
+        conn.close()
+        raise RuntimeError(f"Login failed: {resp.status} {resp.reason}")
+    set_cookie = resp.getheader("Set-Cookie") or ""
+    resp.read()
+    conn.close()
+    parts = set_cookie.split(";")
+    cookie = ""
+    for part in parts:
+        part = part.strip()
+        if part.startswith("lrs_session="):
+            cookie = part
+            break
+    if not cookie:
+        raise RuntimeError("Login failed: missing session cookie")
+    return cookie
+
+
 def run_ota_http(ip: str, admin_pass: str, firmware: str, flags: Dict[str, str]) -> None:
+    cookie = login_and_get_cookie(ip, admin_pass)
     with open(firmware, "rb") as f:
         fw_bytes = f.read()
     content_type, body = build_multipart(
         flags, "firmware", os.path.basename(firmware), fw_bytes
     )
     conn = http.client.HTTPConnection(ip, 80, timeout=30)
-    auth = ("admin:" + admin_pass).encode("utf-8")
     headers = {
         "Content-Type": content_type,
         "Content-Length": str(len(body)),
-        "Authorization": "Basic " + base64.b64encode(auth).decode("utf-8"),
+        "Cookie": cookie,
     }
     conn.request("POST", "/api/ota", body=body, headers=headers)
     resp = conn.getresponse()
