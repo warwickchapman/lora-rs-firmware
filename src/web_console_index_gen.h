@@ -2074,6 +2074,7 @@ function mergeProvisioningStickyRows(devices, sessionNonce) {
     provStickySessionNonce = nonce;
     provStickyRowsByChip = {};
     provStickyOrder = [];
+    provLastRowsHtml = '';
   }
   const list = Array.isArray(devices) ? devices : [];
   for (const d of list) {
@@ -2241,10 +2242,6 @@ function renderProvisioningStatus(out) {
     result.innerText = `Provisioning ${provisioningSessionStateLabel(sess.state)}`;
   }
   if (!devices.length) {
-    if (compactMode && provLastRowsHtml) {
-      rows.innerHTML = provLastRowsHtml;
-      return;
-    }
     rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${compactMode ? 'Low-memory mode: showing counts only (keeping rows when available).' : 'No devices discovered yet.'}</td></tr>`;
     return;
   }
@@ -2325,6 +2322,7 @@ async function startFleetProvisioningDiscovery() {
   const result = document.getElementById('provWizardResult');
   const estEl = document.getElementById('prov_estimated_count');
   const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 8) || 8));
+  clearProvisioningStickyRows();
   suspendGlobalPollsUntilMs = Date.now() + 5000;
   if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }
   const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est }), silent: true, allowHttpError: true });
