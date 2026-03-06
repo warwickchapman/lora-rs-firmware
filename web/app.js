@@ -2307,7 +2307,7 @@ function syncPagePolling() {
 async function startFleetProvisioningDiscovery() {
   const result = document.getElementById('provWizardResult');
   const estEl = document.getElementById('prov_estimated_count');
-  const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 8) || 8));
+  const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 2) || 2));
   clearProvisioningStickyRows();
   suspendGlobalPollsUntilMs = Date.now() + 5000;
   if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }

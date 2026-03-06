@@ -231,7 +231,7 @@ void WebConsole::handleProvisioningStart() {
       return;
     }
   }
-  uint16_t estimated = 8;
+  uint16_t estimated = 2;
   if (!body["estimated_count"].isNull()) {
     int v = body["estimated_count"].as<int>();
     if (v < 1)

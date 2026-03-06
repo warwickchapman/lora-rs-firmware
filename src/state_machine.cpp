@@ -47,7 +47,9 @@ constexpr uint8_t kProvRoleTxFlag = 0x01;
 constexpr uint32_t kProvVerifyTimeoutMs = 15000;
 constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 4000;
 constexpr uint32_t kProvDiscoverReplyBaseMs = 2000;
-constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 2000;
+constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 1200;
+constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 10000;
+constexpr uint32_t kProvDiscoverEarlySettleMs = 800;
 constexpr uint8_t kProvDiscoverBroadcastBurstCount = 1;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
 constexpr uint8_t kProvMaxRetriesPerNode = 1;
@@ -931,6 +933,9 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   prov_.discover_broadcast_window_ms =
       (kProvDiscoverBroadcastBurstCount > 1) ? ((kProvDiscoverBroadcastBurstCount - 1U) * kProvDiscoverBroadcastGapMs) : 0U;
   prov_.discover_reply_window_ms = kProvDiscoverReplyBaseMs + (static_cast<uint32_t>(estimatedCount) * kProvDiscoverReplyPerDeviceMs);
+  if (prov_.discover_reply_window_ms > kProvDiscoverReplyWindowMaxMs) {
+    prov_.discover_reply_window_ms = kProvDiscoverReplyWindowMaxMs;
+  }
   prov_.phase_deadline_ms = prov_.started_ms + prov_.discover_broadcast_window_ms + prov_.discover_reply_window_ms;
   const uint32_t cap = prov_.started_ms + 120000UL;
   if (prov_.phase_deadline_ms > cap) prov_.phase_deadline_ms = cap;
@@ -1925,7 +1930,11 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       }
       return;
     }
-    if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
+    const uint32_t expected = (prov_.estimated_count > 0U) ? static_cast<uint32_t>(prov_.estimated_count) : 1U;
+    const bool enoughFound = static_cast<uint32_t>(prov_device_count_) >= expected;
+    const uint32_t settleAtMs = prov_.started_ms + prov_.discover_broadcast_window_ms + kProvDiscoverEarlySettleMs;
+    const bool settleElapsed = static_cast<int32_t>(now - settleAtMs) >= 0;
+    if ((enoughFound && settleElapsed) || static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
       recomputeProvisioningConflictsAndAssignments();
       prov_.state = ProvisioningSessionState::Ready;
       return;
