@@ -50,6 +50,15 @@
 - Add `System > Diagnostics` sub-menu to group troubleshooting tools and avoid clutter in top-level System settings.
 - Add remote serial console / TCP serial monitor (VS Code-style monitor over TCP/IP) under `System > Diagnostics`.
 
+## Memory / Peer Cache Optimization
+- Reduce `PeerRuntime` RAM footprint (if heap pressure persists):
+  - Pack booleans/enums into a bitfield byte: `in_use`, `temp_valid`, `downlink_rssi_valid`, `pending`, `poll_pending`, `ack_state`.
+  - Combine retry fields: `retry_step` + `poll_retry_step` into a single byte (4 bits each).
+  - Store `pending_relay` as 1 bit.
+  - Consider narrower counters/timestamps if safe (risk: wrap on long intervals); `last_cmd_counter` could be `uint16_t` if protocol permits.
+  - Drop `downlink_rssi_valid` and use sentinel `downlink_rssi = -128` to save a byte.
+  - If polling is optional, move poll state into a separate struct allocated only when enabled.
+
 ## WiFi Provisioning UX
 - When clicking `Use` on a scanned WiFi network, auto-fill SSID and focus the password field.
 - Scroll password field into view after `Use` (especially on mobile).

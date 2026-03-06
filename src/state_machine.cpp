@@ -260,6 +260,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
   }
+  resetPollStorage();
   fleet_scan_active_ = false;
   fleet_scan_start_address_ = 1;
   fleet_scan_end_address_ = 80;
@@ -323,6 +324,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
   }
+  resetPollStorage();
   fleet_scan_active_ = false;
   fleet_scan_next_ms_ = 0;
   fleet_scan_started_ms_ = 0;
@@ -371,6 +373,9 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   if (runtime_.tx_command_retry_timeout_ms > kMaxRetryTimeoutMs) runtime_.tx_command_retry_timeout_ms = kMaxRetryTimeoutMs;
   if (runtime_.rx_failsafe_timeout_ms < kMinRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMinRxFailsafeTimeoutMs;
   if (runtime_.rx_failsafe_timeout_ms > kMaxRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMaxRxFailsafeTimeoutMs;
+  if (!runtime_.tx_mqtt_remote_polling_enabled) {
+    freePollStorage();
+  }
 }
 
 bool NodeStateMachine::ensureProvisioningStorage() {
@@ -404,6 +409,44 @@ void NodeStateMachine::freeProvisioningStorage() {
   }
   prov_device_capacity_ = 0;
   prov_device_count_ = 0;
+}
+
+NodeStateMachine::PollRuntime *NodeStateMachine::pollStateForIndex(size_t index) {
+  if (poll_states_ == nullptr || index >= poll_state_capacity_) return nullptr;
+  return &poll_states_[index];
+}
+
+const NodeStateMachine::PollRuntime *NodeStateMachine::pollStateForIndex(size_t index) const {
+  if (poll_states_ == nullptr || index >= poll_state_capacity_) return nullptr;
+  return &poll_states_[index];
+}
+
+bool NodeStateMachine::ensurePollStorage() {
+  if (poll_states_ != nullptr && poll_state_capacity_ >= kMaxPeers) return true;
+  freePollStorage();
+  poll_states_ = new (std::nothrow) PollRuntime[kMaxPeers];
+  if (poll_states_ == nullptr) {
+    poll_state_capacity_ = 0;
+    lrslog::event("poll_storage_oom", 0, static_cast<uint32_t>(kMaxPeers & 0xFFFFU),
+                  static_cast<uint8_t>(sizeof(PollRuntime) & 0xFFU));
+    return false;
+  }
+  poll_state_capacity_ = kMaxPeers;
+  resetPollStorage();
+  return true;
+}
+
+void NodeStateMachine::resetPollStorage() {
+  if (poll_states_ == nullptr) return;
+  for (size_t i = 0; i < poll_state_capacity_; ++i) poll_states_[i] = PollRuntime{};
+}
+
+void NodeStateMachine::freePollStorage() {
+  if (poll_states_ != nullptr) {
+    delete[] poll_states_;
+    poll_states_ = nullptr;
+  }
+  poll_state_capacity_ = 0;
 }
 
 void NodeStateMachine::tick() {
@@ -456,8 +499,9 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.last_cmd_counter = node.last_cmd_counter;
   out.ack_state = node.ack_state;
   out.poll_interval_ms = node.poll_interval_ms;
-  out.last_poll_tx_ms = node.last_poll_tx_ms;
-  out.poll_pending = node.poll_pending;
+  const PollRuntime *poll = pollStateForIndex(index);
+  out.last_poll_tx_ms = poll ? poll->last_poll_tx_ms : 0U;
+  out.poll_pending = poll ? poll->poll_pending : false;
   return true;
 }
 
@@ -575,7 +619,12 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
     if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
     if (interval > kMaxRemotePollIntervalMs) interval = kMaxRemotePollIntervalMs;
     node->poll_interval_ms = interval;
-    node->next_poll_ms = now + interval;
+    if (ensurePollStorage()) {
+      PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+      if (poll != nullptr) {
+        poll->next_poll_ms = now + interval;
+      }
+    }
   }
   node->pending = true;
   node->pending_relay = relayState ? 1 : 0;
@@ -597,12 +646,17 @@ bool NodeStateMachine::mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t po
 
   if (pollIntervalMs > 0 && pollIntervalMs < kMinRemotePollIntervalMs) pollIntervalMs = kMinRemotePollIntervalMs;
   if (pollIntervalMs > kMaxRemotePollIntervalMs) pollIntervalMs = kMaxRemotePollIntervalMs;
+  if (pollIntervalMs > 0) {
+    if (!ensurePollStorage()) return false;
+  }
   node->poll_interval_ms = pollIntervalMs;
+  PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
   if (pollIntervalMs == 0) {
-    node->poll_pending = false;
-    node->next_poll_ms = 0;
-  } else {
-    node->next_poll_ms = millis() + 1000;
+    if (poll != nullptr) {
+      *poll = PollRuntime{};
+    }
+  } else if (poll != nullptr) {
+    poll->next_poll_ms = millis() + 1000;
   }
   return true;
 }
@@ -613,17 +667,20 @@ bool NodeStateMachine::mqttPollPeerNow(uint8_t dstAddress) {
 
   PeerRuntime *node = findOrCreatePeer(dstAddress);
   if (node == nullptr) return false;
+  if (!ensurePollStorage()) return false;
+  PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+  if (poll == nullptr) return false;
 
   uint32_t sentCounter = 0;
   if (!sendPollRequest(dstAddress, &sentCounter)) return false;
   const uint32_t now = millis();
   const uint32_t pollResponseDeadlineMs = (runtime_.ack_timeout_ms >= 2000U) ? runtime_.ack_timeout_ms : 2000U;
-  node->poll_pending = true;
-  node->poll_counter = sentCounter;
-  node->poll_deadline_ms = now + pollResponseDeadlineMs;
-  node->last_poll_tx_ms = now;
+  poll->poll_pending = true;
+  poll->poll_counter = sentCounter;
+  poll->poll_deadline_ms = now + pollResponseDeadlineMs;
+  poll->last_poll_tx_ms = now;
   if (node->poll_interval_ms > 0) {
-    node->next_poll_ms = now + node->poll_interval_ms;
+    poll->next_poll_ms = now + node->poll_interval_ms;
   }
   return true;
 }
@@ -643,10 +700,16 @@ bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
 
   for (size_t i = idx; i + 1 < peer_count_; ++i) {
     peers_[i] = peers_[i + 1];
+    if (poll_states_ != nullptr && i + 1 < poll_state_capacity_) {
+      poll_states_[i] = poll_states_[i + 1];
+    }
   }
   if (peer_count_ > 0) {
     peer_count_--;
     peers_[peer_count_] = PeerRuntime{};
+    if (poll_states_ != nullptr && peer_count_ < poll_state_capacity_) {
+      poll_states_[peer_count_] = PollRuntime{};
+    }
   }
   {
     lrslog::event("mqtt_remote_forget", 0, 0, dstAddress);
@@ -1146,7 +1209,14 @@ NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t addres
     interval = 0;
   }
   node.poll_interval_ms = interval;
-  node.next_poll_ms = (interval > 0) ? (millis() + interval) : 0;
+  if (interval > 0) {
+    if (ensurePollStorage()) {
+      PollRuntime *poll = pollStateForIndex(static_cast<size_t>(&node - peers_));
+      if (poll != nullptr) {
+        poll->next_poll_ms = millis() + interval;
+      }
+    }
+  }
   return &node;
 }
 
@@ -1212,32 +1282,28 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
 
 void NodeStateMachine::tickPeerPolling(uint32_t now) {
   if (!runtime_.role_tx) return;
-  if (!runtime_.tx_mqtt_remote_polling_enabled) {
-    for (size_t i = 0; i < peer_count_; ++i) {
-      PeerRuntime &node = peers_[i];
-      if (!node.in_use) continue;
-      node.poll_pending = false;
-      node.next_poll_ms = 0;
-    }
-    return;
+  if (!runtime_.tx_mqtt_remote_polling_enabled) return;
+  if (poll_states_ == nullptr) {
+    if (!ensurePollStorage()) return;
   }
   const uint32_t pollResponseDeadlineMs = (runtime_.ack_timeout_ms >= 2000U) ? runtime_.ack_timeout_ms : 2000U;
   for (size_t i = 0; i < peer_count_; ++i) {
     PeerRuntime &node = peers_[i];
+    PollRuntime &poll = poll_states_[i];
     if (!node.in_use || node.poll_interval_ms == 0) continue;
 
-    if (node.poll_pending && static_cast<int32_t>(now - node.poll_deadline_ms) >= 0) {
-      node.poll_pending = false;
-      lrslog::event("tx_poll_timeout", 0, node.poll_counter, 0);
-      node.next_poll_ms = now + node.poll_interval_ms;
+    if (poll.poll_pending && static_cast<int32_t>(now - poll.poll_deadline_ms) >= 0) {
+      poll.poll_pending = false;
+      lrslog::event("tx_poll_timeout", 0, poll.poll_counter, 0);
+      poll.next_poll_ms = now + node.poll_interval_ms;
     }
 
     // Keep exactly one in-flight poll per node to avoid overlap ambiguity.
-    if (node.poll_pending) {
+    if (poll.poll_pending) {
       continue;
     }
 
-    if (static_cast<int32_t>(now - node.next_poll_ms) < 0) {
+    if (static_cast<int32_t>(now - poll.next_poll_ms) < 0) {
       continue;
     }
     if (!radioTxBudgetAvailable()) {
@@ -1246,14 +1312,14 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
 
     uint32_t sentCounter = 0;
     if (sendPollRequest(node.address, &sentCounter)) {
-      node.poll_pending = true;
-      node.poll_counter = sentCounter;
-      node.poll_deadline_ms = now + pollResponseDeadlineMs;
-      node.last_poll_tx_ms = now;
-      node.next_poll_ms = now + node.poll_interval_ms;
+      poll.poll_pending = true;
+      poll.poll_counter = sentCounter;
+      poll.poll_deadline_ms = now + pollResponseDeadlineMs;
+      poll.last_poll_tx_ms = now;
+      poll.next_poll_ms = now + node.poll_interval_ms;
     } else {
       // Retry soon if radio send fails.
-      node.next_poll_ms = now + 1000U;
+      poll.next_poll_ms = now + 1000U;
     }
   }
 }
@@ -1564,8 +1630,11 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
       } else {
         // Clear pending on any valid response from this node; retries can overlap counters.
-        node->poll_pending = false;
-        node->next_poll_ms = millis() + node->poll_interval_ms;
+        PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+        if (poll != nullptr) {
+          poll->poll_pending = false;
+          poll->next_poll_ms = millis() + node->poll_interval_ms;
+        }
         lrslog::event("tx_poll_response", msg.rssi, msg.counter, msg.relay_state);
       }
     }

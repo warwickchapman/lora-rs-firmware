@@ -11,7 +11,7 @@
 #endif
 
 #ifndef LRS_MAX_PEERS
-#define LRS_MAX_PEERS 8
+#define LRS_MAX_PEERS 12
 #endif
 
 #ifndef LRS_REPLAY_TRACKED_SOURCES
@@ -286,6 +286,8 @@ class NodeStateMachine {
     uint32_t pending_counter = 0;
     uint32_t pending_deadline_ms = 0;
     uint32_t poll_interval_ms = 0;
+  };
+  struct PollRuntime {
     uint32_t next_poll_ms = 0;
     bool poll_pending = false;
     uint8_t poll_retry_step = 0;
@@ -298,6 +300,8 @@ class NodeStateMachine {
   // may still be sent to uncached peers as transient fire-and-forget operations.
   PeerRuntime peers_[kMaxPeers]{};
   size_t peer_count_ = 0;
+  PollRuntime *poll_states_ = nullptr;
+  size_t poll_state_capacity_ = 0;
 
   bool fleet_scan_active_ = false;
   uint8_t fleet_scan_start_address_ = 1;
@@ -420,6 +424,11 @@ class NodeStateMachine {
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   PeerRuntime *findOrCreatePeer(uint8_t address);
+  PollRuntime *pollStateForIndex(size_t index);
+  const PollRuntime *pollStateForIndex(size_t index) const;
+  bool ensurePollStorage();
+  void resetPollStorage();
+  void freePollStorage();
   bool handleWifiProvisionFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
