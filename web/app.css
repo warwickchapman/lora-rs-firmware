@@ -132,6 +132,9 @@ body.light .navbtn.active{background:rgba(99,102,241,0.15);color:#4f46e5;border-
 body.nav-open .drawer{transform:translateX(0)}
 body.nav-open .drawer-backdrop{opacity:1;pointer-events:auto}
 body.nav-open{overflow:hidden}
+.app-footer{margin-top:4px;padding:0 0 calc(10px + env(safe-area-inset-bottom))}
+.app-footer-inner{width:100%;padding:10px 16px;background:rgba(15,23,42,0.3);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-top:var(--glass-border);box-shadow:var(--glass-shadow);font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
+body.light .app-footer-inner{background:rgba(255,255,255,0.3)}
 .tabbtn{background:rgba(255,255,255,0.05);color:var(--muted);border:var(--glass-border);border-radius:10px;padding:10px 16px;min-height:42px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:none;margin-top:0;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .tabbtn:hover{background:rgba(255,255,255,0.15);color:var(--txt);transform:translateY(-1px)}
 body.light .tabbtn:hover{background:rgba(255,255,255,0.8);color:var(--txt)}
