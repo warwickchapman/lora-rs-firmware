@@ -118,7 +118,7 @@ def main() -> int:
     parser.add_argument(
         "--admin-pass",
         default="",
-        help="Admin password for /api/ota when using flags",
+        help="Admin password for /api/ota when using flags. Use 'ota' to reuse the OTA password per device.",
     )
     args = parser.parse_args()
 
@@ -161,7 +161,8 @@ def main() -> int:
                     "keep_wifi_credentials_after_update": "1" if args.keep_wifi else "0",
                     "keep_shared_fleet_key_after_update": "1" if args.keep_fleet else "0",
                 }
-                run_ota_http(ip, args.admin_pass, args.fw, flags)
+                admin_pass = pw if args.admin_pass == "ota" else args.admin_pass
+                run_ota_http(ip, admin_pass, args.fw, flags)
             else:
                 run_ota(args.espota, ip, pw, args.fw, args.port)
             print(f"OK  {host} {ip}")
