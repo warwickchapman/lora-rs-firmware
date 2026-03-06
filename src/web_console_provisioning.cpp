@@ -161,7 +161,7 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
       continue;
     JsonObject o = arr.add<JsonObject>();
     char chipHex[11];
-    snprintf(chipHex, sizeof(chipHex), "0x%08lX",
+    snprintf(chipHex, sizeof(chipHex), "0x%08lx",
              static_cast<unsigned long>(d.chip_id));
     o["chip_id_hex"] = chipHex;
     o["current_address"] = d.current_address;
