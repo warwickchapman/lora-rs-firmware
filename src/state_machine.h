@@ -77,7 +77,6 @@ struct FleetScanSnapshot {
 enum class ProvisioningSessionState : uint8_t {
   Idle,
   Discovering,
-  DiscoveryRetry,
   Ready,
   Provisioning,
   Complete,
@@ -102,8 +101,6 @@ struct ProvisioningSessionSnapshot {
   uint16_t estimated_count = 0;
   uint32_t started_ms = 0;
   uint32_t phase_deadline_ms = 0;
-  bool retry_enabled = false;
-  bool retry_used = false;
   bool paused_normal_tx = false;
   size_t discovered_count = 0;
   size_t selected_count = 0;
@@ -170,7 +167,7 @@ class NodeStateMachine {
   uint32_t fleetWifiProvisionCooldownRemainingMs() const;
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey);
   bool consumePendingFactoryReset(bool &keepSharedFleetKey, uint8_t &src);
-  bool provisioningStartDiscovery(uint16_t estimatedCount, bool retryOnce = true);
+  bool provisioningStartDiscovery(uint16_t estimatedCount);
   bool provisioningStartProvisionAll();
   void provisioningCancel();
   bool provisioningSession(ProvisioningSessionSnapshot &out) const;
@@ -377,8 +374,6 @@ class NodeStateMachine {
     uint16_t estimated_count = 0;
     uint32_t started_ms = 0;
     uint32_t phase_deadline_ms = 0;
-    bool retry_enabled = false;
-    bool retry_used = false;
     bool pause_normal_tx = false;
     bool provision_all_requested = false;
     size_t current_index = 0;
@@ -386,7 +381,7 @@ class NodeStateMachine {
     uint8_t discover_broadcast_remaining = 0;
     uint32_t discover_broadcast_window_ms = 0;
     uint32_t discover_reply_window_ms = 0;
-    uint32_t next_discover_rebroadcast_ms = 0;
+    uint32_t next_discover_broadcast_ms = 0;
   };
   ProvisioningSessionRuntime prov_{};
 

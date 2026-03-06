@@ -902,7 +902,7 @@ bool NodeStateMachine::isDefaultFleetKey() const {
   return settings_ != nullptr && isDefaultDeploymentKey(settings_->fleet_passphrase);
 }
 
-bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool retryOnce) {
+bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   if (!runtime_.role_tx || radio_ == nullptr) {
     LRS_LOGW(API,
              "event=provisioning_start_reject reason=%s role_tx=%u radio=%u",
@@ -927,7 +927,6 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
   if (prov_.session_nonce == 0) prov_.session_nonce = 1;
   prov_.estimated_count = estimatedCount;
   prov_.started_ms = millis();
-  prov_.retry_enabled = retryOnce;
   prov_.pause_normal_tx = true;
   prov_.discover_broadcast_window_ms =
       (kProvDiscoverBroadcastBurstCount > 1) ? ((kProvDiscoverBroadcastBurstCount - 1U) * kProvDiscoverBroadcastGapMs) : 0U;
@@ -945,7 +944,7 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount, bool 
   prov_.provision_all_requested = false;
   prov_.current_index = 0;
   prov_.discover_broadcast_remaining = (kProvDiscoverBroadcastBurstCount > 0) ? (kProvDiscoverBroadcastBurstCount - 1U) : 0U;
-  prov_.next_discover_rebroadcast_ms = prov_.started_ms + kProvDiscoverBroadcastGapMs;
+  prov_.next_discover_broadcast_ms = prov_.started_ms + kProvDiscoverBroadcastGapMs;
   if (!ensureProvisioningStorage()) {
     LRS_LOGW(API,
              "event=provisioning_start_reject reason=oom_provisioning_storage estimated=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
@@ -1012,8 +1011,6 @@ bool NodeStateMachine::provisioningSession(ProvisioningSessionSnapshot &out) con
   out.estimated_count = prov_.estimated_count;
   out.started_ms = prov_.started_ms;
   out.phase_deadline_ms = prov_.phase_deadline_ms;
-  out.retry_enabled = prov_.retry_enabled;
-  out.retry_used = prov_.retry_used;
   out.paused_normal_tx = prov_.pause_normal_tx;
   out.discovered_count = prov_device_count_;
   size_t conflicts = 0, selected = 0, verified = 0, failed = 0;
@@ -1918,42 +1915,17 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
   if (!radioTxBudgetAvailable()) return;
   if (!prov_.active) return;
 
-  if (prov_.state == ProvisioningSessionState::Discovering || prov_.state == ProvisioningSessionState::DiscoveryRetry) {
-    if (prov_.discover_broadcast_remaining > 0 && static_cast<int32_t>(now - prov_.next_discover_rebroadcast_ms) >= 0) {
+  if (prov_.state == ProvisioningSessionState::Discovering) {
+    if (prov_.discover_broadcast_remaining > 0 && static_cast<int32_t>(now - prov_.next_discover_broadcast_ms) >= 0) {
       if (sendProvisioningDiscoverStart(prov_.session_nonce, prov_.discover_reply_window_ms, prov_.discover_broadcast_window_ms)) {
         prov_.discover_broadcast_remaining--;
-        prov_.next_discover_rebroadcast_ms = now + kProvDiscoverBroadcastGapMs;
+        prov_.next_discover_broadcast_ms = now + kProvDiscoverBroadcastGapMs;
       } else {
-        prov_.next_discover_rebroadcast_ms = now + 120U;
+        prov_.next_discover_broadcast_ms = now + 120U;
       }
       return;
     }
     if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
-      if (prov_.retry_enabled && !prov_.retry_used) {
-        prov_.retry_used = true;
-        prov_.state = ProvisioningSessionState::DiscoveryRetry;
-        prov_.started_ms = now;
-        prov_.discover_broadcast_window_ms =
-            (kProvDiscoverBroadcastBurstCount > 1) ? ((kProvDiscoverBroadcastBurstCount - 1U) * kProvDiscoverBroadcastGapMs) : 0U;
-        prov_.discover_reply_window_ms =
-            kProvDiscoverReplyBaseMs + (static_cast<uint32_t>(prov_.estimated_count) * kProvDiscoverReplyPerDeviceMs);
-        prov_.phase_deadline_ms = now + prov_.discover_broadcast_window_ms + prov_.discover_reply_window_ms;
-        const uint32_t retryCap = now + 60000UL;
-        if (prov_.phase_deadline_ms > retryCap) prov_.phase_deadline_ms = retryCap;
-        if (prov_.phase_deadline_ms <= now) prov_.phase_deadline_ms = now + 1000UL;
-        uint32_t retryTotalMs = prov_.phase_deadline_ms - now;
-        if (retryTotalMs <= prov_.discover_broadcast_window_ms) {
-          prov_.discover_broadcast_window_ms = 0;
-          retryTotalMs = prov_.phase_deadline_ms - now;
-        }
-        prov_.discover_reply_window_ms = retryTotalMs - prov_.discover_broadcast_window_ms;
-        prov_.discover_broadcast_remaining = (kProvDiscoverBroadcastBurstCount > 0) ? (kProvDiscoverBroadcastBurstCount - 1U) : 0U;
-        prov_.next_discover_rebroadcast_ms = now + kProvDiscoverBroadcastGapMs;
-        if (sendProvisioningDiscoverStart(prov_.session_nonce, prov_.discover_reply_window_ms, prov_.discover_broadcast_window_ms)) {
-          lrslog::event("prov_discover_retry", 0, prov_.session_nonce, 0);
-        }
-        return;
-      }
       recomputeProvisioningConflictsAndAssignments();
       prov_.state = ProvisioningSessionState::Ready;
       return;

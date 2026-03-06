@@ -128,8 +128,6 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
   s["estimated_count"] = sess.estimated_count;
   s["started_ms"] = sess.started_ms;
   s["phase_deadline_ms"] = sess.phase_deadline_ms;
-  s["retry_enabled"] = sess.retry_enabled;
-  s["retry_used"] = sess.retry_used;
   s["paused_normal_tx"] = sess.paused_normal_tx;
   s["discovered_count"] = sess.discovered_count;
   s["selected_count"] = sess.selected_count;
@@ -225,7 +223,6 @@ void WebConsole::handleProvisioningStart() {
   if (server_.arg("plain").length() > 0) {
     JsonDocument filter;
     filter["estimated_count"] = true;
-    filter["retry_once"] = true;
     auto err = deserializeJson(body, server_.arg("plain"),
                                DeserializationOption::Filter(filter));
     if (err) {
@@ -243,16 +240,15 @@ void WebConsole::handleProvisioningStart() {
       v = 8;
     estimated = static_cast<uint16_t>(v);
   }
-  const bool retryOnce = parseBoolField(body["retry_once"], true);
-  if (!sm_->provisioningStartDiscovery(estimated, retryOnce)) {
+  if (!sm_->provisioningStartDiscovery(estimated)) {
     sendTracked(409, "application/json",
                 "{\"ok\":false,\"error\":\"start_failed\"}");
     return;
   }
   LRS_LOGI(API,
-           "event=provisioning_start estimated=%u retry_once=%u heap_free=%lu "
+           "event=provisioning_start estimated=%u heap_free=%lu "
            "heap_frag=%u max_free_block=%lu",
-           static_cast<unsigned>(estimated), retryOnce ? 1U : 0U,
+           static_cast<unsigned>(estimated),
            static_cast<unsigned long>(lrslog::heapFree()),
            static_cast<unsigned>(lrslog::heapFragPercent()),
            static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));

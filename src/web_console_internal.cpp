@@ -123,7 +123,6 @@ const char *remoteAckStateText(PeerAckState s) {
 const char *provisioningSessionStateText(ProvisioningSessionState s) {
   switch (s) {
     case ProvisioningSessionState::Discovering: return "discovering";
-    case ProvisioningSessionState::DiscoveryRetry: return "discovery_retry";
     case ProvisioningSessionState::Ready: return "ready";
     case ProvisioningSessionState::Provisioning: return "provisioning";
     case ProvisioningSessionState::Complete: return "complete";

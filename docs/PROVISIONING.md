@@ -79,6 +79,8 @@ Web Console operator cues (Fleet -> Manage -> LoRa):
 - A compact session line is shown during active sessions with phase/progress and elapsed time (for example: `Discovering...`, `Verified x/y`, `Provisioned x/y`, `elapsed mm:ss`).
 - Discovery reliability: factory-key targets now transmit two announce frames per discover command (short jitter before the second frame). Coordinator device list remains deduped by `chip_id`.
 - Discovery timing model is two-phase: coordinator sends a short `DiscoverStart` burst first, then remains silent while targets reply on randomized jitter within the declared reply window.
+- Discovery is now single-pass (no automatic retry cycle). If another scan is desired, the operator explicitly presses `Start Discovery` again.
+- During discovery/readiness UI updates, discovered rows are sticky by `chip_id` and remain visible until `Provision All` is started (or session is cancelled), preventing transient row drops under compact/low-memory status responses.
 - Address auto-assignment for provisioning is constrained to `1..32`.
 - If `verify` is missed after apply, coordinator performs a fleet-key probe on the assigned address before final classification; status may show `applied_unconfirmed` when apply likely succeeded but confirmation was not observed.
 
@@ -109,4 +111,4 @@ Suggested handoff block:
 - Config path: LittleFS `/config.json`
 - Web API: `/api/status-lite`, `/api/settings`, `/api/factory`, `/api/wifi/scan`, `/api/logs.csv`
 - Priority task: `<describe task>`
-- Constraints: maintain protocol compatibility unless explicitly approved
+- Constraints: pre-release firmware; favor clean/small implementation over backward-compat layers.

@@ -2039,6 +2039,41 @@ let provLastRowsHtml = '';
 let provPollSeenActive = false;
 let provPollGraceUntilMs = 0;
 let suspendGlobalPollsUntilMs = 0;
+let provStickySessionNonce = 0;
+let provStickyRowsByChip = {};
+let provStickyOrder = [];
+function clearProvisioningStickyRows() {
+  provStickySessionNonce = 0;
+  provStickyRowsByChip = {};
+  provStickyOrder = [];
+  provLastRowsHtml = '';
+}
+function mergeProvisioningStickyRows(devices, sessionNonce) {
+  const nonce = Number(sessionNonce || 0);
+  if (nonce > 0 && provStickySessionNonce !== nonce) {
+    provStickySessionNonce = nonce;
+    provStickyRowsByChip = {};
+    provStickyOrder = [];
+  }
+  const list = Array.isArray(devices) ? devices : [];
+  for (const d of list) {
+    const key = String((d && (d.chip_id_hex || d.chip_id)) || '');
+    if (!key) continue;
+    if (!Object.prototype.hasOwnProperty.call(provStickyRowsByChip, key)) {
+      provStickyOrder.push(key);
+    }
+    provStickyRowsByChip[key] = d;
+  }
+  if (provStickyOrder.length > 16) {
+    const drop = provStickyOrder.splice(0, provStickyOrder.length - 16);
+    for (const key of drop) delete provStickyRowsByChip[key];
+  }
+  const out = [];
+  for (const key of provStickyOrder) {
+    if (Object.prototype.hasOwnProperty.call(provStickyRowsByChip, key)) out.push(provStickyRowsByChip[key]);
+  }
+  return out;
+}
 function stopProvisioningPolling() {
   if (provStatusPollTimer) { clearTimeout(provStatusPollTimer); provStatusPollTimer = 0; }
 }
@@ -2074,7 +2109,6 @@ function ensureProvisioningUiScaffold() {
 function provisioningSessionStateLabel(s) {
   const key = String(s || 'idle');
   if (key === 'discovering') return 'Discovering';
-  if (key === 'discovery_retry') return 'Discovering (retry)';
   if (key === 'ready') return 'Ready';
   if (key === 'provisioning') return 'Provisioning';
   if (key === 'complete') return 'Complete';
@@ -2091,7 +2125,7 @@ function formatElapsedCompact(ms) {
 }
 function provisioningDisabledReason(st, discovered, sessActive) {
   if (st === 'ready' && discovered > 0) return 'Ready to provision discovered devices.';
-  if (st === 'discovering' || st === 'discovery_retry') return 'Provision All unlocks when discovery finishes.';
+  if (st === 'discovering') return 'Provision All unlocks when discovery finishes.';
   if (st === 'provisioning') return 'Provisioning is already in progress.';
   if (st === 'complete') return 'Session complete. Run discovery again for another batch.';
   if (st === 'error') return 'Session failed. Start discovery again.';
@@ -2122,17 +2156,22 @@ function renderProvisioningStatus(out) {
   const provisionReason = document.getElementById('provProvisionAllReason');
   if (!summary || !rows) return;
   const sess = (out && out.session) || {};
-  const devices = Array.isArray(out && out.devices) ? out.devices : [];
+  const incomingDevices = Array.isArray(out && out.devices) ? out.devices : [];
   provUiSessionActive = !!sess.active;
   provUiSessionState = String(sess.state || 'idle');
+  const st = String(sess.state || 'idle');
+  const stickyEnabled = (st === 'discovering' || st === 'ready' || st === 'provisioning');
+  const devices = stickyEnabled
+    ? mergeProvisioningStickyRows(incomingDevices, sess.session_nonce)
+    : incomingDevices;
+  const discoveredRaw = Number(sess.discovered_count || 0);
+  const discoveredEffective = Math.max(discoveredRaw, devices.length);
   const compactMode = !!(sess && (sess.compact || sess.devices_truncated));
   if (provisionBtn) {
-    const st = String(sess.state || 'idle');
-    const discovered = Number(sess.discovered_count || 0);
-    const canProvision = (st === 'ready' && discovered > 0);
+    const canProvision = (st === 'ready' && discoveredEffective > 0);
     provisionBtn.disabled = !canProvision;
     if (provisionReason) {
-      provisionReason.innerText = provisioningDisabledReason(st, discovered, !!sess.active);
+      provisionReason.innerText = provisioningDisabledReason(st, discoveredEffective, !!sess.active);
       provisionReason.classList.toggle('ok', canProvision);
     }
   }
@@ -2143,13 +2182,12 @@ function renderProvisioningStatus(out) {
   const total = Math.max(1, Number(sess.estimated_count || 0) || Number(sess.discovered_count || 0) || devices.length || 1);
   const verified = Number(sess.verified_count || 0);
   const failed = Number(sess.failed_count || 0);
-  const discovered = Number(sess.discovered_count || 0);
+  const discovered = discoveredEffective;
   const provisioned = Math.min(total, verified + failed);
-  const st = String(sess.state || 'idle');
   if (sessionLine) {
     if (!sess.active) {
       sessionLine.innerText = 'No provisioning session active.';
-    } else if (st === 'discovering' || st === 'discovery_retry') {
+    } else if (st === 'discovering') {
       sessionLine.innerText = `Discovering... ${discovered}/${total} found · elapsed ${elapsedTxt}`;
     } else if (st === 'ready') {
       sessionLine.innerText = `Verified ${verified}/${total} · ready to provision ${discovered}/${total} · elapsed ${elapsedTxt}`;
@@ -2166,10 +2204,10 @@ function renderProvisioningStatus(out) {
   let countdownTxt = '';
   if (sess.active && Number(sess.phase_deadline_ms || 0) > 0 && now > 0) {
     const rem = Math.max(0, Math.ceil((Number(sess.phase_deadline_ms) - now) / 1000));
-    if (rem > 0 && (sess.state === 'discovering' || sess.state === 'discovery_retry' || sess.state === 'provisioning')) countdownTxt = ` · next phase in ~${rem}s`;
+    if (rem > 0 && (sess.state === 'discovering' || sess.state === 'provisioning')) countdownTxt = ` · next phase in ~${rem}s`;
   }
   summary.innerText = sess.active
-    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${Number(sess.discovered_count || 0)} · conflicts ${Number(sess.conflict_count || 0)}${countdownTxt}`
+    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${discoveredEffective} · conflicts ${Number(sess.conflict_count || 0)}${countdownTxt}`
     : 'No provisioning session active.';
   if (result && sess.active) {
     result.className = 'result-line show';
@@ -2232,7 +2270,7 @@ function startProvisioningPolling(opts) {
     const out = await refreshProvisioningStatus(true);
     const sess = (out && out.session) || {};
     const st = String(sess.state || 'idle');
-    const activeLike = !!sess.active || st === 'discovering' || st === 'discovery_retry' || st === 'provisioning' || st === 'ready';
+    const activeLike = !!sess.active || st === 'discovering' || st === 'provisioning' || st === 'ready';
     if (activeLike) {
       provPollSeenActive = true;
       idleAfterGraceCount = 0;
@@ -2259,26 +2297,19 @@ function syncPagePolling() {
   syncStatusLiveSse(true);
 }
 async function startFleetProvisioningDiscovery() {
-  return startFleetProvisioningDiscoveryWithMode(false);
-}
-async function searchMoreFleetProvisioning() {
-  return startFleetProvisioningDiscoveryWithMode(true);
-}
-async function startFleetProvisioningDiscoveryWithMode(searchMore) {
   const result = document.getElementById('provWizardResult');
   const estEl = document.getElementById('prov_estimated_count');
   const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 8) || 8));
-  const retry = true;
   suspendGlobalPollsUntilMs = Date.now() + 5000;
-  if (result) { result.className = 'result-line show'; result.innerText = searchMore ? 'Searching for more devices...' : 'Starting discovery...'; }
-  const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est, retry_once: retry }), silent: true, allowHttpError: true });
+  if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }
+  const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est }), silent: true, allowHttpError: true });
   if (out && out.ok) {
     if (out.session) { renderProvisioningStatus(out); }
     startProvisioningPolling({ graceMs: 5000 });
-    if (result) { result.className = 'result-line show ok'; result.innerText = searchMore ? 'Search started. Watching live updates...' : 'Discovery started. Watching live updates...'; }
+    if (result) { result.className = 'result-line show ok'; result.innerText = 'Discovery started. Watching live updates...'; }
     return;
   }
-  if (result) { result.className = 'result-line show err'; result.innerText = `${searchMore ? 'Search' : 'Discovery'} start failed: ${(out && out.error) || 'request_failed'}`; }
+  if (result) { result.className = 'result-line show err'; result.innerText = `Discovery start failed: ${(out && out.error) || 'request_failed'}`; }
 }
 async function provisionFleetAll() {
   const result = document.getElementById('provWizardResult');
@@ -2286,6 +2317,7 @@ async function provisionFleetAll() {
   if (result) { result.className = 'result-line show'; result.innerText = 'Provisioning discovered devices...'; }
   const out = await apiJson('/api/provisioning/provision-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', silent: true, allowHttpError: true });
   if (out && out.ok) {
+    clearProvisioningStickyRows();
     if (out.session) { renderProvisioningStatus(out); }
     startProvisioningPolling({ graceMs: 5000 });
     if (result) { result.className = 'result-line show ok'; result.innerText = 'Provisioning started. Waiting for verify replies...'; }
@@ -2295,6 +2327,7 @@ async function provisionFleetAll() {
 }
 async function cancelFleetProvisioning() {
   stopProvisioningPolling();
+  clearProvisioningStickyRows();
   await apiJson('/api/provisioning/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', silent: true, allowHttpError: true });
   const out = await refreshProvisioningStatus(true);
   const result = document.getElementById('provWizardResult');
@@ -2421,7 +2454,7 @@ function isFleetManageActive() {
 }
 function isProvisioningUiBusy() {
   const st = String(provUiSessionState || 'idle');
-  return !!provUiSessionActive || st === 'discovering' || st === 'discovery_retry' || st === 'provisioning';
+  return !!provUiSessionActive || st === 'discovering' || st === 'provisioning';
 }
 function sessionPollDelayMs() {
   if (document.hidden) return 1800000;

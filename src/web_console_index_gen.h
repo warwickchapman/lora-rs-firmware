@@ -10,7 +10,7 @@ R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automation
 )HTML"
 #endif
 R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button><div class="drawer-footer"><button class="drawer-tool" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="drawer-tool theme-toggle" id="themeBtnDrawer" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">☀</button></div></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">lrs-00000000</div><div class="right"><div id="relayHeader" class="relay-head off" title="Relay off" aria-label="Relay off">⚪</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div></div></header><main>
-<section class="card page active" id="page-status"><div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div><div class="status-grid"><div><div id="statusLiteTable" class="status-table">Loading metrics...</div><button id="btnLoadStatusDetails" class="details-btn" onclick="toggleStatusDetails()">Load Full Details</button><div id="statusDetailsPane" class="status-details"><div id="statusTable" class="status-table">Loading details...</div><div class="sensor-grid" id="statusSensors"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div></div></div></div><div class="status-side"><div class="relay-card"><div id="relayBadge" class="relay-badge off">RELAY OFF</div><div id="relayMeta" class="small" style="margin-top:8px">Input: -, Link: -</div></div><h4 style="margin:0 0 2px 0">Sensors</h4><div class="status-sensor-grid"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div><div class="sensor-tile">Tank: n/a</div><div class="sensor-tile">Float: n/a</div><div class="sensor-tile">Flow: n/a</div></div></div></div></section><section class="card page" id="page-fleet"><h3>Fleet</h3><div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div><div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div class="grid" style="margin-top:8px"><div><label>Scan start address</label><input id="fleetScanStart" type="number" min="1" max="254" value="1" /></div><div><label>Scan end address</label><input id="fleetScanEnd" type="number" min="1" max="254" value="80" /></div><div><label>Scan interval (ms)</label><input id="fleetScanIntervalMs" type="number" min="80" max="2000" value="120" /></div><div style="display:flex;align-items:end"><div class="actions"><button type="button" id="fleetScanBtn" onclick="toggleFleetScan()">Scan Fleet</button></div></div></div><div class="small" id="fleetScanSummary" style="margin-top:4px">Scan idle.</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div><div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet in batches of up to 8 devices.</div><div class="grid"><div><label>Estimated devices (max 8)</label><input id="prov_estimated_count" type="number" min="1" max="8" value="8" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="searchMoreFleetProvisioning()" title="Search more" aria-label="Search more">↻</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur Addr</th><th>New Addr</th><th>FW Ver</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div><div class="small">If more than 8 devices respond, provision this batch first, then run discovery again.</div></div></div></div></div></section>
+<section class="card page active" id="page-status"><div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div><div class="status-grid"><div><div id="statusLiteTable" class="status-table">Loading metrics...</div><button id="btnLoadStatusDetails" class="details-btn" onclick="toggleStatusDetails()">Load Full Details</button><div id="statusDetailsPane" class="status-details"><div id="statusTable" class="status-table">Loading details...</div><div class="sensor-grid" id="statusSensors"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div></div></div></div><div class="status-side"><div class="relay-card"><div id="relayBadge" class="relay-badge off">RELAY OFF</div><div id="relayMeta" class="small" style="margin-top:8px">Input: -, Link: -</div></div><h4 style="margin:0 0 2px 0">Sensors</h4><div class="status-sensor-grid"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div><div class="sensor-tile">Tank: n/a</div><div class="sensor-tile">Float: n/a</div><div class="sensor-tile">Flow: n/a</div></div></div></div></section><section class="card page" id="page-fleet"><h3>Fleet</h3><div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div><div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div class="grid" style="margin-top:8px"><div><label>Scan start address</label><input id="fleetScanStart" type="number" min="1" max="254" value="1" /></div><div><label>Scan end address</label><input id="fleetScanEnd" type="number" min="1" max="254" value="80" /></div><div><label>Scan interval (ms)</label><input id="fleetScanIntervalMs" type="number" min="80" max="2000" value="120" /></div><div style="display:flex;align-items:end"><div class="actions"><button type="button" id="fleetScanBtn" onclick="toggleFleetScan()">Scan Fleet</button></div></div></div><div class="small" id="fleetScanSummary" style="margin-top:4px">Scan idle.</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div><div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet in batches of up to 8 devices.</div><div class="grid"><div><label>Estimated devices (max 8)</label><input id="prov_estimated_count" type="number" min="1" max="8" value="8" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Chip ID</th><th>Cur Addr</th><th>New Addr</th><th>FW Ver</th><th>RSSI</th><th>Status</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div><div class="small">If more than 8 devices respond, provision this batch first, then run discovery again.</div></div></div></div></div></section>
 )HTML"
 #if LRS_ENABLE_AUTOMATIONS
 R"HTML(<section class="card page" id="page-automations">
@@ -2059,6 +2059,41 @@ let provLastRowsHtml = '';
 let provPollSeenActive = false;
 let provPollGraceUntilMs = 0;
 let suspendGlobalPollsUntilMs = 0;
+let provStickySessionNonce = 0;
+let provStickyRowsByChip = {};
+let provStickyOrder = [];
+function clearProvisioningStickyRows() {
+  provStickySessionNonce = 0;
+  provStickyRowsByChip = {};
+  provStickyOrder = [];
+  provLastRowsHtml = '';
+}
+function mergeProvisioningStickyRows(devices, sessionNonce) {
+  const nonce = Number(sessionNonce || 0);
+  if (nonce > 0 && provStickySessionNonce !== nonce) {
+    provStickySessionNonce = nonce;
+    provStickyRowsByChip = {};
+    provStickyOrder = [];
+  }
+  const list = Array.isArray(devices) ? devices : [];
+  for (const d of list) {
+    const key = String((d && (d.chip_id_hex || d.chip_id)) || '');
+    if (!key) continue;
+    if (!Object.prototype.hasOwnProperty.call(provStickyRowsByChip, key)) {
+      provStickyOrder.push(key);
+    }
+    provStickyRowsByChip[key] = d;
+  }
+  if (provStickyOrder.length > 16) {
+    const drop = provStickyOrder.splice(0, provStickyOrder.length - 16);
+    for (const key of drop) delete provStickyRowsByChip[key];
+  }
+  const out = [];
+  for (const key of provStickyOrder) {
+    if (Object.prototype.hasOwnProperty.call(provStickyRowsByChip, key)) out.push(provStickyRowsByChip[key]);
+  }
+  return out;
+}
 function stopProvisioningPolling() {
   if (provStatusPollTimer) { clearTimeout(provStatusPollTimer); provStatusPollTimer = 0; }
 }
@@ -2094,7 +2129,6 @@ function ensureProvisioningUiScaffold() {
 function provisioningSessionStateLabel(s) {
   const key = String(s || 'idle');
   if (key === 'discovering') return 'Discovering';
-  if (key === 'discovery_retry') return 'Discovering (retry)';
   if (key === 'ready') return 'Ready';
   if (key === 'provisioning') return 'Provisioning';
   if (key === 'complete') return 'Complete';
@@ -2111,7 +2145,7 @@ function formatElapsedCompact(ms) {
 }
 function provisioningDisabledReason(st, discovered, sessActive) {
   if (st === 'ready' && discovered > 0) return 'Ready to provision discovered devices.';
-  if (st === 'discovering' || st === 'discovery_retry') return 'Provision All unlocks when discovery finishes.';
+  if (st === 'discovering') return 'Provision All unlocks when discovery finishes.';
   if (st === 'provisioning') return 'Provisioning is already in progress.';
   if (st === 'complete') return 'Session complete. Run discovery again for another batch.';
   if (st === 'error') return 'Session failed. Start discovery again.';
@@ -2142,17 +2176,22 @@ function renderProvisioningStatus(out) {
   const provisionReason = document.getElementById('provProvisionAllReason');
   if (!summary || !rows) return;
   const sess = (out && out.session) || {};
-  const devices = Array.isArray(out && out.devices) ? out.devices : [];
+  const incomingDevices = Array.isArray(out && out.devices) ? out.devices : [];
   provUiSessionActive = !!sess.active;
   provUiSessionState = String(sess.state || 'idle');
+  const st = String(sess.state || 'idle');
+  const stickyEnabled = (st === 'discovering' || st === 'ready' || st === 'provisioning');
+  const devices = stickyEnabled
+    ? mergeProvisioningStickyRows(incomingDevices, sess.session_nonce)
+    : incomingDevices;
+  const discoveredRaw = Number(sess.discovered_count || 0);
+  const discoveredEffective = Math.max(discoveredRaw, devices.length);
   const compactMode = !!(sess && (sess.compact || sess.devices_truncated));
   if (provisionBtn) {
-    const st = String(sess.state || 'idle');
-    const discovered = Number(sess.discovered_count || 0);
-    const canProvision = (st === 'ready' && discovered > 0);
+    const canProvision = (st === 'ready' && discoveredEffective > 0);
     provisionBtn.disabled = !canProvision;
     if (provisionReason) {
-      provisionReason.innerText = provisioningDisabledReason(st, discovered, !!sess.active);
+      provisionReason.innerText = provisioningDisabledReason(st, discoveredEffective, !!sess.active);
       provisionReason.classList.toggle('ok', canProvision);
     }
   }
@@ -2163,13 +2202,12 @@ function renderProvisioningStatus(out) {
   const total = Math.max(1, Number(sess.estimated_count || 0) || Number(sess.discovered_count || 0) || devices.length || 1);
   const verified = Number(sess.verified_count || 0);
   const failed = Number(sess.failed_count || 0);
-  const discovered = Number(sess.discovered_count || 0);
+  const discovered = discoveredEffective;
   const provisioned = Math.min(total, verified + failed);
-  const st = String(sess.state || 'idle');
   if (sessionLine) {
     if (!sess.active) {
       sessionLine.innerText = 'No provisioning session active.';
-    } else if (st === 'discovering' || st === 'discovery_retry') {
+    } else if (st === 'discovering') {
       sessionLine.innerText = `Discovering... ${discovered}/${total} found · elapsed ${elapsedTxt}`;
     } else if (st === 'ready') {
       sessionLine.innerText = `Verified ${verified}/${total} · ready to provision ${discovered}/${total} · elapsed ${elapsedTxt}`;
@@ -2186,10 +2224,10 @@ function renderProvisioningStatus(out) {
   let countdownTxt = '';
   if (sess.active && Number(sess.phase_deadline_ms || 0) > 0 && now > 0) {
     const rem = Math.max(0, Math.ceil((Number(sess.phase_deadline_ms) - now) / 1000));
-    if (rem > 0 && (sess.state === 'discovering' || sess.state === 'discovery_retry' || sess.state === 'provisioning')) countdownTxt = ` · next phase in ~${rem}s`;
+    if (rem > 0 && (sess.state === 'discovering' || sess.state === 'provisioning')) countdownTxt = ` · next phase in ~${rem}s`;
   }
   summary.innerText = sess.active
-    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${Number(sess.discovered_count || 0)} · conflicts ${Number(sess.conflict_count || 0)}${countdownTxt}`
+    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${discoveredEffective} · conflicts ${Number(sess.conflict_count || 0)}${countdownTxt}`
     : 'No provisioning session active.';
   if (result && sess.active) {
     result.className = 'result-line show';
@@ -2252,7 +2290,7 @@ function startProvisioningPolling(opts) {
     const out = await refreshProvisioningStatus(true);
     const sess = (out && out.session) || {};
     const st = String(sess.state || 'idle');
-    const activeLike = !!sess.active || st === 'discovering' || st === 'discovery_retry' || st === 'provisioning' || st === 'ready';
+    const activeLike = !!sess.active || st === 'discovering' || st === 'provisioning' || st === 'ready';
     if (activeLike) {
       provPollSeenActive = true;
       idleAfterGraceCount = 0;
@@ -2279,26 +2317,19 @@ function syncPagePolling() {
   syncStatusLiveSse(true);
 }
 async function startFleetProvisioningDiscovery() {
-  return startFleetProvisioningDiscoveryWithMode(false);
-}
-async function searchMoreFleetProvisioning() {
-  return startFleetProvisioningDiscoveryWithMode(true);
-}
-async function startFleetProvisioningDiscoveryWithMode(searchMore) {
   const result = document.getElementById('provWizardResult');
   const estEl = document.getElementById('prov_estimated_count');
   const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 8) || 8));
-  const retry = true;
   suspendGlobalPollsUntilMs = Date.now() + 5000;
-  if (result) { result.className = 'result-line show'; result.innerText = searchMore ? 'Searching for more devices...' : 'Starting discovery...'; }
-  const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est, retry_once: retry }), silent: true, allowHttpError: true });
+  if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }
+  const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est }), silent: true, allowHttpError: true });
   if (out && out.ok) {
     if (out.session) { renderProvisioningStatus(out); }
     startProvisioningPolling({ graceMs: 5000 });
-    if (result) { result.className = 'result-line show ok'; result.innerText = searchMore ? 'Search started. Watching live updates...' : 'Discovery started. Watching live updates...'; }
+    if (result) { result.className = 'result-line show ok'; result.innerText = 'Discovery started. Watching live updates...'; }
     return;
   }
-  if (result) { result.className = 'result-line show err'; result.innerText = `${searchMore ? 'Search' : 'Discovery'} start failed: ${(out && out.error) || 'request_failed'}`; }
+  if (result) { result.className = 'result-line show err'; result.innerText = `Discovery start failed: ${(out && out.error) || 'request_failed'}`; }
 }
 async function provisionFleetAll() {
   const result = document.getElementById('provWizardResult');
@@ -2306,6 +2337,7 @@ async function provisionFleetAll() {
   if (result) { result.className = 'result-line show'; result.innerText = 'Provisioning discovered devices...'; }
   const out = await apiJson('/api/provisioning/provision-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', silent: true, allowHttpError: true });
   if (out && out.ok) {
+    clearProvisioningStickyRows();
     if (out.session) { renderProvisioningStatus(out); }
     startProvisioningPolling({ graceMs: 5000 });
     if (result) { result.className = 'result-line show ok'; result.innerText = 'Provisioning started. Waiting for verify replies...'; }
@@ -2315,6 +2347,7 @@ async function provisionFleetAll() {
 }
 async function cancelFleetProvisioning() {
   stopProvisioningPolling();
+  clearProvisioningStickyRows();
   await apiJson('/api/provisioning/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', silent: true, allowHttpError: true });
   const out = await refreshProvisioningStatus(true);
   const result = document.getElementById('provWizardResult');
@@ -2440,7 +2473,7 @@ function isFleetManageActive() {
 }
 function isProvisioningUiBusy() {
   const st = String(provUiSessionState || 'idle');
-  return !!provUiSessionActive || st === 'discovering' || st === 'discovery_retry' || st === 'provisioning';
+  return !!provUiSessionActive || st === 'discovering' || st === 'provisioning';
 }
 function sessionPollDelayMs() {
   if (document.hidden) return 1800000;
