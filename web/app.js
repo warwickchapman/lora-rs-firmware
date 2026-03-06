@@ -2117,7 +2117,56 @@ async function refreshProvisioningStatus(silent = true) {
   provStatusInFlight = false;
   return null;
 }
-function startProvisioningPolling(opts) { }
+function startProvisioningPolling(opts) {
+  stopProvisioningPolling();
+  const graceMs = Math.max(0, Number((opts && opts.graceMs) || 0));
+  provPollSeenActive = false;
+  provPollGraceUntilMs = Date.now() + graceMs;
+  let idleAfterGraceCount = 0;
+  const scheduleNext = (ms) => {
+    if (provStatusPollTimer) { clearTimeout(provStatusPollTimer); provStatusPollTimer = 0; }
+    provStatusPollTimer = setTimeout(loop, Math.max(250, Number(ms) || 1000));
+  };
+  const loop = async () => {
+    if (!(activePage === 'fleet' && activeFleetTab === 'manage' && activeFleetManageTab === 'lora')) {
+      provStatusPollTimer = 0;
+      return;
+    }
+    const now = Date.now();
+    if (document.hidden) {
+      scheduleNext(4000);
+      return;
+    }
+    if (suspendGlobalPollsUntilMs > now) {
+      scheduleNext(Math.min(2500, Math.max(500, suspendGlobalPollsUntilMs - now)));
+      return;
+    }
+    const out = await refreshProvisioningStatus(true);
+    const sess = (out && out.session) || {};
+    const st = String(sess.state || 'idle');
+    const activeLike = !!sess.active || st === 'discovering' || st === 'discovery_retry' || st === 'provisioning' || st === 'ready';
+    if (activeLike) {
+      provPollSeenActive = true;
+      idleAfterGraceCount = 0;
+      scheduleNext(1200);
+      return;
+    }
+    const withinGrace = Date.now() < provPollGraceUntilMs;
+    if (withinGrace) {
+      scheduleNext(1200);
+      return;
+    }
+    if (!provPollSeenActive && out == null) {
+      idleAfterGraceCount++;
+      if (idleAfterGraceCount < 4) {
+        scheduleNext(1800);
+        return;
+      }
+    }
+    provStatusPollTimer = 0;
+  };
+  scheduleNext(300);
+}
 function syncPagePolling() {
   syncStatusLiveSse(true);
 }
