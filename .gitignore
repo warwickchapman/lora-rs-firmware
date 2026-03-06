@@ -13,6 +13,7 @@ tools/.venv/
 tools/flasher/venv/
 tools/flasher/firmware_cache/
 lrs-firmware-*.bin
+.agent/
 
 # Build artifacts
 build/
