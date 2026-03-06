@@ -1479,8 +1479,8 @@ function applyStatusPageState(st) {
     <div class="k">AP IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.ap_ip || 'n/a'), st.ap_ip, 'AP IP')}</div>
     ${apMdnsRow}`;
   }
-  const t = document.getElementById('sensorTempTile');
-  if (t) {
+  const tempTiles = document.querySelectorAll('#sensorTempTile');
+  tempTiles.forEach((t) => {
     if (st.sensor_temp_detected && st.sensor_temp_valid) {
       t.innerText = `Temperature: ${Number(st.sensor_temp_c).toFixed(1)} C`;
     } else if (st.sensor_temp_enabled) {
@@ -1488,20 +1488,20 @@ function applyStatusPageState(st) {
     } else {
       t.innerText = 'Temperature: disabled';
     }
-  }
-  const rt = document.getElementById('sensorRemoteTempTile');
-  if (rt) {
+  });
+  const remoteTempTiles = document.querySelectorAll('#sensorRemoteTempTile');
+  remoteTempTiles.forEach((rt) => {
     if (st.lora_remote_temp_valid) {
       rt.innerText = `Remote LoRa temp: ${Number(st.lora_remote_temp_c).toFixed(1)} C`;
     } else {
       rt.innerText = 'Remote LoRa temp: n/a';
     }
-  }
-  const inTile = document.getElementById('sensorInputTile');
-  if (inTile) {
+  });
+  const inputTiles = document.querySelectorAll('#sensorInputTile');
+  inputTiles.forEach((inTile) => {
     const closed = Number(st.local_input_state) === 1;
     inTile.innerHTML = `Dry contact input: <span class="sensor-state ${closed ? 'closed' : 'open'}">${closed ? 'CLOSED' : 'OPEN'}</span>`;
-  }
+  });
   const sdState = document.getElementById('sensorDiagState');
   const sdTemp = document.getElementById('sensorDiagTemp');
   const sdAddr = document.getElementById('sensorDiagAddr');
@@ -1728,17 +1728,26 @@ async function scanWifi() {
   const host = document.getElementById('wifi_scan_list');
   if (!host) return;
   wifiScanInFlight = true;
+  const scanPressureWindowMs = 22000;
+  suspendGlobalPollsUntilMs = Math.max(suspendGlobalPollsUntilMs, Date.now() + scanPressureWindowMs);
   if (btn) { btn.disabled = true; btn.innerText = 'Scanning...'; }
   host.innerHTML = 'Scanning...';
   try {
     const start = Date.now();
-    const timeoutMs = 15000;
+    const timeoutMs = 20000;
+    let transientFailures = 0;
     let out = null;
     while ((Date.now() - start) < timeoutMs) {
       out = await apiJson('/api/wifi/scan', { silent: true, timeoutMs: 5000 });
-      if (!out) { host.innerHTML = 'Scan failed'; return; }
+      if (!out) {
+        transientFailures++;
+        host.innerHTML = transientFailures > 2 ? 'Scanning... (retrying link)' : 'Scanning...';
+        await sleep(transientFailures > 2 ? 1200 : 800);
+        continue;
+      }
+      transientFailures = 0;
       if (String(out.status || '') === 'ready') { break; }
-      await sleep(500);
+      await sleep(900);
     }
     if (!out || String(out.status || '') !== 'ready') {
       host.innerHTML = 'Scan timed out';
