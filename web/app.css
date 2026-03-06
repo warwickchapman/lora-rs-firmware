@@ -24,7 +24,7 @@ header .id-copy:hover{color:var(--txt)}
 header .theme{margin-top:0;padding:0;min-width:auto;min-height:auto;border:0;background:transparent;border-radius:0;cursor:pointer;transition:opacity 0.2s ease;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 header .logout{margin-top:0;padding:0;min-height:auto;border:0;background:transparent;border-radius:0;cursor:pointer;transition:opacity 0.2s ease;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;font-weight:600}
 header .theme:hover, header .logout:hover{opacity:.8;transform:none}
-main{padding:24px 16px;display:flex;flex-direction:column;gap:20px;max-width:980px;margin:0 auto}
+main{padding:24px 16px calc(88px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:20px;max-width:980px;margin:0 auto}
 .card{background:var(--card);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:var(--glass-border);border-radius:24px;padding:24px;box-shadow:var(--glass-shadow);transition:transform 0.3s ease}
 label{display:block;font-size:0.85rem;margin-top:12px;font-weight:700;color:var(--txt);letter-spacing:0.02em}
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
@@ -132,8 +132,8 @@ body.light .navbtn.active{background:rgba(99,102,241,0.15);color:#4f46e5;border-
 body.nav-open .drawer{transform:translateX(0)}
 body.nav-open .drawer-backdrop{opacity:1;pointer-events:auto}
 body.nav-open{overflow:hidden}
-.app-footer{margin-top:4px;padding:0 0 calc(10px + env(safe-area-inset-bottom))}
-.app-footer-inner{width:100%;padding:10px 16px;background:rgba(15,23,42,0.3);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-top:var(--glass-border);box-shadow:var(--glass-shadow);font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
+.app-footer{position:fixed;left:0;right:0;bottom:0;z-index:25}
+.app-footer-inner{width:100%;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(15,23,42,0.3);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-top:var(--glass-border);box-shadow:var(--glass-shadow);font-size:.85rem;color:var(--muted);overflow-wrap:anywhere}
 body.light .app-footer-inner{background:rgba(255,255,255,0.3)}
 .tabbtn{background:rgba(255,255,255,0.05);color:var(--muted);border:var(--glass-border);border-radius:10px;padding:10px 16px;min-height:42px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:none;margin-top:0;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .tabbtn:hover{background:rgba(255,255,255,0.15);color:var(--txt);transform:translateY(-1px)}
@@ -248,7 +248,7 @@ body.light .sensor-state.closed{background:rgba(74,222,128,0.2);color:#15803d}
 body.light .toast{background:rgba(255,255,255,0.8);color:#0f172a;box-shadow:0 20px 40px rgba(31,38,135,.15);border-color:rgba(255,255,255,0.8)}
 .toast.show{display:block}
 .toast.err{border-left:4px solid #f87171}
-.mobile-action-bar{display:none;position:fixed;left:10px;right:10px;bottom:max(10px,env(safe-area-inset-bottom));z-index:30;padding:8px;background:rgba(15,23,42,0.8);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:var(--glass-border);border-radius:14px;gap:8px;box-shadow:0 12px 28px rgba(0,0,0,.35)}
+.mobile-action-bar{display:none;position:fixed;left:10px;right:10px;bottom:calc(52px + env(safe-area-inset-bottom));z-index:30;padding:8px;background:rgba(15,23,42,0.8);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:var(--glass-border);border-radius:14px;gap:8px;box-shadow:0 12px 28px rgba(0,0,0,.35)}
 body.light .mobile-action-bar{background:rgba(255,255,255,0.85);box-shadow:0 12px 28px rgba(31,38,135,.15)}
 .mobile-action-bar button{margin-top:0;min-height:40px;padding:8px 12px;border-radius:10px}
 .mobile-action-bar .primary{flex:1 1 auto}
@@ -288,7 +288,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
 @media(max-width:850px){.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){
  .grid{grid-template-columns:1fr}
- main{padding:16px 10px}
+ main{padding:16px 10px calc(150px + env(safe-area-inset-bottom))}
  .card{padding:18px;border-radius:18px}
  .fleet-detail-grid{grid-template-columns:140px 1fr}
  .status-table{grid-template-columns:140px 1fr}
@@ -336,7 +336,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  .prov-table thead th,.prov-table tbody td{padding:8px 10px}
  .actions.mobile-action-source{display:none}
  .mobile-action-bar.show{display:flex}
- main{padding-bottom:90px}
+ main{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 }
 @media(max-width:430px){
  .status-head-device{display:none}
