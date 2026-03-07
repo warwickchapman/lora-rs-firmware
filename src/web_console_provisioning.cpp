@@ -107,16 +107,16 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
   doc["ok"] = true;
 
   constexpr size_t maxCompactRows = 8;
-  const bool activeSession = sess.active;
-  bool compact = activeSession || veryLowHeap;
-  const size_t returnedDevices =
-      compact
-          ? ((totalDevices < maxCompactRows) ? totalDevices : maxCompactRows)
-          : totalDevices;
+  bool compact = veryLowHeap;
+  const size_t returnedDevices = compact
+                                     ? ((totalDevices < maxCompactRows)
+                                            ? totalDevices
+                                            : maxCompactRows)
+                                     : totalDevices;
   const bool truncated = returnedDevices < totalDevices;
   const char *compactReason = nullptr;
   if (compact) {
-    compactReason = activeSession ? "active_session" : "low_heap";
+    compactReason = "low_heap";
   } else if (truncated) {
     compact = true;
     compactReason = "truncated_rows";

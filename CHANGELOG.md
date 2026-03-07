@@ -26,6 +26,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Fleet landing behavior now defaults to `Manage` when no known fleet devices exist, and defaults to `Devices` when known devices are present.
 - Fleet scan receive filtering on RX was relaxed for `PollRequest`: any same-fleet-key transmitter can scan/discover devices (not only the configured paired source address).
 - Fleet Devices table/detail now include a `Web UI` link when a device URL is known (`web_ui_url` present in fleet data).
+- Provisioning table low-memory notice now appears only for true compact payload conditions (low heap or row truncation); active discovery with no rows now reports `Awaiting device replies...`.
 
 ## [0.5.9-alpha] - 2026-03-05
 

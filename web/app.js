@@ -2203,6 +2203,7 @@ function renderProvisioningStatus(out) {
   const discoveredRaw = Number(sess.discovered_count || 0);
   const discoveredEffective = Math.max(discoveredRaw, devices.length);
   const compactMode = !!(sess && (sess.compact || sess.devices_truncated));
+  const compactReason = String((sess && sess.compact_reason) || '');
   if (provisionBtn) {
     const canProvision = (st === 'ready' && discoveredEffective > 0);
     provisionBtn.disabled = !canProvision;
@@ -2253,7 +2254,13 @@ function renderProvisioningStatus(out) {
     result.innerText = `Provisioning ${provisioningSessionStateLabel(sess.state)}`;
   }
   if (!devices.length) {
-    rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${compactMode ? 'Low-memory mode: showing counts only (keeping rows when available).' : 'No devices discovered yet.'}</td></tr>`;
+    let emptyText = 'No devices discovered yet.';
+    if (compactMode && (compactReason === 'low_heap' || compactReason === 'truncated_rows')) {
+      emptyText = 'Low-memory mode: showing counts only (keeping rows when available).';
+    } else if (sess.active && (st === 'discovering' || st === 'ready' || st === 'provisioning')) {
+      emptyText = 'Awaiting device replies...';
+    }
+    rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${emptyText}</td></tr>`;
     return;
   }
   rows.innerHTML = devices.map((d) => {
