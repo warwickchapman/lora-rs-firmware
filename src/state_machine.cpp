@@ -955,8 +955,10 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   prov_.discover_reply_window_ms = totalWindowMs - prov_.discover_broadcast_window_ms;
   prov_.provision_all_requested = false;
   prov_.current_index = 0;
-  prov_.discover_broadcast_remaining = (kProvDiscoverBroadcastBurstCount > 0) ? (kProvDiscoverBroadcastBurstCount - 1U) : 0U;
-  prov_.next_discover_broadcast_ms = prov_.started_ms + kProvDiscoverBroadcastGapMs;
+  // Queue discovery broadcast(s) for coordinator tick instead of requiring
+  // immediate radio TX in the API request path.
+  prov_.discover_broadcast_remaining = (kProvDiscoverBroadcastBurstCount > 0) ? kProvDiscoverBroadcastBurstCount : 1U;
+  prov_.next_discover_broadcast_ms = prov_.started_ms;
   if (!ensureProvisioningStorage()) {
     LRS_LOGW(API,
              "event=provisioning_start_reject reason=oom_provisioning_storage estimated=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
@@ -969,15 +971,6 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   }
   resetProvisioningStorage();
 
-  if (!sendProvisioningDiscoverStart(prov_.session_nonce, prov_.discover_reply_window_ms, prov_.discover_broadcast_window_ms)) {
-    LRS_LOGW(API,
-             "event=provisioning_start_reject reason=radio_send_failed counter=%lu local=%u",
-             static_cast<unsigned long>(last_counter_),
-             static_cast<unsigned>(runtime_.local_address));
-    prov_ = ProvisioningSessionRuntime{};
-    freeProvisioningStorage();
-    return false;
-  }
   lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
   return true;
 }

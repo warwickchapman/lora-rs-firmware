@@ -18,6 +18,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Provisioning auto-assignment is now constrained to address range `1..32`.
 - Provisioning target reliability improvement: each factory-key device now sends two discovery announce frames per `DiscoverStart` (second announce uses short jitter), while coordinator dedupe remains chip-ID-based.
 - Provisioning address assignment is now sticky across separate discovery runs on the same coordinator uptime using a fixed-size chip/address registry (12 entries): already-provisioned addresses are reserved, known chips prefer their prior address, and full remote factory reset clears registry entries for that address.
+- Provisioning start API no longer hard-fails when immediate radio TX budget is unavailable; discovery broadcasts are now queued from the coordinator tick, reducing intermittent `Discovery start failed: request_failed` starts.
 
 ## [0.5.9-alpha] - 2026-03-05
 
