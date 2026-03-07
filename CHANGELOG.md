@@ -22,6 +22,10 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Provisioning discovery resilience tuned for first-pass reliability: coordinator `DiscoverStart` burst count increased to `2`, and discovery no longer exits early on estimated-count settle before the reply window closes.
 - Provisioning target announce timing now spreads both announce frames across the full reply window using deterministic chip-ID slot offsets plus bounded jitter, reducing repeated cross-device announce collisions.
 - Provisioning session summary text now avoids misleading estimate-denominator phrasing (`x/y`), and reports `Found N (estimated E)` with `Verified V / Found N` progress.
+- Fleet Devices scan defaults were re-tuned for operational range management: default scan range is now `1..32` (operator-adjustable up to `254`).
+- Fleet landing behavior now defaults to `Manage` when no known fleet devices exist, and defaults to `Devices` when known devices are present.
+- Fleet scan receive filtering on RX was relaxed for `PollRequest`: any same-fleet-key transmitter can scan/discover devices (not only the configured paired source address).
+- Fleet Devices table/detail now include a `Web UI` link when a device URL is known (`web_ui_url` present in fleet data).
 
 ## [0.5.9-alpha] - 2026-03-05
 

@@ -273,7 +273,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   resetPollStorage();
   fleet_scan_active_ = false;
   fleet_scan_start_address_ = 1;
-  fleet_scan_end_address_ = 80;
+  fleet_scan_end_address_ = 32;
   fleet_scan_next_address_ = 1;
   fleet_scan_interval_ms_ = 120;
   fleet_scan_next_ms_ = 0;
@@ -1668,6 +1668,8 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("rx_mqtt_unauthorized_source", msg.rssi, msg.counter, msg.src);
         return;
       }
+    } else if (msg.type == MessageType::PollRequest) {
+      // Allow fleet scans from any same-key TX even when this RX is paired to a different remote source.
     } else if (msg.src != runtime_.remote_address) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;

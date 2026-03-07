@@ -248,7 +248,7 @@ void WebConsole::handleFleetScan() {
     sm_->fleetScanCancel();
   } else {
     const uint8_t startAddress = parseAddressField(body["start_address"], 1);
-    const uint8_t endAddress = parseAddressField(body["end_address"], 80);
+    const uint8_t endAddress = parseAddressField(body["end_address"], 32);
     uint16_t intervalMs = body["interval_ms"] | 120;
     if (intervalMs < 80U)
       intervalMs = 80U;

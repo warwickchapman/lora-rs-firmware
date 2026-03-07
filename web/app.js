@@ -38,13 +38,14 @@ let lastRoleIsTx = false;
 let fleetDevicesCache = [];
 let selectedFleetDeviceAddr = 0;
 let fleetDeviceDetailTab = 'state';
-let activeFleetTab = 'devices';
+let activeFleetTab = 'manage';
 let activeFleetManageTab = 'lora';
 let headerStatusRefreshInFlight = false;
 let sessionRefreshInFlight = false;
 let fleetRefreshInFlight = false;
 let fleetRefreshDebounceTimer = 0;
-let fleetScanState = { active: false, start_address: 1, end_address: 80, next_address: 1, interval_ms: 120, sent: 0, total: 0, scanned: 0, progress_pct: 0 };
+let fleetScanState = { active: false, start_address: 1, end_address: 32, next_address: 1, interval_ms: 120, sent: 0, total: 0, scanned: 0, progress_pct: 0 };
+let fleetLandingDecisionToken = 0;
 let provStatusInFlight = false;
 let provLastStatusRefreshMs = 0;
 let provUiSessionActive = false;
@@ -467,6 +468,12 @@ function fleetDeviceTempText(r) {
   if (!r || !r.temp_valid) return 'n/a';
   return `${Number(r.temp_c || 0).toFixed(1)} C`;
 }
+function fleetDeviceWebUiUrl(r) {
+  const url = String((r && r.web_ui_url) || '').trim();
+  if (!url.length) return '';
+  if (!/^https?:\/\//i.test(url)) return '';
+  return url;
+}
 function reasonLabel(v) {
   const r = String(v || '').toLowerCase();
   if (r === 'ack_timeout') return 'ack timeout';
@@ -604,6 +611,23 @@ function showFleetTab(tab) {
   }
   if (activePage === 'fleet' && target === 'manage') { showFleetManageTab(activeFleetManageTab); }
   syncPagePolling();
+}
+async function resolveFleetLandingTab() {
+  if (activePage !== 'fleet' || !lastRoleIsTx) return;
+  const token = ++fleetLandingDecisionToken;
+  if (Array.isArray(fleetDevicesCache) && fleetDevicesCache.length > 0) {
+    showFleetTab('devices');
+    return;
+  }
+  showFleetTab('manage');
+  const out = await apiJson('/api/fleet', { silent: true, timeoutMs: 2500 });
+  if (activePage !== 'fleet' || !lastRoleIsTx || token !== fleetLandingDecisionToken) return;
+  const role = String((out && out.role) || '').toLowerCase();
+  if (role !== 'tx') return;
+  updateFleetScanUi((out && out.scan) || {});
+  const devices = Array.isArray(out && out.devices) ? out.devices : [];
+  fleetDevicesCache = devices;
+  showFleetTab(devices.length > 0 ? 'devices' : 'manage');
 }
 function showFleetManageTab(tab) {
   const target = (tab === 'lora') ? 'lora' : 'wifi';
@@ -1048,7 +1072,7 @@ function showPage(page) {
     ensureStatusStatic(true).catch(() => { });
     refreshStatusLiveNotice();
   }
-  if (activePage === 'fleet') { showFleetTab(activeFleetTab); }
+  if (activePage === 'fleet') { resolveFleetLandingTab().catch(() => { showFleetTab('manage'); }); }
   applyAutomationsFeatureVisibility();
   toggleDrawer(false);
   syncPagePolling();
@@ -2533,6 +2557,10 @@ function renderFleetDeviceDetail() {
   const seenAge = (Number(selected.last_seen_ms || 0) > 0) ? humanAgeMsShort(selected.last_seen_age_ms || 0) : 'never';
   const pollAge = (Number(selected.last_poll_tx_ms || 0) > 0) ? humanAgeMsShort(selected.last_poll_age_ms || 0) : 'never';
   const intervalS = Math.max(0, Math.round(Number(selected.poll_interval_ms || 0) / 1000));
+  const webUiUrl = fleetDeviceWebUiUrl(selected);
+  const webUiText = webUiUrl.length
+    ? `<a href="${escapeHtml(webUiUrl)}" target="_blank" rel="noopener">Open device UI</a>`
+    : '<span class="small">not known</span>';
   const stateView = `
  <div class="fleet-detail-grid">
    <div class="k">Device</div><div class="v">${escapeHtml(addrHex)}</div>
@@ -2544,6 +2572,7 @@ function renderFleetDeviceDetail() {
    <div class="k">Downlink RSSI</div><div class="v">${selected.downlink_rssi_valid ? `${escapeHtml(String(selected.downlink_rssi))} dBm` : 'n/a'}</div>
    <div class="k">Poll state</div><div class="v"><span class="chip ${selected.poll_pending ? 'warn' : 'neutral'}">${selected.poll_pending ? 'pending' : 'idle'}</span> (last tx ${escapeHtml(pollAge)})</div>
    <div class="k">Ack</div><div class="v"><span class="chip ${ackChipClass(selected.ack_state)}">${escapeHtml(String(selected.ack_state || 'unknown'))}</span></div>
+   <div class="k">Web UI</div><div class="v">${webUiText}</div>
  </div>`;
   const manageView = `
  <div class="fleet-detail-grid">
@@ -2569,7 +2598,7 @@ function updateFleetScanUi(scan) {
   fleetScanState = Object.assign({}, fleetScanState || {}, st);
   const active = !!fleetScanState.active;
   const start = Number(fleetScanState.start_address || 1);
-  const end = Number(fleetScanState.end_address || 80);
+  const end = Number(fleetScanState.end_address || 32);
   const nextAddr = Number(fleetScanState.next_address || start);
   const intervalMs = Number(fleetScanState.interval_ms || 120);
   const sent = Number(fleetScanState.sent || 0);
@@ -2670,6 +2699,10 @@ async function refreshFleet() {
     const addr = Number(r.address || 0);
     const seenAge = (Number(r.last_seen_ms || 0) > 0) ? humanAgeMsShort(r.last_seen_age_ms || 0) : 'never';
     const freshness = freshnessChip(r);
+    const webUiUrl = fleetDeviceWebUiUrl(r);
+    const webUiCell = webUiUrl.length
+      ? `<a href="${escapeHtml(webUiUrl)}" target="_blank" rel="noopener">Open</a>`
+      : '<span class="small">-</span>';
     const selectedCls = addr === Number(selectedFleetDeviceAddr || 0) ? 'selected' : '';
     return `<tr class="${selectedCls}">
    <td><b>${escapeHtml(addrHex)}</b></td>
@@ -2677,10 +2710,11 @@ async function refreshFleet() {
    <td>${inputChip(r.input_state)}</td>
    <td>${escapeHtml(fleetDeviceTempText(r))}</td>
    <td>${freshness} ${escapeHtml(seenAge)}</td>
+   <td>${webUiCell}</td>
    <td><button type="button" onclick="selectFleetDevice(${addr})">View</button></td>
   </tr>`;
   }).join('');
-  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Web UI</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
   renderFleetDeviceDetail();
   fleetRefreshInFlight = false;
 }
