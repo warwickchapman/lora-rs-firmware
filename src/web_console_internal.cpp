@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "runtime_utils.h"
+
 namespace webconsole_internal {
 
 const uint32_t kMinHeartbeatMs = 60000;
@@ -84,22 +86,7 @@ bool isOwnLrsSoftApLike(const String &ssid) {
 }
 
 const char *wifiStatusText(wl_status_t st) {
-  switch (st) {
-    case WL_IDLE_STATUS: return "idle";
-    case WL_NO_SSID_AVAIL: return "ssid_not_found";
-    case WL_SCAN_COMPLETED: return "scan_completed";
-    case WL_CONNECTED: return "connected";
-    case WL_CONNECT_FAILED: return "connect_failed";
-    case WL_CONNECTION_LOST: return "connection_lost";
-    case WL_DISCONNECTED: return "disconnected";
-#ifdef WL_WRONG_PASSWORD
-    case WL_WRONG_PASSWORD: return "wrong_password";
-#endif
-#ifdef WL_NO_SHIELD
-    case WL_NO_SHIELD: return "no_shield";
-#endif
-    default: return "unknown";
-  }
+  return runtime_utils::wifiStatusText(st);
 }
 
 const char *httpMethodText(HTTPMethod method) {

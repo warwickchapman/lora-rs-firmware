@@ -7,6 +7,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Changed
+- Internal cleanup + heap hygiene pass (behavior-neutral): removed dead root artifacts (`web_console_ui_assets_orig.cpp`, `.new`), deduplicated role/WiFi status helpers into neutral `runtime_utils`, renamed `defaultLanHostnameForRole(bool)` to `defaultLanHostname()`, and reduced transient String churn in status/config identity formatting.
 - Flasher Windows packaging policy simplified to `MSI + portable ZIP` (NSIS setup EXE removed from release workflow and asset contract).
 - Fleet LoRa provisioning UI polish: clearer scan table labels (`Cur Addr`, `New Addr`, `FW Ver`), improved table presentation, inline disabled reason for `Provision All`, and compact session progress text with elapsed time.
 - LoRa discovery now runs as a two-phase cycle: short coordinator `DiscoverStart` broadcast burst followed by a silent randomized reply window on targets, reducing coordinator-talk collisions during announce collection.

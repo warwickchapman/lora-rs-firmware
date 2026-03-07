@@ -9,6 +9,7 @@
 
 #include "build_info.h"
 #include "logger.h"
+#include "runtime_utils.h"
 
 namespace {
 constexpr uint32_t kStaConnectTimeoutMs = 20000;
@@ -41,34 +42,6 @@ constexpr uint32_t kStaReconnectHeapLogIntervalMs = 30000;
 constexpr uint8_t kStaFailureResetThreshold = 10;
 constexpr uint8_t kStaStackResetLimit = 10;
 
-const char *wifiStatusText(wl_status_t st) {
-  switch (st) {
-  case WL_IDLE_STATUS:
-    return "idle";
-  case WL_NO_SSID_AVAIL:
-    return "ssid_not_found";
-  case WL_SCAN_COMPLETED:
-    return "scan_completed";
-  case WL_CONNECTED:
-    return "connected";
-  case WL_CONNECT_FAILED:
-    return "connect_failed";
-  case WL_CONNECTION_LOST:
-    return "connection_lost";
-  case WL_DISCONNECTED:
-    return "disconnected";
-#ifdef WL_WRONG_PASSWORD
-  case WL_WRONG_PASSWORD:
-    return "wrong_password";
-#endif
-#ifdef WL_NO_SHIELD
-  case WL_NO_SHIELD:
-    return "no_shield";
-#endif
-  default:
-    return "unknown";
-  }
-}
 } // namespace
 
 void App::begin() {
@@ -440,7 +413,7 @@ void App::updateNetworking() {
       LRS_LOGW(WIFI,
                "event=sta_connect_failed ssid=%s reason=%s status=%d "
                "ap_fallback=1 consecutive_failures=%u",
-               cfg.wifi_sta_ssid.c_str(), wifiStatusText(st),
+               cfg.wifi_sta_ssid.c_str(), runtime_utils::wifiStatusText(st),
                static_cast<int>(st),
                static_cast<unsigned>(sta_connect_consecutive_failures_));
       ensureApEnabled();

@@ -4,46 +4,13 @@
 
 #include "config_store.h"
 #include "logger.h"
+#include "runtime_utils.h"
 #include "web_console_internal.h"
 #include "web_console_ui_assets.h"
 
 using namespace webconsole_internal;
 
 namespace {
-bool parseRoleTxFromModeRole(const String &mode, const String &role,
-                             bool &roleTx) {
-  if (mode == "paired") {
-    if (role == "transmitter") {
-      roleTx = true;
-      return true;
-    }
-    if (role == "receiver") {
-      roleTx = false;
-      return true;
-    }
-    return false;
-  }
-  if (mode == "mesh") {
-    if (role == "coordinator") {
-      roleTx = true;
-      return true;
-    }
-    if (role == "node") {
-      roleTx = false;
-      return true;
-    }
-    return false;
-  }
-  if (mode == "standalone") {
-    if (role == "none") {
-      roleTx = true;
-      return true;
-    }
-    return false;
-  }
-  return false;
-}
-
 const char *formatIp(const IPAddress &ip, char out[16]) {
   snprintf(out, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
   return out;
@@ -153,7 +120,7 @@ void WebConsole::handleLoginPage() {
   markResponseStatus(200);
   setUiNoStoreHeaders();
 
-  const String chipIdSlug = config_->defaultLanHostnameForRole(true);
+  const String chipIdSlug = config_->defaultLanHostname();
   const String metaTag =
       String("<meta name=\"lrs-device-id\" content=\"") + chipIdSlug + "\">\n";
 
@@ -343,7 +310,7 @@ void WebConsole::handleSetupCommissioningApi() {
   role.toLowerCase();
 
   bool roleTx = true;
-  if (!parseRoleTxFromModeRole(mode, role, roleTx)) {
+  if (!runtime_utils::parseRoleTxFromModeRole(mode, role, roleTx)) {
     sendTracked(400, "application/json",
                 "{\"ok\":false,\"error\":\"invalid_mode_role\"}");
     return;
@@ -394,7 +361,7 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.mqtt_controller_addresses =
       doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str();
   if (cfg.lan_hostname.length() == 0) {
-    cfg.lan_hostname = config_->defaultLanHostnameForRole(cfg.role_tx);
+    cfg.lan_hostname = config_->defaultLanHostname();
   }
   cfg.audit_last_saved_by = "first_login_commissioning";
   cfg.audit_last_saved_ms = millis();

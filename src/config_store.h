@@ -69,13 +69,14 @@ class ConfigStore {
   bool schedulePostOtaFactoryReset(bool keepSharedFleetKey = false, bool keepWifiCredentials = false);
   bool consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials);
 
-  String chipIdHex() const;
-  String defaultLanHostnameForRole(bool roleTx) const;
+  const String &chipIdHex() const;
+  String defaultLanHostname() const;
   String apSsid() const;
   String apPassword() const;
 
  private:
   Settings cfg_{};
+  mutable String chip_id_hex_cache_;
 
   void setDefaults();
   void ensureProvisionedDefaults();

@@ -12,6 +12,16 @@
 
 using namespace webconsole_internal;
 
+namespace {
+void buildFwDisplayString(char *out, size_t len) {
+  if (LRS_GIT_DIRTY == 0) {
+    snprintf(out, len, "%s (%s)", LRS_FW_VERSION, LRS_GIT_SHA);
+  } else {
+    snprintf(out, len, "%s (%s, dirty)", LRS_FW_VERSION, LRS_GIT_SHA);
+  }
+}
+} // namespace
+
 bool WebConsole::buildStatusLiveCache() {
   if (!config_ || !sm_)
     return false;
@@ -141,7 +151,9 @@ bool WebConsole::buildStatusStaticCache() {
   doc["ap_ip"] = apIpBuf;
 #if LRS_ENABLE_MDNS
   doc["mdns_ap"] = "lrs.local";
-  doc["mdns_lan"] = config_->settings().lan_hostname + ".local";
+  char mdnsLanBuf[72];
+  snprintf(mdnsLanBuf, sizeof(mdnsLanBuf), "%s.local", config_->settings().lan_hostname.c_str());
+  doc["mdns_lan"] = mdnsLanBuf;
 #endif
   doc["fw_version"] = LRS_FW_VERSION;
   doc["fw_git_sha"] = LRS_GIT_SHA;
@@ -150,13 +162,7 @@ bool WebConsole::buildStatusStaticCache() {
   doc["fw_build_id"] = LRS_BUILD_ID;
   doc["fw_build_date_short"] = LRS_BUILD_DATE_SHORT;
   char fwDisplay[96];
-  if (LRS_GIT_DIRTY == 0) {
-    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s)", LRS_FW_VERSION,
-             LRS_GIT_SHA);
-  } else {
-    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s, dirty)", LRS_FW_VERSION,
-             LRS_GIT_SHA);
-  }
+  buildFwDisplayString(fwDisplay, sizeof(fwDisplay));
   doc["fw_display"] = fwDisplay;
   doc["build_date"] = __DATE__;
   doc["build_time"] = __TIME__;
@@ -198,13 +204,7 @@ bool WebConsole::buildStatusLiteCache() {
   doc["heap_frag_percent"] = lrslog::heapFragPercent();
   doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
   char fwDisplay[96];
-  if (LRS_GIT_DIRTY == 0) {
-    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s)", LRS_FW_VERSION,
-             LRS_GIT_SHA);
-  } else {
-    snprintf(fwDisplay, sizeof(fwDisplay), "%s (%s, dirty)", LRS_FW_VERSION,
-             LRS_GIT_SHA);
-  }
+  buildFwDisplayString(fwDisplay, sizeof(fwDisplay));
   doc["fw_display"] = fwDisplay;
   doc["fw_version"] = LRS_FW_VERSION;
 

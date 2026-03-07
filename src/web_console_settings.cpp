@@ -119,7 +119,7 @@ void WebConsole::handlePostSettings() {
   const bool prevApAlwaysOn = prev.ap_always_on;
   const String prevAdminPassword = prev.admin_password;
   const bool oldRoleTx = prev.role_tx;
-  const String oldDefaultHost = config_->defaultLanHostnameForRole(oldRoleTx);
+  const String oldDefaultHost = config_->defaultLanHostname();
   const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
   const String oldLegacyRoleTxHost = oldLegacyDefaultHost + "-tx";
   const String oldLegacyRoleRxHost = oldLegacyDefaultHost + "-rx";
@@ -161,7 +161,7 @@ void WebConsole::handlePostSettings() {
         (prev.lan_hostname == oldLegacyRoleTxHost) || (prev.lan_hostname == oldLegacyRoleRxHost);
     if (wasDefaultHostname && (oldDefaultHost.equals(postedLanHost) || oldLegacyDefaultHost.equals(postedLanHost) ||
                                oldLegacyRoleTxHost.equals(postedLanHost) || oldLegacyRoleRxHost.equals(postedLanHost))) {
-      next.lan_hostname = config_->defaultLanHostnameForRole(next.role_tx);
+      next.lan_hostname = config_->defaultLanHostname();
     } else {
       next.lan_hostname = postedLanHost;
     }

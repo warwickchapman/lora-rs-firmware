@@ -27,6 +27,7 @@ Commands:
 - `src/mqtt_bridge.*`: MQTT publish/subscribe bridge
 - `src/sensor_manager.*`: DS18B20 detection/reads
 - `src/web_console.*`: embedded UI + REST endpoints
+- `src/runtime_utils.*`: shared pure helpers (role/mode parsing and WiFi status text) used by app + web/config paths to avoid cross-module coupling
 - `src/logger.*`: structured serial logs + optional UDP mirror
 
 ## 4. Critical Defaults

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "logger.h"
+#include "runtime_utils.h"
 
 namespace {
 constexpr char kConfigPath[] = "/config.json";
@@ -102,7 +103,7 @@ int dayOfYear(int y, int m, int d) {
   return doy;
 }
 
-String compileWeekStamp() {
+void compileWeekStamp(char out[5]) {
   const String date = __DATE__;
   const int mon = monthFromShort(date.substring(0, 3));
   const int day = date.substring(4, 6).toInt();
@@ -111,9 +112,7 @@ String compileWeekStamp() {
   const unsigned yy = static_cast<unsigned>(year % 100);
   const unsigned ww = static_cast<unsigned>(((dayOfYear(year, mon, day) - 1) / 7) + 1);
 
-  char out[6];
-  snprintf(out, sizeof(out), "%02u%02u", yy, ww);
-  return String(out);
+  snprintf(out, 5, "%02u%02u", yy, ww);
 }
 
 String deriveShortPassword(const String &chip) {
@@ -141,36 +140,6 @@ bool isAllowedConfigKey(const char *key) {
   return false;
 }
 
-bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleTx) {
-  if (mode == kModePaired) {
-    if (role == kRoleTransmitter) {
-      roleTx = true;
-      return true;
-    }
-    if (role == kRoleReceiver) {
-      roleTx = false;
-      return true;
-    }
-    return false;
-  }
-  if (mode == kModeMesh) {
-    if (role == kRoleCoordinator) {
-      roleTx = true;
-      return true;
-    }
-    if (role == kRoleNode) {
-      roleTx = false;
-      return true;
-    }
-    return false;
-  }
-  if (mode == kModeStandalone && role == kRoleNone) {
-    roleTx = true;
-    return true;
-  }
-  return false;
-}
-
 char readFirstNonWhitespace(File &f) {
   while (f.available()) {
     const int c = f.read();
@@ -191,6 +160,7 @@ bool ConfigStore::begin() {
   }
 
   setDefaults();
+  (void)chipIdHex();
 
   if (!LittleFS.exists(kConfigPath)) {
     LRS_LOGW(FS, "event=config_missing path=%s action=write_defaults", kConfigPath);
@@ -262,7 +232,7 @@ bool ConfigStore::begin() {
   cfg_.commissioned = root["commissioned"] | false;
   cfg_.mode = String(static_cast<const char *>(root["mode"] | ""));
   cfg_.role = String(static_cast<const char *>(root["role"] | ""));
-  if (!parseRoleTxFromModeRole(cfg_.mode, cfg_.role, cfg_.role_tx)) {
+  if (!runtime_utils::parseRoleTxFromModeRole(cfg_.mode, cfg_.role, cfg_.role_tx)) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=mode_role_invalid mode=%s role=%s action=reset_defaults", kConfigPath,
              cfg_.mode.c_str(), cfg_.role.c_str());
     ensureProvisionedDefaults();
@@ -620,14 +590,16 @@ bool ConfigStore::consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &kee
   return true;
 }
 
-String ConfigStore::chipIdHex() const {
-  char chip[9];
-  snprintf(chip, sizeof(chip), "%08x", ESP.getChipId());
-  return String(chip);
+const String &ConfigStore::chipIdHex() const {
+  if (chip_id_hex_cache_.length() == 0) {
+    char chip[9];
+    snprintf(chip, sizeof(chip), "%08x", ESP.getChipId());
+    chip_id_hex_cache_ = chip;
+  }
+  return chip_id_hex_cache_;
 }
 
-String ConfigStore::defaultLanHostnameForRole(bool roleTx) const {
-  (void)roleTx;
+String ConfigStore::defaultLanHostname() const {
   return String("lrs-") + chipIdHex();
 }
 
@@ -709,15 +681,13 @@ void ConfigStore::ensureProvisionedDefaults() {
 #endif
 
   const String chipHex = chipIdHex();
-  cfg_.lan_hostname = defaultLanHostnameForRole(cfg_.role_tx);
+  cfg_.lan_hostname = defaultLanHostname();
   cfg_.admin_password = deriveShortPassword(chipHex);
-  String serial;
-  serial.reserve(4 + 4 + 1 + chipHex.length());
-  serial = "lrs";
-  serial += compileWeekStamp();
-  serial += "-";
-  serial += chipHex;
-  cfg_.factory_serial = serial;
+  char weekStamp[5];
+  compileWeekStamp(weekStamp);
+  char serialBuf[24];
+  snprintf(serialBuf, sizeof(serialBuf), "lrs%s-%s", weekStamp, chipHex.c_str());
+  cfg_.factory_serial = serialBuf;
   cfg_.audit_last_saved_by = "factory";
   cfg_.audit_last_saved_ms = 0;
   cfg_.audit_last_reboot_reason = "power_on";
