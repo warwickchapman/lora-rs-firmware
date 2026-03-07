@@ -49,13 +49,11 @@ constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 4000;
 constexpr uint32_t kProvDiscoverReplyBaseMs = 2000;
 constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 1200;
 constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 10000;
-constexpr uint32_t kProvDiscoverEarlySettleMs = 800;
-constexpr uint8_t kProvDiscoverBroadcastBurstCount = 1;
+constexpr uint8_t kProvDiscoverBroadcastBurstCount = 2;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
 constexpr uint8_t kProvMaxRetriesPerNode = 1;
 constexpr uint8_t kProvAnnounceRepeatCount = 2;
-constexpr uint16_t kProvAnnounceSecondJitterMinMs = 120;
-constexpr uint16_t kProvAnnounceSecondJitterMaxMs = 420;
+constexpr uint16_t kProvAnnounceRetryBackoffMs = 120;
 constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
 constexpr size_t kProvChunkBitmapMax = 31;
@@ -1967,6 +1965,7 @@ void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
   if (!prov_rx_.discover_pending) return;
   if (prov_rx_.announce_remaining == 0) {
     prov_rx_.discover_pending = false;
+    prov_rx_.announce_second_at_ms = 0;
     return;
   }
   if (static_cast<int32_t>(now - prov_rx_.announce_at_ms) < 0) return;
@@ -1974,13 +1973,13 @@ void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
     if (prov_rx_.announce_remaining > 0) prov_rx_.announce_remaining--;
     if (prov_rx_.announce_remaining == 0) {
       prov_rx_.discover_pending = false;
+      prov_rx_.announce_second_at_ms = 0;
     } else {
-      prov_rx_.announce_at_ms =
-          now + static_cast<uint32_t>(random(kProvAnnounceSecondJitterMinMs, static_cast<long>(kProvAnnounceSecondJitterMaxMs + 1U)));
+      prov_rx_.announce_at_ms = prov_rx_.announce_second_at_ms;
     }
     lrslog::event("prov_announce_tx", 0, prov_rx_.session_nonce, runtime_.local_address);
   } else {
-    prov_rx_.announce_at_ms = now + 500U;
+    prov_rx_.announce_at_ms = now + kProvAnnounceRetryBackoffMs;
   }
 }
 
@@ -1998,11 +1997,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       }
       return;
     }
-    const uint32_t expected = (prov_.estimated_count > 0U) ? static_cast<uint32_t>(prov_.estimated_count) : 1U;
-    const bool enoughFound = static_cast<uint32_t>(prov_device_count_) >= expected;
-    const uint32_t settleAtMs = prov_.started_ms + prov_.discover_broadcast_window_ms + kProvDiscoverEarlySettleMs;
-    const bool settleElapsed = static_cast<int32_t>(now - settleAtMs) >= 0;
-    if ((enoughFound && settleElapsed) || static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
+    if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
       recomputeProvisioningConflictsAndAssignments();
       prov_.state = ProvisioningSessionState::Ready;
       return;
@@ -2275,8 +2270,24 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     prov_rx_.session_nonce = sessionNonce;
     prov_rx_.discover_pending = true;
     prov_rx_.announce_remaining = kProvAnnounceRepeatCount;
-    prov_rx_.announce_at_ms =
-        now + broadcastWindowMs + static_cast<uint32_t>(random(0, static_cast<long>(replyWindowMs + 1U)));
+    const uint32_t chip = ESP.getChipId();
+    const uint32_t seed = fnv1a32(reinterpret_cast<const uint8_t *>(&chip), sizeof(chip));
+    const uint32_t halfWindow = (replyWindowMs >= 2U) ? (replyWindowMs / 2U) : 1U;
+    const uint32_t slotA = (halfWindow > 0U) ? (seed % halfWindow) : 0U;
+    const uint32_t slotB = halfWindow + ((halfWindow > 0U) ? ((seed >> 12) % halfWindow) : 0U);
+    uint32_t jitterSpan = halfWindow / 6U;
+    if (jitterSpan < 30U) jitterSpan = 30U;
+    if (jitterSpan > 220U) jitterSpan = 220U;
+    const int32_t jitterA = static_cast<int32_t>(random(-static_cast<long>(jitterSpan), static_cast<long>(jitterSpan + 1U)));
+    const int32_t jitterB = static_cast<int32_t>(random(-static_cast<long>(jitterSpan), static_cast<long>(jitterSpan + 1U)));
+    int32_t relA = static_cast<int32_t>(slotA) + jitterA;
+    int32_t relB = static_cast<int32_t>(slotB) + jitterB;
+    if (relA < 0) relA = 0;
+    if (relA >= static_cast<int32_t>(halfWindow)) relA = static_cast<int32_t>(halfWindow - 1U);
+    if (relB < static_cast<int32_t>(halfWindow)) relB = static_cast<int32_t>(halfWindow);
+    if (relB >= static_cast<int32_t>(replyWindowMs)) relB = static_cast<int32_t>(replyWindowMs - 1U);
+    prov_rx_.announce_at_ms = now + broadcastWindowMs + static_cast<uint32_t>(relA);
+    prov_rx_.announce_second_at_ms = now + broadcastWindowMs + static_cast<uint32_t>(relB);
     lrslog::event("prov_discover_rx", msg.rssi, sessionNonce, 0);
     return true;
   }
@@ -2357,6 +2368,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     prov_rx_.key_transfer_active = false;
     prov_rx_.discover_pending = false;
     prov_rx_.announce_remaining = 0;
+    prov_rx_.announce_second_at_ms = 0;
     lrslog::event("prov_apply_rx", msg.rssi, sessionNonce, newAddr);
     return fleet_prov_apply_pending_;
   }

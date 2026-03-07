@@ -2211,24 +2211,25 @@ function renderProvisioningStatus(out) {
   const started = Number(sess.started_ms || 0);
   const elapsedMs = (now > 0 && started > 0 && now >= started) ? (now - started) : 0;
   const elapsedTxt = formatElapsedCompact(elapsedMs);
-  const total = Math.max(1, Number(sess.estimated_count || 0) || Number(sess.discovered_count || 0) || devices.length || 1);
+  const estimated = Math.max(1, Number(sess.estimated_count || 0) || Number(sess.discovered_count || 0) || devices.length || 1);
   const verified = Number(sess.verified_count || 0);
   const failed = Number(sess.failed_count || 0);
   const discovered = discoveredEffective;
-  const provisioned = Math.min(total, verified + failed);
+  const found = discovered;
+  const provisioned = Math.min(found, verified + failed);
   if (sessionLine) {
     if (!sess.active) {
       sessionLine.innerText = 'No provisioning session active.';
     } else if (st === 'discovering') {
-      sessionLine.innerText = `Discovering... ${discovered}/${total} found · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Discovering... Found ${found} (estimated ${estimated}) · elapsed ${elapsedTxt}`;
     } else if (st === 'ready') {
-      sessionLine.innerText = `Verified ${verified}/${total} · ready to provision ${discovered}/${total} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Found ${found} (estimated ${estimated}) · Verified ${verified} / Found ${found} · elapsed ${elapsedTxt}`;
     } else if (st === 'provisioning') {
-      sessionLine.innerText = `Provisioned ${provisioned}/${total} · verified ${verified}/${total} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Provisioned ${provisioned} / Found ${found} · Verified ${verified} / Found ${found} · elapsed ${elapsedTxt}`;
     } else if (st === 'complete') {
-      sessionLine.innerText = `Complete · verified ${verified}/${total} · failed ${failed}/${total} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Complete · Verified ${verified} / Found ${found} · Failed ${failed} · elapsed ${elapsedTxt}`;
     } else if (st === 'error') {
-      sessionLine.innerText = `Error · verified ${verified}/${total} · failed ${failed}/${total} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Error · Verified ${verified} / Found ${found} · Failed ${failed} · elapsed ${elapsedTxt}`;
     } else {
       sessionLine.innerText = `${provisioningSessionStateLabel(st)} · elapsed ${elapsedTxt}`;
     }
