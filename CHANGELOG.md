@@ -27,6 +27,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Fleet scan receive filtering on RX was relaxed for `PollRequest`: any same-fleet-key transmitter can scan/discover devices (not only the configured paired source address).
 - Fleet Devices table/detail now include a `Web UI` link when a device URL is known (`web_ui_url` present in fleet data).
 - Provisioning table low-memory notice now appears only for true compact payload conditions (low heap or row truncation); active discovery with no rows now reports `Awaiting device replies...`.
+- Fleet WiFi provisioning send path now treats empty posted SSID/password fields as “use stored settings,” preventing false `ssid_required` when Fleet Manage is used without opening Settings first.
+- Fleet WiFi provisioning UI now posts only explicit override fields, accepts HTTP error payloads, and surfaces specific errors (`ssid_required`, `cooldown_active`, `send_failed`) instead of generic `request_failed`.
 
 ## [0.5.9-alpha] - 2026-03-05
 

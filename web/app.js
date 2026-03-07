@@ -2377,19 +2377,21 @@ async function cancelFleetProvisioning() {
 async function provisionFleetWifi() {
   const el = document.getElementById('wifiProvisionResult');
   if (!el) return;
-  let body = collectNetworkBody();
-  if (!String(body.wifi_sta_ssid || '').trim().length) {
-    await loadSettingsPageData(false);
-    body = collectNetworkBody();
-  }
-  if (!String(body.wifi_sta_ssid || '').trim().length) {
-    el.className = 'result-line show err';
-    el.innerText = 'Enter STA SSID before sending WiFi to fleet.';
-    return;
-  }
+  const body = {};
+  const requestedSsid = normalizedInputValue('wifi_sta_ssid');
+  const requestedPass = inputValue('wifi_sta_password');
+  if (requestedSsid.length) body.wifi_sta_ssid = requestedSsid;
+  if (requestedPass.length) body.wifi_sta_password = requestedPass;
   el.className = 'result-line show';
   el.innerText = 'Sending WiFi credentials over LoRa...';
-  const out = await apiJson('/api/network/provision-fleet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), silent: true });
+  const out = await apiJson('/api/network/provision-fleet', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    silent: true,
+    allowHttpError: true,
+    timeoutMs: 20000
+  });
   if (out && out.ok) {
     const msg = `LoRa WiFi provisioning sent (${out.packets || '?'} packets broadcast)`;
     el.className = 'result-line show ok';
@@ -2408,6 +2410,20 @@ async function provisionFleetWifi() {
   if (out && out.error === 'cooldown_active') {
     const sec = Math.max(1, Number(out.retry_after_s || Math.ceil(Number(out.retry_after_ms || 0) / 1000) || 1));
     const msg = `Wait ${sec}s before sending WiFi provisioning again.`;
+    el.className = 'result-line show err';
+    el.innerText = msg;
+    showToast(msg, true);
+    return;
+  }
+  if (out && out.error === 'ssid_required') {
+    const msg = 'Enter STA SSID in Settings > Network, then retry.';
+    el.className = 'result-line show err';
+    el.innerText = msg;
+    showToast(msg, true);
+    return;
+  }
+  if (out && out.error === 'send_failed') {
+    const msg = 'Fleet WiFi send failed (radio busy). Retry in a few seconds.';
     el.className = 'result-line show err';
     el.innerText = msg;
     showToast(msg, true);

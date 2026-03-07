@@ -39,8 +39,16 @@ void WebConsole::handleProvisionFleetWifi() {
     return;
   }
   const auto &cfg = config_->settings();
-  const char *ssid = body["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str();
-  const char *pass = body["wifi_sta_password"] | cfg.wifi_sta_password.c_str();
+  const char *requestedSsid = body["wifi_sta_ssid"] | nullptr;
+  const char *requestedPass = body["wifi_sta_password"] | nullptr;
+  const char *ssid =
+      (requestedSsid != nullptr && requestedSsid[0] != '\0')
+          ? requestedSsid
+          : cfg.wifi_sta_ssid.c_str();
+  const char *pass =
+      (requestedPass != nullptr && requestedPass[0] != '\0')
+          ? requestedPass
+          : cfg.wifi_sta_password.c_str();
   const size_t ssidLen = (ssid != nullptr) ? strlen(ssid) : 0U;
   const size_t passLen = (pass != nullptr) ? strlen(pass) : 0U;
   if (ssidLen == 0U) {
