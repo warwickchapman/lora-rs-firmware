@@ -54,6 +54,20 @@ In `Network` tab:
 - Set LAN hostname (`<name>.local`).
 - Choose whether AP remains enabled after STA connects.
 
+## Fleet Behavior
+- `Standalone` mode is local-only. Fleet menu/actions are not available.
+- Fleet discovery/provisioning is available on TX/coordinator behavior only.
+- `Fleet > Devices` scan defaults to range `1..32` and can be changed up to `254`.
+- `Fleet > Manage > LoRa` discovery now prompts for expected factory devices when you press `Start Discovery` (no persistent estimate field).
+- Discovery stops when either:
+  - found count reaches expected count, or
+  - `120s` timeout is reached.
+- Provisioning table rows are the source of truth (no hidden count-only row mode).
+- `Fleet > Manage > WiFi` supports:
+  - send to all known devices
+  - per-device send
+  - optional per-device SSID/password override
+
 ## USB Flash (No VSCode/PlatformIO)
 You can flash release binaries and derive the login password with Python + `esptool`.
 

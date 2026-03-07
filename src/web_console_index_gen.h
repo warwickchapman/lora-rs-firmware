@@ -10,7 +10,7 @@ R"HTML(<button class="navbtn" id="nav-automations" onclick="showPage('automation
 )HTML"
 #endif
 R"HTML(<button class="navbtn" id="nav-sensors" onclick="showPage('sensors')">Sensors</button><button class="navbtn cog" id="nav-settings" onclick="showPage('settings')">Settings</button><div class="drawer-footer"><button class="drawer-tool" onclick="logout()" title="Logout" aria-label="Logout">⎋</button><button class="drawer-tool theme-toggle" id="themeBtnDrawer" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">☀</button></div></aside><header><button class="menu-btn" id="menuBtn" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button><div id="consoleTitle" class="title">lrs-00000000</div><div class="right"><div id="relayHeader" class="relay-head off" title="Relay off" aria-label="Relay off">⚪</div><div id="loraBadge" class="wifi"><span id="loraIcon" class="sig lora lv0"><i></i><i></i><i></i><i></i></span><span id="loraText">LoRa</span></div><div id="wifiBadge" class="wifi"><span id="wifiIcon" class="wifi-icon lv0"><svg viewBox="0 0 20 14" aria-hidden="true"><path class="arc a1" d="M1 6.5c5-5 13-5 18 0"></path><path class="arc a2" d="M4.5 9c3-3 8-3 11 0"></path><path class="arc a3" d="M7.8 11.2c1.2-1.2 3.2-1.2 4.4 0"></path><circle class="dot" cx="10" cy="12.6" r="1.2"></circle><path class="x" d="M2 2l3 3"></path><path class="x" d="M5 2l-3 3"></path></svg></span><span id="wifiText">WiFi</span></div></div></header><main>
-<section class="card page active" id="page-status"><div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div><div class="status-grid"><div><div id="statusLiteTable" class="status-table">Loading metrics...</div><button id="btnLoadStatusDetails" class="details-btn" onclick="toggleStatusDetails()">Load Full Details</button><div id="statusDetailsPane" class="status-details"><div id="statusTable" class="status-table">Loading details...</div><div class="sensor-grid" id="statusSensors"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div></div></div></div><div class="status-side"><div class="relay-card"><div id="relayBadge" class="relay-badge off">RELAY OFF</div><div id="relayMeta" class="small" style="margin-top:8px">Input: -, Link: -</div></div><h4 style="margin:0 0 2px 0">Sensors</h4><div class="status-sensor-grid"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div><div class="sensor-tile">Tank: n/a</div><div class="sensor-tile">Float: n/a</div><div class="sensor-tile">Flow: n/a</div></div></div></div></section><section class="card page" id="page-fleet"><h3>Fleet</h3><div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div><div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div class="grid" style="margin-top:8px"><div><label>Scan start address</label><input id="fleetScanStart" type="number" min="1" max="254" value="1" /></div><div><label>Scan end address</label><input id="fleetScanEnd" type="number" min="1" max="254" value="32" /></div><div><label>Scan interval (ms)</label><input id="fleetScanIntervalMs" type="number" min="80" max="2000" value="120" /></div><div style="display:flex;align-items:end"><div class="actions"><button type="button" id="fleetScanBtn" onclick="toggleFleetScan()">Scan Fleet</button></div></div></div><div class="small" id="fleetScanSummary" style="margin-top:4px">Scan idle.</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div><div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network and broadcasts them to devices in the same fleet.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to Fleet (LoRa)</button></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet in batches of up to 8 devices.</div><div class="grid"><div><label>Estimated devices (max 8)</label><input id="prov_estimated_count" type="number" min="1" max="8" value="2" /></div></div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Status</th><th>Chip ID</th><th>Cur Addr</th><th>New Addr</th><th>FW Ver</th><th>RSSI</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div><div class="small">If more than 8 devices respond, provision this batch first, then run discovery again.</div></div></div></div></div></section>
+<section class="card page active" id="page-status"><div class="status-head"><h3>Status <span id="statusLiveState" class="status-live-dot" title="Waiting for device updates..." aria-label="Waiting for device updates...">🟡</span></h3><div id="statusHeadDevice" class="status-head-device"><span id="statusHeadDeviceText" class="name">Device: -</span><button id="statusHeadDeviceCopy" type="button" class="copy-btn" data-copy="" data-label="Device identity" onclick="copyFromButton(this)">Copy</button></div></div><div class="status-grid"><div><div id="statusLiteTable" class="status-table">Loading metrics...</div><button id="btnLoadStatusDetails" class="details-btn" onclick="toggleStatusDetails()">Load Full Details</button><div id="statusDetailsPane" class="status-details"><div id="statusTable" class="status-table">Loading details...</div><div class="sensor-grid" id="statusSensors"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div></div></div></div><div class="status-side"><div class="relay-card"><div id="relayBadge" class="relay-badge off">RELAY OFF</div><div id="relayMeta" class="small" style="margin-top:8px">Input: -, Link: -</div></div><h4 style="margin:0 0 2px 0">Sensors</h4><div class="status-sensor-grid"><div class="sensor-tile" id="sensorTempTile">Temperature: n/a</div><div class="sensor-tile" id="sensorRemoteTempTile">Remote LoRa temp: n/a</div><div class="sensor-tile" id="sensorInputTile">Dry contact input: <span class="sensor-state open">OPEN</span></div><div class="sensor-tile">Tank: n/a</div><div class="sensor-tile">Float: n/a</div><div class="sensor-tile">Flow: n/a</div></div></div></div></section><section class="card page" id="page-fleet"><h3>Fleet</h3><div class="settings-tabs"><button class="tabbtn active" id="fleet-tab-devices" onclick="showFleetTab('devices')">Devices</button><button class="tabbtn" id="fleet-tab-manage" onclick="showFleetTab('manage')">Manage</button></div><div class="fleet-pane active" id="fleet-pane-devices"><div class="small" id="fleetSummary">Loading...</div><div class="grid" style="margin-top:8px"><div><label>Scan start address</label><input id="fleetScanStart" type="number" min="1" max="254" value="1" /></div><div><label>Scan end address</label><input id="fleetScanEnd" type="number" min="1" max="254" value="32" /></div><div><label>Scan interval (ms)</label><input id="fleetScanIntervalMs" type="number" min="80" max="2000" value="120" /></div><div style="display:flex;align-items:end"><div class="actions"><button type="button" id="fleetScanBtn" onclick="toggleFleetScan()">Scan Fleet</button></div></div></div><div class="small" id="fleetScanSummary" style="margin-top:4px">Scan idle.</div><div id="fleetTableHost" style="margin-top:8px">Loading device list...</div><div id="fleetDetailHost" class="fleet-detail">Select a device to view details.</div></div><div class="fleet-pane" id="fleet-pane-manage"><div class="settings-tabs"><button class="tabbtn active" id="fleet-manage-tab-lora" onclick="showFleetManageTab('lora')">LoRa</button><button class="tabbtn" id="fleet-manage-tab-wifi" onclick="showFleetManageTab('wifi')">WiFi</button></div><div class="settings-pane" id="fleet-manage-pane-wifi"><div class="grid"><div style="grid-column:1/-1"><label>WiFi provisioning</label><div class="small">Uses STA SSID/password from Settings > Network. Send to all known fleet devices or target one device with optional overrides.</div><div class="actions"><button type="button" onclick="provisionFleetWifi()">Send WiFi to All (LoRa)</button></div><div id="fleetWifiDeviceList" style="margin-top:8px"></div><div id="wifiProvisionResult" class="result-line"></div></div></div></div><div class="settings-pane active" id="fleet-manage-pane-lora"><div class="grid"><div style="grid-column:1/-1"><label>LoRa provisioning</label><div class="small">Discover factory-key devices, auto-resolve duplicate addresses, and provision them into this fleet in batches of up to 8 devices.</div><div class="actions"><button type="button" onclick="startFleetProvisioningDiscovery()">Start Discovery</button><button type="button" onclick="cancelFleetProvisioning()">Cancel</button></div><div id="provWizardResult" class="result-line"></div><div id="provWizardSummary" class="small" style="margin-top:6px"></div><div style="overflow:auto;max-height:260px;border:1px solid var(--border);border-radius:10px;margin-top:8px"><table class="table" style="margin:0"><thead><tr><th>Status</th><th>Chip ID</th><th>Cur Addr</th><th>New Addr</th><th>FW Ver</th><th>RSSI</th></tr></thead><tbody id="provWizardRows"><tr><td colspan="6" class="small">No provisioning session active.</td></tr></tbody></table></div><div class="actions" style="margin-top:8px"><button type="button" onclick="provisionFleetAll()" id="provProvisionAllBtn" disabled>Provision All</button></div><div class="small">If more than 8 devices respond, provision this batch first, then run discovery again.</div></div></div></div></div></section>
 )HTML"
 #if LRS_ENABLE_AUTOMATIONS
 R"HTML(<section class="card page" id="page-automations">
@@ -60,6 +60,7 @@ let automationsDoc = null;
 let currentApIp = '';
 let currentApMdns = '';
 let lastRoleIsTx = false;
+let lastMode = 'paired';
 let fleetDevicesCache = [];
 let selectedFleetDeviceAddr = 0;
 let fleetDeviceDetailTab = 'state';
@@ -636,7 +637,7 @@ function showFleetTab(tab) {
   syncPagePolling();
 }
 async function resolveFleetLandingTab() {
-  if (activePage !== 'fleet' || !lastRoleIsTx) return;
+  if (activePage !== 'fleet' || !lastRoleIsTx || lastMode === 'standalone') return;
   const token = ++fleetLandingDecisionToken;
   if (Array.isArray(fleetDevicesCache) && fleetDevicesCache.length > 0) {
     showFleetTab('devices');
@@ -664,6 +665,7 @@ function showFleetManageTab(tab) {
   if (!(activePage === 'fleet' && activeFleetTab === 'manage')) return;
   if (target !== 'lora') {
     stopProvisioningPolling();
+    renderFleetWifiTargets(fleetDevicesCache);
   } else {
     startProvisioningPolling();
   }
@@ -1103,8 +1105,9 @@ function showPage(page) {
 }
 function applyFleetTabVisibility() {
   const fleetTabBtn = document.getElementById('nav-fleet');
-  if (fleetTabBtn) { fleetTabBtn.style.display = lastRoleIsTx ? '' : 'none'; }
-  if (!lastRoleIsTx && activePage === 'fleet') { showPage('status'); }
+  const fleetEnabled = (lastMode !== 'standalone') && lastRoleIsTx;
+  if (fleetTabBtn) { fleetTabBtn.style.display = fleetEnabled ? '' : 'none'; }
+  if (!fleetEnabled && activePage === 'fleet') { showPage('status'); }
 }
 function showToast(msg, isError = false) {
   const t = document.getElementById('toast');
@@ -1339,7 +1342,7 @@ function startStatusLiveSse() {
       } catch (e) { }
     };
     const onFleetEvent = (ev) => {
-      if (!(activePage === 'fleet' && activeFleetTab === 'devices')) return;
+      if (activePage !== 'fleet') return;
       try {
         const fleet = JSON.parse(ev.data);
         const role = String(fleet.role || '').toLowerCase();
@@ -1347,9 +1350,10 @@ function startStatusLiveSse() {
         if (role !== 'tx') return;
         const devices = Array.isArray(fleet.devices) ? fleet.devices : [];
         fleetDevicesCache = devices;
-        const summary = document.getElementById('fleetSummary');
-        if (summary) summary.innerText = `Discovered devices: ${devices.length} | Global schedule default: ${Math.max(60, Math.round(Number(fleet.tx_default_poll_interval_ms || 60000) / 1000))}s | Global polling: ${fleet.tx_polling_enabled ? 'enabled' : 'disabled'}`;
-        renderFleetTable(devices);
+        renderFleetWifiTargets(devices);
+        if (activeFleetTab === 'devices') {
+          renderFleetTable(devices, fleet);
+        }
       } catch (e) { }
     };
     const onProvisioningEvent = (ev) => {
@@ -1413,6 +1417,7 @@ function applyStatusPageState(st) {
   applyFleetTabVisibility();
   const roleIsTx = lastRoleIsTx;
   const modeRaw = String(st.mode || 'paired').toLowerCase();
+  lastMode = modeRaw;
   const roleRaw = String(st.role_name || '').toLowerCase();
   const modeDisplay = modeRaw === 'mesh' ? 'Mesh' : (modeRaw === 'standalone' ? 'Standalone' : 'Paired');
   let roleDisplayName = roleRaw;
@@ -1573,6 +1578,7 @@ function applyHeaderStatus(st) {
   if (!st) return;
   const footerMem = document.getElementById('footerMem');
   const modeRaw = String(st.mode || 'paired').toLowerCase();
+  lastMode = modeRaw;
   const titleEl = document.getElementById('consoleTitle');
   const hLan = st.lan_hostname ? String(st.lan_hostname) : '';
   const hMdns = st.mdns_lan ? String(st.mdns_lan) : '';
@@ -1703,6 +1709,7 @@ async function loadSettingsPageData(force) {
     const s = await apiJson('/api/settings', { silent: true, timeoutMs: 6000 });
     if (!s) return;
     lastRoleIsTx = !!s.role_tx;
+    lastMode = String(s.mode || 'paired').toLowerCase();
     applyFleetTabVisibility();
     Object.keys(s).forEach(k => {
       const el = document.getElementById(k);
@@ -2222,8 +2229,6 @@ function renderProvisioningStatus(out) {
     : incomingDevices;
   const discoveredRaw = Number(sess.discovered_count || 0);
   const discoveredEffective = Math.max(discoveredRaw, devices.length);
-  const compactMode = !!(sess && (sess.compact || sess.devices_truncated));
-  const compactReason = String((sess && sess.compact_reason) || '');
   if (provisionBtn) {
     const canProvision = (st === 'ready' && discoveredEffective > 0);
     provisionBtn.disabled = !canProvision;
@@ -2275,9 +2280,7 @@ function renderProvisioningStatus(out) {
   }
   if (!devices.length) {
     let emptyText = 'No devices discovered yet.';
-    if (compactMode && (compactReason === 'low_heap' || compactReason === 'truncated_rows')) {
-      emptyText = 'Low-memory mode: showing counts only (keeping rows when available).';
-    } else if (sess.active && (st === 'discovering' || st === 'ready' || st === 'provisioning')) {
+    if (sess.active && (st === 'discovering' || st === 'ready' || st === 'provisioning')) {
       emptyText = 'Awaiting device replies...';
     }
     rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${emptyText}</td></tr>`;
@@ -2358,8 +2361,9 @@ function syncPagePolling() {
 }
 async function startFleetProvisioningDiscovery() {
   const result = document.getElementById('provWizardResult');
-  const estEl = document.getElementById('prov_estimated_count');
-  const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 2) || 2));
+  const raw = window.prompt('How many factory-default devices are powered up? (1-8)', '2');
+  if (raw === null) return;
+  const est = Math.max(1, Math.min(8, Number(raw) || 2));
   clearProvisioningStickyRows();
   suspendGlobalPollsUntilMs = Date.now() + 5000;
   if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }
@@ -2394,16 +2398,22 @@ async function cancelFleetProvisioning() {
   const result = document.getElementById('provWizardResult');
   if (result) { result.className = 'result-line show'; result.innerText = out && out.session && out.session.active ? 'Provisioning session updated.' : 'Provisioning session cancelled.'; }
 }
-async function provisionFleetWifi() {
+async function provisionFleetWifi(targetAddr, overrideSsid, overridePass) {
   const el = document.getElementById('wifiProvisionResult');
   if (!el) return;
   const body = {};
-  const requestedSsid = normalizedInputValue('wifi_sta_ssid');
-  const requestedPass = inputValue('wifi_sta_password');
+  const requestedSsid = String(overrideSsid || '').trim() || normalizedInputValue('wifi_sta_ssid');
+  const requestedPass = String(overridePass || '') || inputValue('wifi_sta_password');
   if (requestedSsid.length) body.wifi_sta_ssid = requestedSsid;
   if (requestedPass.length) body.wifi_sta_password = requestedPass;
+  const target = Math.floor(Number(targetAddr || 0));
+  if (Number.isFinite(target) && target >= 1 && target <= 254) {
+    body.target_address = target;
+  }
   el.className = 'result-line show';
-  el.innerText = 'Sending WiFi credentials over LoRa...';
+  el.innerText = (body.target_address > 0)
+    ? `Sending WiFi credentials to ${toHexByte(body.target_address)} over LoRa...`
+    : 'Sending WiFi credentials over LoRa...';
   const out = await apiJson('/api/network/provision-fleet', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2413,7 +2423,8 @@ async function provisionFleetWifi() {
     timeoutMs: 20000
   });
   if (out && out.ok) {
-    const msg = `LoRa WiFi provisioning sent (${out.packets || '?'} packets broadcast)`;
+    const targetTxt = (body.target_address > 0) ? ` to ${toHexByte(body.target_address)}` : ' (broadcast)';
+    const msg = `LoRa WiFi provisioning sent${targetTxt} (${out.packets || '?'} packets)`;
     el.className = 'result-line show ok';
     el.innerText = msg;
     if (wifiProvisionResultTimer) { clearTimeout(wifiProvisionResultTimer); wifiProvisionResultTimer = 0; }
@@ -2454,6 +2465,36 @@ async function provisionFleetWifi() {
   el.className = 'result-line show err';
   el.innerText = msg;
   showToast(msg, true);
+}
+function provisionFleetWifiTo(addr) {
+  const ssidEl = document.getElementById(`wifi-override-ssid-${addr}`);
+  const passEl = document.getElementById(`wifi-override-pass-${addr}`);
+  const ssid = ssidEl ? String(ssidEl.value || '').trim() : '';
+  const pass = passEl ? String(passEl.value || '') : '';
+  provisionFleetWifi(addr, ssid, pass);
+}
+function renderFleetWifiTargets(devices) {
+  const host = document.getElementById('fleetWifiDeviceList');
+  if (!host) return;
+  const list = Array.isArray(devices) ? devices : [];
+  if (!list.length) {
+    host.innerHTML = '<div class="small">No known fleet devices yet.</div>';
+    return;
+  }
+  const rows = list.map((d) => {
+    const addr = Number(d.address || 0);
+    const seenAge = (Number(d.last_seen_ms || 0) > 0) ? humanAgeMsShort(d.last_seen_age_ms || 0) : 'unknown';
+    const state = Number(d.last_seen_ms || 0) > 0 ? 'online' : 'cached';
+    return `<tr>
+      <td class="mono">${escapeHtml(fleetDeviceAddrHex(d))}</td>
+      <td>${escapeHtml(state)}</td>
+      <td>${escapeHtml(seenAge)}</td>
+      <td><input id="wifi-override-ssid-${addr}" type="text" placeholder="Optional SSID override" /></td>
+      <td><input id="wifi-override-pass-${addr}" type="password" placeholder="Optional password override" /></td>
+      <td><button type="button" onclick="provisionFleetWifiTo(${addr})">Send</button></td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Status</th><th>Last Seen</th><th>SSID Override</th><th>Password Override</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 async function testMqtt() {
   const body = collectMqttBody();
@@ -2698,6 +2739,47 @@ async function toggleFleetScan() {
   updateFleetScanUi(out);
   await refreshFleet();
 }
+function renderFleetTable(devices, fleetMeta) {
+  const host = document.getElementById('fleetTableHost');
+  const summary = document.getElementById('fleetSummary');
+  const detail = document.getElementById('fleetDetailHost');
+  if (!host || !summary) return;
+  const list = Array.isArray(devices) ? devices : [];
+  const pollMs = Number((fleetMeta && fleetMeta.tx_default_poll_interval_ms) || 60000);
+  const pollEnabled = !!(fleetMeta && fleetMeta.tx_polling_enabled);
+  summary.innerText = `Discovered devices: ${list.length} | Global schedule default: ${Math.max(60, Math.round(pollMs / 1000))}s | Global polling: ${pollEnabled ? 'enabled' : 'disabled'}`;
+  if (list.length === 0) {
+    host.innerHTML = 'No devices discovered yet.';
+    if (detail) detail.innerHTML = 'No device selected.';
+    selectedFleetDeviceAddr = 0;
+    return;
+  }
+  if (!list.some((r) => Number(r.address || 0) === Number(selectedFleetDeviceAddr || 0))) {
+    selectedFleetDeviceAddr = Number(list[0].address || 0);
+  }
+  const rows = list.map((r) => {
+    const addrHex = fleetDeviceAddrHex(r);
+    const addr = Number(r.address || 0);
+    const seenAge = (Number(r.last_seen_ms || 0) > 0) ? humanAgeMsShort(r.last_seen_age_ms || 0) : 'never';
+    const freshness = freshnessChip(r);
+    const webUiUrl = fleetDeviceWebUiUrl(r);
+    const webUiCell = webUiUrl.length
+      ? `<a href="${escapeHtml(webUiUrl)}" target="_blank" rel="noopener">Open</a>`
+      : '<span class="small">-</span>';
+    const selectedCls = addr === Number(selectedFleetDeviceAddr || 0) ? 'selected' : '';
+    return `<tr class="${selectedCls}">
+   <td><b>${escapeHtml(addrHex)}</b></td>
+   <td>${relayChip(r.relay_state)}</td>
+   <td>${inputChip(r.input_state)}</td>
+   <td>${escapeHtml(fleetDeviceTempText(r))}</td>
+   <td>${freshness} ${escapeHtml(seenAge)}</td>
+   <td>${webUiCell}</td>
+   <td><button type="button" onclick="selectFleetDevice(${addr})">View</button></td>
+  </tr>`;
+  }).join('');
+  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Web UI</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
+  renderFleetDeviceDetail();
+}
 async function refreshFleet() {
   if (!(activePage === 'fleet' && activeFleetTab === 'devices')) return;
   if (fleetRefreshInFlight) return;
@@ -2725,39 +2807,8 @@ async function refreshFleet() {
   }
   const devices = Array.isArray(out.devices) ? out.devices : [];
   fleetDevicesCache = devices;
-  summary.innerText = `Discovered devices: ${devices.length} | Global schedule default: ${Math.max(60, Math.round(Number(out.tx_default_poll_interval_ms || 60000) / 1000))}s | Global polling: ${out.tx_polling_enabled ? 'enabled' : 'disabled'}`;
-  if (devices.length === 0) {
-    host.innerHTML = 'No devices discovered yet.';
-    if (detail) detail.innerHTML = 'No device selected.';
-    selectedFleetDeviceAddr = 0;
-    fleetRefreshInFlight = false;
-    return;
-  }
-  if (!devices.some((r) => Number(r.address || 0) === Number(selectedFleetDeviceAddr || 0))) {
-    selectedFleetDeviceAddr = Number(devices[0].address || 0);
-  }
-  const rows = devices.map((r) => {
-    const addrHex = fleetDeviceAddrHex(r);
-    const addr = Number(r.address || 0);
-    const seenAge = (Number(r.last_seen_ms || 0) > 0) ? humanAgeMsShort(r.last_seen_age_ms || 0) : 'never';
-    const freshness = freshnessChip(r);
-    const webUiUrl = fleetDeviceWebUiUrl(r);
-    const webUiCell = webUiUrl.length
-      ? `<a href="${escapeHtml(webUiUrl)}" target="_blank" rel="noopener">Open</a>`
-      : '<span class="small">-</span>';
-    const selectedCls = addr === Number(selectedFleetDeviceAddr || 0) ? 'selected' : '';
-    return `<tr class="${selectedCls}">
-   <td><b>${escapeHtml(addrHex)}</b></td>
-   <td>${relayChip(r.relay_state)}</td>
-   <td>${inputChip(r.input_state)}</td>
-   <td>${escapeHtml(fleetDeviceTempText(r))}</td>
-   <td>${freshness} ${escapeHtml(seenAge)}</td>
-   <td>${webUiCell}</td>
-   <td><button type="button" onclick="selectFleetDevice(${addr})">View</button></td>
-  </tr>`;
-  }).join('');
-  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Web UI</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
-  renderFleetDeviceDetail();
+  renderFleetTable(devices, out);
+  renderFleetWifiTargets(devices);
   fleetRefreshInFlight = false;
 }
 async function importConfig(file) {

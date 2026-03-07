@@ -58,11 +58,8 @@ mDNS behavior:
 ## 5. Configuration (Web UI)
 Tabs:
 - Status
-- LoRa
-- Network
-- MQTT
-- Sensors
-- Factory
+- Fleet (hidden in standalone mode)
+- Settings: LoRa / Network / MQTT / System
 
 Minimum required settings:
 - Mode and role (mode-aware)
@@ -75,6 +72,11 @@ Minimum required settings:
 - `mesh` mode: coordinator/node role naming with the same underlying TX/RX branch behavior.
 - `standalone` mode: local-only role (`none`) for non-paired local operation.
 - Addressing still defines 1-to-1, 1-to-many, and many-to-1 layouts.
+
+Fleet workflow:
+- `Fleet > Manage > LoRa`: discovery + provisioning for factory devices.
+- `Fleet > Devices`: peer scan defaults to `1..32` (manual max `254`) and shows cached known peers immediately.
+- `Fleet > Manage > WiFi`: send WiFi credentials to all known peers or target a single peer with optional override credentials.
 
 Addressing and mode/role together define effective behavior and control ownership.
 

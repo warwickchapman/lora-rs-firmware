@@ -9,10 +9,34 @@
 
 using namespace webconsole_internal;
 
+namespace {
+bool listHasAddress(const uint8_t *list, uint8_t count, uint8_t addr) {
+  if (addr == 0 || addr == 255)
+    return false;
+  const uint8_t capped =
+      (count > Settings::kAddressListCap) ? Settings::kAddressListCap : count;
+  for (uint8_t i = 0; i < capped; ++i) {
+    if (list[i] == addr)
+      return true;
+  }
+  return false;
+}
+
+bool listAppendUnique(uint8_t *list, uint8_t &count, uint8_t addr) {
+  if (addr == 0 || addr == 255)
+    return false;
+  if (listHasAddress(list, count, addr))
+    return false;
+  if (count >= Settings::kAddressListCap)
+    return false;
+  list[count++] = addr;
+  return true;
+}
+} // namespace
+
 void WebConsole::buildFleetJson(JsonDocument &doc) {
   auto &cfg = config_->settings();
-  const size_t peerCount =
-      (cfg.role_tx && sm_ != nullptr) ? sm_->peerCount() : 0;
+  const size_t peerCount = (cfg.role_tx && sm_ != nullptr) ? sm_->peerCount() : 0;
   size_t docCapacity = kFleetDocBaseBytes + (peerCount * kFleetDocPerPeerBytes);
   if (docCapacity < kFleetDocMinBytes)
     docCapacity = kFleetDocMinBytes;
@@ -64,10 +88,19 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
   }
   JsonArray arr = doc["devices"].to<JsonArray>();
   if (cfg.role_tx && sm_ != nullptr) {
+    uint8_t activeAddrs[Settings::kAddressListCap]{};
+    uint8_t activeCount = 0;
+    bool knownChanged = false;
+
     for (size_t i = 0; i < peerCount; ++i) {
       PeerStatusSnapshot node{};
       if (!sm_->peerByIndex(i, node))
         continue;
+      listAppendUnique(activeAddrs, activeCount, node.address);
+      if (listAppendUnique(cfg.known_peer_addresses, cfg.known_peer_count,
+                           node.address)) {
+        knownChanged = true;
+      }
       JsonObject r = arr.add<JsonObject>();
       r["address"] = node.address;
       char addrHex[5];
@@ -108,6 +141,50 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
       r["stale_threshold_ms"] = staleAfterMs;
       r["stale"] = (node.last_seen_ms == 0) || (seenAgeMs > staleAfterMs);
     }
+
+    // Include cached known peers even before live scan replies arrive.
+    const uint8_t knownCapped = (cfg.known_peer_count > Settings::kAddressListCap)
+                                    ? Settings::kAddressListCap
+                                    : cfg.known_peer_count;
+    for (uint8_t i = 0; i < knownCapped; ++i) {
+      const uint8_t addr = cfg.known_peer_addresses[i];
+      if (addr == 0 || addr == 255 || listHasAddress(activeAddrs, activeCount, addr)) {
+        continue;
+      }
+      JsonObject r = arr.add<JsonObject>();
+      r["address"] = addr;
+      char addrHex[5];
+      snprintf(addrHex, sizeof(addrHex), "0x%02X", addr);
+      r["addr_hex"] = addrHex;
+      r["relay_state"] = 0;
+      r["input_state"] = 0;
+      r["temp_valid"] = false;
+      r["temp_c"] = 0;
+      r["uplink_rssi"] = -127;
+      r["downlink_rssi_valid"] = false;
+      r["downlink_rssi"] = -127;
+      r["last_seen_ms"] = 0;
+      r["last_seen_age_ms"] = 0;
+      r["last_cmd_counter"] = 0;
+      r["ack_state"] = "unknown";
+      r["poll_interval_ms"] = 0;
+      r["poll_interval_s"] = 0;
+      r["last_poll_tx_ms"] = 0;
+      r["last_poll_age_ms"] = 0;
+      r["poll_pending"] = false;
+      r["poll_state"] = "idle";
+      r["expected_interval_ms"] = 0;
+      r["stale_after_ms"] = 0;
+      r["stale_threshold_ms"] = 0;
+      r["stale"] = true;
+      r["known_only"] = true;
+    }
+
+    if (knownChanged) {
+      cfg.audit_last_saved_by = "fleet_known_peers";
+      cfg.audit_last_saved_ms = millis();
+      config_->save();
+    }
   }
   if (doc.overflowed()) {
     LRS_LOGW(API, "event=fleet_json_overflow peers=%u cap=%u",
@@ -123,6 +200,15 @@ void WebConsole::handleFleet() {
     return;
   JsonDocument doc;
   buildFleetJson(doc);
+  auto &cfg = config_->settings();
+  if (cfg.mode == "standalone") {
+    doc["role"] = cfg.role_tx ? "tx" : "rx";
+    doc["mode"] = cfg.mode;
+    doc["ok"] = false;
+    doc["error"] = "fleet_disabled_in_standalone";
+    doc["devices"].to<JsonArray>().clear();
+    doc["scan"].to<JsonObject>().clear();
+  }
   const size_t len = measureJson(doc);
   server_.setContentLength(len);
   markResponseStatus(200);
@@ -145,6 +231,11 @@ bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
   if (!requireAuth(true))
     return true;
   auto &cfg = config_->settings();
+  if (cfg.mode == "standalone") {
+    server_.send(409, "application/json",
+                 "{\"ok\":false,\"error\":\"fleet_disabled_in_standalone\"}");
+    return true;
+  }
   if (!cfg.role_tx || sm_ == nullptr) {
     server_.send(400, "application/json",
                  "{\"ok\":false,\"error\":\"tx_only\"}");
@@ -221,6 +312,11 @@ void WebConsole::handleFleetScan() {
   if (!requireAuth(true))
     return;
   auto &cfg = config_->settings();
+  if (cfg.mode == "standalone") {
+    sendTracked(409, "application/json",
+                "{\"ok\":false,\"error\":\"fleet_disabled_in_standalone\"}");
+    return;
+  }
   if (!cfg.role_tx || sm_ == nullptr) {
     sendTracked(400, "application/json",
                 "{\"ok\":false,\"error\":\"tx_only\"}");

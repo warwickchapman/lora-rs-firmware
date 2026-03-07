@@ -35,6 +35,9 @@ constexpr const char *kAllowedFields[] = {
     "role",
     "local_address",
     "remote_address",
+    "paired_target_addresses",
+    "allowed_controller_addresses",
+    "known_peer_addresses",
     "lora_frequency_hz",
     "lora_tx_power",
     "lora_spreading_factor",
@@ -140,6 +143,42 @@ bool isAllowedConfigKey(const char *key) {
   return false;
 }
 
+uint8_t parseAddressList(JsonVariantConst src, uint8_t *out, uint8_t cap) {
+  if (out == nullptr || cap == 0) return 0;
+  for (uint8_t i = 0; i < cap; ++i) out[i] = 0;
+  if (src.isNull()) return 0;
+  if (!src.is<JsonArrayConst>()) return 0;
+  JsonArrayConst arr = src.as<JsonArrayConst>();
+  uint8_t count = 0;
+  for (JsonVariantConst v : arr) {
+    if (!v.is<uint8_t>() && !v.is<unsigned int>() && !v.is<int>()) continue;
+    const int addr = v.as<int>();
+    if (addr < 1 || addr > 254) continue;
+    bool dup = false;
+    for (uint8_t i = 0; i < count; ++i) {
+      if (out[i] == static_cast<uint8_t>(addr)) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    out[count++] = static_cast<uint8_t>(addr);
+    if (count >= cap) break;
+  }
+  return count;
+}
+
+void writeAddressList(JsonDocument &doc, const char *key, const uint8_t *values, uint8_t count, uint8_t cap) {
+  JsonArray arr = doc[key].to<JsonArray>();
+  if (values == nullptr || cap == 0) return;
+  if (count > cap) count = cap;
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint8_t addr = values[i];
+    if (addr < 1 || addr > 254) continue;
+    arr.add(addr);
+  }
+}
+
 char readFirstNonWhitespace(File &f) {
   while (f.available()) {
     const int c = f.read();
@@ -241,6 +280,10 @@ bool ConfigStore::begin() {
 
   cfg_.local_address = root["local_address"] | 1;
   cfg_.remote_address = root["remote_address"] | 2;
+  cfg_.paired_target_count = parseAddressList(root["paired_target_addresses"], cfg_.paired_target_addresses, Settings::kAddressListCap);
+  cfg_.allowed_controller_count =
+      parseAddressList(root["allowed_controller_addresses"], cfg_.allowed_controller_addresses, Settings::kAddressListCap);
+  cfg_.known_peer_count = parseAddressList(root["known_peer_addresses"], cfg_.known_peer_addresses, Settings::kAddressListCap);
 
   cfg_.lora_frequency_hz = root["lora_frequency_hz"] | 433000000L;
   cfg_.lora_tx_power = root["lora_tx_power"] | 17;
@@ -291,6 +334,16 @@ bool ConfigStore::begin() {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=address_range action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
+  }
+  if (cfg_.paired_target_count == 0 && cfg_.remote_address >= 1 && cfg_.remote_address <= 254) {
+    cfg_.paired_target_count = 1;
+    cfg_.paired_target_addresses[0] = cfg_.remote_address;
+  } else if (cfg_.paired_target_count > 0) {
+    cfg_.remote_address = cfg_.paired_target_addresses[0];
+  }
+  if (cfg_.allowed_controller_count == 0 && cfg_.remote_address >= 1 && cfg_.remote_address <= 254) {
+    cfg_.allowed_controller_count = 1;
+    cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
   }
   if (cfg_.mqtt_control_enabled && !cfg_.mqtt_client_enabled) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=mqtt_control_requires_client action=reset_defaults", kConfigPath);
@@ -348,6 +401,10 @@ bool ConfigStore::save() {
   doc["role"] = cfg_.role;
   doc["local_address"] = cfg_.local_address;
   doc["remote_address"] = cfg_.remote_address;
+  writeAddressList(doc, "paired_target_addresses", cfg_.paired_target_addresses, cfg_.paired_target_count, Settings::kAddressListCap);
+  writeAddressList(doc, "allowed_controller_addresses", cfg_.allowed_controller_addresses, cfg_.allowed_controller_count,
+                   Settings::kAddressListCap);
+  writeAddressList(doc, "known_peer_addresses", cfg_.known_peer_addresses, cfg_.known_peer_count, Settings::kAddressListCap);
 
   doc["lora_frequency_hz"] = cfg_.lora_frequency_hz;
   doc["lora_tx_power"] = cfg_.lora_tx_power;
@@ -620,6 +677,14 @@ void ConfigStore::setDefaults() {
   cfg_.role_tx = true;
   cfg_.local_address = 1;
   cfg_.remote_address = 2;
+  cfg_.paired_target_count = 1;
+  memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
+  cfg_.paired_target_addresses[0] = 2;
+  cfg_.allowed_controller_count = 1;
+  memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
+  cfg_.allowed_controller_addresses[0] = 2;
+  cfg_.known_peer_count = 0;
+  memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
 
   cfg_.lora_frequency_hz = 433000000L;
   cfg_.lora_tx_power = 17;
@@ -673,6 +738,14 @@ void ConfigStore::ensureProvisionedDefaults() {
   if (cfg_.remote_address == cfg_.local_address) {
     cfg_.remote_address = (cfg_.local_address % 254) + 1;
   }
+  cfg_.paired_target_count = 1;
+  memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
+  cfg_.paired_target_addresses[0] = cfg_.remote_address;
+  cfg_.allowed_controller_count = 1;
+  memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
+  cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
+  cfg_.known_peer_count = 0;
+  memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
 
 #ifdef REGION_US
   cfg_.lora_frequency_hz = 915000000L;

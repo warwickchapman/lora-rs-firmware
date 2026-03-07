@@ -113,6 +113,15 @@ bool csvContainsAddress(const String &raw, uint8_t src) {
   return false;
 }
 
+bool fixedListContainsAddress(const uint8_t *values, uint8_t count, uint8_t src) {
+  if (values == nullptr || src == 0 || src == 255) return false;
+  if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
+  for (uint8_t i = 0; i < count; ++i) {
+    if (values[i] == src) return true;
+  }
+  return false;
+}
+
 uint16_t crc16Ccitt(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFFU;
   for (size_t i = 0; i < len; ++i) {
@@ -292,6 +301,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   fleet_prov_apply_session_nonce_ = 0;
   fleet_prov_apply_address_ = 0;
   fleet_prov_apply_role_tx_ = false;
+  fleet_prov_apply_controller_address_ = 0;
   fleet_prov_apply_key_ = "";
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
@@ -352,6 +362,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   fleet_prov_apply_session_nonce_ = 0;
   fleet_prov_apply_address_ = 0;
   fleet_prov_apply_role_tx_ = false;
+  fleet_prov_apply_controller_address_ = 0;
   fleet_prov_apply_key_ = "";
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
@@ -366,7 +377,12 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
 void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.role_tx = cfg.role_tx;
   runtime_.local_address = cfg.local_address;
-  runtime_.remote_address = cfg.remote_address;
+  if (cfg.role_tx) {
+    runtime_.remote_address = (cfg.paired_target_count > 0) ? cfg.paired_target_addresses[0] : cfg.remote_address;
+  } else {
+    runtime_.remote_address =
+        (cfg.allowed_controller_count > 0) ? cfg.allowed_controller_addresses[0] : cfg.remote_address;
+  }
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
@@ -766,10 +782,11 @@ bool NodeStateMachine::fleetScanSnapshot(FleetScanSnapshot &out) const {
   return true;
 }
 
-bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &password) {
+bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &password, uint8_t targetAddress) {
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr) return false;
   if (fleetWifiProvisionCooldownRemainingMs() > 0) return false;
+  if (targetAddress == 0) return false;
   if (ssid.length() == 0 || ssid.length() > 32) return false;
   if (password.length() > 64) return false;
 
@@ -799,7 +816,7 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
   payload[8] = static_cast<uint8_t>((hash >> 16) & 0xFFU);
   payload[9] = static_cast<uint8_t>((hash >> 24) & 0xFFU);
   last_counter_++;
-  if (!radio_->sendRaw(MessageType::WifiProvision, last_counter_, runtime_.local_address, kWifiProvisionBroadcastAddress, payload)) {
+  if (!radio_->sendRaw(MessageType::WifiProvision, last_counter_, runtime_.local_address, targetAddress, payload)) {
     return false;
   }
 
@@ -815,7 +832,7 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
     payload[4] = static_cast<uint8_t>(chunkLen);
     memcpy(payload + 5, data + offset, chunkLen);
     last_counter_++;
-    if (!radio_->sendRaw(MessageType::WifiProvision, last_counter_, runtime_.local_address, kWifiProvisionBroadcastAddress, payload)) {
+    if (!radio_->sendRaw(MessageType::WifiProvision, last_counter_, runtime_.local_address, targetAddress, payload)) {
       return false;
     }
   }
@@ -825,7 +842,7 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
   payload[1] = transferId;
   payload[3] = totalChunks;
   last_counter_++;
-  if (!radio_->sendRaw(MessageType::WifiProvision, last_counter_, runtime_.local_address, kWifiProvisionBroadcastAddress, payload)) {
+  if (!radio_->sendRaw(MessageType::WifiProvision, last_counter_, runtime_.local_address, targetAddress, payload)) {
     return false;
   }
 
@@ -900,9 +917,20 @@ bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, uint
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
   if (settings_ == nullptr) return false;
+  if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
+    return true;
+  }
   const String &raw = settings_->mqtt_controller_addresses;
   if (raw.length() == 0) return false;
   return csvContainsAddress(raw, src);
+}
+
+bool NodeStateMachine::isAuthorizedPairedSource(uint8_t src) const {
+  if (settings_ == nullptr) return false;
+  if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
+    return true;
+  }
+  return src == runtime_.remote_address;
 }
 
 bool NodeStateMachine::isDefaultFleetKey() const {
@@ -1056,16 +1084,19 @@ bool NodeStateMachine::provisioningDeviceByIndex(size_t index, ProvisioningDevic
   return true;
 }
 
-bool NodeStateMachine::consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, String &fleetKey) {
+bool NodeStateMachine::consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx,
+                                                         uint8_t &controllerAddress, String &fleetKey) {
   if (!fleet_prov_apply_pending_) return false;
   sessionNonce = fleet_prov_apply_session_nonce_;
   newAddress = fleet_prov_apply_address_;
   roleTx = fleet_prov_apply_role_tx_;
+  controllerAddress = fleet_prov_apply_controller_address_;
   fleetKey = fleet_prov_apply_key_;
   fleet_prov_apply_pending_ = false;
   fleet_prov_apply_session_nonce_ = 0;
   fleet_prov_apply_address_ = 0;
   fleet_prov_apply_role_tx_ = false;
+  fleet_prov_apply_controller_address_ = 0;
   fleet_prov_apply_key_ = "";
   return true;
 }
@@ -1670,7 +1701,7 @@ void NodeStateMachine::tickReceive() {
       }
     } else if (msg.type == MessageType::PollRequest) {
       // Allow fleet scans from any same-key TX even when this RX is paired to a different remote source.
-    } else if (msg.src != runtime_.remote_address) {
+    } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
@@ -1997,6 +2028,12 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       } else {
         prov_.next_discover_broadcast_ms = now + 120U;
       }
+      return;
+    }
+    if (prov_.estimated_count > 0 && prov_device_count_ >= static_cast<size_t>(prov_.estimated_count)) {
+      recomputeProvisioningConflictsAndAssignments();
+      prov_.state = ProvisioningSessionState::Ready;
+      lrslog::event("prov_discover_done_target_reached", 0, prov_device_count_, prov_.estimated_count);
       return;
     }
     if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
@@ -2365,6 +2402,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     fleet_prov_apply_session_nonce_ = sessionNonce;
     fleet_prov_apply_address_ = newAddr;
     fleet_prov_apply_role_tx_ = (payload[8] & kProvRoleTxFlag) != 0U;
+    fleet_prov_apply_controller_address_ = msg.src;
     fleet_prov_apply_key_ = newKey;
     fleet_prov_apply_pending_ = (fleet_prov_apply_key_.length() > 0);
     prov_rx_.key_transfer_active = false;

@@ -71,7 +71,12 @@ Provisioning endpoints in current firmware:
 - `GET /api/provisioning/status`
 - `POST /api/provisioning/provision-all`
 - `POST /api/provisioning/cancel`
-- `POST /api/network/provision-fleet` (broadcast STA WiFi credentials over LoRa)
+- `POST /api/network/provision-fleet` (broadcast or targeted STA WiFi credentials over LoRa)
+
+`/api/network/provision-fleet` request fields:
+- `wifi_sta_ssid` (optional override; defaults to stored STA SSID)
+- `wifi_sta_password` (optional override; defaults to stored STA password)
+- `target_address` (optional; `1..254`; default `255` for broadcast)
 
 Web Console operator cues (Fleet -> Manage -> LoRa):
 - Provisioning results table uses explicit addressing/version labels: `Cur Addr`, `New Addr`, `FW Ver`.
@@ -80,9 +85,14 @@ Web Console operator cues (Fleet -> Manage -> LoRa):
 - Discovery reliability: factory-key targets now transmit two announce frames per discover command (short jitter before the second frame). Coordinator device list remains deduped by `chip_id`.
 - Discovery timing model is two-phase: coordinator sends a short `DiscoverStart` burst first, then remains silent while targets reply on randomized jitter within the declared reply window.
 - Discovery is now single-pass (no automatic retry cycle). If another scan is desired, the operator explicitly presses `Start Discovery` again.
-- During discovery/readiness UI updates, discovered rows are sticky by `chip_id` and remain visible until `Provision All` is started (or session is cancelled), preventing transient row drops under compact/low-memory status responses.
+- Discovery start prompts for expected device count (`1..8`) and stops on expected count reached or `120s`.
+- During discovery/readiness UI updates, discovered rows are sticky by `chip_id` and remain visible until `Provision All` is started (or session is cancelled).
 - Address auto-assignment for provisioning is constrained to `1..32`.
 - If `verify` is missed after apply, coordinator performs a fleet-key probe on the assigned address before final classification; status may show `applied_unconfirmed` when apply likely succeeded but confirmation was not observed.
+- Provisioning status responses always include row data (no low-memory count-only mode).
+
+Mode gating:
+- Fleet APIs are blocked in `standalone` mode (`fleet_disabled_in_standalone`).
 
 CLI mirrors:
 - `run`, `status`, `cancel`

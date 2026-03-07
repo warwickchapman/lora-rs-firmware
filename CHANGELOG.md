@@ -7,6 +7,12 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Changed
+- Fleet Devices SSE rendering bug fixed: live fleet events now update both summary and table consistently (no `Discovered devices: N` with empty table mismatch).
+- Fleet known-peer cache is now persisted in config (bounded to 12) and included in `/api/fleet` responses so Fleet defaults can use existing known peers immediately after reboot.
+- Fleet menu is now hidden in standalone mode and fleet APIs return explicit mode-gate errors.
+- Fleet Manage LoRa discovery no longer uses a persistent estimated-count input; operator is prompted at scan start for expected factory-device count.
+- Provisioning status API always returns row data (low-memory compact/count-only suppression removed).
+- Fleet WiFi provisioning now supports targeted send (`target_address`) in addition to broadcast, with UI actions for send-all and per-device send with optional per-device overrides.
 - Internal cleanup + heap hygiene pass (behavior-neutral): removed dead root artifacts (`web_console_ui_assets_orig.cpp`, `.new`), deduplicated role/WiFi status helpers into neutral `runtime_utils`, renamed `defaultLanHostnameForRole(bool)` to `defaultLanHostname()`, and reduced transient String churn in status/config identity formatting.
 - Flasher Windows packaging policy simplified to `MSI + portable ZIP` (NSIS setup EXE removed from release workflow and asset contract).
 - Fleet LoRa provisioning UI polish: clearer scan table labels (`Cur Addr`, `New Addr`, `FW Ver`), improved table presentation, inline disabled reason for `Provision All`, and compact session progress text with elapsed time.

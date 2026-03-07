@@ -105,6 +105,12 @@ This ordering keeps LoRa control priority above MQTT.
 - `POST /api/system/factory-reset`
 - `POST /api/reboot`
 
+Fleet/Provisioning implementation notes:
+- Fleet endpoints are disabled in `standalone` mode (`fleet_disabled_in_standalone`).
+- Fleet devices response includes both live peers and cached known peers (bounded to 12) so Devices page can render before a fresh scan.
+- Provisioning status no longer uses compact/count-only response mode; rows remain authoritative for UI state.
+- `/api/network/provision-fleet` supports optional `target_address` for per-device sends (`255` broadcast default).
+
 ## 8. Packet and Compatibility
 Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.
 Older 8-byte payload firmware is not wire-compatible.

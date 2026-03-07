@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 struct Settings {
+  static constexpr uint8_t kAddressListCap = 12;
   uint16_t schema_version;
   bool commissioned;
   String mode;
@@ -11,6 +12,12 @@ struct Settings {
   bool role_tx;
   uint8_t local_address;
   uint8_t remote_address;
+  uint8_t paired_target_count;
+  uint8_t paired_target_addresses[kAddressListCap];
+  uint8_t allowed_controller_count;
+  uint8_t allowed_controller_addresses[kAddressListCap];
+  uint8_t known_peer_count;
+  uint8_t known_peer_addresses[kAddressListCap];
 
   long lora_frequency_hz;
   uint8_t lora_tx_power;

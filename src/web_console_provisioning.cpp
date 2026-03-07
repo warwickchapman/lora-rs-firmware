@@ -31,6 +31,7 @@ void WebConsole::handleProvisionFleetWifi() {
   JsonDocument filter;
   filter["wifi_sta_ssid"] = true;
   filter["wifi_sta_password"] = true;
+  filter["target_address"] = true;
   auto err = deserializeJson(body, server_.arg("plain"),
                              DeserializationOption::Filter(filter));
   if (err) {
@@ -41,6 +42,8 @@ void WebConsole::handleProvisionFleetWifi() {
   const auto &cfg = config_->settings();
   const char *requestedSsid = body["wifi_sta_ssid"] | nullptr;
   const char *requestedPass = body["wifi_sta_password"] | nullptr;
+  const uint8_t targetAddress =
+      parseAddressField(body["target_address"], 255);
   const char *ssid =
       (requestedSsid != nullptr && requestedSsid[0] != '\0')
           ? requestedSsid
@@ -79,7 +82,13 @@ void WebConsole::handleProvisionFleetWifi() {
     return;
   }
 
-  if (!sm_->sendFleetWifiProvision(String(ssid), String(pass))) {
+  if (targetAddress == 0) {
+    sendTracked(400, "application/json",
+                "{\"ok\":false,\"error\":\"invalid_target_address\"}");
+    return;
+  }
+
+  if (!sm_->sendFleetWifiProvision(String(ssid), String(pass), targetAddress)) {
     sendTracked(409, "application/json",
                 "{\"ok\":false,\"error\":\"send_failed\"}");
     return;
@@ -89,6 +98,7 @@ void WebConsole::handleProvisionFleetWifi() {
   const size_t chunks = (totalLen + 6U) / 7U;
   JsonDocument out;
   out["ok"] = true;
+  out["target_address"] = targetAddress;
   out["packets"] =
       static_cast<uint32_t>(chunks + 2U); // start + chunks + commit
   sendJsonDoc(200, out);
@@ -107,28 +117,8 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
   sm_->provisioningSession(sess);
   const size_t totalDevices = sm_->provisioningDeviceCount();
 
-  const uint32_t heapFree = lrslog::heapFree();
-  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-  const bool veryLowHeap = (heapFree < kApiProvStatusCompactFreeBytes ||
-                            maxBlock < kApiProvStatusCompactMaxBlockBytes);
-
   doc["ok"] = true;
-
-  constexpr size_t maxCompactRows = 8;
-  bool compact = veryLowHeap;
-  const size_t returnedDevices = compact
-                                     ? ((totalDevices < maxCompactRows)
-                                            ? totalDevices
-                                            : maxCompactRows)
-                                     : totalDevices;
-  const bool truncated = returnedDevices < totalDevices;
-  const char *compactReason = nullptr;
-  if (compact) {
-    compactReason = "low_heap";
-  } else if (truncated) {
-    compact = true;
-    compactReason = "truncated_rows";
-  }
+  const size_t returnedDevices = totalDevices;
   JsonObject s = doc["session"].to<JsonObject>();
   s["active"] = sess.active;
   s["state"] = provisioningSessionStateText(sess.state);
@@ -145,11 +135,8 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
   s["now_ms"] = millis();
   s["devices_total"] = totalDevices;
   s["devices_returned"] = returnedDevices;
-  s["devices_truncated"] = truncated;
-  s["compact"] = compact;
-  if (compactReason != nullptr) {
-    s["compact_reason"] = compactReason;
-  }
+  s["devices_truncated"] = false;
+  s["compact"] = false;
   if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
     last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
     LRS_LOGI(API,
@@ -181,15 +168,6 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
     o["state"] = provisioningDeviceStateText(d.state);
     o["address_conflict"] = d.address_conflict;
   }
-  if (compact) {
-    LRS_LOGW(API,
-             "event=provisioning_status_compact reason=%s heap_free=%lu "
-             "heap_frag=%u max_free_block=%lu",
-             compactReason ? compactReason : "unknown",
-             static_cast<unsigned long>(heapFree),
-             static_cast<unsigned>(lrslog::heapFragPercent()),
-             static_cast<unsigned long>(maxBlock));
-  }
 }
 
 void WebConsole::handleProvisioningStatus() {
@@ -199,15 +177,6 @@ void WebConsole::handleProvisioningStatus() {
   if (sm_ == nullptr) {
     sendTracked(500, "application/json",
                 "{\"ok\":false,\"error\":\"state_machine_unavailable\"}");
-    return;
-  }
-  const uint32_t heapFree = lrslog::heapFree();
-  const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-  const bool veryLowHeap = (heapFree < kApiProvStatusCompactFreeBytes ||
-                            maxBlock < kApiProvStatusCompactMaxBlockBytes);
-  if (veryLowHeap && rejectApiIfLowHeap("/api/provisioning/status",
-                                        kApiProvStatusCompactFreeBytes,
-                                        kApiProvStatusCompactMaxBlockBytes)) {
     return;
   }
   JsonDocument doc;

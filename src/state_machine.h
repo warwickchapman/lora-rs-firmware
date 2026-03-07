@@ -161,7 +161,7 @@ class NodeStateMachine {
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
   bool fleetScanSnapshot(FleetScanSnapshot &out) const;
-  bool sendFleetWifiProvision(const String &ssid, const String &password);
+  bool sendFleetWifiProvision(const String &ssid, const String &password, uint8_t targetAddress = 255);
   bool hasPendingWifiProvision() const;
   bool consumePendingWifiProvision(String &ssid, String &password, uint8_t &src);
   uint32_t fleetWifiProvisionCooldownRemainingMs() const;
@@ -174,7 +174,8 @@ class NodeStateMachine {
   size_t provisioningDeviceCount() const;
   bool provisioningDeviceByIndex(size_t index, ProvisioningDeviceSnapshot &out) const;
   bool hasPendingFleetProvisionApply() const;
-  bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, String &fleetKey);
+  bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, uint8_t &controllerAddress,
+                                         String &fleetKey);
  bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
 
  private:
@@ -334,6 +335,7 @@ class NodeStateMachine {
   uint16_t fleet_prov_apply_session_nonce_ = 0;
   uint8_t fleet_prov_apply_address_ = 0;
   bool fleet_prov_apply_role_tx_ = false;
+  uint8_t fleet_prov_apply_controller_address_ = 0;
   String fleet_prov_apply_key_;
 
   struct ProvisioningDevice {
@@ -443,6 +445,7 @@ class NodeStateMachine {
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
   bool isAuthorizedMqttController(uint8_t src) const;
+  bool isAuthorizedPairedSource(uint8_t src) const;
   bool isDefaultFleetKey() const;
   bool shouldAcceptReplayAndUpdate(const ProtocolMessage &msg, bool trustedSourceHint);
   bool isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const;

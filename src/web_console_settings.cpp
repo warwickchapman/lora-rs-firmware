@@ -7,6 +7,40 @@
 
 using namespace webconsole_internal;
 
+namespace {
+uint8_t parseAddressArrayField(JsonVariantConst src, uint8_t *out, uint8_t cap) {
+  if (out == nullptr || cap == 0) return 0;
+  for (uint8_t i = 0; i < cap; ++i) out[i] = 0;
+  if (src.isNull() || !src.is<JsonArrayConst>()) return 0;
+  JsonArrayConst arr = src.as<JsonArrayConst>();
+  uint8_t count = 0;
+  for (JsonVariantConst v : arr) {
+    const int addr = v.as<int>();
+    if (addr < 1 || addr > 254) continue;
+    bool dup = false;
+    for (uint8_t i = 0; i < count; ++i) {
+      if (out[i] == static_cast<uint8_t>(addr)) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    out[count++] = static_cast<uint8_t>(addr);
+    if (count >= cap) break;
+  }
+  return count;
+}
+
+void writeAddressArray(JsonDocument &doc, const char *key, const uint8_t *values, uint8_t count, uint8_t cap) {
+  JsonArray arr = doc[key].to<JsonArray>();
+  if (values == nullptr || cap == 0) return;
+  if (count > cap) count = cap;
+  for (uint8_t i = 0; i < count; ++i) {
+    if (values[i] >= 1 && values[i] <= 254) arr.add(values[i]);
+  }
+}
+}  // namespace
+
 void WebConsole::handleGetSettings() {
   HeapProbeGuard heapProbe(this, "/api/settings:get");
   JsonDocument doc;
@@ -16,6 +50,10 @@ void WebConsole::handleGetSettings() {
   doc["role_tx"] = cfg.role_tx;
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
+  writeAddressArray(doc, "paired_target_addresses", cfg.paired_target_addresses, cfg.paired_target_count, Settings::kAddressListCap);
+  writeAddressArray(doc, "allowed_controller_addresses", cfg.allowed_controller_addresses, cfg.allowed_controller_count,
+                    Settings::kAddressListCap);
+  writeAddressArray(doc, "known_peer_addresses", cfg.known_peer_addresses, cfg.known_peer_count, Settings::kAddressListCap);
   doc["lora_frequency_hz"] = cfg.lora_frequency_hz;
   doc["lora_tx_power"] = cfg.lora_tx_power;
   doc["lora_spreading_factor"] = cfg.lora_spreading_factor;
@@ -71,6 +109,9 @@ void WebConsole::handlePostSettings() {
   filter["role_tx"] = true;
   filter["local_address"] = true;
   filter["remote_address"] = true;
+  filter["paired_target_addresses"] = true;
+  filter["allowed_controller_addresses"] = true;
+  filter["known_peer_addresses"] = true;
   filter["lora_frequency_hz"] = true;
   filter["lora_tx_power"] = true;
   filter["lora_spreading_factor"] = true;
@@ -118,7 +159,6 @@ void WebConsole::handlePostSettings() {
   const String prevLanHost = prev.lan_hostname;
   const bool prevApAlwaysOn = prev.ap_always_on;
   const String prevAdminPassword = prev.admin_password;
-  const bool oldRoleTx = prev.role_tx;
   const String oldDefaultHost = config_->defaultLanHostname();
   const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
   const String oldLegacyRoleTxHost = oldLegacyDefaultHost + "-tx";
@@ -134,6 +174,18 @@ void WebConsole::handlePostSettings() {
   }
   next.local_address = parseAddressField(doc["local_address"], next.local_address);
   next.remote_address = parseAddressField(doc["remote_address"], next.remote_address);
+  if (!doc["paired_target_addresses"].isNull()) {
+    next.paired_target_count =
+        parseAddressArrayField(doc["paired_target_addresses"], next.paired_target_addresses, Settings::kAddressListCap);
+  }
+  if (!doc["allowed_controller_addresses"].isNull()) {
+    next.allowed_controller_count = parseAddressArrayField(doc["allowed_controller_addresses"], next.allowed_controller_addresses,
+                                                          Settings::kAddressListCap);
+  }
+  if (!doc["known_peer_addresses"].isNull()) {
+    next.known_peer_count =
+        parseAddressArrayField(doc["known_peer_addresses"], next.known_peer_addresses, Settings::kAddressListCap);
+  }
   next.lora_frequency_hz = doc["lora_frequency_hz"] | next.lora_frequency_hz;
   next.lora_tx_power = static_cast<uint8_t>(doc["lora_tx_power"] | next.lora_tx_power);
   next.lora_spreading_factor = static_cast<uint8_t>(doc["lora_spreading_factor"] | next.lora_spreading_factor);
@@ -187,6 +239,19 @@ void WebConsole::handlePostSettings() {
   if (next.local_address > 254) next.local_address = 254;
   if (next.remote_address < 1) next.remote_address = 1;
   if (next.remote_address > 254) next.remote_address = 254;
+  if (next.role_tx) {
+    if (next.paired_target_count == 0) {
+      next.paired_target_count = 1;
+      next.paired_target_addresses[0] = next.remote_address;
+    }
+    next.remote_address = next.paired_target_addresses[0];
+  } else {
+    if (next.allowed_controller_count == 0) {
+      next.allowed_controller_count = 1;
+      next.allowed_controller_addresses[0] = next.remote_address;
+    }
+    next.remote_address = next.allowed_controller_addresses[0];
+  }
   next.fleet_passphrase.trim();
   const bool hasFleetPassphraseField = !doc["fleet_passphrase"].isNull();
   const bool allowDefaultDeploymentKey = parseBoolField(doc["allow_default_deployment_key"], false);
@@ -270,6 +335,10 @@ void WebConsole::handleExportSettings() {
   doc["role_tx"] = cfg.role_tx;
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
+  writeAddressArray(doc, "paired_target_addresses", cfg.paired_target_addresses, cfg.paired_target_count, Settings::kAddressListCap);
+  writeAddressArray(doc, "allowed_controller_addresses", cfg.allowed_controller_addresses, cfg.allowed_controller_count,
+                    Settings::kAddressListCap);
+  writeAddressArray(doc, "known_peer_addresses", cfg.known_peer_addresses, cfg.known_peer_count, Settings::kAddressListCap);
   doc["lora_frequency_hz"] = cfg.lora_frequency_hz;
   doc["lora_tx_power"] = cfg.lora_tx_power;
   doc["lora_spreading_factor"] = cfg.lora_spreading_factor;

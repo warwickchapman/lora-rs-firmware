@@ -80,3 +80,19 @@
 - Add mandatory secret redaction in logs (WiFi passwords, fleet keys, tokens, other secrets).
 - Keep default logging at `INFO`; make `DEBUG` / `TRACE` opt-in diagnostics modes.
 - Avoid log spam in tight loops (prefer state-change logging and/or repeated-warning rate limiting).
+
+## Future Platform
+- Cloud dashboard (future workstream): capture requirements and architecture options, but do not begin implementation yet.
+
+## Memory / Stability
+- Add post-commissioning low-memory Web UI mode to reduce heap pressure and improve stability.
+- In low-memory mode, Web UI should either be disabled until reboot or run as a minimal hook/stub endpoint.
+- When the hook is accessed, start full Web UI on demand.
+- After a configurable inactivity timeout, revert from full Web UI back to low-memory mode.
+
+## Deferred From Addressing/Fleet Release
+- Standalone LoRa telemetry-only behavior (local-only control with optional LoRa status broadcasting).
+- Multi-controller management UX beyond primary-controller-first behavior.
+- Fleet WiFi policy automation (site templates / zone-based credential assignment).
+- Extended connectivity verification signals beyond current LoRa/app-level status.
+- Terminology redesign beyond current `Transmitter`/`Receiver` UI naming.

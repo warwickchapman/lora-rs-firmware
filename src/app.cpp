@@ -5,6 +5,7 @@
 #if LRS_ENABLE_MDNS
 #include <ESP8266mDNS.h>
 #endif
+#include <cstring>
 #include <time.h>
 
 #include "build_info.h"
@@ -263,9 +264,10 @@ void App::tick() {
       uint16_t provSession = 0;
       uint8_t provAddr = 0;
       bool provRoleTx = false;
+      uint8_t provControllerAddr = 0;
       String provFleetKey;
       if (sm_.consumePendingFleetProvisionApply(provSession, provAddr,
-                                                provRoleTx, provFleetKey)) {
+                                                provRoleTx, provControllerAddr, provFleetKey)) {
         auto &cfg = config_.settings();
         const bool changed = (cfg.local_address != provAddr) ||
                              (cfg.role_tx != provRoleTx) ||
@@ -274,6 +276,18 @@ void App::tick() {
         cfg.role_tx = provRoleTx;
         cfg.mode = "paired";
         cfg.role = provRoleTx ? "transmitter" : "receiver";
+        if (provRoleTx) {
+          cfg.paired_target_count = 0;
+          memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
+        } else {
+          if (provControllerAddr < 1 || provControllerAddr > 254) {
+            provControllerAddr = cfg.remote_address;
+          }
+          cfg.allowed_controller_count = 1;
+          memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
+          cfg.allowed_controller_addresses[0] = provControllerAddr;
+          cfg.remote_address = provControllerAddr;
+        }
         cfg.fleet_passphrase = provFleetKey;
         cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
         cfg.audit_last_saved_by = "lora_fleet_provision";

@@ -35,6 +35,7 @@ let automationsDoc = null;
 let currentApIp = '';
 let currentApMdns = '';
 let lastRoleIsTx = false;
+let lastMode = 'paired';
 let fleetDevicesCache = [];
 let selectedFleetDeviceAddr = 0;
 let fleetDeviceDetailTab = 'state';
@@ -613,7 +614,7 @@ function showFleetTab(tab) {
   syncPagePolling();
 }
 async function resolveFleetLandingTab() {
-  if (activePage !== 'fleet' || !lastRoleIsTx) return;
+  if (activePage !== 'fleet' || !lastRoleIsTx || lastMode === 'standalone') return;
   const token = ++fleetLandingDecisionToken;
   if (Array.isArray(fleetDevicesCache) && fleetDevicesCache.length > 0) {
     showFleetTab('devices');
@@ -641,6 +642,7 @@ function showFleetManageTab(tab) {
   if (!(activePage === 'fleet' && activeFleetTab === 'manage')) return;
   if (target !== 'lora') {
     stopProvisioningPolling();
+    renderFleetWifiTargets(fleetDevicesCache);
   } else {
     startProvisioningPolling();
   }
@@ -1080,8 +1082,9 @@ function showPage(page) {
 }
 function applyFleetTabVisibility() {
   const fleetTabBtn = document.getElementById('nav-fleet');
-  if (fleetTabBtn) { fleetTabBtn.style.display = lastRoleIsTx ? '' : 'none'; }
-  if (!lastRoleIsTx && activePage === 'fleet') { showPage('status'); }
+  const fleetEnabled = (lastMode !== 'standalone') && lastRoleIsTx;
+  if (fleetTabBtn) { fleetTabBtn.style.display = fleetEnabled ? '' : 'none'; }
+  if (!fleetEnabled && activePage === 'fleet') { showPage('status'); }
 }
 function showToast(msg, isError = false) {
   const t = document.getElementById('toast');
@@ -1318,7 +1321,7 @@ function startStatusLiveSse() {
       } catch (e) { }
     };
     const onFleetEvent = (ev) => {
-      if (!(activePage === 'fleet' && activeFleetTab === 'devices')) return;
+      if (activePage !== 'fleet') return;
       try {
         const fleet = JSON.parse(ev.data);
         const role = String(fleet.role || '').toLowerCase();
@@ -1326,9 +1329,10 @@ function startStatusLiveSse() {
         if (role !== 'tx') return;
         const devices = Array.isArray(fleet.devices) ? fleet.devices : [];
         fleetDevicesCache = devices;
-        const summary = document.getElementById('fleetSummary');
-        if (summary) summary.innerText = `Discovered devices: ${devices.length} | Global schedule default: ${Math.max(60, Math.round(Number(fleet.tx_default_poll_interval_ms || 60000) / 1000))}s | Global polling: ${fleet.tx_polling_enabled ? 'enabled' : 'disabled'}`;
-        renderFleetTable(devices);
+        renderFleetWifiTargets(devices);
+        if (activeFleetTab === 'devices') {
+          renderFleetTable(devices, fleet);
+        }
       } catch (e) { }
     };
     const onProvisioningEvent = (ev) => {
@@ -1392,6 +1396,7 @@ function applyStatusPageState(st) {
   applyFleetTabVisibility();
   const roleIsTx = lastRoleIsTx;
   const modeRaw = String(st.mode || 'paired').toLowerCase();
+  lastMode = modeRaw;
   const roleRaw = String(st.role_name || '').toLowerCase();
   const modeDisplay = modeRaw === 'mesh' ? 'Mesh' : (modeRaw === 'standalone' ? 'Standalone' : 'Paired');
   let roleDisplayName = roleRaw;
@@ -1552,6 +1557,7 @@ function applyHeaderStatus(st) {
   if (!st) return;
   const footerMem = document.getElementById('footerMem');
   const modeRaw = String(st.mode || 'paired').toLowerCase();
+  lastMode = modeRaw;
   const titleEl = document.getElementById('consoleTitle');
   const hLan = st.lan_hostname ? String(st.lan_hostname) : '';
   const hMdns = st.mdns_lan ? String(st.mdns_lan) : '';
@@ -1683,6 +1689,7 @@ async function loadSettingsPageData(force) {
     const s = await apiJson('/api/settings', { silent: true, timeoutMs: 6000 });
     if (!s) return;
     lastRoleIsTx = !!s.role_tx;
+    lastMode = String(s.mode || 'paired').toLowerCase();
     applyFleetTabVisibility();
     Object.keys(s).forEach(k => {
       const el = document.getElementById(k);
@@ -2202,8 +2209,6 @@ function renderProvisioningStatus(out) {
     : incomingDevices;
   const discoveredRaw = Number(sess.discovered_count || 0);
   const discoveredEffective = Math.max(discoveredRaw, devices.length);
-  const compactMode = !!(sess && (sess.compact || sess.devices_truncated));
-  const compactReason = String((sess && sess.compact_reason) || '');
   if (provisionBtn) {
     const canProvision = (st === 'ready' && discoveredEffective > 0);
     provisionBtn.disabled = !canProvision;
@@ -2255,9 +2260,7 @@ function renderProvisioningStatus(out) {
   }
   if (!devices.length) {
     let emptyText = 'No devices discovered yet.';
-    if (compactMode && (compactReason === 'low_heap' || compactReason === 'truncated_rows')) {
-      emptyText = 'Low-memory mode: showing counts only (keeping rows when available).';
-    } else if (sess.active && (st === 'discovering' || st === 'ready' || st === 'provisioning')) {
+    if (sess.active && (st === 'discovering' || st === 'ready' || st === 'provisioning')) {
       emptyText = 'Awaiting device replies...';
     }
     rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${emptyText}</td></tr>`;
@@ -2338,8 +2341,9 @@ function syncPagePolling() {
 }
 async function startFleetProvisioningDiscovery() {
   const result = document.getElementById('provWizardResult');
-  const estEl = document.getElementById('prov_estimated_count');
-  const est = Math.max(1, Math.min(8, Number(estEl && estEl.value || 2) || 2));
+  const raw = window.prompt('How many factory-default devices are powered up? (1-8)', '2');
+  if (raw === null) return;
+  const est = Math.max(1, Math.min(8, Number(raw) || 2));
   clearProvisioningStickyRows();
   suspendGlobalPollsUntilMs = Date.now() + 5000;
   if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }
@@ -2374,16 +2378,22 @@ async function cancelFleetProvisioning() {
   const result = document.getElementById('provWizardResult');
   if (result) { result.className = 'result-line show'; result.innerText = out && out.session && out.session.active ? 'Provisioning session updated.' : 'Provisioning session cancelled.'; }
 }
-async function provisionFleetWifi() {
+async function provisionFleetWifi(targetAddr, overrideSsid, overridePass) {
   const el = document.getElementById('wifiProvisionResult');
   if (!el) return;
   const body = {};
-  const requestedSsid = normalizedInputValue('wifi_sta_ssid');
-  const requestedPass = inputValue('wifi_sta_password');
+  const requestedSsid = String(overrideSsid || '').trim() || normalizedInputValue('wifi_sta_ssid');
+  const requestedPass = String(overridePass || '') || inputValue('wifi_sta_password');
   if (requestedSsid.length) body.wifi_sta_ssid = requestedSsid;
   if (requestedPass.length) body.wifi_sta_password = requestedPass;
+  const target = Math.floor(Number(targetAddr || 0));
+  if (Number.isFinite(target) && target >= 1 && target <= 254) {
+    body.target_address = target;
+  }
   el.className = 'result-line show';
-  el.innerText = 'Sending WiFi credentials over LoRa...';
+  el.innerText = (body.target_address > 0)
+    ? `Sending WiFi credentials to ${toHexByte(body.target_address)} over LoRa...`
+    : 'Sending WiFi credentials over LoRa...';
   const out = await apiJson('/api/network/provision-fleet', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2393,7 +2403,8 @@ async function provisionFleetWifi() {
     timeoutMs: 20000
   });
   if (out && out.ok) {
-    const msg = `LoRa WiFi provisioning sent (${out.packets || '?'} packets broadcast)`;
+    const targetTxt = (body.target_address > 0) ? ` to ${toHexByte(body.target_address)}` : ' (broadcast)';
+    const msg = `LoRa WiFi provisioning sent${targetTxt} (${out.packets || '?'} packets)`;
     el.className = 'result-line show ok';
     el.innerText = msg;
     if (wifiProvisionResultTimer) { clearTimeout(wifiProvisionResultTimer); wifiProvisionResultTimer = 0; }
@@ -2434,6 +2445,36 @@ async function provisionFleetWifi() {
   el.className = 'result-line show err';
   el.innerText = msg;
   showToast(msg, true);
+}
+function provisionFleetWifiTo(addr) {
+  const ssidEl = document.getElementById(`wifi-override-ssid-${addr}`);
+  const passEl = document.getElementById(`wifi-override-pass-${addr}`);
+  const ssid = ssidEl ? String(ssidEl.value || '').trim() : '';
+  const pass = passEl ? String(passEl.value || '') : '';
+  provisionFleetWifi(addr, ssid, pass);
+}
+function renderFleetWifiTargets(devices) {
+  const host = document.getElementById('fleetWifiDeviceList');
+  if (!host) return;
+  const list = Array.isArray(devices) ? devices : [];
+  if (!list.length) {
+    host.innerHTML = '<div class="small">No known fleet devices yet.</div>';
+    return;
+  }
+  const rows = list.map((d) => {
+    const addr = Number(d.address || 0);
+    const seenAge = (Number(d.last_seen_ms || 0) > 0) ? humanAgeMsShort(d.last_seen_age_ms || 0) : 'unknown';
+    const state = Number(d.last_seen_ms || 0) > 0 ? 'online' : 'cached';
+    return `<tr>
+      <td class="mono">${escapeHtml(fleetDeviceAddrHex(d))}</td>
+      <td>${escapeHtml(state)}</td>
+      <td>${escapeHtml(seenAge)}</td>
+      <td><input id="wifi-override-ssid-${addr}" type="text" placeholder="Optional SSID override" /></td>
+      <td><input id="wifi-override-pass-${addr}" type="password" placeholder="Optional password override" /></td>
+      <td><button type="button" onclick="provisionFleetWifiTo(${addr})">Send</button></td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Status</th><th>Last Seen</th><th>SSID Override</th><th>Password Override</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 async function testMqtt() {
   const body = collectMqttBody();
@@ -2679,6 +2720,47 @@ async function toggleFleetScan() {
   updateFleetScanUi(out);
   await refreshFleet();
 }
+function renderFleetTable(devices, fleetMeta) {
+  const host = document.getElementById('fleetTableHost');
+  const summary = document.getElementById('fleetSummary');
+  const detail = document.getElementById('fleetDetailHost');
+  if (!host || !summary) return;
+  const list = Array.isArray(devices) ? devices : [];
+  const pollMs = Number((fleetMeta && fleetMeta.tx_default_poll_interval_ms) || 60000);
+  const pollEnabled = !!(fleetMeta && fleetMeta.tx_polling_enabled);
+  summary.innerText = `Discovered devices: ${list.length} | Global schedule default: ${Math.max(60, Math.round(pollMs / 1000))}s | Global polling: ${pollEnabled ? 'enabled' : 'disabled'}`;
+  if (list.length === 0) {
+    host.innerHTML = 'No devices discovered yet.';
+    if (detail) detail.innerHTML = 'No device selected.';
+    selectedFleetDeviceAddr = 0;
+    return;
+  }
+  if (!list.some((r) => Number(r.address || 0) === Number(selectedFleetDeviceAddr || 0))) {
+    selectedFleetDeviceAddr = Number(list[0].address || 0);
+  }
+  const rows = list.map((r) => {
+    const addrHex = fleetDeviceAddrHex(r);
+    const addr = Number(r.address || 0);
+    const seenAge = (Number(r.last_seen_ms || 0) > 0) ? humanAgeMsShort(r.last_seen_age_ms || 0) : 'never';
+    const freshness = freshnessChip(r);
+    const webUiUrl = fleetDeviceWebUiUrl(r);
+    const webUiCell = webUiUrl.length
+      ? `<a href="${escapeHtml(webUiUrl)}" target="_blank" rel="noopener">Open</a>`
+      : '<span class="small">-</span>';
+    const selectedCls = addr === Number(selectedFleetDeviceAddr || 0) ? 'selected' : '';
+    return `<tr class="${selectedCls}">
+   <td><b>${escapeHtml(addrHex)}</b></td>
+   <td>${relayChip(r.relay_state)}</td>
+   <td>${inputChip(r.input_state)}</td>
+   <td>${escapeHtml(fleetDeviceTempText(r))}</td>
+   <td>${freshness} ${escapeHtml(seenAge)}</td>
+   <td>${webUiCell}</td>
+   <td><button type="button" onclick="selectFleetDevice(${addr})">View</button></td>
+  </tr>`;
+  }).join('');
+  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Web UI</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
+  renderFleetDeviceDetail();
+}
 async function refreshFleet() {
   if (!(activePage === 'fleet' && activeFleetTab === 'devices')) return;
   if (fleetRefreshInFlight) return;
@@ -2706,39 +2788,8 @@ async function refreshFleet() {
   }
   const devices = Array.isArray(out.devices) ? out.devices : [];
   fleetDevicesCache = devices;
-  summary.innerText = `Discovered devices: ${devices.length} | Global schedule default: ${Math.max(60, Math.round(Number(out.tx_default_poll_interval_ms || 60000) / 1000))}s | Global polling: ${out.tx_polling_enabled ? 'enabled' : 'disabled'}`;
-  if (devices.length === 0) {
-    host.innerHTML = 'No devices discovered yet.';
-    if (detail) detail.innerHTML = 'No device selected.';
-    selectedFleetDeviceAddr = 0;
-    fleetRefreshInFlight = false;
-    return;
-  }
-  if (!devices.some((r) => Number(r.address || 0) === Number(selectedFleetDeviceAddr || 0))) {
-    selectedFleetDeviceAddr = Number(devices[0].address || 0);
-  }
-  const rows = devices.map((r) => {
-    const addrHex = fleetDeviceAddrHex(r);
-    const addr = Number(r.address || 0);
-    const seenAge = (Number(r.last_seen_ms || 0) > 0) ? humanAgeMsShort(r.last_seen_age_ms || 0) : 'never';
-    const freshness = freshnessChip(r);
-    const webUiUrl = fleetDeviceWebUiUrl(r);
-    const webUiCell = webUiUrl.length
-      ? `<a href="${escapeHtml(webUiUrl)}" target="_blank" rel="noopener">Open</a>`
-      : '<span class="small">-</span>';
-    const selectedCls = addr === Number(selectedFleetDeviceAddr || 0) ? 'selected' : '';
-    return `<tr class="${selectedCls}">
-   <td><b>${escapeHtml(addrHex)}</b></td>
-   <td>${relayChip(r.relay_state)}</td>
-   <td>${inputChip(r.input_state)}</td>
-   <td>${escapeHtml(fleetDeviceTempText(r))}</td>
-   <td>${freshness} ${escapeHtml(seenAge)}</td>
-   <td>${webUiCell}</td>
-   <td><button type="button" onclick="selectFleetDevice(${addr})">View</button></td>
-  </tr>`;
-  }).join('');
-  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Relay</th><th>Input</th><th>Sensors</th><th>Freshness</th><th>Web UI</th><th>View</th></tr></thead><tbody>${rows}</tbody></table>`;
-  renderFleetDeviceDetail();
+  renderFleetTable(devices, out);
+  renderFleetWifiTargets(devices);
   fleetRefreshInFlight = false;
 }
 async function importConfig(file) {
