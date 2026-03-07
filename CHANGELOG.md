@@ -17,6 +17,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Provisioning verify is now more resilient: coordinator probes the newly assigned address on fleet key before downgrade, and devices that applied but could not confirm are labeled `applied_unconfirmed` instead of hard-failed.
 - Provisioning auto-assignment is now constrained to address range `1..32`.
 - Provisioning target reliability improvement: each factory-key device now sends two discovery announce frames per `DiscoverStart` (second announce uses short jitter), while coordinator dedupe remains chip-ID-based.
+- Provisioning address assignment is now sticky across separate discovery runs on the same coordinator uptime using a fixed-size chip/address registry (12 entries): already-provisioned addresses are reserved, known chips prefer their prior address, and full remote factory reset clears registry entries for that address.
 
 ## [0.5.9-alpha] - 2026-03-05
 

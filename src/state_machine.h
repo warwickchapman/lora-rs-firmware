@@ -366,6 +366,13 @@ class NodeStateMachine {
   ProvisioningDevice *prov_devices_ = nullptr;
   size_t prov_device_capacity_ = 0;
   size_t prov_device_count_ = 0;
+  struct ProvisionedAddressEntry {
+    bool in_use = false;
+    uint32_t chip_id = 0;
+    uint8_t assigned_address = 0;
+    uint32_t updated_ms = 0;
+  };
+  ProvisionedAddressEntry provisioned_addrs_[kMaxPeers]{};
 
   struct ProvisioningSessionRuntime {
     bool active = false;
@@ -438,6 +445,9 @@ class NodeStateMachine {
   bool isDefaultFleetKey() const;
   bool shouldAcceptReplayAndUpdate(const ProtocolMessage &msg, bool trustedSourceHint);
   bool isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const;
+  uint8_t preferredProvisionedAddressForChip(uint32_t chipId) const;
+  bool hasDiscoveredProvisioningChip(uint32_t chipId) const;
+  void rememberProvisionedAddress(uint32_t chipId, uint8_t assignedAddress);
   ProvisioningDevice *findProvisioningDeviceByChip(uint32_t chipId);
   ProvisioningDevice *upsertProvisioningDevice(uint32_t chipId);
   bool ensureProvisioningStorage();

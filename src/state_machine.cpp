@@ -879,6 +879,13 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
+  if (!keepSharedFleetKey) {
+    for (size_t i = 0; i < kMaxPeers; ++i) {
+      if (provisioned_addrs_[i].in_use && provisioned_addrs_[i].assigned_address == dstAddress) {
+        provisioned_addrs_[i] = ProvisionedAddressEntry{};
+      }
+    }
+  }
   lrslog::event(keepSharedFleetKey ? "factory_reset_peer_tx_keep" : "factory_reset_peer_tx_full", 0, last_counter_, dstAddress);
   return true;
 }
@@ -1100,12 +1107,76 @@ NodeStateMachine::ProvisioningDevice *NodeStateMachine::upsertProvisioningDevice
   return &d;
 }
 
+uint8_t NodeStateMachine::preferredProvisionedAddressForChip(uint32_t chipId) const {
+  if (chipId == 0) return 0;
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    const ProvisionedAddressEntry &e = provisioned_addrs_[i];
+    if (!e.in_use || e.chip_id != chipId) continue;
+    if (e.assigned_address < kProvAddressMin || e.assigned_address > kProvAddressMax) return 0;
+    return e.assigned_address;
+  }
+  return 0;
+}
+
+bool NodeStateMachine::hasDiscoveredProvisioningChip(uint32_t chipId) const {
+  if (chipId == 0 || prov_devices_ == nullptr) return false;
+  for (size_t i = 0; i < prov_device_count_; ++i) {
+    const ProvisioningDevice &d = prov_devices_[i];
+    if (d.in_use && d.chip_id == chipId) return true;
+  }
+  return false;
+}
+
+void NodeStateMachine::rememberProvisionedAddress(uint32_t chipId, uint8_t assignedAddress) {
+  if (chipId == 0) return;
+  if (assignedAddress < kProvAddressMin || assignedAddress > kProvAddressMax) return;
+  const uint32_t now = millis();
+  size_t emptyIndex = kMaxPeers;
+  size_t oldestIndex = 0;
+  uint32_t oldestMs = 0xFFFFFFFFUL;
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    ProvisionedAddressEntry &e = provisioned_addrs_[i];
+    if (e.in_use && e.chip_id == chipId) {
+      e.assigned_address = assignedAddress;
+      e.updated_ms = now;
+      return;
+    }
+    if (!e.in_use && emptyIndex == kMaxPeers) {
+      emptyIndex = i;
+      continue;
+    }
+    if (e.in_use && e.updated_ms < oldestMs) {
+      oldestMs = e.updated_ms;
+      oldestIndex = i;
+    }
+  }
+  const size_t idx = (emptyIndex < kMaxPeers) ? emptyIndex : oldestIndex;
+  provisioned_addrs_[idx].in_use = true;
+  provisioned_addrs_[idx].chip_id = chipId;
+  provisioned_addrs_[idx].assigned_address = assignedAddress;
+  provisioned_addrs_[idx].updated_ms = now;
+}
+
 void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   bool used[256]{};
   used[0] = true;
   used[255] = true;
   if (runtime_.local_address >= kProvAddressMin && runtime_.local_address <= kProvAddressMax) {
     used[runtime_.local_address] = true;
+  }
+  for (size_t i = 0; i < peer_count_; ++i) {
+    const PeerRuntime &peer = peers_[i];
+    if (!peer.in_use) continue;
+    if (peer.address >= kProvAddressMin && peer.address <= kProvAddressMax) {
+      used[peer.address] = true;
+    }
+  }
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    const ProvisionedAddressEntry &e = provisioned_addrs_[i];
+    if (!e.in_use) continue;
+    if (e.assigned_address < kProvAddressMin || e.assigned_address > kProvAddressMax) continue;
+    if (hasDiscoveredProvisioningChip(e.chip_id)) continue;
+    used[e.assigned_address] = true;
   }
   for (size_t i = 0; i < prov_device_count_; ++i) {
     prov_devices_[i].address_conflict = false;
@@ -1124,9 +1195,12 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   for (size_t i = 0; i < prov_device_count_; ++i) {
     ProvisioningDevice &d = prov_devices_[i];
     if (!d.in_use) continue;
-    if (!d.address_conflict && d.current_address >= kProvAddressMin && d.current_address <= kProvAddressMax &&
-        !used[d.current_address]) {
-      d.assigned_address = d.current_address;
+    uint8_t preferred = preferredProvisionedAddressForChip(d.chip_id);
+    if (preferred == 0 && !d.address_conflict && d.current_address >= kProvAddressMin && d.current_address <= kProvAddressMax) {
+      preferred = d.current_address;
+    }
+    if (preferred >= kProvAddressMin && preferred <= kProvAddressMax && !used[preferred]) {
+      d.assigned_address = preferred;
       used[d.assigned_address] = true;
     }
   }
@@ -1233,6 +1307,7 @@ bool NodeStateMachine::confirmProvisioningByFleetResponse(const ProtocolMessage 
     d.rssi = msg.rssi;
     d.last_seen_ms = now;
     d.state = ProvisioningDeviceState::Verified;
+    rememberProvisionedAddress(d.chip_id, d.assigned_address);
     if (prov_.current_index == i) {
       prov_.current_index++;
     }
@@ -1978,6 +2053,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         d.late_verify_probe_sent = false;
       } else {
         d.state = ProvisioningDeviceState::AppliedUnconfirmed;
+        rememberProvisionedAddress(d.chip_id, d.assigned_address);
         lrslog::event("prov_applied_unconfirmed", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
         prov_.current_index++;
       }
@@ -2172,6 +2248,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       d->rssi = msg.rssi;
       d->last_seen_ms = now;
       d->state = ProvisioningDeviceState::Verified;
+      rememberProvisionedAddress(chipId, payload[7]);
       if (prov_.state == ProvisioningSessionState::Provisioning && prov_.current_index < prov_device_count_ &&
           prov_devices_[prov_.current_index].chip_id == chipId) {
         prov_.current_index++;
