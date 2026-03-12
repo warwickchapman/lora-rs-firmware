@@ -1,0 +1,359 @@
+:root {
+  --bg: #0a0f14;
+  --panel: #121a22;
+  --panel-alt: #0f151c;
+  --line: #2b3b4d;
+  --text: #d7e5f4;
+  --muted: #8ca4bb;
+  --ok: #1ec16b;
+  --warn: #f2a93b;
+  --bad: #ef4e4e;
+  --accent: #5db0ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  color: var(--text);
+  background: radial-gradient(circle at 15% 0%, #1a2533 0%, var(--bg) 48%), var(--bg);
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #0f1720 0%, #0c1218 100%);
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.topbar p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mode-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.mode-btn:hover {
+  color: var(--text);
+}
+
+.mode-active {
+  color: #d8ebff;
+  background: #17324a;
+}
+
+.device-tabs {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.device-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #101923;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.device-tab-active {
+  color: #d8ebff;
+  border-color: #3c6e9c;
+  background: #15314a;
+}
+
+.tab-ping,
+.tab-serial {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.tab-ping.ping-online { background: var(--ok); border: 0; }
+.tab-ping.ping-offline,
+.tab-ping.ping-error { background: var(--bad); border: 0; }
+.tab-ping.ping-unknown { background: #5a6f83; border: 0; }
+
+.tab-serial.serial-ok { background: var(--ok); }
+.tab-serial.serial-retry { background: var(--warn); }
+.tab-serial.serial-error { background: var(--bad); }
+.tab-serial.serial-idle { background: #5a6f83; }
+
+.ws-status {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ws-connected {
+  color: #bdebd2;
+  border-color: #2f8158;
+  background: #113326;
+}
+
+.ws-connecting {
+  color: #f6ddaf;
+  border-color: #9a7532;
+  background: #3f3119;
+}
+
+.ws-disconnected {
+  color: #ffd1d1;
+  border-color: #8b3a3a;
+  background: #351515;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px;
+  height: calc(100vh - 66px);
+  min-height: 0;
+}
+
+body.view-tabbed .grid {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.slot-card {
+  height: 100%;
+  min-height: 0;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-alt) 100%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.slot-card.hidden {
+  display: none;
+}
+
+.slot-header {
+  position: relative;
+  border-bottom: 1px solid var(--line);
+  padding: 7px 10px;
+}
+
+.slot-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ping-badge {
+  position: absolute;
+  right: 10px;
+  top: 6px;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  border: 1px solid transparent;
+}
+
+.ping-online {
+  color: #c7f8dd;
+  border-color: #2a8957;
+  background: #143725;
+}
+
+.ping-offline,
+.ping-error {
+  color: #ffd2d2;
+  border-color: #9f4040;
+  background: #391515;
+}
+
+.ping-unknown {
+  color: #ffe5ba;
+  border-color: #9e7736;
+  background: #3c2f18;
+}
+
+.slot-controls {
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 0.72fr auto;
+  gap: 7px;
+  align-items: end;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.slot-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.slot-controls input,
+.slot-controls select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0b1219;
+  color: var(--text);
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  align-self: end;
+}
+
+.inline-actions button {
+  border: 1px solid #38516c;
+  background: #132131;
+  color: #d5e6f8;
+  border-radius: 7px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.inline-actions button:hover {
+  border-color: var(--accent);
+  color: white;
+}
+
+.serial-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+  border: 1px solid #38516c;
+}
+
+.serial-ok { background: var(--ok); }
+.serial-retry { background: var(--warn); }
+.serial-error { background: var(--bad); }
+.serial-idle { background: #5a6f83; }
+
+.log-pane {
+  margin: 0;
+  padding: 9px 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  white-space: pre;
+  line-height: 1.35;
+  font-size: 12px;
+}
+
+.log-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.copy-log-btn {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+  border: 1px solid #38516c;
+  background: rgba(19, 33, 49, 0.95);
+  color: #d5e6f8;
+  border-radius: 7px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.copy-log-btn:hover {
+  border-color: var(--accent);
+  color: white;
+}
+
+.copy-log-btn.copy-ok {
+  border-color: #2a8957;
+  background: #143725;
+  color: #c7f8dd;
+}
+
+@media (max-width: 1400px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .topbar-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .grid {
+    height: auto;
+    grid-template-rows: none;
+  }
+
+  .slot-card {
+    min-height: 60vh;
+  }
+
+  .slot-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+}
