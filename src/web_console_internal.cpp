@@ -47,6 +47,7 @@ const size_t kStatusLiveCacheReserveBytes = 1024;
 const size_t kStatusStaticCacheReserveBytes = 1024;
 const size_t kStatusLiteCacheReserveBytes = 384;
 const uint32_t kStatusLiveSseKeepAliveMs = 15000;
+const uint32_t kStatusLiveSseMaxAgeMs = 300000;
 const uint32_t kStatusLiveSseConnectMinFreeBytes = 5000;
 const uint32_t kStatusLiveSseConnectMinMaxBlockBytes = 2000;
 const uint32_t kStatusLiveSsePushHealthyMs = 2000;

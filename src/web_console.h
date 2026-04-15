@@ -17,6 +17,7 @@ public:
              std::function<void(bool, bool)> onApply,
              std::function<void()> onAutomationsSaved = {});
   void tick();
+  bool isWebActive() const;
 
 private:
   ESP8266WebServer server_{80};
@@ -119,6 +120,7 @@ private:
   };
   HeapProbeSnapshot captureHeapProbe() const;
   void logHeapProbe(const char *path, const HeapProbeSnapshot &before);
+
   class HeapProbeGuard {
   public:
     HeapProbeGuard(WebConsole *owner, const char *path)
@@ -156,6 +158,7 @@ private:
   WiFiClient status_live_sse_client_{};
   String status_live_sse_page_;
   bool status_live_sse_active_ = false;
+  uint32_t status_live_sse_connect_ms_ = 0;
   uint32_t status_live_sse_last_push_ms_ = 0;
   uint32_t status_live_sse_last_keepalive_ms_ = 0;
   uint32_t status_live_sse_last_sent_cache_ms_ = 0;

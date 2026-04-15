@@ -181,9 +181,11 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
     }
 
     if (knownChanged) {
-      cfg.audit_last_saved_by = "fleet_known_peers";
-      cfg.audit_last_saved_ms = millis();
-      config_->save();
+      // Known peers updated in-memory only. Persistence is deferred to avoid
+      // flash writes on read paths (GET/SSE). The addresses will be saved
+      // with the next explicit settings save.
+      LRS_LOGD(API, "event=fleet_known_peers_updated count=%u",
+               static_cast<unsigned>(cfg.known_peer_count));
     }
   }
   if (doc.overflowed()) {

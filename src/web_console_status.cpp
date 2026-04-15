@@ -13,6 +13,9 @@
 using namespace webconsole_internal;
 
 namespace {
+constexpr uint32_t kFleetSseReserveMarginBytes = 512;
+constexpr uint32_t kProvisioningSseReserveMarginBytes = 512;
+
 void buildFwDisplayString(char *out, size_t len) {
   if (LRS_GIT_DIRTY == 0) {
     snprintf(out, len, "%s (%s)", LRS_FW_VERSION, LRS_GIT_SHA);
@@ -115,6 +118,7 @@ bool WebConsole::buildStatusLiveCache() {
     doc["sensor_temp_last_read_ms"] = ts.last_read_ms;
   }
 
+  status_live_cache_.body.clear();
   serializeJson(doc, status_live_cache_.body);
   status_live_cache_.built_ms = millis();
   status_live_cache_building_ = false;
@@ -172,7 +176,7 @@ bool WebConsole::buildStatusStaticCache() {
   doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
   doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
   doc["audit_boot_count"] = cfg.audit_boot_count;
-
+  status_static_cache_.body.clear();
   serializeJson(doc, status_static_cache_.body);
   status_static_cache_.built_ms = millis();
   status_static_cache_building_ = false;
@@ -224,6 +228,11 @@ void WebConsole::tickStatusLiveSse() {
   }
 
   const uint32_t now = millis();
+  if (status_live_sse_connect_ms_ != 0U &&
+      (now - status_live_sse_connect_ms_) >= kStatusLiveSseMaxAgeMs) {
+    closeStatusLiveSse();
+    return;
+  }
   const uint32_t pushIntervalMs = computeStatusLiveSseIntervalMs();
   status_live_sse_last_interval_ms_ = pushIntervalMs;
 
@@ -266,9 +275,23 @@ void WebConsole::tickStatusLiveSse() {
 
   if (status_live_sse_page_ == "fleet") {
     if (status_live_sse_last_fleet_push_ms_ == 0 ||
-        (now - status_live_sse_last_fleet_push_ms_) >= 1500) {
+        (now - status_live_sse_last_fleet_push_ms_) >= 3000) {
+      const size_t peerCount =
+          (config_ != nullptr && sm_ != nullptr && config_->settings().role_tx)
+              ? sm_->peerCount()
+              : 0U;
+      size_t estimatedDocBytes =
+          kFleetDocBaseBytes + (peerCount * kFleetDocPerPeerBytes);
+      if (estimatedDocBytes < kFleetDocMinBytes) {
+        estimatedDocBytes = kFleetDocMinBytes;
+      }
+      if (estimatedDocBytes > kFleetDocMaxBytes) {
+        estimatedDocBytes = kFleetDocMaxBytes;
+      }
+      const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
       if (apiHeapHealthy(kApiFleetLowHeapRejectFreeBytes,
-                         kApiFleetLowHeapRejectMaxBlockBytes)) {
+                         kApiFleetLowHeapRejectMaxBlockBytes) &&
+          maxBlock >= (estimatedDocBytes + kFleetSseReserveMarginBytes)) {
         JsonDocument doc;
         buildFleetJson(doc);
         if (status_live_sse_client_.print(F("event: fleet\nid: ")) == 0 ||
@@ -284,9 +307,12 @@ void WebConsole::tickStatusLiveSse() {
     }
   } else if (status_live_sse_page_ == "provisioning") {
     if (status_live_sse_last_prov_push_ms_ == 0 ||
-        (now - status_live_sse_last_prov_push_ms_) >= 1500) {
+        (now - status_live_sse_last_prov_push_ms_) >= 3000) {
+      const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
       if (apiHeapHealthy(kApiProvStatusCompactFreeBytes,
-                         kApiProvStatusCompactMaxBlockBytes)) {
+                         kApiProvStatusCompactMaxBlockBytes) &&
+          maxBlock >=
+              (kApiProvStatusCompactMaxBlockBytes + kProvisioningSseReserveMarginBytes)) {
         JsonDocument doc;
         buildProvisioningStatusJson(doc);
         if (status_live_sse_client_.print(F("event: provisioning\nid: ")) ==
@@ -344,6 +370,7 @@ void WebConsole::handleStatusLiveEvents() {
   status_live_sse_client_ = client;
   status_live_sse_page_ = server_.arg("page");
   status_live_sse_active_ = true;
+  status_live_sse_connect_ms_ = now;
   status_live_sse_last_push_ms_ = 0;
   status_live_sse_last_keepalive_ms_ = 0;
   status_live_sse_last_sent_cache_ms_ = 0;

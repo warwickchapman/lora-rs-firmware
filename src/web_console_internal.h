@@ -47,6 +47,7 @@ extern const size_t kStatusLiveCacheReserveBytes;
 extern const size_t kStatusStaticCacheReserveBytes;
 extern const size_t kStatusLiteCacheReserveBytes;
 extern const uint32_t kStatusLiveSseKeepAliveMs;
+extern const uint32_t kStatusLiveSseMaxAgeMs;
 extern const uint32_t kStatusLiveSseConnectMinFreeBytes;
 extern const uint32_t kStatusLiveSseConnectMinMaxBlockBytes;
 extern const uint32_t kStatusLiveSsePushHealthyMs;

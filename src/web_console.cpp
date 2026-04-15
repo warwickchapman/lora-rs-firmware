@@ -50,6 +50,15 @@ void WebConsole::tick() {
   tickStatusLiveSse();
 }
 
+bool WebConsole::isWebActive() const {
+  const uint32_t now = millis();
+  const bool recentPressure =
+      last_web_pressure_ms_ != 0U &&
+      static_cast<int32_t>(now - last_web_pressure_ms_) <
+          static_cast<int32_t>(kStatusLiveSsePressureWindowMs);
+  return status_live_sse_active_ || request_log_.active || recentPressure;
+}
+
 void WebConsole::beginRequestLog(const char *path, bool api, bool poll,
                                  bool heapDiag) {
   request_log_.active = true;
@@ -212,11 +221,15 @@ void WebConsole::sendTracked(int code, const char *contentType,
 }
 
 void WebConsole::initStatusCaches() {
-  // Keep cache allocation lazy on low-RAM boards; reserve() here can OOM during
-  // boot.
   status_live_cache_.built_ms = 0;
   status_static_cache_.built_ms = 0;
   status_lite_cache_.built_ms = 0;
+  // Pre-reserve backing buffers so repeated cache rebuilds reuse the same
+  // allocation instead of fragmenting the heap with free/realloc cycles.
+  // The reserve constants are sized for typical serialized JSON payloads.
+  status_live_cache_.body.reserve(kStatusLiveCacheReserveBytes);
+  status_static_cache_.body.reserve(kStatusStaticCacheReserveBytes);
+  status_lite_cache_.body.reserve(kStatusLiteCacheReserveBytes);
 }
 
 bool WebConsole::apiHeapHealthy(uint32_t minFreeBytes,
@@ -269,7 +282,9 @@ void WebConsole::closeStatusLiveSse() {
     status_live_sse_client_.stop();
   }
   status_live_sse_client_ = WiFiClient();
+  status_live_sse_page_ = "";
   status_live_sse_active_ = false;
+  status_live_sse_connect_ms_ = 0;
   status_live_sse_last_push_ms_ = 0;
   status_live_sse_last_keepalive_ms_ = 0;
   status_live_sse_last_sent_cache_ms_ = 0;

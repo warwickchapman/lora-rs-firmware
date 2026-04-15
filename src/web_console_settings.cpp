@@ -39,6 +39,161 @@ void writeAddressArray(JsonDocument &doc, const char *key, const uint8_t *values
     if (values[i] >= 1 && values[i] <= 254) arr.add(values[i]);
   }
 }
+
+struct SettingsBackup {
+  String mode;
+  String role;
+  bool role_tx = false;
+  uint8_t local_address = 0;
+  uint8_t remote_address = 0;
+  uint8_t paired_target_count = 0;
+  uint8_t paired_target_addresses[Settings::kAddressListCap]{};
+  uint8_t allowed_controller_count = 0;
+  uint8_t allowed_controller_addresses[Settings::kAddressListCap]{};
+  uint8_t known_peer_count = 0;
+  uint8_t known_peer_addresses[Settings::kAddressListCap]{};
+  long lora_frequency_hz = 0;
+  uint8_t lora_tx_power = 0;
+  uint8_t lora_spreading_factor = 0;
+  long lora_bandwidth_hz = 0;
+  uint8_t lora_coding_rate = 0;
+  uint32_t heartbeat_ms = 0;
+  uint32_t ack_timeout_ms = 0;
+  uint32_t mqtt_remote_retry_timeout_ms = 0;
+  bool tx_mqtt_remote_polling_enabled = false;
+  uint32_t tx_mqtt_remote_default_poll_interval_ms = 0;
+  bool rx_push_on_change_enabled = false;
+  uint32_t rx_push_min_interval_ms = 0;
+  bool input_control_paired_lora_enabled = false;
+  uint32_t tx_command_retry_timeout_ms = 0;
+  String rx_failsafe_mode;
+  uint32_t rx_failsafe_timeout_ms = 0;
+  String wifi_sta_ssid;
+  String wifi_sta_password;
+  String lan_hostname;
+  String fleet_passphrase;
+  bool fleet_setup_prompt_dismissed = false;
+  String admin_password;
+  bool ap_always_on = false;
+  bool mqtt_client_enabled = false;
+  bool mqtt_control_enabled = false;
+  String mqtt_controller_addresses;
+  String mqtt_host;
+  uint16_t mqtt_port = 0;
+  String mqtt_user;
+  String mqtt_password;
+  String mqtt_topic_root;
+  bool sensor_temp_enabled = false;
+  bool commissioned = false;
+  String audit_last_saved_by;
+  uint32_t audit_last_saved_ms = 0;
+};
+
+void captureSettingsBackup(const Settings &src, SettingsBackup &dst) {
+  dst.mode = src.mode;
+  dst.role = src.role;
+  dst.role_tx = src.role_tx;
+  dst.local_address = src.local_address;
+  dst.remote_address = src.remote_address;
+  dst.paired_target_count = src.paired_target_count;
+  memcpy(dst.paired_target_addresses, src.paired_target_addresses,
+         sizeof(dst.paired_target_addresses));
+  dst.allowed_controller_count = src.allowed_controller_count;
+  memcpy(dst.allowed_controller_addresses, src.allowed_controller_addresses,
+         sizeof(dst.allowed_controller_addresses));
+  dst.known_peer_count = src.known_peer_count;
+  memcpy(dst.known_peer_addresses, src.known_peer_addresses,
+         sizeof(dst.known_peer_addresses));
+  dst.lora_frequency_hz = src.lora_frequency_hz;
+  dst.lora_tx_power = src.lora_tx_power;
+  dst.lora_spreading_factor = src.lora_spreading_factor;
+  dst.lora_bandwidth_hz = src.lora_bandwidth_hz;
+  dst.lora_coding_rate = src.lora_coding_rate;
+  dst.heartbeat_ms = src.heartbeat_ms;
+  dst.ack_timeout_ms = src.ack_timeout_ms;
+  dst.mqtt_remote_retry_timeout_ms = src.mqtt_remote_retry_timeout_ms;
+  dst.tx_mqtt_remote_polling_enabled = src.tx_mqtt_remote_polling_enabled;
+  dst.tx_mqtt_remote_default_poll_interval_ms =
+      src.tx_mqtt_remote_default_poll_interval_ms;
+  dst.rx_push_on_change_enabled = src.rx_push_on_change_enabled;
+  dst.rx_push_min_interval_ms = src.rx_push_min_interval_ms;
+  dst.input_control_paired_lora_enabled = src.input_control_paired_lora_enabled;
+  dst.tx_command_retry_timeout_ms = src.tx_command_retry_timeout_ms;
+  dst.rx_failsafe_mode = src.rx_failsafe_mode;
+  dst.rx_failsafe_timeout_ms = src.rx_failsafe_timeout_ms;
+  dst.wifi_sta_ssid = src.wifi_sta_ssid;
+  dst.wifi_sta_password = src.wifi_sta_password;
+  dst.lan_hostname = src.lan_hostname;
+  dst.fleet_passphrase = src.fleet_passphrase;
+  dst.fleet_setup_prompt_dismissed = src.fleet_setup_prompt_dismissed;
+  dst.admin_password = src.admin_password;
+  dst.ap_always_on = src.ap_always_on;
+  dst.mqtt_client_enabled = src.mqtt_client_enabled;
+  dst.mqtt_control_enabled = src.mqtt_control_enabled;
+  dst.mqtt_controller_addresses = src.mqtt_controller_addresses;
+  dst.mqtt_host = src.mqtt_host;
+  dst.mqtt_port = src.mqtt_port;
+  dst.mqtt_user = src.mqtt_user;
+  dst.mqtt_password = src.mqtt_password;
+  dst.mqtt_topic_root = src.mqtt_topic_root;
+  dst.sensor_temp_enabled = src.sensor_temp_enabled;
+  dst.commissioned = src.commissioned;
+  dst.audit_last_saved_by = src.audit_last_saved_by;
+  dst.audit_last_saved_ms = src.audit_last_saved_ms;
+}
+
+void restoreSettingsBackup(const SettingsBackup &src, Settings &dst) {
+  dst.mode = src.mode;
+  dst.role = src.role;
+  dst.role_tx = src.role_tx;
+  dst.local_address = src.local_address;
+  dst.remote_address = src.remote_address;
+  dst.paired_target_count = src.paired_target_count;
+  memcpy(dst.paired_target_addresses, src.paired_target_addresses,
+         sizeof(dst.paired_target_addresses));
+  dst.allowed_controller_count = src.allowed_controller_count;
+  memcpy(dst.allowed_controller_addresses, src.allowed_controller_addresses,
+         sizeof(dst.allowed_controller_addresses));
+  dst.known_peer_count = src.known_peer_count;
+  memcpy(dst.known_peer_addresses, src.known_peer_addresses,
+         sizeof(dst.known_peer_addresses));
+  dst.lora_frequency_hz = src.lora_frequency_hz;
+  dst.lora_tx_power = src.lora_tx_power;
+  dst.lora_spreading_factor = src.lora_spreading_factor;
+  dst.lora_bandwidth_hz = src.lora_bandwidth_hz;
+  dst.lora_coding_rate = src.lora_coding_rate;
+  dst.heartbeat_ms = src.heartbeat_ms;
+  dst.ack_timeout_ms = src.ack_timeout_ms;
+  dst.mqtt_remote_retry_timeout_ms = src.mqtt_remote_retry_timeout_ms;
+  dst.tx_mqtt_remote_polling_enabled = src.tx_mqtt_remote_polling_enabled;
+  dst.tx_mqtt_remote_default_poll_interval_ms =
+      src.tx_mqtt_remote_default_poll_interval_ms;
+  dst.rx_push_on_change_enabled = src.rx_push_on_change_enabled;
+  dst.rx_push_min_interval_ms = src.rx_push_min_interval_ms;
+  dst.input_control_paired_lora_enabled = src.input_control_paired_lora_enabled;
+  dst.tx_command_retry_timeout_ms = src.tx_command_retry_timeout_ms;
+  dst.rx_failsafe_mode = src.rx_failsafe_mode;
+  dst.rx_failsafe_timeout_ms = src.rx_failsafe_timeout_ms;
+  dst.wifi_sta_ssid = src.wifi_sta_ssid;
+  dst.wifi_sta_password = src.wifi_sta_password;
+  dst.lan_hostname = src.lan_hostname;
+  dst.fleet_passphrase = src.fleet_passphrase;
+  dst.fleet_setup_prompt_dismissed = src.fleet_setup_prompt_dismissed;
+  dst.admin_password = src.admin_password;
+  dst.ap_always_on = src.ap_always_on;
+  dst.mqtt_client_enabled = src.mqtt_client_enabled;
+  dst.mqtt_control_enabled = src.mqtt_control_enabled;
+  dst.mqtt_controller_addresses = src.mqtt_controller_addresses;
+  dst.mqtt_host = src.mqtt_host;
+  dst.mqtt_port = src.mqtt_port;
+  dst.mqtt_user = src.mqtt_user;
+  dst.mqtt_password = src.mqtt_password;
+  dst.mqtt_topic_root = src.mqtt_topic_root;
+  dst.sensor_temp_enabled = src.sensor_temp_enabled;
+  dst.commissioned = src.commissioned;
+  dst.audit_last_saved_by = src.audit_last_saved_by;
+  dst.audit_last_saved_ms = src.audit_last_saved_ms;
+}
 }  // namespace
 
 void WebConsole::handleGetSettings() {
@@ -152,171 +307,176 @@ void WebConsole::handlePostSettings() {
   }
 
   auto &cfg = config_->settings();
-  const Settings prev = cfg;
-  Settings next = cfg;
-  const String prevStaSsid = prev.wifi_sta_ssid;
-  const String prevStaPassword = prev.wifi_sta_password;
-  const String prevLanHost = prev.lan_hostname;
-  const bool prevApAlwaysOn = prev.ap_always_on;
-  const String prevAdminPassword = prev.admin_password;
+  SettingsBackup backup;
+  captureSettingsBackup(cfg, backup);
+  auto restoreOnFailure = [&]() { restoreSettingsBackup(backup, cfg); };
+  const String prevStaSsid = cfg.wifi_sta_ssid;
+  const String prevStaPassword = cfg.wifi_sta_password;
+  const String prevLanHost = cfg.lan_hostname;
+  const bool prevApAlwaysOn = cfg.ap_always_on;
+  const String prevAdminPassword = cfg.admin_password;
   const String oldDefaultHost = config_->defaultLanHostname();
   const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
   const String oldLegacyRoleTxHost = oldLegacyDefaultHost + "-tx";
   const String oldLegacyRoleRxHost = oldLegacyDefaultHost + "-rx";
-  next.mode = doc["mode"] | next.mode.c_str();
-  next.role = doc["role"] | next.role.c_str();
-  next.role_tx = parseBoolField(doc["role_tx"], next.role_tx);
-  if (next.mode == "paired") {
-    next.role = next.role_tx ? "transmitter" : "receiver";
-  } else if (next.mode.length() == 0) {
-    next.mode = "paired";
-    next.role = next.role_tx ? "transmitter" : "receiver";
+  
+  cfg.mode = doc["mode"] | cfg.mode.c_str();
+  cfg.role = doc["role"] | cfg.role.c_str();
+  cfg.role_tx = parseBoolField(doc["role_tx"], cfg.role_tx);
+  if (cfg.mode == "paired") {
+    cfg.role = cfg.role_tx ? "transmitter" : "receiver";
+  } else if (cfg.mode.length() == 0) {
+    cfg.mode = "paired";
+    cfg.role = cfg.role_tx ? "transmitter" : "receiver";
   }
-  next.local_address = parseAddressField(doc["local_address"], next.local_address);
-  next.remote_address = parseAddressField(doc["remote_address"], next.remote_address);
+  cfg.local_address = parseAddressField(doc["local_address"], cfg.local_address);
+  cfg.remote_address = parseAddressField(doc["remote_address"], cfg.remote_address);
   if (!doc["paired_target_addresses"].isNull()) {
-    next.paired_target_count =
-        parseAddressArrayField(doc["paired_target_addresses"], next.paired_target_addresses, Settings::kAddressListCap);
+    cfg.paired_target_count =
+        parseAddressArrayField(doc["paired_target_addresses"], cfg.paired_target_addresses, Settings::kAddressListCap);
   }
   if (!doc["allowed_controller_addresses"].isNull()) {
-    next.allowed_controller_count = parseAddressArrayField(doc["allowed_controller_addresses"], next.allowed_controller_addresses,
+    cfg.allowed_controller_count = parseAddressArrayField(doc["allowed_controller_addresses"], cfg.allowed_controller_addresses,
                                                           Settings::kAddressListCap);
   }
   if (!doc["known_peer_addresses"].isNull()) {
-    next.known_peer_count =
-        parseAddressArrayField(doc["known_peer_addresses"], next.known_peer_addresses, Settings::kAddressListCap);
+    cfg.known_peer_count =
+        parseAddressArrayField(doc["known_peer_addresses"], cfg.known_peer_addresses, Settings::kAddressListCap);
   }
-  next.lora_frequency_hz = doc["lora_frequency_hz"] | next.lora_frequency_hz;
-  next.lora_tx_power = static_cast<uint8_t>(doc["lora_tx_power"] | next.lora_tx_power);
-  next.lora_spreading_factor = static_cast<uint8_t>(doc["lora_spreading_factor"] | next.lora_spreading_factor);
-  next.lora_bandwidth_hz = doc["lora_bandwidth_hz"] | next.lora_bandwidth_hz;
-  next.lora_coding_rate = static_cast<uint8_t>(doc["lora_coding_rate"] | next.lora_coding_rate);
-  next.heartbeat_ms = doc["heartbeat_ms"] | next.heartbeat_ms;
-  next.ack_timeout_ms = doc["ack_timeout_ms"] | next.ack_timeout_ms;
-  next.mqtt_remote_retry_timeout_ms = doc["mqtt_remote_retry_timeout_ms"] | next.mqtt_remote_retry_timeout_ms;
-  next.tx_mqtt_remote_polling_enabled = parseBoolField(doc["tx_mqtt_remote_polling_enabled"], next.tx_mqtt_remote_polling_enabled);
-  next.tx_mqtt_remote_default_poll_interval_ms =
-      doc["tx_mqtt_remote_default_poll_interval_ms"] | next.tx_mqtt_remote_default_poll_interval_ms;
-  next.rx_push_on_change_enabled = parseBoolField(doc["rx_push_on_change_enabled"], next.rx_push_on_change_enabled);
-  next.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | next.rx_push_min_interval_ms;
-  next.input_control_paired_lora_enabled = parseBoolField(doc["input_control_paired_lora_enabled"], next.input_control_paired_lora_enabled);
-  next.tx_command_retry_timeout_ms = doc["tx_command_retry_timeout_ms"] | next.tx_command_retry_timeout_ms;
-  next.rx_failsafe_mode = doc["rx_failsafe_mode"] | next.rx_failsafe_mode.c_str();
-  next.rx_failsafe_timeout_ms = doc["rx_failsafe_timeout_ms"] | next.rx_failsafe_timeout_ms;
-  next.wifi_sta_ssid = doc["wifi_sta_ssid"] | next.wifi_sta_ssid.c_str();
-  next.wifi_sta_password = doc["wifi_sta_password"] | next.wifi_sta_password.c_str();
+  cfg.lora_frequency_hz = doc["lora_frequency_hz"] | cfg.lora_frequency_hz;
+  cfg.lora_tx_power = static_cast<uint8_t>(doc["lora_tx_power"] | cfg.lora_tx_power);
+  cfg.lora_spreading_factor = static_cast<uint8_t>(doc["lora_spreading_factor"] | cfg.lora_spreading_factor);
+  cfg.lora_bandwidth_hz = doc["lora_bandwidth_hz"] | cfg.lora_bandwidth_hz;
+  cfg.lora_coding_rate = static_cast<uint8_t>(doc["lora_coding_rate"] | cfg.lora_coding_rate);
+  cfg.heartbeat_ms = doc["heartbeat_ms"] | cfg.heartbeat_ms;
+  cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
+  cfg.mqtt_remote_retry_timeout_ms = doc["mqtt_remote_retry_timeout_ms"] | cfg.mqtt_remote_retry_timeout_ms;
+  cfg.tx_mqtt_remote_polling_enabled = parseBoolField(doc["tx_mqtt_remote_polling_enabled"], cfg.tx_mqtt_remote_polling_enabled);
+  cfg.tx_mqtt_remote_default_poll_interval_ms =
+      doc["tx_mqtt_remote_default_poll_interval_ms"] | cfg.tx_mqtt_remote_default_poll_interval_ms;
+  cfg.rx_push_on_change_enabled = parseBoolField(doc["rx_push_on_change_enabled"], cfg.rx_push_on_change_enabled);
+  cfg.rx_push_min_interval_ms = doc["rx_push_min_interval_ms"] | cfg.rx_push_min_interval_ms;
+  cfg.input_control_paired_lora_enabled = parseBoolField(doc["input_control_paired_lora_enabled"], cfg.input_control_paired_lora_enabled);
+  cfg.tx_command_retry_timeout_ms = doc["tx_command_retry_timeout_ms"] | cfg.tx_command_retry_timeout_ms;
+  cfg.rx_failsafe_mode = doc["rx_failsafe_mode"] | cfg.rx_failsafe_mode.c_str();
+  cfg.rx_failsafe_timeout_ms = doc["rx_failsafe_timeout_ms"] | cfg.rx_failsafe_timeout_ms;
+  cfg.wifi_sta_ssid = doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str();
+  cfg.wifi_sta_password = doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str();
+  
   const bool hasLanHostnameField = !doc["lan_hostname"].isNull();
   if (hasLanHostnameField) {
-    const char *postedLanHost = doc["lan_hostname"] | next.lan_hostname.c_str();
+    const char *postedLanHost = doc["lan_hostname"] | cfg.lan_hostname.c_str();
     const bool wasDefaultHostname =
-        (prev.lan_hostname == oldDefaultHost) || (prev.lan_hostname == oldLegacyDefaultHost) ||
-        (prev.lan_hostname == oldLegacyRoleTxHost) || (prev.lan_hostname == oldLegacyRoleRxHost);
+        (prevLanHost == oldDefaultHost) || (prevLanHost == oldLegacyDefaultHost) ||
+        (prevLanHost == oldLegacyRoleTxHost) || (prevLanHost == oldLegacyRoleRxHost);
     if (wasDefaultHostname && (oldDefaultHost.equals(postedLanHost) || oldLegacyDefaultHost.equals(postedLanHost) ||
                                oldLegacyRoleTxHost.equals(postedLanHost) || oldLegacyRoleRxHost.equals(postedLanHost))) {
-      next.lan_hostname = config_->defaultLanHostname();
+      cfg.lan_hostname = config_->defaultLanHostname();
     } else {
-      next.lan_hostname = postedLanHost;
+      cfg.lan_hostname = postedLanHost;
     }
   }
-  next.fleet_passphrase = doc["fleet_passphrase"] | next.fleet_passphrase.c_str();
-  next.ap_always_on = parseBoolField(doc["ap_always_on"], next.ap_always_on);
-  next.mqtt_client_enabled = parseBoolField(doc["mqtt_client_enabled"], next.mqtt_client_enabled);
-  next.mqtt_control_enabled = parseBoolField(doc["mqtt_control_enabled"], next.mqtt_control_enabled);
-  next.mqtt_controller_addresses = doc["mqtt_controller_addresses"] | next.mqtt_controller_addresses.c_str();
-  next.mqtt_host = doc["mqtt_host"] | next.mqtt_host.c_str();
-  next.mqtt_port = static_cast<uint16_t>(doc["mqtt_port"] | next.mqtt_port);
-  next.mqtt_user = doc["mqtt_user"] | next.mqtt_user.c_str();
-  next.mqtt_password = doc["mqtt_password"] | next.mqtt_password.c_str();
-  next.mqtt_topic_root = doc["mqtt_topic_root"] | next.mqtt_topic_root.c_str();
-  next.sensor_temp_enabled = parseBoolField(doc["sensor_temp_enabled"], next.sensor_temp_enabled);
+  cfg.fleet_passphrase = doc["fleet_passphrase"] | cfg.fleet_passphrase.c_str();
+  cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
+  cfg.mqtt_client_enabled = parseBoolField(doc["mqtt_client_enabled"], cfg.mqtt_client_enabled);
+  cfg.mqtt_control_enabled = parseBoolField(doc["mqtt_control_enabled"], cfg.mqtt_control_enabled);
+  cfg.mqtt_controller_addresses = doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str();
+  cfg.mqtt_host = doc["mqtt_host"] | cfg.mqtt_host.c_str();
+  cfg.mqtt_port = static_cast<uint16_t>(doc["mqtt_port"] | cfg.mqtt_port);
+  cfg.mqtt_user = doc["mqtt_user"] | cfg.mqtt_user.c_str();
+  cfg.mqtt_password = doc["mqtt_password"] | cfg.mqtt_password.c_str();
+  cfg.mqtt_topic_root = doc["mqtt_topic_root"] | cfg.mqtt_topic_root.c_str();
+  cfg.sensor_temp_enabled = parseBoolField(doc["sensor_temp_enabled"], cfg.sensor_temp_enabled);
 
-  String newAdmin = doc["admin_password"] | next.admin_password.c_str();
+  String newAdmin = doc["admin_password"] | cfg.admin_password.c_str();
   if (newAdmin.length() >= 8) {
-    next.admin_password = newAdmin;
+    cfg.admin_password = newAdmin;
   }
 
-  if (next.local_address < 1) next.local_address = 1;
-  if (next.local_address > 254) next.local_address = 254;
-  if (next.remote_address < 1) next.remote_address = 1;
-  if (next.remote_address > 254) next.remote_address = 254;
-  if (next.role_tx) {
-    if (next.paired_target_count == 0) {
-      next.paired_target_count = 1;
-      next.paired_target_addresses[0] = next.remote_address;
+  if (cfg.local_address < 1) cfg.local_address = 1;
+  if (cfg.local_address > 254) cfg.local_address = 254;
+  if (cfg.remote_address < 1) cfg.remote_address = 1;
+  if (cfg.remote_address > 254) cfg.remote_address = 254;
+  if (cfg.role_tx) {
+    if (cfg.paired_target_count == 0) {
+      cfg.paired_target_count = 1;
+      cfg.paired_target_addresses[0] = cfg.remote_address;
     }
-    next.remote_address = next.paired_target_addresses[0];
+    cfg.remote_address = cfg.paired_target_addresses[0];
   } else {
-    if (next.allowed_controller_count == 0) {
-      next.allowed_controller_count = 1;
-      next.allowed_controller_addresses[0] = next.remote_address;
+    if (cfg.allowed_controller_count == 0) {
+      cfg.allowed_controller_count = 1;
+      cfg.allowed_controller_addresses[0] = cfg.remote_address;
     }
-    next.remote_address = next.allowed_controller_addresses[0];
+    cfg.remote_address = cfg.allowed_controller_addresses[0];
   }
-  next.fleet_passphrase.trim();
+  cfg.fleet_passphrase.trim();
   const bool hasFleetPassphraseField = !doc["fleet_passphrase"].isNull();
   const bool allowDefaultDeploymentKey = parseBoolField(doc["allow_default_deployment_key"], false);
-  if (hasFleetPassphraseField && next.fleet_passphrase.length() < kMinDeploymentKeyLen) {
+  if (hasFleetPassphraseField && cfg.fleet_passphrase.length() < kMinDeploymentKeyLen) {
+    restoreOnFailure();
     server_.send(400, "text/plain",
                  String("deployment key too short (min ") + String(static_cast<unsigned>(kMinDeploymentKeyLen)) +
                      " chars)");
     return;
   }
-  if (hasFleetPassphraseField && !allowDefaultDeploymentKey && isDefaultDeploymentKey(next.fleet_passphrase)) {
+  if (hasFleetPassphraseField && !allowDefaultDeploymentKey && isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+    restoreOnFailure();
     server_.send(400, "text/plain", "deployment key cannot be default; set unique key");
     return;
   }
-  if (hasFleetPassphraseField && !isDefaultDeploymentKey(next.fleet_passphrase)) {
-    next.fleet_setup_prompt_dismissed = true;
+  if (hasFleetPassphraseField && !isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+    cfg.fleet_setup_prompt_dismissed = true;
   }
-  if (next.lora_frequency_hz < kMinFrequencyHz || next.lora_frequency_hz > kMaxFrequencyHz) {
-    next.lora_frequency_hz = kDefaultFrequencyHz;
+  if (cfg.lora_frequency_hz < kMinFrequencyHz || cfg.lora_frequency_hz > kMaxFrequencyHz) {
+    cfg.lora_frequency_hz = kDefaultFrequencyHz;
   }
-  if (next.mode == "paired") {
-    if (next.heartbeat_ms < kMinHeartbeatMs) next.heartbeat_ms = kMinHeartbeatMs;
-    if (next.heartbeat_ms > kMaxHeartbeatMs) next.heartbeat_ms = kMaxHeartbeatMs;
+  if (cfg.mode == "paired") {
+    if (cfg.heartbeat_ms < kMinHeartbeatMs) cfg.heartbeat_ms = kMinHeartbeatMs;
+    if (cfg.heartbeat_ms > kMaxHeartbeatMs) cfg.heartbeat_ms = kMaxHeartbeatMs;
   } else {
     // Heartbeat setting is paired-mode only; keep a stable default elsewhere.
-    next.heartbeat_ms = 60000UL;
+    cfg.heartbeat_ms = 60000UL;
   }
-  if (next.ack_timeout_ms < kMinAckTimeoutMs) next.ack_timeout_ms = kMinAckTimeoutMs;
-  if (next.ack_timeout_ms > kMaxAckTimeoutMs) next.ack_timeout_ms = kMaxAckTimeoutMs;
-  if (next.mqtt_remote_retry_timeout_ms < kMinMqttRemoteRetryTimeoutMs) next.mqtt_remote_retry_timeout_ms = kMinMqttRemoteRetryTimeoutMs;
-  if (next.mqtt_remote_retry_timeout_ms > kMaxMqttRemoteRetryTimeoutMs) next.mqtt_remote_retry_timeout_ms = kMaxMqttRemoteRetryTimeoutMs;
-  if (next.tx_mqtt_remote_default_poll_interval_ms < kMinTxPollDefaultIntervalMs) {
-    next.tx_mqtt_remote_default_poll_interval_ms = kMinTxPollDefaultIntervalMs;
+  if (cfg.ack_timeout_ms < kMinAckTimeoutMs) cfg.ack_timeout_ms = kMinAckTimeoutMs;
+  if (cfg.ack_timeout_ms > kMaxAckTimeoutMs) cfg.ack_timeout_ms = kMaxAckTimeoutMs;
+  if (cfg.mqtt_remote_retry_timeout_ms < kMinMqttRemoteRetryTimeoutMs) cfg.mqtt_remote_retry_timeout_ms = kMinMqttRemoteRetryTimeoutMs;
+  if (cfg.mqtt_remote_retry_timeout_ms > kMaxMqttRemoteRetryTimeoutMs) cfg.mqtt_remote_retry_timeout_ms = kMaxMqttRemoteRetryTimeoutMs;
+  if (cfg.tx_mqtt_remote_default_poll_interval_ms < kMinTxPollDefaultIntervalMs) {
+    cfg.tx_mqtt_remote_default_poll_interval_ms = kMinTxPollDefaultIntervalMs;
   }
-  if (next.tx_mqtt_remote_default_poll_interval_ms > kMaxTxPollDefaultIntervalMs) {
-    next.tx_mqtt_remote_default_poll_interval_ms = kMaxTxPollDefaultIntervalMs;
+  if (cfg.tx_mqtt_remote_default_poll_interval_ms > kMaxTxPollDefaultIntervalMs) {
+    cfg.tx_mqtt_remote_default_poll_interval_ms = kMaxTxPollDefaultIntervalMs;
   }
-  if (next.rx_push_min_interval_ms < kMinRxPushIntervalMs) next.rx_push_min_interval_ms = kMinRxPushIntervalMs;
-  if (next.rx_push_min_interval_ms > kMaxRxPushIntervalMs) next.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
-  if (next.tx_command_retry_timeout_ms < 5000UL) next.tx_command_retry_timeout_ms = 5000UL;
-  if (next.tx_command_retry_timeout_ms > 3600000UL) next.tx_command_retry_timeout_ms = 3600000UL;
-  next.rx_failsafe_mode.trim();
-  next.rx_failsafe_mode.toLowerCase();
-  if (next.rx_failsafe_mode != "hold_last" && next.rx_failsafe_mode != "force_off" && next.rx_failsafe_mode != "force_on") {
-    next.rx_failsafe_mode = "hold_last";
+  if (cfg.rx_push_min_interval_ms < kMinRxPushIntervalMs) cfg.rx_push_min_interval_ms = kMinRxPushIntervalMs;
+  if (cfg.rx_push_min_interval_ms > kMaxRxPushIntervalMs) cfg.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
+  if (cfg.tx_command_retry_timeout_ms < 5000UL) cfg.tx_command_retry_timeout_ms = 5000UL;
+  if (cfg.tx_command_retry_timeout_ms > 3600000UL) cfg.tx_command_retry_timeout_ms = 3600000UL;
+  cfg.rx_failsafe_mode.trim();
+  cfg.rx_failsafe_mode.toLowerCase();
+  if (cfg.rx_failsafe_mode != "hold_last" && cfg.rx_failsafe_mode != "force_off" && cfg.rx_failsafe_mode != "force_on") {
+    cfg.rx_failsafe_mode = "hold_last";
   }
-  if (next.rx_failsafe_timeout_ms < 5000UL) next.rx_failsafe_timeout_ms = 5000UL;
-  if (next.rx_failsafe_timeout_ms > 3600000UL) next.rx_failsafe_timeout_ms = 3600000UL;
-  if (next.mqtt_port == 0) next.mqtt_port = 1883;
-  if (next.mqtt_topic_root.length() == 0) next.mqtt_topic_root = "lora";
-  if (next.mqtt_control_enabled && !next.mqtt_client_enabled) {
+  if (cfg.rx_failsafe_timeout_ms < 5000UL) cfg.rx_failsafe_timeout_ms = 5000UL;
+  if (cfg.rx_failsafe_timeout_ms > 3600000UL) cfg.rx_failsafe_timeout_ms = 3600000UL;
+  if (cfg.mqtt_port == 0) cfg.mqtt_port = 1883;
+  if (cfg.mqtt_topic_root.length() == 0) cfg.mqtt_topic_root = "lora";
+  if (cfg.mqtt_control_enabled && !cfg.mqtt_client_enabled) {
+    restoreOnFailure();
     server_.send(400, "text/plain", "mqtt_control_enabled requires mqtt_client_enabled");
     return;
   }
-  next.audit_last_saved_by = "admin";
-  next.audit_last_saved_ms = millis();
+  cfg.audit_last_saved_by = "admin";
+  cfg.audit_last_saved_ms = millis();
 
-  const bool networkChanged = (next.wifi_sta_ssid != prevStaSsid) ||
-                              (next.wifi_sta_password != prevStaPassword) ||
-                              (next.lan_hostname != prevLanHost) ||
-                              (next.ap_always_on != prevApAlwaysOn);
-  const bool otaAuthChanged = (next.admin_password != prevAdminPassword);
+  const bool networkChanged = (cfg.wifi_sta_ssid != prevStaSsid) ||
+                              (cfg.wifi_sta_password != prevStaPassword) ||
+                              (cfg.lan_hostname != prevLanHost) ||
+                              (cfg.ap_always_on != prevApAlwaysOn);
+  const bool otaAuthChanged = (cfg.admin_password != prevAdminPassword);
 
-  cfg = next;
   if (!config_->save()) {
-    cfg = prev;
+    restoreOnFailure();
     server_.send(500, "text/plain", "save failed");
     return;
   }
