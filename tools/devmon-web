@@ -1,0 +1,10 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+
+if ! python3 -c 'import fastapi, uvicorn, serial, websockets' >/dev/null 2>&1; then
+  echo "Installing devmon dependencies..."
+  python3 -m pip install -r "$SCRIPT_DIR/devmon_web/requirements.txt"
+fi
+
+exec python3 "$SCRIPT_DIR/devmon_web/main.py" "$@"
