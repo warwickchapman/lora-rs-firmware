@@ -497,6 +497,5 @@ jobs:
           tag_name: ${{ needs.setup.outputs.tag }}
           files: all_assets/*
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
     services: {} # dummy to find where to put the env
