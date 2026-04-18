@@ -58,7 +58,9 @@ async function api(path, method = "GET", body = null) {
 }
 
 function pingText(ping) {
-  if (!ping) return "unknown";
+  if (!ping) return "no IP";
+  if (ping.state === "no_ip") return "no IP";
+  if (ping.state === "serial_preferred") return "serial preferred";
   if (ping.state === "online") {
     if (typeof ping.latency_ms === "number") return `online ${ping.latency_ms.toFixed(1)}ms`;
     return "online";
@@ -69,15 +71,15 @@ function pingText(ping) {
 }
 
 function serialText(serial) {
-  if (!serial) return "serial: idle";
-  if (serial.running) return "serial: connected";
+  if (!serial) return "Serial: idle";
+  if (serial.running) return "Serial: connected";
   if (serial.wanted) {
     const retryIn = Number(serial.retry_in_s ?? 0);
-    if (serial.error) return `serial retry in ${Math.max(0, Math.ceil(retryIn))}s (${serial.error})`;
-    return `serial retry in ${Math.max(0, Math.ceil(retryIn))}s`;
+    if (serial.error) return `Serial: retry in ${Math.max(0, Math.ceil(retryIn))}s (${serial.error})`;
+    return `Serial: retry in ${Math.max(0, Math.ceil(retryIn))}s`;
   }
-  if (serial.error) return `serial error: ${serial.error}`;
-  return "serial: stopped";
+  if (serial.error) return `Serial: error (${serial.error})`;
+  return "Serial: stopped";
 }
 
 function serialIndicatorClass(serial) {
@@ -86,6 +88,26 @@ function serialIndicatorClass(serial) {
   if (serial.wanted) return "serial-retry";
   if (serial.error) return "serial-error";
   return "serial-idle";
+}
+
+function ipIndicatorClass(slot) {
+  const ping = slot.ping || {};
+  if (!slot.ip || ping.state === "no_ip") return "ip-no_ip";
+  if (ping.state === "serial_preferred") return "ip-serial_preferred";
+  if (ping.state === "online") return "ip-online";
+  if (ping.state === "offline") return "ip-offline";
+  if (ping.state === "error") return "ip-error";
+  return "ip-no_ip";
+}
+
+function ipStatusTitle(slot) {
+  const ping = slot.ping || {};
+  if (!slot.ip || ping.state === "no_ip") return "IP: no IP learned yet";
+  if (ping.state === "serial_preferred") return `IP: ${slot.ip} (serial attached, network check paused)`;
+  if (ping.state === "online") return typeof ping.latency_ms === "number" ? `IP: ${slot.ip} reachable (${ping.latency_ms.toFixed(1)} ms)` : `IP: ${slot.ip} reachable`;
+  if (ping.state === "offline") return `IP: ${slot.ip} unreachable`;
+  if (ping.state === "error") return `IP: ${slot.ip} check error`;
+  return `IP: ${slot.ip}`;
 }
 
 function refreshPortSelect(selectEl, currentPort) {
@@ -142,9 +164,9 @@ function renderDeviceTabs() {
     const btn = document.createElement("button");
     btn.className = "device-tab";
     if (slot.slot_id === state.activeTab) btn.classList.add("device-tab-active");
-    const pingState = slot.ping?.state || "unknown";
+    const ipClass = ipIndicatorClass(slot);
     const serialClass = serialIndicatorClass(slot.serial);
-    btn.innerHTML = `<span>Device ${slot.slot_id + 1}</span><span class="tab-ping ping-${pingState}"></span><span class="tab-serial ${serialClass}"></span>`;
+    btn.innerHTML = `<span>Device ${slot.slot_id + 1}</span><span class="tab-icon ${ipClass}" title="${ipStatusTitle(slot)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 0 1 16 0"></path><path d="M7 17a5 5 0 0 1 10 0"></path><path d="M10 17a2 2 0 0 1 4 0"></path></svg></span><span class="tab-icon ${serialClass}" title="${serialText(slot.serial)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h8v6h2v3h-3v3h-6v-3H6v-3h2z"></path></svg></span>`;
     btn.addEventListener("click", () => setActiveTab(slot.slot_id));
     dom.deviceTabs.appendChild(btn);
   }
@@ -166,7 +188,6 @@ function renderSlotCard(slot) {
     const refs = {
       root,
       title: root.querySelector(".slot-title"),
-      badge: root.querySelector(".ping-badge"),
       ipInput: root.querySelector(".ip-input"),
       portSelect: root.querySelector(".port-select"),
       baudInput: root.querySelector(".baud-input"),
@@ -174,6 +195,7 @@ function renderSlotCard(slot) {
       startBtn: root.querySelector(".start-btn"),
       stopBtn: root.querySelector(".stop-btn"),
       clearBtn: root.querySelector(".clear-btn"),
+      ipIndicator: root.querySelector(".ip-indicator"),
       serialIndicator: root.querySelector(".serial-indicator"),
       copyLogBtn: root.querySelector(".copy-log-btn"),
       logPane: root.querySelector(".log-pane"),
@@ -188,7 +210,7 @@ function renderSlotCard(slot) {
         });
       } catch (err) {
         refs.serialIndicator.title = String(err);
-        refs.serialIndicator.className = "serial-indicator serial-error";
+        refs.serialIndicator.className = "status-icon serial-indicator serial-error";
       }
     });
 
@@ -197,7 +219,7 @@ function renderSlotCard(slot) {
         await api(`/api/slots/${slot.slot_id}/serial/start`, "POST");
       } catch (err) {
         refs.serialIndicator.title = String(err);
-        refs.serialIndicator.className = "serial-indicator serial-error";
+        refs.serialIndicator.className = "status-icon serial-indicator serial-error";
       }
     });
 
@@ -206,7 +228,7 @@ function renderSlotCard(slot) {
         await api(`/api/slots/${slot.slot_id}/serial/stop`, "POST");
       } catch (err) {
         refs.serialIndicator.title = String(err);
-        refs.serialIndicator.className = "serial-indicator serial-error";
+        refs.serialIndicator.className = "status-icon serial-indicator serial-error";
       }
     });
 
@@ -215,7 +237,7 @@ function renderSlotCard(slot) {
         await api(`/api/slots/${slot.slot_id}/logs/clear`, "POST");
       } catch (err) {
         refs.serialIndicator.title = String(err);
-        refs.serialIndicator.className = "serial-indicator serial-error";
+        refs.serialIndicator.className = "status-icon serial-indicator serial-error";
       }
     });
 
@@ -245,14 +267,14 @@ function renderSlotCard(slot) {
   card.ipInput.value = slot.ip;
   card.baudInput.value = String(slot.baud || 115200);
 
-  const ping = slot.ping || { state: "unknown" };
-  card.badge.className = `ping-badge ping-${ping.state || "unknown"}`;
-  card.badge.textContent = pingText(ping);
-
   refreshPortSelect(card.portSelect, slot.port || "");
 
+  const ipClass = ipIndicatorClass(slot);
+  card.ipIndicator.className = `status-icon ip-indicator ${ipClass}`;
+  card.ipIndicator.title = ipStatusTitle(slot);
+
   const indicatorClass = serialIndicatorClass(slot.serial);
-  card.serialIndicator.className = `serial-indicator ${indicatorClass}`;
+  card.serialIndicator.className = `status-icon serial-indicator ${indicatorClass}`;
   card.serialIndicator.title = serialText(slot.serial);
 
   card.logPane.textContent = (slot.logs || []).join("\n");
@@ -321,8 +343,9 @@ function applyEvent(event) {
     slot.ping = { state: event.state, latency_ms: event.latency_ms, last_ok_at: event.at };
     const card = dom.cards.get(event.slot_id);
     if (card) {
-      card.badge.className = `ping-badge ping-${event.state || "unknown"}`;
-      card.badge.textContent = pingText(slot.ping);
+      const ipClass = ipIndicatorClass(slot);
+      card.ipIndicator.className = `status-icon ip-indicator ${ipClass}`;
+      card.ipIndicator.title = ipStatusTitle(slot);
     }
     renderDeviceTabs();
     return;
@@ -339,8 +362,11 @@ function applyEvent(event) {
     };
     const card = dom.cards.get(event.slot_id);
     if (card) {
-      card.serialIndicator.className = `serial-indicator ${serialIndicatorClass(slot.serial)}`;
+      card.serialIndicator.className = `status-icon serial-indicator ${serialIndicatorClass(slot.serial)}`;
       card.serialIndicator.title = serialText(slot.serial);
+      const ipClass = ipIndicatorClass(slot);
+      card.ipIndicator.className = `status-icon ip-indicator ${ipClass}`;
+      card.ipIndicator.title = ipStatusTitle(slot);
     }
     renderDeviceTabs();
     return;
@@ -352,8 +378,14 @@ function applyEvent(event) {
       const slot = state.slots.find((s) => s.slot_id === event.slot_id);
       if (slot) slot.ip = event.ip_detected;
       const card = dom.cards.get(event.slot_id);
-      if (card) card.ipInput.value = event.ip_detected;
+      if (card) {
+        card.ipInput.value = event.ip_detected;
+        const ipClass = ipIndicatorClass(slot);
+        card.ipIndicator.className = `status-icon ip-indicator ${ipClass}`;
+        card.ipIndicator.title = ipStatusTitle(slot);
+      }
     }
+    renderDeviceTabs();
     return;
   }
 

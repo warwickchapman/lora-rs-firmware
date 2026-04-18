@@ -103,23 +103,34 @@ h1 {
   background: #15314a;
 }
 
-.tab-ping,
-.tab-serial {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
+.tab-icon {
+  width: 12px;
+  height: 12px;
   display: inline-block;
+  color: var(--muted);
 }
 
-.tab-ping.ping-online { background: var(--ok); border: 0; }
-.tab-ping.ping-offline,
-.tab-ping.ping-error { background: var(--bad); border: 0; }
-.tab-ping.ping-unknown { background: #5a6f83; border: 0; }
+.tab-icon svg,
+.status-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
-.tab-serial.serial-ok { background: var(--ok); }
-.tab-serial.serial-retry { background: var(--warn); }
-.tab-serial.serial-error { background: var(--bad); }
-.tab-serial.serial-idle { background: #5a6f83; }
+.tab-icon.ip-online { color: var(--ok); }
+.tab-icon.ip-offline,
+.tab-icon.ip-error { color: var(--bad); }
+.tab-icon.ip-no_ip { color: #5a6f83; }
+.tab-icon.ip-serial_preferred { color: var(--accent); }
+.tab-icon.serial-ok { color: var(--ok); }
+.tab-icon.serial-retry { color: var(--warn); }
+.tab-icon.serial-error { color: var(--bad); }
+.tab-icon.serial-idle { color: #5a6f83; }
 
 .ws-status {
   border: 1px solid var(--line);
@@ -178,9 +189,11 @@ body.view-tabbed .grid {
 }
 
 .slot-header {
-  position: relative;
   border-bottom: 1px solid var(--line);
   padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .slot-title {
@@ -189,34 +202,24 @@ body.view-tabbed .grid {
   font-weight: 700;
 }
 
-.ping-badge {
-  position: absolute;
-  right: 10px;
-  top: 6px;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 10px;
-  border: 1px solid transparent;
+.status-icons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.ping-online {
-  color: #c7f8dd;
-  border-color: #2a8957;
-  background: #143725;
+.status-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  color: #5a6f83;
 }
 
-.ping-offline,
-.ping-error {
-  color: #ffd2d2;
-  border-color: #9f4040;
-  background: #391515;
-}
-
-.ping-unknown {
-  color: #ffe5ba;
-  border-color: #9e7736;
-  background: #3c2f18;
-}
+.ip-online { color: var(--ok); }
+.ip-offline,
+.ip-error { color: var(--bad); }
+.ip-no_ip { color: #5a6f83; }
+.ip-serial_preferred { color: var(--accent); }
 
 .slot-controls {
   display: grid;
@@ -270,18 +273,10 @@ body.view-tabbed .grid {
   color: white;
 }
 
-.serial-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  display: inline-block;
-  border: 1px solid #38516c;
-}
-
-.serial-ok { background: var(--ok); }
-.serial-retry { background: var(--warn); }
-.serial-error { background: var(--bad); }
-.serial-idle { background: #5a6f83; }
+.serial-ok { color: var(--ok); }
+.serial-retry { color: var(--warn); }
+.serial-error { color: var(--bad); }
+.serial-idle { color: #5a6f83; }
 
 .log-pane {
   margin: 0;

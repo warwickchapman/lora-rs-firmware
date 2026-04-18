@@ -28,7 +28,20 @@
       <section class="slot-card">
         <div class="slot-header">
           <h2 class="slot-title"></h2>
-          <span class="ping-badge ping-unknown">unknown</span>
+          <div class="status-icons">
+            <span class="status-icon ip-indicator ip-no_ip" title="IP: no IP learned yet" aria-label="ip status">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 17a8 8 0 0 1 16 0"></path>
+                <path d="M7 17a5 5 0 0 1 10 0"></path>
+                <path d="M10 17a2 2 0 0 1 4 0"></path>
+              </svg>
+            </span>
+            <span class="status-icon serial-indicator serial-idle" title="Serial: idle" aria-label="serial status">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 7h8v6h2v3h-3v3h-6v-3H6v-3h2z"></path>
+              </svg>
+            </span>
+          </div>
         </div>
 
         <div class="slot-controls">
@@ -49,7 +62,6 @@
             <button class="start-btn">Connect</button>
             <button class="stop-btn">Stop</button>
             <button class="clear-btn">Clear</button>
-            <span class="serial-indicator serial-idle" title="serial: idle" aria-label="serial status"></span>
           </div>
         </div>
 

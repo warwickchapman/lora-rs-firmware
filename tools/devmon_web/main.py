@@ -130,7 +130,7 @@ def _valid_ipv4(ip: str) -> bool:
 
 def ping_once(ip: str) -> Tuple[str, Optional[float]]:
     if not ip:
-        return "unknown", None
+        return "no_ip", None
 
     if sys.platform == "darwin":
         cmd = ["ping", "-n", "-c", "1", "-W", "1000", ip]
@@ -314,7 +314,12 @@ class DevmonManager:
     async def _ping_loop(self) -> None:
         while not self._stopping:
             for slot in self.slots:
-                state, latency = await asyncio.to_thread(ping_once, slot.ip)
+                # When serial is attached, prefer that path and stop active IP checks.
+                if slot.serial_running:
+                    state = "serial_preferred" if slot.ip else "no_ip"
+                    latency = None
+                else:
+                    state, latency = await asyncio.to_thread(ping_once, slot.ip)
                 event = {
                     "type": "ping",
                     "slot_id": slot.slot_id,
