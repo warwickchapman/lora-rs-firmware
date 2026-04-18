@@ -7,35 +7,19 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Changed
-- Fleet Devices SSE rendering bug fixed: live fleet events now update both summary and table consistently (no `Discovered devices: N` with empty table mismatch).
-- Fleet known-peer cache is now persisted in config (bounded to 12) and included in `/api/fleet` responses so Fleet defaults can use existing known peers immediately after reboot.
-- Fleet menu is now hidden in standalone mode and fleet APIs return explicit mode-gate errors.
-- Fleet Manage LoRa discovery no longer uses a persistent estimated-count input; operator is prompted at scan start for expected factory-device count.
-- Provisioning status API always returns row data (low-memory compact/count-only suppression removed).
-- Fleet WiFi provisioning now supports targeted send (`target_address`) in addition to broadcast, with UI actions for send-all and per-device send with optional per-device overrides.
-- Internal cleanup + heap hygiene pass (behavior-neutral): removed dead root artifacts (`web_console_ui_assets_orig.cpp`, `.new`), deduplicated role/WiFi status helpers into neutral `runtime_utils`, renamed `defaultLanHostnameForRole(bool)` to `defaultLanHostname()`, and reduced transient String churn in status/config identity formatting.
-- Flasher Windows packaging policy simplified to `MSI + portable ZIP` (NSIS setup EXE removed from release workflow and asset contract).
-- Fleet LoRa provisioning UI polish: clearer scan table labels (`Cur Addr`, `New Addr`, `FW Ver`), improved table presentation, inline disabled reason for `Provision All`, and compact session progress text with elapsed time.
-- LoRa discovery now runs as a two-phase cycle: short coordinator `DiscoverStart` broadcast burst followed by a silent randomized reply window on targets, reducing coordinator-talk collisions during announce collection.
-- Provisioning discovery flow was simplified by removing automatic retry (`DiscoveryRetry` / `retry_once` / “Search more” path); scans are now operator-driven single pass (`Start Discovery`).
-- Provisioning device rows are now sticky by chip ID during discovery/readiness updates and are only cleared when provisioning starts or the session is cancelled.
-- Provisioning discovery defaults are now tuned for small bench batches: default estimated device count is `2` in UI/API start flow.
-- Provisioning discovery timing is now less pessimistic for high estimates: shorter per-device reply scaling, capped max reply window, and early completion once expected count is reached and settle time has elapsed.
-- Provisioning verify is now more resilient: coordinator probes the newly assigned address on fleet key before downgrade, and devices that applied but could not confirm are labeled `applied_unconfirmed` instead of hard-failed.
-- Provisioning auto-assignment is now constrained to address range `1..32`.
-- Provisioning target reliability improvement: each factory-key device now sends two discovery announce frames per `DiscoverStart` (second announce uses short jitter), while coordinator dedupe remains chip-ID-based.
-- Provisioning address assignment is now sticky across separate discovery runs on the same coordinator uptime using a fixed-size chip/address registry (12 entries): already-provisioned addresses are reserved, known chips prefer their prior address, and full remote factory reset clears registry entries for that address.
-- Provisioning start API no longer hard-fails when immediate radio TX budget is unavailable; discovery broadcasts are now queued from the coordinator tick, reducing intermittent `Discovery start failed: request_failed` starts.
-- Provisioning discovery resilience tuned for first-pass reliability: coordinator `DiscoverStart` burst count increased to `2`, and discovery no longer exits early on estimated-count settle before the reply window closes.
-- Provisioning target announce timing now spreads both announce frames across the full reply window using deterministic chip-ID slot offsets plus bounded jitter, reducing repeated cross-device announce collisions.
-- Provisioning session summary text now avoids misleading estimate-denominator phrasing (`x/y`), and reports `Found N (estimated E)` with `Verified V / Found N` progress.
-- Fleet Devices scan defaults were re-tuned for operational range management: default scan range is now `1..32` (operator-adjustable up to `254`).
-- Fleet landing behavior now defaults to `Manage` when no known fleet devices exist, and defaults to `Devices` when known devices are present.
-- Fleet scan receive filtering on RX was relaxed for `PollRequest`: any same-fleet-key transmitter can scan/discover devices (not only the configured paired source address).
-- Fleet Devices table/detail now include a `Web UI` link when a device URL is known (`web_ui_url` present in fleet data).
-- Provisioning table low-memory notice now appears only for true compact payload conditions (low heap or row truncation); active discovery with no rows now reports `Awaiting device replies...`.
-- Fleet WiFi provisioning send path now treats empty posted SSID/password fields as “use stored settings,” preventing false `ssid_required` when Fleet Manage is used without opening Settings first.
-- Fleet WiFi provisioning UI now posts only explicit override fields, accepts HTTP error payloads, and surfaces specific errors (`ssid_required`, `cooldown_active`, `send_failed`) instead of generic `request_failed`.
+- Provisioning and fleet operations are now substantially more reliable in small-batch bench and field workflows, with better discovery timing, sticky addressing, clearer operator feedback, and fewer false failures.
+- Fleet state now survives reboot more usefully: known peers are persisted, fleet landing defaults are smarter, and device data now surfaces direct `Web UI` links when a remote URL is known.
+- Fleet WiFi provisioning now supports targeted sends as well as broadcast, and the UI/API path now preserves stored credentials correctly when no explicit override is posted.
+- Fleet scan and discovery behavior is now less collision-prone and more predictable: same-fleet-key scans are less restrictive, discovery uses a two-phase coordinator/reply window, and targets spread announce frames more safely across the reply window.
+- Provisioning sessions are now operator-driven single-pass runs with sticky chip-ID rows, more realistic estimate defaults, clearer table labels/progress text, and fewer confusing low-memory states.
+- Provisioning address assignment is now constrained to `1..32`, reserved across discovery runs on the same coordinator uptime, and more tolerant of devices that apply successfully but cannot be re-confirmed immediately (`applied_unconfirmed`).
+- Provisioning start no longer fails immediately when radio TX budget is briefly unavailable; discovery starts are now queued from coordinator tick for better first-pass reliability.
+- Runtime/web cleanup removed dead root artifacts (`web_console_ui_assets_orig.cpp`, `.new`), deduplicated shared role/WiFi helpers into `runtime_utils`, renamed `defaultLanHostnameForRole(bool)` to `defaultLanHostname()`, and reduced transient `String` churn in status/config identity formatting.
+- Windows flasher packaging is now simplified to `MSI + portable ZIP`; the NSIS setup EXE is no longer part of the release workflow or asset contract.
+- Linux flasher packaging metadata was tightened so the app identifies cleanly as `Thanda LoRa Flasher` / `thanda-lora-flasher` with AppStream metadata for software-center presentation.
+- Linux release assets now ship `.AppImage.tar.gz` only; raw `.AppImage` upload has been removed from the release workflow.
+- The web login page now shows a chip-ID slug badge for faster device identification before sign-in.
+- `devmon_web` now distinguishes `no IP` vs `serial preferred`, pauses active IP checks while serial is attached, and uses clearer icon-based IP/serial status indicators in both device tabs and cards.
 
 ## [0.5.9-alpha] - 2026-03-05
 

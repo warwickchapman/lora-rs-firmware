@@ -240,9 +240,9 @@ Release execution guardrails:
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
 
 Conditional checklist: when `tools/flasher/**` changed in the release:
-- Rebuild flasher installers from current source for all supported targets (Windows x64 MSI/Setup/Portable ZIP, Linux x64, macOS arm64/x86_64).
+- Rebuild flasher installers from current source for all supported targets (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
 - Ensure flasher metadata is synchronized first via `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` match root `VERSION`.
-- Verify the signed/notarized macOS DMGs pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
+- Verify local macOS DMGs pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
 - Update the public firmware repository (`lora-rs-firmware`) README with:
   - A brief "what the desktop flasher is" summary.
   - Current supported OS/architecture list.
@@ -256,7 +256,8 @@ Release binary set contract:
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.
-- Release macOS artifacts must be Developer ID signed and notarized; release build fails if required secrets are missing.
+- Standard release path currently uses local macOS builds outside CI; verify the resulting DMGs with `spctl` and `codesign`.
+- Developer ID signing + notarization remains the future hardening path if release distribution policy changes.
 - Required certificate secrets:
   - `APPLE_DEVELOPER_ID_CERT_P12_BASE64`
   - `APPLE_DEVELOPER_ID_CERT_PASSWORD`
