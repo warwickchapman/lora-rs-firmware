@@ -54,11 +54,13 @@ const monitorAfterFlash = ref(true);
 const lastPortSnapshot = ref<string[]>([]);
 const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
+const stickLogToBottom = ref(true);
 
 const LOCAL_OPTION = '__local_browse__';
 const hasActiveDeviceInfo = computed(() =>
   !!deviceInfo.value && deviceInfoPort.value === selectedPort.value
 );
+const crashCount = computed(() => countCrashEvents(logs.value));
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -205,6 +207,14 @@ function copyAllDeviceInfo() {
   copyToClipboard(block, 'all device configuration');
 }
 
+function copyActivityLog() {
+  if (logs.value.length === 0) {
+    notify('No activity logs to copy');
+    return;
+  }
+  copyToClipboard(logs.value.join('\n'), 'activity log');
+}
+
 function copyActivePassword() {
   const password = deviceInfo.value?.password?.trim();
   if (!password) {
@@ -310,8 +320,16 @@ function scrollToBottom() {
   }
 }
 
+function handleLogScroll() {
+  if (!logContainer.value) return;
+  const { scrollTop, clientHeight, scrollHeight } = logContainer.value;
+  stickLogToBottom.value = scrollHeight - (scrollTop + clientHeight) < 24;
+}
+
 watch(logs, () => {
-  nextTick(() => scrollToBottom());
+  if (stickLogToBottom.value) {
+    nextTick(() => scrollToBottom());
+  }
 }, { deep: true });
 
 onMounted(async () => {
@@ -372,6 +390,37 @@ function formatLabel(key: string) {
   };
   return mapping[key] || key.replace('_', ' ').split(' ').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
 }
+
+function isCrashStart(line: string): boolean {
+  return [
+    'User exception (panic/abort/assert)',
+    'Soft WDT reset',
+    'wdt reset',
+    'Fatal exception',
+    'Exception (',
+    'Unhandled C++ exception:',
+  ].some(marker => line.includes(marker));
+}
+
+function countCrashEvents(entries: string[]): number {
+  let count = 0;
+  let inCrashBlock = false;
+  for (const entry of entries) {
+    const line = entry.trim();
+    if (!line) continue;
+    if (isCrashStart(line)) {
+      if (!inCrashBlock) {
+        count += 1;
+        inCrashBlock = true;
+      }
+      continue;
+    }
+    if (inCrashBlock && line.startsWith('[INFO][SYS]') && line.includes('event=boot_banner')) {
+      inCrashBlock = false;
+    }
+  }
+  return count;
+}
 </script>
 
 <template>
@@ -385,6 +434,35 @@ function formatLabel(key: string) {
             Activity log
           </h2>
           <div class="flex items-center gap-4">
+            <div
+              v-if="crashCount > 0"
+              class="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300"
+              title="Crash signatures detected in the current log"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              <span>{{ crashCount }}</span>
+            </div>
+            <button
+              @click="copyActivityLog"
+              :disabled="logs.length === 0"
+              :class="[
+                'p-1.5 rounded-md border transition-all',
+                logs.length > 0
+                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
+              ]"
+              title="Copy activity log"
+              aria-label="Copy activity log"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
             <button
               v-if="isMonitoring"
               @click="copyActivePassword"
@@ -432,7 +510,7 @@ function formatLabel(key: string) {
           </div>
         </div>
         
-        <div ref="logContainer" class="flex-1 overflow-auto font-mono text-[9px] sm:text-[10px] pr-2 custom-scrollbar space-y-0.5 leading-tight tracking-tight whitespace-pre">
+        <div ref="logContainer" @scroll="handleLogScroll" class="flex-1 overflow-auto font-mono text-[9px] sm:text-[10px] pr-2 custom-scrollbar space-y-0.5 leading-tight tracking-tight whitespace-pre">
           <div v-for="(log, i) in logs" :key="i" class="text-slate-400 border-l border-slate-700/50 pl-2 opacity-90">
             {{ log }}
           </div>
