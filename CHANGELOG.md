@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-18
+
 ### Changed
 - Provisioning and fleet operations are now substantially more reliable in small-batch bench and field workflows, with better discovery timing, sticky addressing, clearer operator feedback, and fewer false failures.
 - Fleet state now survives reboot more usefully: known peers are persisted, fleet landing defaults are smarter, and device data now surfaces direct `Web UI` links when a remote URL is known.
