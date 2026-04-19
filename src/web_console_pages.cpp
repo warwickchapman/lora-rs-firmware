@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "runtime_utils.h"
 #include "web_console_internal.h"
+#include "web_console_settings_backup.h"
 #include "web_console_ui_assets.h"
 
 using namespace webconsole_internal;
@@ -16,7 +17,7 @@ const char *formatIp(const IPAddress &ip, char out[16]) {
   return out;
 }
 
-constexpr size_t kProgmemHtmlChunkBytes = 768;
+constexpr size_t kProgmemHtmlChunkBytes = 1460;
 
 bool sendProgmemHtml(ESP8266WebServer &server, int code,
                      const char *contentType, PGM_P html) {
@@ -45,7 +46,7 @@ bool sendProgmemHtml(ESP8266WebServer &server, int code,
       break;
 
     sent += writtenTotal;
-    if ((sent % (kProgmemHtmlChunkBytes * 4)) == 0)
+    if ((sent % (kProgmemHtmlChunkBytes * 8)) == 0)
       delay(0);
   }
   return sent == len;
@@ -67,31 +68,14 @@ void WebConsole::handleIndex() {
   const bool heapTight = (heapBefore < kIndexLowHeapRejectFreeBytes) ||
                          (maxBlockBefore < kIndexLowHeapRejectMaxBlockBytes) ||
                          (fragBefore > 45U);
-  const bool forceFull =
-      server_.hasArg("force_full") && server_.arg("force_full") != "0";
   LRS_LOGI(
       WEB,
       "event=index_send_start heap_free=%lu heap_frag=%u max_free_block=%lu",
       static_cast<unsigned long>(heapBefore), static_cast<unsigned>(fragBefore),
       static_cast<unsigned long>(maxBlockBefore));
-  if (!forceFull && heapTight) {
+  if (heapTight) {
     LRS_LOGW(WEB,
-             "event=index_send_reject_low_heap heap_free=%lu heap_frag=%u "
-             "max_free_block=%lu",
-             static_cast<unsigned long>(heapBefore),
-             static_cast<unsigned>(fragBefore),
-             static_cast<unsigned long>(maxBlockBefore));
-    LRS_LOGI(WEB, "event=index_send_low_heap_fallback");
-    markResponseStatus(200);
-    setUiNoStoreHeaders();
-    if (!sendProgmemHtml(server_, 200, "text/html", kIndexLowHeapHtml)) {
-      LRS_LOGW(WEB, "event=index_low_heap_html_partial");
-    }
-    return;
-  }
-  if (forceFull && heapTight) {
-    LRS_LOGW(WEB,
-             "event=index_send_force_low_heap heap_free=%lu heap_frag=%u "
+             "event=index_send_low_heap heap_free=%lu heap_frag=%u "
              "max_free_block=%lu",
              static_cast<unsigned long>(heapBefore),
              static_cast<unsigned>(fragBefore),
@@ -336,12 +320,14 @@ void WebConsole::handleSetupCommissioningApi() {
   }
 
   auto &cfg = config_->settings();
-  const Settings prev = cfg;
+  SettingsBackup backup;
+  captureSettingsBackup(cfg, backup);
+  auto restoreOnFailure = [&]() { restoreSettingsBackup(backup, cfg); };
 
-  const String prevStaSsid = prev.wifi_sta_ssid;
-  const String prevStaPassword = prev.wifi_sta_password;
-  const String prevLanHost = prev.lan_hostname;
-  const bool prevApAlwaysOn = prev.ap_always_on;
+  const String prevStaSsid = cfg.wifi_sta_ssid;
+  const String prevStaPassword = cfg.wifi_sta_password;
+  const String prevLanHost = cfg.lan_hostname;
+  const bool prevApAlwaysOn = cfg.ap_always_on;
 
   cfg.mode = mode;
   cfg.role = role;
@@ -367,7 +353,7 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.audit_last_saved_ms = millis();
 
   if (!config_->save()) {
-    cfg = prev;
+    restoreOnFailure();
     sendTracked(500, "application/json",
                 "{\"ok\":false,\"error\":\"save_failed\"}");
     return;

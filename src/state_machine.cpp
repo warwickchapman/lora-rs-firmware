@@ -59,6 +59,8 @@ constexpr uint8_t kProvBroadcastAddress = 255;
 constexpr size_t kProvChunkBitmapMax = 31;
 constexpr uint8_t kProvAddressMin = 1;
 constexpr uint8_t kProvAddressMax = 32;
+constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
+constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
 
 inline void startupTxPhaseTrace(const char *phase) {
@@ -305,6 +307,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   fleet_prov_apply_key_ = "";
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
+  tick_watchdog_last_log_ms_ = millis();
   freeProvisioningStorage();
   LRS_LOGI(SYS,
            "event=prov_capacity max_devices=%u bytes=%u mode=lazy",
@@ -366,6 +369,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   fleet_prov_apply_key_ = "";
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
+  tick_watchdog_last_log_ms_ = millis();
   freeProvisioningStorage();
   for (size_t i = 0; i < kReplayTrackedSources; ++i) replay_sources_[i] = ReplaySourceState{};
   replay_table_evictions_ = 0;
@@ -476,6 +480,20 @@ void NodeStateMachine::freePollStorage() {
 }
 
 void NodeStateMachine::tick() {
+  const uint32_t now = millis();
+  if (static_cast<uint32_t>(now - tick_watchdog_last_log_ms_) >= kStateMachineLivenessLogIntervalMs) {
+    LRS_LOGI(SYS,
+             "event=sm_tick_alive role_tx=%u link_state=%u prov_active=%u prov_state=%u fleet_scan=%u heap_free=%lu max_free_block=%lu",
+             runtime_.role_tx ? 1U : 0U,
+             static_cast<unsigned>(link_state_),
+             prov_.active ? 1U : 0U,
+             static_cast<unsigned>(prov_.state),
+             fleet_scan_active_ ? 1U : 0U,
+             static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+    tick_watchdog_last_log_ms_ = now;
+  }
+
   resetRadioTxBudgetForTick();
   tickReceive();
 
@@ -484,7 +502,7 @@ void NodeStateMachine::tick() {
   } else {
     tickReceiver();
   }
-  tickProvisioningTarget(millis());
+  tickProvisioningTarget(now);
 
   tickLed();
   finishRadioTxBudgetForTick();
@@ -981,6 +999,7 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   prov_.discover_reply_window_ms = totalWindowMs - prov_.discover_broadcast_window_ms;
   prov_.provision_all_requested = false;
   prov_.current_index = 0;
+  prov_.watchdog_last_log_ms = 0;
   // Queue discovery broadcast(s) for coordinator tick instead of requiring
   // immediate radio TX in the API request path.
   prov_.discover_broadcast_remaining = (kProvDiscoverBroadcastBurstCount > 0) ? kProvDiscoverBroadcastBurstCount : 1U;
@@ -1002,16 +1021,18 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
 }
 
 bool NodeStateMachine::provisioningStartProvisionAll() {
-  if (!prov_.active) return false;
   if (!(prov_.state == ProvisioningSessionState::Ready || prov_.state == ProvisioningSessionState::Complete ||
         prov_.state == ProvisioningSessionState::Error)) {
     return false;
   }
   recomputeProvisioningConflictsAndAssignments();
+  prov_.active = true;
   prov_.provision_all_requested = true;
   prov_.state = ProvisioningSessionState::Provisioning;
   prov_.current_index = 0;
   prov_.phase_deadline_ms = millis();
+  prov_.pause_normal_tx = true;
+  prov_.watchdog_last_log_ms = 0;
   for (size_t i = 0; i < prov_device_count_; ++i) {
     if (!prov_devices_[i].in_use) continue;
     prov_devices_[i].selected = true;
@@ -1029,6 +1050,21 @@ bool NodeStateMachine::provisioningStartProvisionAll() {
 }
 
 void NodeStateMachine::provisioningCancel() {
+  if (prov_.state == ProvisioningSessionState::Discovering &&
+      prov_device_count_ > 0) {
+    recomputeProvisioningConflictsAndAssignments();
+    prov_.active = false;
+    prov_.state = ProvisioningSessionState::Ready;
+    prov_.phase_deadline_ms = 0;
+    prov_.pause_normal_tx = false;
+    prov_.watchdog_last_log_ms = 0;
+    LRS_LOGI(API,
+             "event=prov_discover_ready reason=operator_stop found=%u estimated=%u elapsed_ms=%lu",
+             static_cast<unsigned>(prov_device_count_),
+             static_cast<unsigned>(prov_.estimated_count),
+             static_cast<unsigned long>(millis() - prov_.started_ms));
+    return;
+  }
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
   freeProvisioningStorage();
@@ -1727,11 +1763,19 @@ void NodeStateMachine::tickReceive() {
   if (runtime_.role_tx) {
     if (msg.type == MessageType::Ack) {
       if (!ackMatchesPendingCommand(msg)) {
-        LRS_LOGW(LORA,
-                 "event=tx_ack_counter_mismatch acked=%lu pending=%lu rx_counter=%lu",
-                 static_cast<unsigned long>(msg.unix_time_s),
-                 static_cast<unsigned long>(tx_pending_command_counter_),
-                 static_cast<unsigned long>(msg.counter));
+        if (!tx_command_pending_) {
+          // Heartbeat/state-sync ACKs from the paired RX are still proof that
+          // the link is alive, even when no command-confirmation ACK is
+          // currently outstanding.
+          link_state_ = LinkState::Idle;
+          lrslog::event("tx_ack_alive", msg.rssi, msg.counter, msg.relay_state);
+        } else {
+          LRS_LOGW(LORA,
+                   "event=tx_ack_counter_mismatch acked=%lu pending=%lu rx_counter=%lu",
+                   static_cast<unsigned long>(msg.unix_time_s),
+                   static_cast<unsigned long>(tx_pending_command_counter_),
+                   static_cast<unsigned long>(msg.counter));
+        }
         return;
       }
       tx_ack_pending_ = true;
@@ -2017,10 +2061,23 @@ void NodeStateMachine::tickProvisioningTarget(uint32_t now) {
 }
 
 void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
-  if (!radioTxBudgetAvailable()) return;
   if (!prov_.active) return;
 
   if (prov_.state == ProvisioningSessionState::Discovering) {
+    if (prov_.watchdog_last_log_ms == 0 ||
+        static_cast<uint32_t>(now - prov_.watchdog_last_log_ms) >= kProvWatchdogLogIntervalMs) {
+      const uint32_t remainingMs =
+          (static_cast<int32_t>(prov_.phase_deadline_ms - now) > 0) ? (prov_.phase_deadline_ms - now) : 0U;
+      LRS_LOGI(API,
+               "event=prov_discover_watchdog state=discovering found=%u estimated=%u broadcasts_left=%u deadline_in_ms=%lu heap_free=%lu max_free_block=%lu",
+               static_cast<unsigned>(prov_device_count_),
+               static_cast<unsigned>(prov_.estimated_count),
+               static_cast<unsigned>(prov_.discover_broadcast_remaining),
+               static_cast<unsigned long>(remainingMs),
+               static_cast<unsigned long>(lrslog::heapFree()),
+               static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+      prov_.watchdog_last_log_ms = now;
+    }
     if (prov_.discover_broadcast_remaining > 0 && static_cast<int32_t>(now - prov_.next_discover_broadcast_ms) >= 0) {
       if (sendProvisioningDiscoverStart(prov_.session_nonce, prov_.discover_reply_window_ms, prov_.discover_broadcast_window_ms)) {
         prov_.discover_broadcast_remaining--;
@@ -2032,18 +2089,60 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
     }
     if (prov_.estimated_count > 0 && prov_device_count_ >= static_cast<size_t>(prov_.estimated_count)) {
       recomputeProvisioningConflictsAndAssignments();
+      prov_.active = false;
       prov_.state = ProvisioningSessionState::Ready;
+      prov_.phase_deadline_ms = 0;
+      prov_.pause_normal_tx = false;
+      prov_.watchdog_last_log_ms = 0;
+      LRS_LOGI(API,
+               "event=prov_discover_ready reason=target_reached found=%u estimated=%u elapsed_ms=%lu",
+               static_cast<unsigned>(prov_device_count_),
+               static_cast<unsigned>(prov_.estimated_count),
+               static_cast<unsigned long>(now - prov_.started_ms));
       lrslog::event("prov_discover_done_target_reached", 0, prov_device_count_, prov_.estimated_count);
       return;
     }
     if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
       recomputeProvisioningConflictsAndAssignments();
+      prov_.active = false;
       prov_.state = ProvisioningSessionState::Ready;
+      prov_.phase_deadline_ms = 0;
+      prov_.pause_normal_tx = false;
+      prov_.watchdog_last_log_ms = 0;
+      LRS_LOGI(API,
+               "event=prov_discover_ready reason=deadline found=%u estimated=%u elapsed_ms=%lu",
+               static_cast<unsigned>(prov_device_count_),
+               static_cast<unsigned>(prov_.estimated_count),
+               static_cast<unsigned long>(now - prov_.started_ms));
       return;
     }
   }
 
   if (prov_.state != ProvisioningSessionState::Provisioning || !prov_.provision_all_requested) return;
+
+  if (prov_.watchdog_last_log_ms == 0 ||
+      static_cast<uint32_t>(now - prov_.watchdog_last_log_ms) >= kProvWatchdogLogIntervalMs) {
+    const uint32_t remainingMs =
+        (static_cast<int32_t>(prov_.phase_deadline_ms - now) > 0) ? (prov_.phase_deadline_ms - now) : 0U;
+    size_t verified = 0;
+    size_t failed = 0;
+    for (size_t i = 0; i < prov_device_count_; ++i) {
+      const ProvisioningDevice &d = prov_devices_[i];
+      if (!d.in_use) continue;
+      if (d.state == ProvisioningDeviceState::Verified) ++verified;
+      if (d.state == ProvisioningDeviceState::Failed) ++failed;
+    }
+    LRS_LOGI(API,
+             "event=prov_apply_watchdog state=provisioning index=%u total=%u verified=%u failed=%u deadline_in_ms=%lu heap_free=%lu max_free_block=%lu",
+             static_cast<unsigned>(prov_.current_index),
+             static_cast<unsigned>(prov_device_count_),
+             static_cast<unsigned>(verified),
+             static_cast<unsigned>(failed),
+             static_cast<unsigned long>(remainingMs),
+             static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+    prov_.watchdog_last_log_ms = now;
+  }
 
   while (prov_.current_index < prov_device_count_) {
     ProvisioningDevice &d = prov_devices_[prov_.current_index];

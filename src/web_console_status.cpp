@@ -153,12 +153,6 @@ bool WebConsole::buildStatusStaticCache() {
   snprintf(apIpBuf, sizeof(apIpBuf), "%u.%u.%u.%u", apIp[0], apIp[1], apIp[2],
            apIp[3]);
   doc["ap_ip"] = apIpBuf;
-#if LRS_ENABLE_MDNS
-  doc["mdns_ap"] = "lrs.local";
-  char mdnsLanBuf[72];
-  snprintf(mdnsLanBuf, sizeof(mdnsLanBuf), "%s.local", config_->settings().lan_hostname.c_str());
-  doc["mdns_lan"] = mdnsLanBuf;
-#endif
   doc["fw_version"] = LRS_FW_VERSION;
   doc["fw_git_sha"] = LRS_GIT_SHA;
   doc["fw_git_branch"] = LRS_GIT_BRANCH;
@@ -228,6 +222,14 @@ void WebConsole::tickStatusLiveSse() {
   }
 
   const uint32_t now = millis();
+
+  if (last_user_activity_ms_ != 0U &&
+      (now - last_user_activity_ms_) >= kSseIdleTimeoutMs &&
+      (now - status_live_sse_connect_ms_) >= kSseIdleTimeoutMs) {
+    closeStatusLiveSse();
+    return;
+  }
+
   if (status_live_sse_connect_ms_ != 0U &&
       (now - status_live_sse_connect_ms_) >= kStatusLiveSseMaxAgeMs) {
     closeStatusLiveSse();
@@ -306,6 +308,15 @@ void WebConsole::tickStatusLiveSse() {
       }
     }
   } else if (status_live_sse_page_ == "provisioning") {
+    ProvisioningSessionSnapshot prov{};
+    const bool provHot =
+        sm_ != nullptr &&
+        sm_->provisioningSession(prov) && prov.active &&
+        (prov.state == ProvisioningSessionState::Discovering ||
+         prov.state == ProvisioningSessionState::Provisioning);
+    if (!provHot) {
+      return;
+    }
     if (status_live_sse_last_prov_push_ms_ == 0 ||
         (now - status_live_sse_last_prov_push_ms_) >= 3000) {
       const uint32_t maxBlock = lrslog::heapMaxFreeBlock();

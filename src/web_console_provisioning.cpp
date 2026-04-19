@@ -208,7 +208,7 @@ void WebConsole::handleProvisioningStart() {
       return;
     }
   }
-  uint16_t estimated = 2;
+  uint16_t estimated = 8;
   if (!body["estimated_count"].isNull()) {
     int v = body["estimated_count"].as<int>();
     if (v < 1)
@@ -218,6 +218,12 @@ void WebConsole::handleProvisioningStart() {
     estimated = static_cast<uint16_t>(v);
   }
   if (!sm_->provisioningStartDiscovery(estimated)) {
+    LRS_LOGW(API,
+             "event=provisioning_start_api_reject error=start_failed estimated=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
+             static_cast<unsigned>(estimated),
+             static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned>(lrslog::heapFragPercent()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
     sendTracked(409, "application/json",
                 "{\"ok\":false,\"error\":\"start_failed\"}");
     return;

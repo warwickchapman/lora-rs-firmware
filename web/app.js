@@ -4,13 +4,6 @@ const MIN_DEPLOYMENT_KEY_LEN = 16;
 const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
 )HTML"
-#if LRS_ENABLE_MDNS
-    R"HTML(const LRS_ENABLE_MDNS = true;
-)HTML"
-#else
-    R"HTML(const LRS_ENABLE_MDNS = false;
-)HTML"
-#endif
 #if LRS_ENABLE_AUTOMATIONS
     R"HTML(const UI_AUTOMATIONS_ENABLED = true;
 )HTML"
@@ -28,12 +21,10 @@ let staIsConnected = false;
 let connectedStaSsid = '';
 let staTestInFlight = false;
 let currentStaIp = '';
-let currentLanMdns = '';
 let automationsPageLoaded = false;
 let automationsPageLoadInFlight = false;
 let automationsDoc = null;
 let currentApIp = '';
-let currentApMdns = '';
 let lastRoleIsTx = false;
 let lastMode = 'paired';
 let fleetDevicesCache = [];
@@ -64,6 +55,8 @@ let statusLiveSseReconnectTimer = 0;
 let statusLiveSseBackoffMs = 1000;
 let statusLiveUiTicker = 0;
 let statusLiveHasLiveData = false;
+let lastUserInteractionMs = Date.now();
+const sseIdleTimeoutMs = 60000;
 let statusDegradedLiteMode = false;
 let mobileActionSourceEl = null;
 let mobileActionPrimaryEl = null;
@@ -152,17 +145,16 @@ function refreshRoleLabels() {
   }
 }
 function refreshHostnamePreview() {
-  if (!LRS_ENABLE_MDNS) return;
   const label = document.getElementById('lan_hostname_label');
   const hint = document.getElementById('lan_hostname_hint');
   const wrap = document.getElementById('lan_hostname_preview_wrap');
   const preview = document.getElementById('lan_hostname_preview');
-  if (label) label.innerText = 'LAN hostname (mDNS)';
-  if (hint) hint.innerText = 'Used as the device hostname for WiFi, OTA, and LAN mDNS.';
+  if (label) label.innerText = 'LAN hostname';
+  if (hint) hint.innerText = 'Used as the device hostname for WiFi and OTA.';
   if (wrap) wrap.style.display = '';
   if (!preview) return;
   const raw = (document.getElementById('lan_hostname').value || '').trim() || 'lrs';
-  preview.innerHTML = `<a class="link" href="http://${raw}.local">http://${raw}.local</a>`;
+  preview.innerText = raw;
 }
 function isDefaultDeploymentKey(v) {
   return String(v || '').trim() === 'lora-default-passphrase';
@@ -522,47 +514,11 @@ function updateStaTestButtonState() {
 function stripPort(host) {
   return String(host || '').trim().toLowerCase().replace(/:\d+$/, '');
 }
-function normalizeLanHost(raw) {
-  let h = String(raw || '').trim().toLowerCase();
-  if (!h.length) return '';
-  h = h.replace(/^https?:\/\//, '');
-  h = h.replace(/\/.*$/, '');
-  if (h.endsWith('.local')) return h;
-  return `${h}.local`;
-}
-function startLanHostnameRedirect(hostname) {
-  if (!LRS_ENABLE_MDNS) return;
-  const targetHost = normalizeLanHost(hostname);
-  if (!targetHost) return;
-  const targetUrl = `http://${targetHost}/`;
-  const el = document.getElementById('netTestResult');
-  const total = 8;
-  let left = total;
-  if (window.__lanRedirectTimer) { clearInterval(window.__lanRedirectTimer); }
-  const paint = () => {
-    if (!el) return;
-    el.className = 'result-line show ok';
-    el.innerText = `Network saved. Switching to ${targetUrl} in ${left}s...`;
-  };
-  paint();
-  window.__lanRedirectTimer = setInterval(() => {
-    left--;
-    if (left <= 0) {
-      clearInterval(window.__lanRedirectTimer);
-      window.__lanRedirectTimer = null;
-      location.href = targetUrl;
-      return;
-    }
-    paint();
-  }, 1000);
-}
 function isLikelyStaSessionPath() {
   const host = stripPort(location.hostname);
   const staIp = stripPort(currentStaIp);
-  const lanMdns = stripPort(currentLanMdns);
   if (host.length === 0) return false;
   if (staIp && host === staIp) return true;
-  if (LRS_ENABLE_MDNS && lanMdns && host === lanMdns) return true;
   return false;
 }
 function toggleDrawer(force) {
@@ -1184,8 +1140,6 @@ function buildStatusFallbackFromLite(lite) {
     uptime_ms: Number((lite && lite.uptime_ms) || 0),
     ap_ssid: String((lite && lite.ap_ssid) || ''),
     ap_ip: String((lite && lite.ap_ip) || ''),
-    mdns_ap: String((lite && lite.mdns_ap) || ''),
-    mdns_lan: String((lite && lite.mdns_lan) || ''),
     deployment_key: String((lite && lite.deployment_key) || ''),
     sensor_temp_enabled: false,
     sensor_temp_detected: false,
@@ -1230,6 +1184,12 @@ function refreshStatusLiveNotice() {
     setStatusLiveNotice('Status updates paused while tab is hidden');
     return;
   }
+  if (Date.now() - lastUserInteractionMs > sseIdleTimeoutMs) {
+    if (statusDetailsLoaded) {
+      setStatusLiveNotice('Live updates paused due to inactivity. Click/touch to resume.');
+    }
+    return;
+  }
   if ((suspendGlobalPollsUntilMs > 0 && Date.now() < suspendGlobalPollsUntilMs)) {
     setStatusLiveNotice('Status updates paused while device is busy');
     return;
@@ -1261,6 +1221,9 @@ function startStatusLiveUiTicker() {
   if (location.pathname !== '/' || activePage !== 'status') return;
   const loop = () => {
     if (location.pathname !== '/' || activePage !== 'status') { statusLiveUiTicker = 0; return; }
+    if (Date.now() - lastUserInteractionMs > sseIdleTimeoutMs) {
+      if (statusLiveEventSource) closeStatusLiveSse();
+    }
     refreshStatusLiveNotice();
     statusLiveUiTicker = setTimeout(loop, 1000);
   };
@@ -1303,8 +1266,22 @@ function handleStatusLivePayload(live) {
 }
 function startStatusLiveSse() {
   if (!shouldUseStatusLiveSse()) return;
+  if (Date.now() - lastUserInteractionMs > sseIdleTimeoutMs) {
+    if (statusLiveEventSource) {
+      try { statusLiveEventSource.close(); } catch (e) { }
+      statusLiveEventSource = null;
+    }
+    statusLiveSseConnected = false;
+    return;
+  }
   if (statusLiveEventSource) return;
-  const pageParam = activePage === 'status' ? 'status' : (activePage === 'fleet' ? (isProvisioningUiBusy() ? 'provisioning' : 'fleet') : 'none');
+  const pageParam = activePage === 'status'
+    ? 'status'
+    : (activePage === 'fleet'
+      ? ((activeFleetTab === 'manage' && activeFleetManageTab === 'lora')
+        ? (isProvisioningUiBusy() ? 'provisioning' : 'none')
+        : 'fleet')
+      : 'none');
   try {
     const es = new EventSource('/api/status-live/events?page=' + pageParam);
     statusLiveEventSource = es;
@@ -1381,7 +1358,6 @@ function syncStatusLiveSse(forceReconnect = false) {
   refreshStatusLiveNotice();
 }
 function applyStatusPageState(st) {
-  console.log("applyStatusPageState fired", st);
   if (!st) return;
   applyHeaderStatus(st);
   const relayOn = Number(st.relay_state) === 1;
@@ -1439,9 +1415,7 @@ function applyStatusPageState(st) {
   else if (relayReasonRaw.startsWith('input_')) relaySource = 'input';
   staIsConnected = !!st.sta_connected;
   currentStaIp = String(st.sta_ip || '');
-  currentLanMdns = LRS_ENABLE_MDNS ? String(st.mdns_lan || (st.lan_hostname ? `${st.lan_hostname}.local` : '')) : '';
   currentApIp = String(st.ap_ip || '');
-  currentApMdns = LRS_ENABLE_MDNS ? String(st.mdns_ap || 'lrs.local') : '';
   if (staIsConnected) {
     const connectedSsid = String(st.sta_ssid || '');
     if (connectedSsid.length) {
@@ -1451,18 +1425,6 @@ function applyStatusPageState(st) {
     connectedStaSsid = '';
   }
   updateStaTestButtonState();
-  const lanHost = LRS_ENABLE_MDNS ? String(st.mdns_lan || (st.lan_hostname ? `${st.lan_hostname}.local` : '')).replace(/\/+$/, '') : '';
-  const apHost = LRS_ENABLE_MDNS ? String(st.mdns_ap || 'lrs.local').replace(/\/+$/, '') : '';
-  const apUrl = apHost ? `http://${apHost}/` : '';
-  const lanUrl = lanHost ? `http://${lanHost}/` : '';
-  const lanMdnsHtml = lanUrl ? `<a class="link" href="${escapeHtml(lanUrl)}">${escapeHtml(lanUrl)}</a>` : 'n/a';
-  const apMdnsHtml = apUrl ? `<a class="link" href="${escapeHtml(apUrl)}">${escapeHtml(apUrl)}</a>` : 'n/a';
-  const statusMdnsRows = LRS_ENABLE_MDNS
-    ? `<div class="k">LAN mDNS URL</div><div class="v copyable">${copyableValueHtml(lanMdnsHtml, lanUrl, 'LAN mDNS URL')}</div>`
-    : '';
-  const apMdnsRow = LRS_ENABLE_MDNS
-    ? `<div class="k">AP mDNS URL</div><div class="v copyable">${copyableValueHtml(apMdnsHtml, apUrl, 'AP mDNS URL')}</div>`
-    : '';
   const rb = document.getElementById('relayBadge');
   if (rb) {
     rb.className = `relay-badge ${relayOn ? 'on' : 'off'}`;
@@ -1502,11 +1464,9 @@ function applyStatusPageState(st) {
     <div class="section">WiFi Station</div>
     <div class="k">STA</div><div class="v"><span class="sta-line">${escapeHtml(st.sta_ssid || st.sta_target_ssid || 'not configured')}<span class="sta-dot ${st.sta_connected ? 'on' : 'off'}" title="${st.sta_connected ? 'connected' : 'not connected'}"></span></span><div class="small">${escapeHtml(st.sta_connected ? `${st.sta_rssi} dBm` : 'not connected')}</div></div>
     <div class="k">STA IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.sta_ip || 'n/a'), st.sta_ip, 'STA IP')}</div>
-    ${statusMdnsRows}
     <div class="section">Soft AP</div>
     <div class="k">AP SSID</div><div class="v">${escapeHtml(st.ap_ssid)}</div>
-    <div class="k">AP IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.ap_ip || 'n/a'), st.ap_ip, 'AP IP')}</div>
-    ${apMdnsRow}`;
+    <div class="k">AP IP</div><div class="v copyable">${copyableValueHtml(escapeHtml(st.ap_ip || 'n/a'), st.ap_ip, 'AP IP')}</div>`;
   }
   const tempTiles = document.querySelectorAll('#sensorTempTile');
   tempTiles.forEach((t) => {
@@ -1560,8 +1520,7 @@ function applyHeaderStatus(st) {
   lastMode = modeRaw;
   const titleEl = document.getElementById('consoleTitle');
   const hLan = st.lan_hostname ? String(st.lan_hostname) : '';
-  const hMdns = st.mdns_lan ? String(st.mdns_lan) : '';
-  const hostLabel = String(hLan || hMdns || '').replace(/\.local$/i, '').trim();
+  const hostLabel = String(hLan || '').trim();
   const chipIdStr = st.chip_id ? String(st.chip_id).trim() : '';
   const headerTitle = hostLabel || (chipIdStr ? `lrs-${chipIdStr}` : 'lrs-xxx');
   if (titleEl) { titleEl.innerText = headerTitle; }
@@ -1647,9 +1606,19 @@ async function apiJson(url, options) {
     }
     if (!res.ok) {
       if (allowHttpError) {
-        const out = await res.json();
-        if (out && typeof out === 'object' && out._http_status == null) { out._http_status = res.status; }
-        return out;
+        try {
+          const out = await res.json();
+          if (out && typeof out === 'object' && out._http_status == null) { out._http_status = res.status; }
+          return out;
+        } catch (parseErr) {
+          return {
+            ok: false,
+            error: 'invalid_error_response',
+            _http_status: res.status,
+            _request_error: 'invalid_error_response',
+            _request_message: `HTTP ${res.status} returned invalid JSON`
+          };
+        }
       }
       throw new Error(`HTTP ${res.status}`);
     }
@@ -1659,7 +1628,13 @@ async function apiJson(url, options) {
       const st = document.getElementById('statusTable');
       if (st) { st.innerText = `API error: ${e.message}`; }
     }
-    return null;
+    const aborted = !!(e && (e.name === 'AbortError' || /aborted|timeout/i.test(String(e.message || ''))));
+    return {
+      ok: false,
+      error: aborted ? 'request_timeout' : 'request_failed',
+      _request_error: aborted ? 'timeout' : 'network',
+      _request_message: aborted ? 'Request timed out waiting for the device.' : String((e && e.message) || 'Request failed')
+    };
   } finally {
     if (t) { clearTimeout(t); }
   }
@@ -1671,15 +1646,26 @@ async function logout() {
 async function load() {
   applyAutomationsFeatureVisibility();
   if (activePage === 'status') {
-    await ensureStatusStatic(true);
+    ensureStatusStatic(true).catch(() => { });
     // Only sync SSE if details have been loaded to prevent heavy background work
     if (statusDetailsLoaded) {
-      syncStatusLiveSse();
+      if (Date.now() - lastUserInteractionMs <= sseIdleTimeoutMs) {
+        syncStatusLiveSse();
+      }
     } else {
       refreshStatusLiveNotice();
     }
   }
 }
+
+['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
+  document.addEventListener(evt, () => {
+    lastUserInteractionMs = Date.now();
+    if (!statusLiveSseConnected && shouldUseStatusLiveSse()) {
+      syncStatusLiveSse();
+    }
+  }, { passive: true });
+});
 
 async function loadSettingsPageData(force) {
   if (settingsPageLoadInFlight) return;
@@ -1943,19 +1929,7 @@ async function saveLora() {
 }
 async function saveNetwork() {
   const body = collectNetworkBody();
-  let shouldRedirect = false;
-  let newHost = '';
-  if (LRS_ENABLE_MDNS) {
-    const oldHost = normalizeLanHost(currentLanMdns);
-    newHost = normalizeLanHost(body.lan_hostname);
-    const hostChanged = oldHost.length > 0 && newHost.length > 0 && oldHost !== newHost;
-    shouldRedirect = hostChanged && isLikelyStaSessionPath();
-  }
-  const ok = await postSettings(body, shouldRedirect ? { skipReload: true } : undefined);
-  if (!ok) return;
-  if (shouldRedirect) {
-    startLanHostnameRedirect(newHost);
-  }
+  await postSettings(body);
 }
 async function saveSystem() {
   await postSettings(collectSystemBody());
@@ -2022,7 +1996,7 @@ async function testSta() {
   if (btn && btn.disabled) return;
   const requestedSsid = normalizedInputValue('wifi_sta_ssid');
   if (staIsConnected && requestedSsid.length && requestedSsid !== connectedStaSsid && isLikelyStaSessionPath()) {
-    const apHint = currentApIp ? `http://${currentApIp}` : (LRS_ENABLE_MDNS && currentApMdns ? `http://${currentApMdns}` : 'the Soft AP URL');
+    const apHint = currentApIp ? `http://${currentApIp}` : 'the Soft AP URL';
     const msg = `Cannot test a different SSID from current LAN session (it drops this connection). Join device Soft AP and retry via ${apHint}.`;
     el.className = 'result-line show err';
     el.innerText = msg;
@@ -2073,19 +2047,18 @@ let suspendGlobalPollsUntilMs = 0;
 let provStickySessionNonce = 0;
 let provStickyRowsByChip = {};
 let provStickyOrder = [];
+let provLastSession = null;
 function clearProvisioningStickyRows() {
   provStickySessionNonce = 0;
   provStickyRowsByChip = {};
   provStickyOrder = [];
   provLastRowsHtml = '';
+  provLastSession = null;
 }
 function mergeProvisioningStickyRows(devices, sessionNonce) {
   const nonce = Number(sessionNonce || 0);
-  if (nonce > 0 && provStickySessionNonce !== nonce) {
+  if (nonce > 0 && provStickySessionNonce === 0) {
     provStickySessionNonce = nonce;
-    provStickyRowsByChip = {};
-    provStickyOrder = [];
-    provLastRowsHtml = '';
   }
   const list = Array.isArray(devices) ? devices : [];
   for (const d of list) {
@@ -2136,21 +2109,13 @@ function ensureProvisioningUiScaffold() {
     sessionLine.className = 'small prov-session-line';
     summary.parentNode.insertBefore(sessionLine, summary);
   }
-  const provisionBtn = document.getElementById('provProvisionAllBtn');
-  const actionRow = provisionBtn && provisionBtn.parentElement;
-  if (actionRow && !document.getElementById('provProvisionAllReason')) {
-    const reason = document.createElement('div');
-    reason.id = 'provProvisionAllReason';
-    reason.className = 'small prov-provision-reason';
-    actionRow.insertAdjacentElement('afterend', reason);
-  }
 }
 function provisioningSessionStateLabel(s) {
   const key = String(s || 'idle');
   if (key === 'discovering') return 'Discovering';
-  if (key === 'ready') return 'Ready';
+  if (key === 'ready') return 'Scan Complete';
   if (key === 'provisioning') return 'Provisioning';
-  if (key === 'complete') return 'Complete';
+  if (key === 'complete') return 'Provisioning Complete';
   if (key === 'error') return 'Error';
   return 'Idle';
 }
@@ -2164,13 +2129,13 @@ function formatElapsedCompact(ms) {
 }
 function provisioningDisabledReason(st, discovered, sessActive) {
   if (st === 'ready' && discovered > 0) return 'Ready to provision discovered devices.';
-  if (st === 'discovering') return 'Provision All unlocks when discovery finishes.';
+  if (st === 'discovering') return 'Scan in progress.';
   if (st === 'provisioning') return 'Provisioning is already in progress.';
-  if (st === 'complete') return 'Session complete. Run discovery again for another batch.';
-  if (st === 'error') return 'Session failed. Start discovery again.';
-  if (st === 'ready' && discovered === 0) return 'No discovered devices in this session.';
-  if (sessActive) return 'Provision All is not available in the current phase.';
-  return 'Start discovery to enable Provision All.';
+  if (st === 'complete') return 'Provisioning complete. Scan again for another batch.';
+  if (st === 'error') return 'Session failed. Scan again when ready.';
+  if (st === 'ready' && discovered === 0) return 'No factory devices replied. Check power and factory mode.';
+  if (sessActive) return 'Session active.';
+  return 'Ready to scan for factory devices.';
 }
 function provisioningDeviceStatusDisplay(d) {
   const state = String((d && d.state) || 'unknown');
@@ -2189,81 +2154,162 @@ function provisioningDeviceStatusDisplay(d) {
   }
   return `❔ ${state}`;
 }
+function provisioningDeviceNoun(n) {
+  return Number(n) === 1 ? 'device' : 'devices';
+}
+function provisioningProvisioningPhase(devices) {
+  const list = Array.isArray(devices) ? devices : [];
+  if (list.some((d) => String((d && d.state) || '') === 'await_verify')) return 'Waiting for verify replies...';
+  if (list.some((d) => String((d && d.state) || '') === 'keying')) return 'Sending fleet key and address...';
+  if (list.some((d) => String((d && d.state) || '') === 'assigned')) return 'Assigning addresses...';
+  return 'Provisioning discovered devices...';
+}
+function setProvisioningPrimaryButton(st, discovered, hasSession) {
+  const btn = document.getElementById('provPrimaryBtn');
+  if (!btn) return;
+  btn.disabled = false;
+  btn.dataset.action = 'scan';
+  if (st === 'discovering') {
+    btn.innerText = 'Stop Scan';
+    btn.dataset.action = 'cancel';
+    return;
+  }
+  if (st === 'ready' && discovered > 0) {
+    btn.innerText = `Provision ${discovered} ${provisioningDeviceNoun(discovered)}`;
+    btn.dataset.action = 'provision';
+    return;
+  }
+  if (st === 'provisioning') {
+    btn.innerText = 'Provisioning...';
+    btn.disabled = true;
+    btn.dataset.action = 'busy';
+    return;
+  }
+  if ((st === 'ready' || st === 'complete' || st === 'error') && hasSession) {
+    btn.innerText = 'Scan Again';
+    btn.dataset.action = 'scan';
+    return;
+  }
+  btn.innerText = 'Scan for Devices';
+}
+async function handleProvisioningPrimaryAction() {
+  const btn = document.getElementById('provPrimaryBtn');
+  const action = String((btn && btn.dataset.action) || 'scan');
+  if (action === 'cancel') {
+    await cancelFleetProvisioning();
+    return;
+  }
+  if (action === 'provision') {
+    await provisionFleetAll();
+    return;
+  }
+  if (action === 'busy') return;
+  await startFleetProvisioningDiscovery();
+}
 function renderProvisioningStatus(out) {
   ensureProvisioningUiScaffold();
   const result = document.getElementById('provWizardResult');
   const sessionLine = document.getElementById('provSessionLine');
   const summary = document.getElementById('provWizardSummary');
   const rows = document.getElementById('provWizardRows');
-  const provisionBtn = document.getElementById('provProvisionAllBtn');
-  const provisionReason = document.getElementById('provProvisionAllReason');
   if (!summary || !rows) return;
+  const wasBusy = isProvisioningUiBusy();
   const sess = (out && out.session) || {};
+  provLastSession = sess;
   const incomingDevices = Array.isArray(out && out.devices) ? out.devices : [];
   provUiSessionActive = !!sess.active;
   provUiSessionState = String(sess.state || 'idle');
   const st = String(sess.state || 'idle');
+  const isBusy = isProvisioningUiBusy();
+  if (wasBusy !== isBusy) {
+    syncStatusLiveSse(true);
+  }
   const stickyEnabled = (st === 'discovering' || st === 'ready' || st === 'provisioning');
   const devices = stickyEnabled
     ? mergeProvisioningStickyRows(incomingDevices, sess.session_nonce)
     : incomingDevices;
   const discoveredRaw = Number(sess.discovered_count || 0);
   const discoveredEffective = Math.max(discoveredRaw, devices.length);
-  if (provisionBtn) {
-    const canProvision = (st === 'ready' && discoveredEffective > 0);
-    provisionBtn.disabled = !canProvision;
-    if (provisionReason) {
-      provisionReason.innerText = provisioningDisabledReason(st, discoveredEffective, !!sess.active);
-      provisionReason.classList.toggle('ok', canProvision);
-    }
-  }
-  const now = Number(sess.now_ms || 0);
-  const started = Number(sess.started_ms || 0);
-  const elapsedMs = (now > 0 && started > 0 && now >= started) ? (now - started) : 0;
-  const elapsedTxt = formatElapsedCompact(elapsedMs);
-  const estimated = Math.max(1, Number(sess.estimated_count || 0) || Number(sess.discovered_count || 0) || devices.length || 1);
+  setProvisioningPrimaryButton(st, discoveredEffective, !!(sess.active || st !== 'idle'));
   const verified = Number(sess.verified_count || 0);
   const failed = Number(sess.failed_count || 0);
   const discovered = discoveredEffective;
   const found = discovered;
   const provisioned = Math.min(found, verified + failed);
   if (sessionLine) {
-    if (!sess.active) {
-      sessionLine.innerText = 'No provisioning session active.';
-    } else if (st === 'discovering') {
-      sessionLine.innerText = `Discovering... Found ${found} (estimated ${estimated}) · elapsed ${elapsedTxt}`;
+    if (st === 'discovering') {
+      sessionLine.innerText = found > 0
+        ? `${found} ${provisioningDeviceNoun(found)} found so far`
+        : 'Scanning for factory devices...';
     } else if (st === 'ready') {
-      sessionLine.innerText = `Found ${found} (estimated ${estimated}) · Verified ${verified} / Found ${found} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = found > 0
+        ? `Scan complete. ${found} ${provisioningDeviceNoun(found)} found.`
+        : 'Scan complete. No devices found.';
     } else if (st === 'provisioning') {
-      sessionLine.innerText = `Provisioned ${provisioned} / Found ${found} · Verified ${verified} / Found ${found} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `${verified} verified of ${Math.max(found, 1)}`;
     } else if (st === 'complete') {
-      sessionLine.innerText = `Complete · Verified ${verified} / Found ${found} · Failed ${failed} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Provisioning complete. ${verified} verified · ${failed} failed.`;
     } else if (st === 'error') {
-      sessionLine.innerText = `Error · Verified ${verified} / Found ${found} · Failed ${failed} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = `Provisioning stopped. ${verified} verified · ${failed} failed.`;
+    } else if (devices.length > 0) {
+      sessionLine.innerText = `${devices.length} saved ${provisioningDeviceNoun(devices.length)} in list`;
     } else {
-      sessionLine.innerText = `${provisioningSessionStateLabel(st)} · elapsed ${elapsedTxt}`;
+      sessionLine.innerText = 'Press Scan for Devices.';
     }
   }
-  let countdownTxt = '';
-  if (sess.active && Number(sess.phase_deadline_ms || 0) > 0 && now > 0) {
-    const rem = Math.max(0, Math.ceil((Number(sess.phase_deadline_ms) - now) / 1000));
-    if (rem > 0 && (sess.state === 'discovering' || sess.state === 'provisioning')) countdownTxt = ` · next phase in ~${rem}s`;
+  if (summary) {
+    if (st === 'discovering') {
+      summary.innerText = found > 0
+        ? 'Scanning. New devices will appear below as they reply.'
+        : 'Scan in progress.';
+    } else if (st === 'ready') {
+      summary.innerText = found > 0
+        ? 'Review the devices below, then provision this batch. Scan Again will keep these rows and add any newly found devices.'
+        : 'No factory devices replied. Check power and factory mode, then scan again.';
+    } else if (st === 'provisioning') {
+      summary.innerText = `${provisioningProvisioningPhase(devices)} ${provisioned} of ${found} completed.`;
+    } else if (st === 'complete') {
+      summary.innerText = 'Session complete. Scan again for another batch.';
+    } else if (st === 'error') {
+      summary.innerText = 'Session failed. Scan again when ready.';
+    } else {
+      summary.innerText = provisioningDisabledReason(st, discoveredEffective, !!sess.active);
+    }
   }
-  summary.innerText = sess.active
-    ? `State: ${provisioningSessionStateLabel(sess.state)} · found ${discoveredEffective} · conflicts ${Number(sess.conflict_count || 0)}${countdownTxt}`
-    : 'No provisioning session active.';
-  if (result && sess.active) {
+  if (result) {
     result.className = 'result-line show';
-    if (sess.state === 'complete') result.className = 'result-line show ok';
-    if (sess.state === 'error') result.className = 'result-line show err';
-    result.innerText = `Provisioning ${provisioningSessionStateLabel(sess.state)}`;
+    if (st === 'discovering') {
+      result.innerText = found > 0
+        ? `Scan in progress. ${found} ${provisioningDeviceNoun(found)} found.`
+        : 'Scan in progress.';
+    } else if (st === 'ready') {
+      result.innerText = found > 0
+        ? `Scan complete. ${found} ${provisioningDeviceNoun(found)} found.`
+        : 'Scan complete. No factory devices replied. Check power and factory mode.';
+    } else if (st === 'provisioning') {
+      result.innerText = provisioningProvisioningPhase(devices);
+    } else if (st === 'complete') {
+      result.className = 'result-line show ok';
+      result.innerText = `Provisioning complete. ${verified} ${provisioningDeviceNoun(verified)} verified.`;
+    } else if (st === 'error') {
+      result.className = 'result-line show err';
+      result.innerText = 'Provisioning failed. Scan again when ready.';
+    } else {
+      result.className = 'result-line';
+      result.innerText = '';
+    }
   }
   if (!devices.length) {
-    let emptyText = 'No devices discovered yet.';
-    if (sess.active && (st === 'discovering' || st === 'ready' || st === 'provisioning')) {
-      emptyText = 'Awaiting device replies...';
+    let emptyText = 'Ready to scan for factory devices.';
+    if (st === 'discovering') {
+      emptyText = 'Scanning for factory devices...';
+    } else if (st === 'ready' || st === 'complete') {
+      emptyText = 'No factory devices replied. Check power and factory mode.';
+    } else if (st === 'provisioning') {
+      emptyText = 'Provisioning session active.';
     }
     rows.innerHTML = `<tr><td colspan="6" class="small prov-empty-row">${emptyText}</td></tr>`;
+    provLastRowsHtml = rows.innerHTML;
     return;
   }
   rows.innerHTML = devices.map((d) => {
@@ -2313,8 +2359,8 @@ function startProvisioningPolling(opts) {
     const out = await refreshProvisioningStatus(true);
     const sess = (out && out.session) || {};
     const st = String(sess.state || 'idle');
-    const activeLike = !!sess.active || st === 'discovering' || st === 'provisioning' || st === 'ready';
-    if (activeLike) {
+    const runningLike = (st === 'discovering' || st === 'provisioning');
+    if (runningLike) {
       provPollSeenActive = true;
       idleAfterGraceCount = 0;
       scheduleNext(1200);
@@ -2341,20 +2387,31 @@ function syncPagePolling() {
 }
 async function startFleetProvisioningDiscovery() {
   const result = document.getElementById('provWizardResult');
-  const raw = window.prompt('How many factory-default devices are powered up? (1-8)', '2');
-  if (raw === null) return;
-  const est = Math.max(1, Math.min(8, Number(raw) || 2));
-  clearProvisioningStickyRows();
+  const est = 8;
   suspendGlobalPollsUntilMs = Date.now() + 5000;
-  if (result) { result.className = 'result-line show'; result.innerText = 'Starting discovery...'; }
+  if (result) { result.className = 'result-line show'; result.innerText = 'Scan in progress.'; }
   const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est }), silent: true, allowHttpError: true });
   if (out && out.ok) {
     if (out.session) { renderProvisioningStatus(out); }
     startProvisioningPolling({ graceMs: 5000 });
-    if (result) { result.className = 'result-line show ok'; result.innerText = 'Discovery started. Watching live updates...'; }
+    if (result) { result.className = 'result-line show'; result.innerText = 'Scan in progress.'; }
     return;
   }
-  if (result) { result.className = 'result-line show err'; result.innerText = `Discovery start failed: ${(out && out.error) || 'request_failed'}`; }
+  let msg = 'Scan start failed.';
+  if (out && out.error === 'start_failed') {
+    msg = 'Scan start rejected by device. Check logs for the reason.';
+  } else if (out && out.error === 'low_heap') {
+    msg = 'Scan start rejected due to low memory. Retry in a few seconds.';
+  } else if (out && out._request_error === 'timeout') {
+    msg = 'Scan start timed out waiting for the device.';
+  } else if (out && out._request_error === 'network') {
+    msg = `Scan start request failed: ${out._request_message || 'connection lost'}`;
+  } else if (out && out._request_error === 'invalid_error_response') {
+    msg = 'Scan start failed: device returned an invalid error response.';
+  } else if (out && out.error) {
+    msg = `Scan start failed: ${out.error}`;
+  }
+  if (result) { result.className = 'result-line show err'; result.innerText = msg; }
 }
 async function provisionFleetAll() {
   const result = document.getElementById('provWizardResult');
@@ -2372,11 +2429,24 @@ async function provisionFleetAll() {
 }
 async function cancelFleetProvisioning() {
   stopProvisioningPolling();
-  clearProvisioningStickyRows();
   await apiJson('/api/provisioning/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', silent: true, allowHttpError: true });
   const out = await refreshProvisioningStatus(true);
   const result = document.getElementById('provWizardResult');
-  if (result) { result.className = 'result-line show'; result.innerText = out && out.session && out.session.active ? 'Provisioning session updated.' : 'Provisioning session cancelled.'; }
+  const sess = (out && out.session) || {};
+  const st = String(sess.state || 'idle');
+  const discovered = Math.max(
+    Number(sess.discovered_count || 0),
+    Array.isArray(out && out.devices) ? out.devices.length : 0
+  );
+  if (st === 'ready' && discovered > 0) {
+    if (result) {
+      result.className = 'result-line show ok';
+      result.innerText = `Scan stopped. ${discovered} ${provisioningDeviceNoun(discovered)} ready to provision.`;
+    }
+    return;
+  }
+  clearProvisioningStickyRows();
+  if (result) { result.className = 'result-line show'; result.innerText = out && out.session && out.session.active ? 'Session updated.' : 'Scan cancelled.'; }
 }
 async function provisionFleetWifi(targetAddr, overrideSsid, overridePass) {
   const el = document.getElementById('wifiProvisionResult');
@@ -2552,7 +2622,7 @@ function isFleetManageActive() {
 }
 function isProvisioningUiBusy() {
   const st = String(provUiSessionState || 'idle');
-  return !!provUiSessionActive || st === 'discovering' || st === 'provisioning';
+  return st === 'discovering' || st === 'provisioning';
 }
 function sessionPollDelayMs() {
   if (document.hidden) return 1800000;
@@ -2853,7 +2923,7 @@ function initPage() {
   if (modeSelect) modeSelect.addEventListener('change', syncRole);
   if (local) local.addEventListener('input', refreshAddressHints);
   if (remote) remote.addEventListener('input', refreshAddressHints);
-  if (host && LRS_ENABLE_MDNS) host.addEventListener('input', refreshHostnamePreview);
+  if (host) host.addEventListener('input', refreshHostnamePreview);
   if (fleetKey) fleetKey.addEventListener('input', updateDeploymentKeyStrength);
   if (staSsid) staSsid.addEventListener('input', updateStaTestButtonState);
   if (staPass) staPass.addEventListener('input', updateStaTestButtonState);
