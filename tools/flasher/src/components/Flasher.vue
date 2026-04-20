@@ -51,16 +51,36 @@ const showToast = ref(false);
 const toastMessage = ref('');
 const logContainer = ref<HTMLElement | null>(null);
 const monitorAfterFlash = ref(true);
+const eraseBeforeFlash = ref(false);
 const lastPortSnapshot = ref<string[]>([]);
 const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
 const stickLogToBottom = ref(true);
+const activeMonitorPort = ref('');
+const activeMonitorSsid = ref('');
 
 const LOCAL_OPTION = '__local_browse__';
 const hasActiveDeviceInfo = computed(() =>
   !!deviceInfo.value && deviceInfoPort.value === selectedPort.value
 );
 const crashCount = computed(() => countCrashEvents(logs.value));
+const monitorDeviceLabel = computed(() => {
+  if (activeMonitorSsid.value) {
+    return activeMonitorSsid.value;
+  }
+  if (hasActiveDeviceInfo.value && deviceInfo.value?.ssid) {
+    return deviceInfo.value.ssid;
+  }
+  return 'Unknown device';
+});
+const monitorContextLabel = computed(() => {
+  const parts = [monitorDeviceLabel.value];
+  const port = activeMonitorPort.value || selectedPort.value;
+  if (port) {
+    parts.push(port);
+  }
+  return parts.join(' on ');
+});
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -224,13 +244,24 @@ function copyActivePassword() {
   copyToClipboard(password, 'password');
 }
 
-async function openActiveDeviceMdns() {
-  const ssid = deviceInfo.value?.ssid?.trim();
-  if (!ssid) {
+function latestStaIpFromLogs(): string | null {
+  for (let i = logs.value.length - 1; i >= 0; i--) {
+    const line = String(logs.value[i] || '');
+    const match = line.match(/\bevent=sta_connected\b.*\bip=((?:\d{1,3}\.){3}\d{1,3})\b/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+async function openActiveDeviceConsole() {
+  if (!deviceInfo.value) {
     notify('Load device info first to open device URL');
     return;
   }
-  const url = `http://${ssid}.local`;
+  const staIp = latestStaIpFromLogs();
+  const url = staIp ? `http://${staIp}` : 'http://192.168.4.1';
   try {
     await openUrl(url);
     logs.value.push(`Opened ${url}`);
@@ -280,7 +311,8 @@ async function startFlash() {
     const result = await invoke('flash_firmware', { 
       port: selectedPort.value,
       firmwarePath,
-      region: isLocal ? null : region.value
+      region: isLocal ? null : region.value,
+      eraseFirst: eraseBeforeFlash.value
     });
     logs.value.push(result as string);
     
@@ -302,13 +334,25 @@ async function toggleMonitor() {
   const targetState = !isMonitoring.value;
   const port = selectedPort.value;
   try {
+    if (targetState && !hasActiveDeviceInfo.value) {
+      await readDeviceInfo();
+    }
+
     await invoke('toggle_serial_monitor', { 
       port, 
       baud: 115200, 
       enable: targetState 
     });
     isMonitoring.value = targetState;
-    logs.value.push(targetState ? `Serial monitor started on ${port}` : 'Serial monitor stopped');
+    if (targetState) {
+      activeMonitorPort.value = port;
+      activeMonitorSsid.value = deviceInfo.value?.ssid?.trim() || '';
+      logs.value.push(`Serial monitor started for ${monitorContextLabel.value}`);
+    } else {
+      logs.value.push(`Serial monitor stopped for ${monitorContextLabel.value}`);
+      activeMonitorPort.value = '';
+      activeMonitorSsid.value = '';
+    }
   } catch (e) {
     logs.value.push('Monitor error: ' + e);
   }
@@ -429,14 +473,25 @@ function countCrashEvents(entries: string[]): number {
       <!-- Log Panel -->
       <div :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
         <div class="flex items-center justify-between border-b border-white/5 pb-4">
-          <h2 class="text-lg font-semibold text-slate-300 flex items-center gap-2">
-            <span :class="['w-2 h-2 rounded-full', isMonitoring || isFlashing ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600']"></span>
-            Activity log
-          </h2>
+          <div class="flex flex-col gap-1">
+            <h2 class="text-lg font-semibold text-slate-300 flex items-center gap-2">
+              <span :class="['w-2 h-2 rounded-full', isMonitoring || isFlashing ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600']"></span>
+              Activity log
+            </h2>
+            <div
+              v-if="isMonitoring"
+              class="pl-4 text-xs text-slate-500"
+            >
+              Monitoring
+              <span class="font-mono text-slate-300">{{ monitorDeviceLabel }}</span>
+              <span class="text-slate-500">on</span>
+              <span class="font-mono text-slate-400">{{ activeMonitorPort || selectedPort }}</span>
+            </div>
+          </div>
           <div class="flex items-center gap-4">
             <div
               v-if="crashCount > 0"
-              class="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-300"
+              class="flex h-10 items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 text-xs font-semibold text-amber-300"
               title="Crash signatures detected in the current log"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -485,7 +540,7 @@ function countCrashEvents(entries: string[]): number {
             </button>
             <button
               v-if="isMonitoring"
-              @click="openActiveDeviceMdns"
+              @click="openActiveDeviceConsole"
               :disabled="!hasActiveDeviceInfo"
               :class="[
                 'p-1.5 rounded-md border transition-all',
@@ -493,8 +548,8 @@ function countCrashEvents(entries: string[]): number {
                   ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
                   : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
               ]"
-              title="Open active device web console"
-              aria-label="Open active device web console"
+              title="Open device web console"
+              aria-label="Open device web console"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="9"></circle>
@@ -573,14 +628,24 @@ function countCrashEvents(entries: string[]): number {
                 <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
                 <span>{{ isFlashing ? 'Flashing...' : 'Flash firmware' }}</span>
               </button>
-              <label class="flex items-center gap-2 cursor-pointer group px-1">
-                <div class="relative flex items-center">
-                  <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
-                  <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-all"></div>
-                  <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </div>
-                <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
-              </label>
+              <div class="flex flex-wrap items-center gap-4 px-1">
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <div class="relative flex items-center">
+                    <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-all"></div>
+                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <div class="relative flex items-center">
+                    <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-amber-500 peer-checked:border-amber-500 transition-all"></div>
+                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Erase flash before write</span>
+                </label>
+              </div>
             </div>
             <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input h-12 hover:bg-white/10 flex items-center justify-center gap-3 text-sm tracking-wider transition-all active:scale-95">
               <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400', { 'animate-spin text-indigo-400': isLoadingInfo }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>

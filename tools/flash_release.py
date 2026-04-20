@@ -96,7 +96,7 @@ def main() -> int:
         args.port,
         "--baud",
         str(args.baud),
-        "write_flash",
+        "write-flash",
         args.addr,
         str(fw),
     )

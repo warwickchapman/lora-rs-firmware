@@ -110,7 +110,7 @@ def main() -> int:
     login_ok = [e for e in key_events if e.event == "login_ok"]
     request_401 = [e for e in key_events if e.event == "request" and e.status == 401]
     slow_web_tick = [e for e in key_events if e.event == "slow_phase" and e.phase == "web_tick"]
-    low_heap = [e for e in key_events if e.event in {"low_heap", "api_low_heap_reject", "mdns_paused", "mdns_paused_heap"}]
+    low_heap = [e for e in key_events if e.event in {"low_heap", "api_low_heap_reject"}]
     prov_compact = [e for e in key_events if e.event == "provisioning_status_compact"]
 
     print(f"Input: {in_path}")
@@ -149,8 +149,6 @@ def main() -> int:
                 "slow_phase",
                 "low_heap",
                 "api_low_heap_reject",
-                "mdns_paused",
-                "mdns_paused_heap",
                 "provisioning_status_compact",
             }
         ]
