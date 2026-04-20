@@ -7,7 +7,6 @@
 #include "state_machine.h"
 
 namespace {
-constexpr uint32_t kReconnectIntervalMs = 30000;
 constexpr uint32_t kPublishIntervalMs = 10000;
 constexpr uint32_t kDiscoveryPublishIntervalMs = 60000;
 constexpr uint8_t kStatusPublishYieldEveryOps = 4;
@@ -160,6 +159,7 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   mqtt_client_.setBufferSize(768);
   mqtt_client_.setCallback(MqttBridge::staticCallback);
   resetPeerPublishCache();
+  resetFibonacci();
   return true;
 }
 
@@ -173,6 +173,7 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
     mqtt_client_.disconnect();
   }
   resetPeerPublishCache();
+  resetFibonacci();
   status_publish_in_progress_ = false;
   status_publish_locals_done_ = false;
   status_publish_peer_index_ = 0;
@@ -229,6 +230,18 @@ void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.remote_address = cfg.remote_address;
   runtime_.mqtt_port = cfg.mqtt_port;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
+}
+
+void MqttBridge::advanceFibonacci() {
+  uint32_t next = fib_prev_s_ + fib_curr_s_;
+  if (next > kFibMaxDelayS) next = kFibMaxDelayS;
+  fib_prev_s_ = fib_curr_s_;
+  fib_curr_s_ = next;
+}
+
+void MqttBridge::resetFibonacci() {
+  fib_prev_s_ = 0;
+  fib_curr_s_ = 1;
 }
 
 void MqttBridge::resetPeerPublishCache() {
@@ -438,7 +451,7 @@ bool MqttBridge::connectIfNeeded() {
   }
 
   const uint32_t now = millis();
-  if ((now - last_reconnect_attempt_ms_) < kReconnectIntervalMs) {
+  if ((now - last_reconnect_attempt_ms_) < (fib_curr_s_ * 1000UL)) {
     return false;
   }
   last_reconnect_attempt_ms_ = now;
@@ -454,10 +467,13 @@ bool MqttBridge::connectIfNeeded() {
 
   if (!ok) {
     {
-      lrslog::event("mqtt_connect_failed", 0, 0, 0);
+      lrslog::event("mqtt_connect_failed", 0, fib_curr_s_ * 1000UL, 0);
     }
+    advanceFibonacci();
     return false;
   }
+
+  resetFibonacci();
 
   if (runtime_.mqtt_control_enabled) {
     mqtt_client_.subscribe(relay_topic_);
@@ -646,7 +662,6 @@ void MqttBridge::publishDiscovery() {
   doc["sta_ip"] = WiFi.localIP().toString();
   doc["ap_ip"] = WiFi.softAPIP().toString();
   doc["sta_ssid"] = settings_->wifi_sta_ssid;
-  doc["lan_mdns"] = settings_->lan_hostname + ".local";
   doc["uptime_ms"] = millis();
   doc["fw"] = "lrs";
   doc["fw_version"] = LRS_FW_VERSION;

@@ -18,7 +18,6 @@ enum class Category : uint8_t {
   SYS,
   WIFI,
   NTP,
-  MDNS,
   LORA,
   SENSOR,
   WEB,

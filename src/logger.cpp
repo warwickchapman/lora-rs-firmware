@@ -42,8 +42,6 @@ const char *categoryText(Category cat) {
       return "WIFI";
     case Category::NTP:
       return "NTP";
-    case Category::MDNS:
-      return "MDNS";
     case Category::LORA:
       return "LORA";
     case Category::SENSOR:
@@ -78,7 +76,6 @@ lrslog::Category classifyEventCategory(const char *event) {
   if (event == nullptr) return lrslog::Category::SYS;
   if (startsWith(event, "sta_") || startsWith(event, "wifi_")) return lrslog::Category::WIFI;
   if (startsWith(event, "ntp_")) return lrslog::Category::NTP;
-  if (startsWith(event, "mdns_")) return lrslog::Category::MDNS;
   if (startsWith(event, "temp_")) return lrslog::Category::SENSOR;
   if (strcmp(event, "time_sync_ntp") == 0) return lrslog::Category::NTP;
   if (strcmp(event, "time_sync_peer") == 0) return lrslog::Category::LORA;

@@ -53,6 +53,10 @@ class MqttBridge {
   };
 
   uint32_t last_reconnect_attempt_ms_ = 0;
+  uint32_t fib_prev_s_ = 0;
+  uint32_t fib_curr_s_ = 1;
+  static constexpr uint32_t kFibMaxDelayS = 300;
+
   uint32_t last_publish_ms_ = 0;
   uint32_t last_discovery_publish_ms_ = 0;
   PeerPublishCacheEntry peer_publish_cache_[kPeerPublishCacheSize]{};
@@ -68,6 +72,8 @@ class MqttBridge {
   bool buildLocalTopic(char *out, size_t outLen, const char *leaf) const;
   bool buildPeerTopic(char *out, size_t outLen, const char *addrSegment, const char *leaf) const;
   void mqttCallback(char *topic, uint8_t *payload, unsigned int length);
+  void advanceFibonacci();
+  void resetFibonacci();
   void resetPeerPublishCache();
   PeerPublishCacheEntry *findPeerPublishCache(uint8_t addr);
   PeerPublishCacheEntry *upsertPeerPublishCache(uint8_t addr);
