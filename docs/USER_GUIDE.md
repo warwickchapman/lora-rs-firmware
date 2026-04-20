@@ -51,7 +51,7 @@ Recommended defaults:
 ## Network Setup
 In `Network` tab:
 - Set STA SSID/password.
-- Set LAN hostname (`<name>.local`).
+- Set LAN hostname.
 - Choose whether AP remains enabled after STA connects.
 
 ## Fleet Behavior
@@ -92,8 +92,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash image at `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
 
 ## OTA Update Test
 Prerequisites:
@@ -103,8 +103,8 @@ Prerequisites:
 - You know the admin password (used for OTA auth).
 
 Steps:
-1. In UI `Network`, confirm LAN mDNS (example: `lrs-004a9c27.local`).
-2. In `/Users/warwick/Code/LoRa/lora_rs/platformio.ini`, set OTA environment `upload_port` to that hostname.
+1. In UI `Network`, confirm the device has a STA IP address.
+2. In `/Users/warwick/Code/LoRa/lora_rs/platformio.ini`, set OTA environment `upload_port` to that IP.
 3. Uncomment and set `upload_flags = --auth=<admin_password>` for that environment.
 4. Run upload:
    - ZA: `python3 -m platformio run -e lrs_za_ota -t upload`
@@ -119,8 +119,8 @@ If OTA fails:
 ## Status Page
 Status is split into:
 - `LoRa`: role, link state, LoRa RSSI, last packet age
-- `WiFi Station`: STA state/IP/RSSI/mDNS
-- `Soft AP`: AP SSID/IP/mDNS
+- `WiFi Station`: STA state/IP/RSSI
+- `Soft AP`: AP SSID/IP
 - `Sensors`: local DS18B20, remote LoRa temperature, dry-contact OPEN/CLOSED
 
 Header badges show:
@@ -185,7 +185,7 @@ Discovery topic (retained JSON):
 
 Discovery payload includes:
 - `serial`, `chip_id`, `role`, `addr`, `remote_addr`
-- `mac`, `sta_ip`, `ap_ip`, `sta_ssid`, `lan_mdns`
+- `mac`, `sta_ip`, `ap_ip`, `sta_ssid`
 - `uptime_ms`, `fw`, `fw_version`, `fw_git_sha`, `fw_git_branch`, `fw_dirty`
 - `build_date`, `build_time`
 
@@ -254,7 +254,7 @@ Prerequisites:
 
 Set test variables:
 ```bash
-export MQTT_HOST="venus.local"
+export MQTT_HOST="venus"
 export MQTT_PORT="1883"
 export ROOT="lora"
 export CHIP_TX="004a9c27"

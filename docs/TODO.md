@@ -23,16 +23,20 @@
 - Unify `deployment_key` and `fleet_passphrase` terminology under user-facing `Shared Fleet Key` (short form: `Fleet Key` where space is tight); place helper text directly under the key input explaining it is the shared passphrase used to derive LoRa encryption/authentication keys; choose one canonical API field name and treat old names as temporary input aliases only.
 - Public firmware repo README update (`lora-rs-firmware`): add a brief desktop flasher summary covering what the app is, supported operating systems/architectures, and include at least one UI screenshot in the README.
 
+## Flasher
+
 ## Logging / Observability
 - Build-time log level override (`LRS_LOG_LEVEL_DEFAULT`): set in `platformio.ini` via `build_flags` (e.g. `-DLRS_LOG_LEVEL_DEFAULT=3`) to change the default runtime verbosity for a build.
 - Log level numeric values for `LRS_LOG_LEVEL_DEFAULT`: `0=ERROR`, `1=WARN`, `2=INFO` (normal default), `3=DEBUG`.
 - Use `DEBUG` temporarily for diagnostics (startup watchdog investigation, provisioning flow tracing, API polling behavior); revert to `INFO` after testing to reduce log volume/serial overhead.
-- Phase 1 (minimal patch, ESP8266-safe): keep structured logging focused on diagnosability with low overhead: levels (`ERROR/WARN/INFO/DEBUG`), categories (`SYS/WIFI/NTP/MDNS/LORA/SENSOR/WEB/API/FS`), redaction helpers, web/API request summaries (status + duration), and heap diagnostics on high-risk endpoints (`/api/status`, `/api/fleet`, `/api/provisioning/status`); keep default level at `INFO`; keep polling endpoints (`/api/status`, `/api/session`) at `DEBUG`.
+- Add lightweight crash breadcrumbs for ESP8266 Web UI instability: keep a documented exception-decoding workflow for bench/support use, persist last-reset context (`reset reason`, `heap_free`, `max_free_block`, and active web feature/path if known), and avoid building a heavyweight always-on crash-report pipeline unless later evidence shows it is needed.
+- Phase 1 (minimal patch, ESP8266-safe): keep structured logging focused on diagnosability with low overhead: levels (`ERROR/WARN/INFO/DEBUG`), categories (`SYS/WIFI/NTP/LORA/SENSOR/WEB/API/FS`), redaction helpers, web/API request summaries (status + duration), and heap diagnostics on high-risk endpoints (`/api/status`, `/api/fleet`, `/api/provisioning/status`); keep default level at `INFO`; keep polling endpoints (`/api/status`, `/api/session`) at `DEBUG`.
 - Phase 2 (later mass refactor): convert remaining ad-hoc prints across modules to the shared logging API; standardize event names/fields; add state-change/rate-limited logging patterns; review LoRa/web/API logs for spam/noise; expand structured coverage for provisioning/fleet workflows; document log taxonomy and operational/debug logging policy.
 - Phase 2 guardrails: no secret leakage (fleet keys, passwords, tokens), avoid heap-heavy log string construction in hot paths, and preserve current runtime timing priorities (LoRa control path before MQTT).
 
 ## MQTT / Heap Discipline
 - Measure fragmentation impact of recent MQTT topic-churn reduction using paired before/after probes (`heap_free`, `max_free_block`, `heap_frag_percent`) around `applyConfig()`, MQTT enable/disable, reconnect, and steady-state publish loops; treat `max_free_block` as the primary success metric.
+- In the Web UI, only enable the `MQTT control enabled` checkbox when `MQTT client enabled` is ticked; keep the dependency obvious in the form state instead of relying on save-time validation alone.
 - Deferred optimization (only if needed): tighten MQTT topic buffer sizes, reduce persistent topic buffers, and move rarely used topic buffers to stack/cold helpers to claw back static RAM **only after** confirming the publish-path refactor improves `max_free_block` stability.
 
 ## Fleet (Fleet-Wide Tools / Actions)
@@ -74,7 +78,7 @@
 
 ## Observability / Logging
 - Implement structured logging with levels: `ERROR`, `WARN`, `INFO` (default), `DEBUG`, `TRACE`.
-- Standardize categories/tags (e.g. `SYS`, `WIFI`, `NTP`, `MDNS`, `LORA`, `SENSOR`, `WEB`, `API`, `FS`).
+- Standardize categories/tags (e.g. `SYS`, `WIFI`, `NTP`, `LORA`, `SENSOR`, `WEB`, `API`, `FS`).
 - Standardize one-line log format with level/category, `t=<millis>`, optional `unix=<epoch>`, `event=<name>`, and key-value fields.
 - Log web page/path requests and API calls with method, path, status, duration (`dur_ms`), and client IP (if available).
 - Add mandatory secret redaction in logs (WiFi passwords, fleet keys, tokens, other secrets).

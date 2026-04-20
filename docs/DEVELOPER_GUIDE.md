@@ -20,7 +20,7 @@ Commands:
 - `python3 -m platformio run -e lrs_us`
 
 ## 3. Runtime Modules
-- `src/app.*`: orchestrator (networking, mdns, OTA, tick order)
+- `src/app.*`: orchestrator (networking, OTA, tick order)
 - `src/config_store.*`: LittleFS settings + deterministic defaults/provisioning
 - `src/radio_protocol.*`: LoRa packet encode/decode, crypto/MAC
 - `src/state_machine.*`: TX/RX logic, timeout/ack, relay/input state
@@ -32,13 +32,12 @@ Commands:
 
 ## 4. Critical Defaults
 - AP SSID: `lrs-<chipid>`
-- AP mDNS: `lrs.local`
 - Heartbeat default: 60 s
 - ACK timeout default: 5 s
 - TX command retry timeout default: 180 s
 - RX fail-safe default: `hold_last` (timeout 180 s; optional `force_off` / `force_on`)
 - DS18B20 default pin: GPIO0
-- MQTT host default: `venus.local`
+- MQTT host default: `venus`
 
 Mode/role mapping:
 - `standalone` mode: role `none`
@@ -49,12 +48,11 @@ Mode/role mapping:
 ## 5. Tick Order and Performance
 In `App::tick`:
 1. networking update
-2. mDNS update prep
-3. inject local temperature into state machine
-4. state machine tick (LoRa control path)
-5. MQTT tick
-6. sensor manager tick
-7. web tick
+2. inject local temperature into state machine
+3. state machine tick (LoRa control path)
+4. MQTT tick
+5. sensor manager tick
+6. web tick
 
 This ordering keeps LoRa control priority above MQTT.
 
@@ -228,6 +226,15 @@ Release alignment policy:
 - Use release tags in `v<version>` form (for example `v0.4.3-alpha`) while `VERSION` remains plain (for example `0.4.3-alpha`).
 - Flasher reuse guard: if `tools/flasher/**` changed, do not reuse prior flasher assets; rebuild all flasher installers from current source.
 - Flasher asset reuse is permitted only when `tools/flasher/**` is unchanged (for example firmware-only/documentation-only releases).
+
+Local non-release flasher version policy:
+- Do not label local one-off test builds with the last shipped release version.
+- Release builds use the exact root `VERSION`.
+- Local ad-hoc flasher builds should derive from the next patch version and current git state:
+  - clean tree: `<next-patch>-dev.<shortsha>`
+  - dirty tree: `<next-patch>-dev.<shortsha>.dirty`
+- Example: if the last release is `0.6.0`, local test DMGs should use `0.6.1-dev.<shortsha>` instead of `0.6.0` or an older prerelease label.
+- This rule applies to local DMGs and other flasher test artifacts; it is there to keep support/debugging truthful and avoid stale version leakage.
 
 Release execution guardrails:
 - Never trigger `package_flasher.yml` manually on `main` for standard releases.

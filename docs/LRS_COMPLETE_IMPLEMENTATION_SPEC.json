@@ -182,7 +182,7 @@
       {"name": "lan_hostname", "type": "string", "default": "lrs-<chipid>"},
       {"name": "ap_always_on", "type": "bool", "default": true},
       {"name": "mqtt_enabled", "type": "bool", "default": false},
-      {"name": "mqtt_host", "type": "string", "default": "venus.local"},
+      {"name": "mqtt_host", "type": "string", "default": "venus"},
       {"name": "mqtt_port", "type": "uint16", "default": 1883, "constraints": "1..65535"},
       {"name": "mqtt_user", "type": "string", "default": ""},
       {"name": "mqtt_password", "type": "string", "default": ""},
@@ -225,13 +225,11 @@
     "main_tick_order": [
       "App.updateNetworking()",
       "App.refreshCaptiveDns() + dns.processNextRequest if running",
-      "App.refreshMdns()",
       "Inject local temp into state machine",
       "NodeStateMachine.tick()",
       "MqttBridge.tick(wifiConnected)",
       "SensorManager.tick()",
       "WebConsole.tick()",
-      "MDNS.update()",
       "ArduinoOTA.handle()"
     ],
     "control_loop_priority_rule": "LoRa state machine tick must execute before MQTT tick to prevent broker latency from degrading relay control path.",
@@ -270,15 +268,6 @@
       "wildcard": "*",
       "target_ip": "softAP IP",
       "active_only_when_ap_enabled": true
-    },
-    "mdns": {
-      "service": "http.tcp:80",
-      "hostname_selection": [
-        "If AP enabled and AP has clients: lrs",
-        "Else if STA connected: normalized lan_hostname or lrs-<chipid>",
-        "Else: lrs"
-      ],
-      "normalization": "lowercase; allow [a-z0-9-]; convert space/_/. to '-'; trim leading/trailing '-'; max length 31; fallback lrs"
     },
     "ota": {
       "library": "ArduinoOTA",
@@ -435,7 +424,7 @@
         "publish_on": ["connect", "every 60000ms"],
         "fields": [
           "serial", "chip_id", "role", "addr", "remote_addr", "mac",
-          "sta_ip", "ap_ip", "sta_ssid", "lan_mdns", "uptime_ms",
+          "sta_ip", "ap_ip", "sta_ssid", "uptime_ms",
           "fw", "fw_version", "fw_git_sha", "fw_git_branch", "fw_dirty",
           "build_date", "build_time"
         ]
@@ -526,7 +515,7 @@
           "lora_last_rssi", "lora_last_packet_ms", "lora_last_tx_ms", "lora_remote_temp_valid", "lora_remote_temp_c", "lora_remote_temp_ms",
           "sta_connected", "sta_ip", "sta_ssid", "sta_rssi", "sta_status_code", "sta_status_text", "sta_target_ssid",
           "sta_target_rssi", "sta_target_rssi_text", "uptime_ms", "relay_reason", "deployment_key", "deployment_key_default",
-          "ap_ssid", "ap_ip", "mdns_ap", "mdns_lan",
+          "ap_ssid", "ap_ip",
           "fw_version", "fw_git_sha", "fw_git_branch", "fw_dirty", "fw_build_id", "fw_build_date_short", "fw_display", "build_date", "build_time",
           "session_remaining_s", "audit_last_saved_by", "audit_last_saved_ms", "audit_last_reboot_reason", "audit_last_reboot_ms", "audit_boot_count",
           "sensor_temp_enabled", "sensor_temp_detected", "sensor_temp_valid", "sensor_temp_c", "sensor_temp_addr", "sensor_temp_error", "sensor_temp_last_read_ms"
@@ -632,7 +621,7 @@
       ]
     },
     "notable_event_names": [
-      "boot", "radio_start_failed", "ota_ready", "config_reloaded", "mdns_failed",
+      "boot", "radio_start_failed", "ota_ready", "config_reloaded",
       "sta_connect_start", "sta_connected", "sta_disconnected", "sta_connect_failed_fallback_ap",
       "tx_packet", "rx_packet", "rx_invalid_size", "rx_bad_mac", "rx_wrong_address", "rx_wrong_source", "rx_filtered_source", "rx_replay_drop",
       "tx_change", "tx_start_sync", "tx_retry", "tx_heartbeat", "tx_ack", "tx_ack_timeout",
@@ -666,7 +655,7 @@
       "Implement immutable config schema + persistence + deterministic derivations",
       "Implement radio packet codec/crypto and deterministic vectors",
       "Implement state machine with simulation tests",
-      "Implement app networking orchestration and OTA/mDNS",
+      "Implement app networking orchestration and OTA",
       "Implement sensor manager",
       "Implement MQTT bridge",
       "Implement web API contracts",

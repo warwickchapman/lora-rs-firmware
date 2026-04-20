@@ -75,12 +75,11 @@ Run each milestone through:
    - settings save/import and reboot persistence
    - commissioning save/apply
    - MQTT test path
-   - mDNS resolution in AP/STA modes
 
 ### Acceptance Criteria
 - Fragmentation plateaus during soak (no persistent `max_free_block` ratchet down in idle polling window).
 - No endpoint regressions/timeouts on hot APIs.
-- No behavior regressions in settings, provisioning, commissioning, MQTT, or mDNS flows.
+- No behavior regressions in settings, provisioning, commissioning, or MQTT flows.
 
 ## Replay Table Policy (2026-02 update)
 - Replay protection source capacity is now compile-time configurable via `LRS_REPLAY_TRACKED_SOURCES` (default `16`).

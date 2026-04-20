@@ -31,9 +31,3 @@
 - Mitigation:
   - runtime memory metrics in acceptance criteria
   - `max_free_block` primary regression signal
-
-## R5: Dead-code drift (mDNS paths)
-- Risk: mDNS-disabled default envs hide regressions in preserved code paths.
-- Impact: silent breakage in mDNS-enabled builds.
-- Mitigation:
-  - explicit mDNS validation gate or formal de-scope per milestone

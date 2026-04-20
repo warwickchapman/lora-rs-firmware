@@ -26,8 +26,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash at address `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write_flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
 
 Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
 
@@ -64,6 +64,15 @@ Main entrypoint:
 - Single source of truth: `/Users/warwick/Code/LoRa/lora_rs/VERSION`
 - Firmware build metadata (`fw_version` shown in Web UI/API), flasher app version label, and factory/release helper scripts all read from this file.
 - For a new release, bump `VERSION` once (for example `0.4.4-alpha`) and keep release tag/title/assets aligned to that value.
+
+Local non-release flasher build policy:
+- Do not reuse the last released version string for one-off local test builds.
+- Release builds use the exact value from `VERSION`.
+- Local ad-hoc flasher builds after a release should identify themselves as:
+  - clean tree: `<next-patch>-dev.<shortsha>`
+  - dirty tree: `<next-patch>-dev.<shortsha>.dirty`
+- Example: after release `0.6.0`, a local test build from commit `abc1234` should be labeled `0.6.1-dev.abc1234` (or `0.6.1-dev.abc1234.dirty` if the tree is modified).
+- This keeps bug reports and screenshots unambiguous and prevents newer test builds from appearing older than the last shipped release.
 
 ## Release Automation Script
 Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same release flow end-to-end:

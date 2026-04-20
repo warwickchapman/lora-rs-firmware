@@ -17,6 +17,7 @@ Run the validated end-to-end LRS release workflow:
 - User asks to prepare, publish, retry, or verify a repo release.
 - User wants firmware + flasher assets aligned to one release version.
 - User wants release notes and GitHub assets checked against the documented contract.
+- User wants a one-off local flasher build for testing without any release publication.
 
 ## Do not use when
 - No release is being prepared.
@@ -28,6 +29,7 @@ Run the validated end-to-end LRS release workflow:
 - Release summary paragraph.
 - At least one feature-focused highlight bullet.
 - Decision on whether current `tools/flasher/**` changes belong in the release.
+- For ad-hoc local flasher builds: target platform/arch and whether the working tree version label should include `.dirty`.
 
 ## Preconditions
 - `VERSION` is the single source of truth.
@@ -36,6 +38,7 @@ Run the validated end-to-end LRS release workflow:
 - If flasher assets are being built, run `python3 tools/flasher/sync_version.py` first.
 - Rebuild flasher if `tools/flasher/**` changed since the source release.
 - macOS flasher builds are local; Windows/Linux flasher builds come from CI.
+- For local ad-hoc flasher builds, do not mutate releases/tags/assets; build locally only.
 
 ## Workflow
 
@@ -74,6 +77,21 @@ Run the validated end-to-end LRS release workflow:
    - x64 DMG
 4. Build Windows/Linux flasher assets via CI.
 5. Upload flasher assets to both repos with `gh release upload --clobber`.
+
+### 3a) Local ad-hoc flasher build path
+Use this when the user wants a test artifact only, not a release.
+
+1. Decide the local build version from current repo state:
+   - release builds use exact `VERSION`
+   - local ad-hoc builds use:
+     - clean tree: `<next-patch>-dev.<shortsha>`
+     - dirty tree: `<next-patch>-dev.<shortsha>.dirty`
+2. Sync flasher metadata before building:
+   - `python3 tools/flasher/sync_version.py`
+3. Build the requested local artifact only:
+   - for macOS testing, build the requested `.app`/`.dmg` locally
+4. Report the exact output path, architecture, and checksum.
+5. Do not create or update tags, releases, or release assets.
 
 ### 4) Release notes
 Release notes must be:
@@ -117,6 +135,11 @@ Enforce these rules:
 - `README.md` and `docs/DEVELOPER_GUIDE.md` still describe the same release process.
 - `tools/flasher/sync_version.py` has been run before local flasher builds.
 
+### Ad-hoc local build verification
+- Confirm the local artifact version label is not reusing the last shipped release string.
+- Confirm the reported output path and target architecture match the user request.
+- If a DMG/app was produced, report a checksum for the final file.
+
 ### Post-publish
 Check both repos:
 - `warwickchapman/lora-rs`
@@ -139,11 +162,19 @@ Always report:
 5. Release URLs for both repos.
 6. Any mismatch between docs, workflow, or published assets.
 
+For local ad-hoc builds, report instead:
+1. Git base used (`VERSION`, short SHA, dirty/clean state).
+2. Derived local build version string.
+3. Output artifact path.
+4. Architecture/target built.
+5. Final checksum.
+
 ## Boundaries
 - This skill does not decide product scope; it only packages what belongs in the release.
 - This skill does not silently include unrelated local changes.
 - This skill does not invent new asset types or release policy.
 - This skill does not replace project docs; it follows them and flags drift.
+- This skill does not publish ad-hoc local builds unless the user later explicitly asks for release/publish work.
 
 ## Quick commands
 
@@ -166,4 +197,9 @@ python3 tools/flasher/sync_version.py
 ```bash
 # standard firmware release path
 python3 tools/release_manager.py --summary "<summary>" --highlight "<highlight>"
+```
+
+```bash
+# local flasher metadata sync before ad-hoc build
+python3 tools/flasher/sync_version.py
 ```

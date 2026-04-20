@@ -2,7 +2,7 @@
 
 ## Current Ownership
 - `/Users/warwick/Code/LoRa/lora_rs/src/app.cpp`
-  - Composition root, lifecycle, runtime orchestration, apply boundary, networking/NTP/OTA/mDNS coordination.
+  - Composition root, lifecycle, runtime orchestration, apply boundary, networking/NTP/OTA coordination.
 
 - `/Users/warwick/Code/LoRa/lora_rs/src/web_console.cpp`
   - `WebConsole` core/common methods: begin/tick/auth/session/request logging/common cache guards/captive probe.

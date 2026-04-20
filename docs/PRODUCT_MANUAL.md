@@ -51,10 +51,6 @@ Default access:
 2. Open `http://192.168.4.1`
 3. Login: user `admin`, password = factory-derived credential
 
-mDNS behavior:
-- AP-side service hostname: `lrs.local`
-- STA-side hostname: configurable (`<lan_hostname>.local`)
-
 ## 5. Configuration (Web UI)
 Tabs:
 - Status
