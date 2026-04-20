@@ -480,9 +480,9 @@ function countCrashEvents(entries: string[]): number {
             </h2>
             <div
               v-if="isMonitoring"
-              class="pl-4 text-xs text-slate-500"
+              class="flex items-center gap-1 pl-4 text-xs text-slate-500"
             >
-              Monitoring
+              <span>Monitoring</span>
               <span class="font-mono text-slate-300">{{ monitorDeviceLabel }}</span>
               <span class="text-slate-500">on</span>
               <span class="font-mono text-slate-400">{{ activeMonitorPort || selectedPort }}</span>
