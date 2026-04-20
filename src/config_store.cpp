@@ -310,7 +310,7 @@ bool ConfigStore::begin() {
   cfg_.mqtt_client_enabled = root["mqtt_client_enabled"] | false;
   cfg_.mqtt_control_enabled = root["mqtt_control_enabled"] | false;
   cfg_.mqtt_controller_addresses = String(static_cast<const char *>(root["mqtt_controller_addresses"] | ""));
-  cfg_.mqtt_host = String(static_cast<const char *>(root["mqtt_host"] | "venus"));
+  cfg_.mqtt_host = String(static_cast<const char *>(root["mqtt_host"] | "venus.local"));
   cfg_.mqtt_port = root["mqtt_port"] | 1883;
   cfg_.mqtt_user = String(static_cast<const char *>(root["mqtt_user"] | ""));
   cfg_.mqtt_password = String(static_cast<const char *>(root["mqtt_password"] | ""));
@@ -711,7 +711,7 @@ void ConfigStore::setDefaults() {
   cfg_.mqtt_client_enabled = false;
   cfg_.mqtt_control_enabled = false;
   cfg_.mqtt_controller_addresses = "";
-  cfg_.mqtt_host = "venus";
+  cfg_.mqtt_host = "venus.local";
   cfg_.mqtt_port = 1883;
   cfg_.mqtt_user = "";
   cfg_.mqtt_password = "";
