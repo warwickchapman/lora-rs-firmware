@@ -2,9 +2,6 @@
 
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
-#if LRS_ENABLE_MDNS
-#include <ESP8266mDNS.h>
-#endif
 #include <cstring>
 #include <time.h>
 
@@ -20,14 +17,6 @@ constexpr uint32_t kNtpPollNoFixMs = 5000;
 constexpr uint32_t kNtpPollFixedMs = 60000;
 constexpr uint32_t kNtpForceRefreshMs = 21600000;
 constexpr uint32_t kMinValidUnixTimeS = 1704067200UL; // 2024-01-01 UTC
-#if LRS_ENABLE_MDNS
-// mDNS should remain available during normal ESP8266 operation and only pause
-// under severe memory pressure.
-constexpr uint32_t kMdnsSuspendFreeHeapBytes = 6000;
-constexpr uint32_t kMdnsSuspendMaxBlockBytes = 1800;
-constexpr uint32_t kMdnsResumeFreeHeapBytes = 8000;
-constexpr uint32_t kMdnsResumeMaxBlockBytes = 2600;
-#endif
 constexpr uint32_t kStartupTraceWindowMs = 15000;
 constexpr uint32_t kStartupTraceBreadcrumbMs = 1000;
 constexpr uint32_t kStartupSlowTickWarnMs = 25;
@@ -197,9 +186,6 @@ void App::tick() {
     dns_.processNextRequest();
   }
   phaseSlowWarn("dns", phaseStartMs);
-  phaseStartMs = millis();
-  refreshMdns();
-  phaseSlowWarn("refresh_mdns_pre", phaseStartMs);
   const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   if (emitStartupBreadcrumb) {
@@ -330,22 +316,6 @@ void App::tick() {
   phaseStartMs = millis();
   web_.tick();
   phaseSlowWarn("web_tick", phaseStartMs);
-  // Re-check mDNS after web handlers because API requests can drop heap
-  // quickly.
-  phaseStartMs = millis();
-  refreshMdns();
-  phaseSlowWarn("refresh_mdns_post", phaseStartMs);
-#if LRS_ENABLE_MDNS
-  {
-    ProvisioningSessionSnapshot prov{};
-    const bool provActive = sm_.provisioningSession(prov) && prov.active;
-    if (!provActive && !mdns_suspended_for_low_heap_) {
-      phaseStartMs = millis();
-      MDNS.update();
-      phaseSlowWarn("mdns_update", phaseStartMs);
-    }
-  }
-#endif
   if (!startupDeferNonEssential) {
     if (ota_enabled_) {
       phaseStartMs = millis();
@@ -559,8 +529,6 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
   } else {
     LRS_LOGI(SYS, "event=config_apply restart_network=0 restart_ota_auth=0");
   }
-  refreshMdns();
-
   lrslog::event("config_reloaded", 0, 0, 0);
 }
 
@@ -709,104 +677,11 @@ void App::startOta() {
   const String &host = cached_sta_hostname_;
   ArduinoOTA.setHostname(host.c_str());
   ArduinoOTA.setPassword(cfg.admin_password.c_str());
-  // Disable ArduinoOTA's internal mDNS to avoid extra heap pressure and mDNS
-  // parsing work.
+  // Disable ArduinoOTA's internal service advertisement to keep heap usage
+  // predictable on ESP8266.
   ArduinoOTA.begin(false);
   ota_enabled_ = true;
   lrslog::event("ota_ready", 0, 0, 0);
-}
-
-void App::refreshMdns() {
-#if !LRS_ENABLE_MDNS
-  return;
-#else
-  const uint32_t freeHeap = ESP.getFreeHeap();
-  const uint32_t maxBlock = ESP.getMaxFreeBlockSize();
-  const bool lowHeapNow = (freeHeap < kMdnsSuspendFreeHeapBytes) ||
-                          (maxBlock < kMdnsSuspendMaxBlockBytes);
-  const bool heapRecovered = (freeHeap >= kMdnsResumeFreeHeapBytes) &&
-                             (maxBlock >= kMdnsResumeMaxBlockBytes);
-  if (lowHeapNow) {
-    if (!mdns_suspended_for_low_heap_) {
-      MDNS.close();
-      active_mdns_hostname_ = "";
-      mdns_suspended_for_low_heap_ = true;
-      lrslog::event("mdns_paused_heap", 0, 0, 0);
-      LRS_LOGW(
-          MDNS,
-          "event=mdns_paused reason=low_heap heap_free=%lu max_free_block=%lu",
-          freeHeap, maxBlock);
-    }
-    return;
-  }
-  if (mdns_suspended_for_low_heap_) {
-    if (!heapRecovered) {
-      return;
-    }
-    mdns_suspended_for_low_heap_ = false;
-    lrslog::event("mdns_resume_heap", 0, 0, 0);
-    LRS_LOGI(MDNS,
-             "event=mdns_resumed reason=heap_recovered heap_free=%lu "
-             "max_free_block=%lu",
-             freeHeap, maxBlock);
-  }
-
-  {
-    ProvisioningSessionSnapshot prov{};
-    const bool provActive = sm_.provisioningSession(prov) && prov.active;
-    if (provActive) {
-      if (!mdns_suspended_for_provisioning_) {
-        MDNS.close();
-        active_mdns_hostname_ = "";
-        mdns_suspended_for_provisioning_ = true;
-        lrslog::event("mdns_paused_prov", 0, prov.session_nonce, 0);
-        LRS_LOGI(MDNS, "event=mdns_paused reason=provisioning session=%u",
-                 prov.session_nonce);
-      }
-      return;
-    }
-    if (mdns_suspended_for_provisioning_) {
-      mdns_suspended_for_provisioning_ = false;
-      lrslog::event("mdns_resume_prov", 0, 0, 0);
-      LRS_LOGI(MDNS, "event=mdns_resumed reason=provisioning_complete");
-    }
-  }
-
-  const char *desiredLiteral = nullptr;
-  const String *desiredRef = nullptr;
-  // Keep hostname stable on LAN once STA is connected.
-  // `lrs.local` is reserved for AP-only operation before STA comes up.
-  if (!sta_connected_) {
-    desiredLiteral = "lrs";
-  } else {
-    if (cached_sta_hostname_.length() == 0) {
-      refreshCachedStaHostname();
-    }
-    desiredRef = &cached_sta_hostname_;
-  }
-
-  const bool unchanged =
-      (desiredLiteral != nullptr)
-          ? (active_mdns_hostname_ == desiredLiteral)
-          : (desiredRef != nullptr && active_mdns_hostname_ == *desiredRef);
-  if (unchanged) {
-    return;
-  }
-
-  const char *desiredName =
-      (desiredLiteral != nullptr) ? desiredLiteral : desiredRef->c_str();
-
-  MDNS.close();
-  if (!MDNS.begin(desiredName)) {
-    lrslog::event("mdns_failed", 0, 0, 0);
-    LRS_LOGW(MDNS, "event=mdns_start_failed host=%s", desiredName);
-    return;
-  }
-  MDNS.addService("http", "tcp", 80);
-  active_mdns_hostname_ = desiredName;
-  lrslog::event("mdns_ready", 0, 0, 0);
-  LRS_LOGI(MDNS, "event=mdns_ready host=%s", desiredName);
-#endif
 }
 
 void App::refreshCachedStaHostname() {

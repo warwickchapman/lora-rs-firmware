@@ -166,6 +166,8 @@ private:
   uint32_t status_live_sse_last_fleet_push_ms_ = 0;
   uint32_t status_live_sse_last_prov_push_ms_ = 0;
   uint32_t last_web_pressure_ms_ = 0;
+  uint32_t last_user_activity_ms_ = 0;
+  static constexpr uint32_t kSseIdleTimeoutMs = 60000;
   bool status_live_cache_building_ = false;
   bool status_static_cache_building_ = false;
   bool status_lite_cache_building_ = false;

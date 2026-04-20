@@ -137,6 +137,13 @@ void WebConsole::buildProvisioningStatusJson(JsonDocument &doc) {
   s["devices_returned"] = returnedDevices;
   s["devices_truncated"] = false;
   s["compact"] = false;
+  doc["heap_free_bytes"] = lrslog::heapFree();
+  doc["heap_frag_percent"] = lrslog::heapFragPercent();
+  doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
+  doc["fw_version"] = LRS_FW_VERSION;
+  doc["fw_display"] =
+      String(LRS_FW_VERSION) + " (" + String(LRS_GIT_SHA) +
+      (LRS_GIT_DIRTY == 0 ? "" : ", dirty") + ")";
   if (last_logged_prov_state_ != static_cast<uint8_t>(sess.state)) {
     last_logged_prov_state_ = static_cast<uint8_t>(sess.state);
     LRS_LOGI(API,

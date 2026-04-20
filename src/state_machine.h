@@ -391,6 +391,7 @@ class NodeStateMachine {
     uint32_t discover_broadcast_window_ms = 0;
     uint32_t discover_reply_window_ms = 0;
     uint32_t next_discover_broadcast_ms = 0;
+    uint32_t watchdog_last_log_ms = 0;
   };
   ProvisioningSessionRuntime prov_{};
 
@@ -465,4 +466,5 @@ class NodeStateMachine {
   bool confirmProvisioningByFleetResponse(const ProtocolMessage &msg);
   bool ackMatchesPendingCommand(const ProtocolMessage &msg) const;
   void applyReceiverFailsafe(uint32_t now);
+  uint32_t tick_watchdog_last_log_ms_ = 0;
 };

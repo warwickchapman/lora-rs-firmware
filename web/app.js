@@ -600,8 +600,10 @@ function showFleetManageTab(tab) {
     stopProvisioningPolling();
     renderFleetWifiTargets(fleetDevicesCache);
   } else {
-    startProvisioningPolling();
+    refreshProvisioningStatus(true).catch(() => { });
+    startProvisioningPolling({ graceMs: 3000 });
   }
+  syncPagePolling();
 }
 function defaultAutomationPredicate() {
   return { peer: 'self', field: 'input', op: '==', value: 0 };
@@ -1240,6 +1242,9 @@ function closeStatusLiveSse() {
   refreshStatusLiveNotice();
 }
 function shouldUseStatusLiveSse() {
+  if (activePage === 'fleet' && activeFleetTab === 'manage' && activeFleetManageTab === 'lora' && isProvisioningUiBusy()) {
+    return false;
+  }
   return true;
 }
 function scheduleStatusLiveSseReconnect() {
@@ -1515,7 +1520,6 @@ function applyStatusPageState(st) {
 }
 function applyHeaderStatus(st) {
   if (!st) return;
-  const footerMem = document.getElementById('footerMem');
   const modeRaw = String(st.mode || 'paired').toLowerCase();
   lastMode = modeRaw;
   const titleEl = document.getElementById('consoleTitle');
@@ -1550,25 +1554,34 @@ function applyHeaderStatus(st) {
     rh.title = relayOn ? 'Relay on' : 'Relay off';
     rh.setAttribute('aria-label', relayOn ? 'Relay on' : 'Relay off');
   }
-  if (footerMem) {
-    const heapBytes = Number(st.heap_free_bytes || 0);
-    const maxBlockBytes = Number(st.max_free_block_bytes || 0);
-    const heapFrag = Number(st.heap_frag_percent || 0);
-    const heapK = heapBytes > 0 ? (heapBytes / 1024) : 0;
-    const maxK = maxBlockBytes > 0 ? (maxBlockBytes / 1024) : 0;
-    const heapTxt = heapBytes > 0 ? (heapK >= 10 ? String(Math.round(heapK)) : heapK.toFixed(1)) : '-';
-    const maxTxt = maxBlockBytes > 0 ? (maxK >= 10 ? String(Math.round(maxK)) : maxK.toFixed(1)) : '-';
-    footerMem.innerText = (heapBytes > 0 && maxBlockBytes > 0) ? `Mem ${heapTxt}/${maxTxt}` : 'Mem -/-';
-    if (heapBytes > 0 || maxBlockBytes > 0) {
-      footerMem.title = `Free heap: ${heapBytes} B | Max block: ${maxBlockBytes} B | Frag: ${heapFrag}%`;
-    } else {
-      footerMem.title = 'Memory metrics unavailable';
-    }
+  applyFooterRuntimeStatus(st);
+}
+function applyFooterRuntimeStatus(st) {
+  if (!st) return;
+  const footerMem = document.getElementById('footerMem');
+  const footerFw = document.getElementById('footerFw');
+  if (footerFw) {
+    footerFw.innerText = `FW: ${String(st.fw_display || st.fw_version || '-')}`;
+  }
+  if (!footerMem) return;
+  const heapBytes = Number(st.heap_free_bytes || 0);
+  const maxBlockBytes = Number(st.max_free_block_bytes || 0);
+  const heapFrag = Number(st.heap_frag_percent || 0);
+  const heapK = heapBytes > 0 ? (heapBytes / 1024) : 0;
+  const maxK = maxBlockBytes > 0 ? (maxBlockBytes / 1024) : 0;
+  const heapTxt = heapBytes > 0 ? (heapK >= 10 ? String(Math.round(heapK)) : heapK.toFixed(1)) : '-';
+  const maxTxt = maxBlockBytes > 0 ? (maxK >= 10 ? String(Math.round(maxK)) : maxK.toFixed(1)) : '-';
+  footerMem.innerText = (heapBytes > 0 && maxBlockBytes > 0) ? `Mem ${heapTxt}/${maxTxt}` : 'Mem -/-';
+  if (heapBytes > 0 || maxBlockBytes > 0) {
+    footerMem.title = `Free heap: ${heapBytes} B | Max block: ${maxBlockBytes} B | Frag: ${heapFrag}%`;
+  } else {
+    footerMem.title = 'Memory metrics unavailable';
   }
 }
 async function refreshHeaderStatus() {
   if (location.pathname !== '/') return;
   if (activePage === 'status') return;
+  if (activePage === 'fleet' && activeFleetTab === 'manage' && activeFleetManageTab === 'lora' && isProvisioningUiBusy()) return;
   if ((suspendGlobalPollsUntilMs > 0 && Date.now() < suspendGlobalPollsUntilMs)) return;
   if (headerStatusRefreshInFlight) return;
   headerStatusRefreshInFlight = true;
@@ -2215,6 +2228,7 @@ function renderProvisioningStatus(out) {
   if (!summary || !rows) return;
   const wasBusy = isProvisioningUiBusy();
   const sess = (out && out.session) || {};
+  applyFooterRuntimeStatus(out);
   provLastSession = sess;
   const incomingDevices = Array.isArray(out && out.devices) ? out.devices : [];
   provUiSessionActive = !!sess.active;

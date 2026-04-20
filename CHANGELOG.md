@@ -7,6 +7,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Changed
+- Active Fleet > Manage > LoRa provisioning now uses a single dedicated provisioning-status update path while discovery/provisioning is live, keeps footer memory/FW stats updating from that payload, and avoids the generic status SSE churn that could leave long runs looking stale near completion.
+- Provisioning throughput is higher in this pre-release firmware: the coordinator now sends bounded bursts of setup/apply frames for the current node instead of effectively one provisioning frame per tick, and verify timing is shorter so 8-device batches complete materially faster without changing the provisioning packet format.
 - Build tooling now regenerates the embedded web console more reliably during PlatformIO builds, and `tools/build_web_console.py` can also be run directly as a manual fallback before compiling in VS Code.
 - LoRa provisioning UX is being simplified around a clearer mobile-first scan flow: scans now default to the full 8-device batch size, completion states read explicitly as scan/provision outcomes, and zero-result scans now direct operators to check power and factory mode instead of implying the coordinator is still waiting.
 - Sensors UI now makes DS18B20 intent clearer by treating it as an opt-in feature for fitted hardware rather than something boards are assumed to use by default.
@@ -25,6 +27,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Provisioning discovery/provisioning phase transitions no longer stall behind the per-tick radio TX budget gate, so scan deadlines can still expire and move to `Ready` even if no further radio send is allowed in that tick.
 - Paired TX link health no longer stays stuck in `timeout` after valid heartbeat/state-sync ACKs from the RX: unsolicited paired ACKs now clear stale timeout state as proof of live comms, while command-confirmation ACK matching remains strict for actual control semantics.
 - mDNS has been removed completely from the firmware, embedded web UI, and documentation; the console now relies on direct IP access, status/discovery payloads no longer publish `.local` fields, and the flasher shortcut opens the STA IP when one is seen in monitor logs or falls back to the Soft AP IP.
+- Fleet > Manage > LoRa no longer traps discovered/provisioning rows inside a height-capped internal scroller; the device table now expands naturally so the page scrolls instead of hiding up to 8 devices in a nested pane.
 - Provisioning address assignment is now constrained to `1..32`, reserved across discovery runs on the same coordinator uptime, and more tolerant of devices that apply successfully but cannot be re-confirmed immediately (`applied_unconfirmed`).
 - Provisioning start no longer fails immediately when radio TX budget is briefly unavailable; discovery starts are now queued from coordinator tick for better first-pass reliability.
 - Runtime/web cleanup removed dead root artifacts (`web_console_ui_assets_orig.cpp`, `.new`), deduplicated shared role/WiFi helpers into `runtime_utils`, renamed `defaultLanHostnameForRole(bool)` to `defaultLanHostname()`, and reduced transient `String` churn in status/config identity formatting.

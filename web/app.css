@@ -260,11 +260,13 @@ body.light .mobile-action-bar .secondary{background:rgba(255,255,255,0.7)}
 body.light .result-line.ok{color:#15803d;background:rgba(74,222,128,0.1)}
 .result-line.err{background:rgba(248,113,113,0.15);color:#fca5a5;border-color:rgba(248,113,113,0.4)}
 body.light .result-line.err{color:#b91c1c;background:rgba(248,113,113,0.1)}
+.prov-primary-actions{margin-top:8px}
+.prov-primary-btn{min-width:220px}
 .prov-session-line{margin-top:8px;font-weight:700;letter-spacing:.01em}
 .prov-provision-reason{margin-top:6px}
 .prov-provision-reason.ok{color:#86efac}
 body.light .prov-provision-reason.ok{color:#15803d}
-.prov-table-wrap{overflow:auto;max-height:280px;border:1px solid var(--border);border-radius:10px;margin-top:8px}
+.prov-table-wrap{overflow:visible;max-height:none;border:1px solid var(--border);border-radius:10px;margin-top:8px}
 .prov-table{width:100%;margin:0;border-collapse:separate;border-spacing:0;font-size:.92rem;table-layout:fixed}
 .prov-table thead th{position:sticky;top:0;z-index:1;padding:10px 12px;text-align:left;font-weight:800;color:var(--muted);background:rgba(255,255,255,0.06);border-bottom:var(--glass-border);letter-spacing:.01em}
 body.light .prov-table thead th{background:rgba(255,255,255,0.72)}
@@ -338,6 +340,7 @@ body.light .spin{border-color:rgba(0,0,0,0.1);border-top-color:#6366f1}
  .wifi-table td:first-child{max-width:44vw}
  .wifi-table button{padding:6px 8px}
  .pass-toggle{width:36px;height:36px;min-width:36px}
+ .prov-primary-btn{width:100%}
  .prov-table{font-size:.86rem}
  .prov-table thead th,.prov-table tbody td{padding:8px 10px}
  .actions.mobile-action-source{display:none}

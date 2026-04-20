@@ -14,10 +14,6 @@
 #include "web_console_internal.h"
 #include "web_console_ui_assets.h"
 
-#ifndef LRS_ENABLE_MDNS
-#define LRS_ENABLE_MDNS 1
-#endif
-
 using namespace webconsole_internal;
 
 namespace {
@@ -73,6 +69,11 @@ void WebConsole::beginRequestLog(const char *path, bool api, bool poll,
   request_log_.client_ip[1] = remote[1];
   request_log_.client_ip[2] = remote[2];
   request_log_.client_ip[3] = remote[3];
+
+  if (!poll && path != nullptr &&
+      strcmp(path, "/api/status-live/events") != 0) {
+    last_user_activity_ms_ = request_log_.started_ms;
+  }
 }
 
 void WebConsole::finishRequestLog() {

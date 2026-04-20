@@ -44,14 +44,15 @@ constexpr uint8_t kProvOpVerify = 8;
 constexpr uint8_t kProvHwModelLrs = 1;
 constexpr uint8_t kProvHwRevA1 = 0xA1;
 constexpr uint8_t kProvRoleTxFlag = 0x01;
-constexpr uint32_t kProvVerifyTimeoutMs = 15000;
-constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 4000;
+constexpr uint32_t kProvVerifyTimeoutMs = 4000;
+constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 1500;
 constexpr uint32_t kProvDiscoverReplyBaseMs = 2000;
 constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 1200;
 constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 10000;
 constexpr uint8_t kProvDiscoverBroadcastBurstCount = 2;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
 constexpr uint8_t kProvMaxRetriesPerNode = 1;
+constexpr uint8_t kProvCoordinatorBurstPacketsPerTick = 6;
 constexpr uint8_t kProvAnnounceRepeatCount = 2;
 constexpr uint16_t kProvAnnounceRetryBackoffMs = 120;
 constexpr uint8_t kProvKeyChunkBytes = 3;
@@ -2144,6 +2145,8 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
     prov_.watchdog_last_log_ms = now;
   }
 
+  uint8_t txBurstRemaining = kProvCoordinatorBurstPacketsPerTick;
+
   while (prov_.current_index < prov_device_count_) {
     ProvisioningDevice &d = prov_devices_[prov_.current_index];
     if (!d.in_use || !d.selected || d.state == ProvisioningDeviceState::Verified ||
@@ -2160,7 +2163,9 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
     if (d.state == ProvisioningDeviceState::AwaitVerify) {
       if (static_cast<int32_t>(now - prov_.phase_deadline_ms) < 0) return;
       if (!d.late_verify_probe_sent) {
+        if (txBurstRemaining == 0) return;
         if (sendPollRequest(d.assigned_address, nullptr)) {
+          txBurstRemaining--;
           d.late_verify_probe_sent = true;
           prov_.phase_deadline_ms = now + kProvLateVerifyProbeTimeoutMs;
           lrslog::event("prov_verify_probe_tx", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
@@ -2225,9 +2230,11 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         encodeU32LE(payload + 3, d.chip_id);
         payload[7] = d.assigned_address;
         payload[8] = 0;  // RX for v1
+        if (txBurstRemaining == 0) return;
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
+        txBurstRemaining--;
         d.state = ProvisioningDeviceState::Assigned;
-        return;
+        continue;
       }
 
       if (d.state == ProvisioningDeviceState::Assigned && !d.key_start_sent) {
@@ -2237,10 +2244,12 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         payload[7] = d.key_total_chunks;
         payload[8] = d.key_len;
         encodeU16LE(payload + 9, d.key_crc16);
+        if (txBurstRemaining == 0) return;
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
+        txBurstRemaining--;
         d.key_start_sent = true;
         d.state = ProvisioningDeviceState::Keying;
-        return;
+        continue;
       }
 
       if (d.state == ProvisioningDeviceState::Keying && d.key_next_chunk < d.key_total_chunks) {
@@ -2254,9 +2263,11 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         if (chunkLen > kProvKeyChunkBytes) chunkLen = kProvKeyChunkBytes;
         payload[8] = static_cast<uint8_t>(chunkLen);
         memcpy(payload + 9, fleetKey.c_str() + offset, chunkLen);
+        if (txBurstRemaining == 0) return;
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
+        txBurstRemaining--;
         d.key_next_chunk++;
-        return;
+        continue;
       }
 
       if (d.state == ProvisioningDeviceState::Keying && !d.key_commit_sent) {
@@ -2266,9 +2277,11 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         payload[7] = d.key_total_chunks;
         payload[8] = d.key_len;
         encodeU16LE(payload + 9, d.key_crc16);
+        if (txBurstRemaining == 0) return;
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
+        txBurstRemaining--;
         d.key_commit_sent = true;
-        return;
+        continue;
       }
 
       if (d.state == ProvisioningDeviceState::Keying && d.key_commit_sent) {
@@ -2277,7 +2290,9 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         encodeU32LE(payload + 3, d.chip_id);
         payload[7] = d.assigned_address;
         payload[8] = 0;  // RX
+        if (txBurstRemaining == 0) return;
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
+        txBurstRemaining--;
         d.state = ProvisioningDeviceState::AwaitVerify;
         prov_.phase_deadline_ms = now + kProvVerifyTimeoutMs;
         lrslog::event("prov_node_tx", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
@@ -2303,8 +2318,10 @@ bool NodeStateMachine::radioTxBudgetAvailable() const {
 }
 
 void NodeStateMachine::resetRadioTxBudgetForTick() {
-  // One expensive outbound LoRa action per state-machine tick keeps loop-time predictable on ESP8266.
-  radio_tx_budget_active_ = true;
+  const bool provisioningBurstActive =
+      prov_.active && prov_.state == ProvisioningSessionState::Provisioning;
+  // Normal runtime stays one-send-per-tick; active provisioning uses its own bounded burst inside the coordinator.
+  radio_tx_budget_active_ = !provisioningBurstActive;
   radio_tx_used_this_tick_ = false;
 }
 
