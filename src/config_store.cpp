@@ -669,20 +669,22 @@ String ConfigStore::apPassword() const {
 }
 
 void ConfigStore::setDefaults() {
+  constexpr uint8_t kGatewayAddress = 254;
+  constexpr uint8_t kFirstRemoteAddress = 1;
   cfg_.schema_version = kConfigSchemaVersion;
   cfg_.commissioned = false;
   cfg_.mode = kModePaired;
   cfg_.role = kRoleTransmitter;
 
   cfg_.role_tx = true;
-  cfg_.local_address = 1;
-  cfg_.remote_address = 2;
+  cfg_.local_address = kGatewayAddress;
+  cfg_.remote_address = kFirstRemoteAddress;
   cfg_.paired_target_count = 1;
   memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = 2;
+  cfg_.paired_target_addresses[0] = kFirstRemoteAddress;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
-  cfg_.allowed_controller_addresses[0] = 2;
+  cfg_.allowed_controller_addresses[0] = kGatewayAddress;
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
 
@@ -732,18 +734,21 @@ void ConfigStore::setDefaults() {
 }
 
 void ConfigStore::ensureProvisionedDefaults() {
-  const uint32_t chipId = ESP.getChipId();
-  cfg_.local_address = static_cast<uint8_t>((chipId & 0xFF) % 254) + 1;
-  cfg_.remote_address = static_cast<uint8_t>(((chipId >> 8) & 0xFF) % 254) + 1;
-  if (cfg_.remote_address == cfg_.local_address) {
-    cfg_.remote_address = (cfg_.local_address % 254) + 1;
+  constexpr uint8_t kGatewayAddress = 254;
+  constexpr uint8_t kFirstRemoteAddress = 1;
+  if (cfg_.role_tx) {
+    cfg_.local_address = kGatewayAddress;
+    cfg_.remote_address = kFirstRemoteAddress;
+  } else {
+    cfg_.local_address = kFirstRemoteAddress;
+    cfg_.remote_address = kGatewayAddress;
   }
   cfg_.paired_target_count = 1;
   memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = cfg_.remote_address;
+  cfg_.paired_target_addresses[0] = kFirstRemoteAddress;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
-  cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
+  cfg_.allowed_controller_addresses[0] = kGatewayAddress;
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
 

@@ -18,7 +18,7 @@ Example:
 - Optional: generate deployment key per batch automatically by passing `--batch-id <YYMMDD>` (or explicit `--deployment-key <value>`).
 
 Example (API-first coordinator workflow):
-- `python3 /Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py run --host 192.168.4.1 --admin-password <pwd> --fleet-key <key> --role tx --local-address 1 --remote-address 2`
+- `python3 /Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py run --host 192.168.4.1 --admin-password <pwd> --fleet-key <key> --role tx --local-address 254 --remote-address 1`
 
 ## What the Script Produces
 A CSV row with:
@@ -39,7 +39,9 @@ A CSV row with:
 
 ## Current Default Policy
 - Factory role: TX
-- Addresses: deterministic by chip ID
+- Addresses:
+  - TX/GW defaults to local `254` with first remote target `1`
+  - RX units are assigned from `1` upwards during fleet provisioning (`1..32` currently)
 - AP/admin password: deterministic by chip ID + product secret
 - AP SSID: `lrs-<chipid>` (role-independent so TX/RX changes do not force AP SSID changes)
 - Deployment key: generated as readable three-word key per batch run unless explicitly provided

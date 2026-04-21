@@ -37,6 +37,7 @@ Examples:
 - `farm-pump-control-west-field-9k`
 
 Recommended defaults:
+- Addressing convention: TX/GW local `254`; RX nodes from `1` upward
 - Heartbeat: 60 s
 - ACK timeout: 5 s
 - MQTT remote retry timeout (TX): 300 s
