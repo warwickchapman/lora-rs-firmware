@@ -368,7 +368,7 @@ def mirror_to_public(
         )
 
 
-def expected_release_assets(version: str) -> List[str]:
+def expected_full_release_assets(version: str) -> List[str]:
     return [
         f"lrs-firmware-{version}-za.bin",
         f"lrs-firmware-{version}-us.bin",
@@ -380,6 +380,14 @@ def expected_release_assets(version: str) -> List[str]:
         f"thanda-lora-flasher-{version}-linux-x64.deb",
         f"thanda-lora-flasher-{version}-linux-x64.rpm",
         f"thanda-lora-flasher-{version}-linux-x64.AppImage.tar.gz",
+    ]
+
+
+def expected_firmware_assets(version: str) -> List[str]:
+    return [
+        f"lrs-firmware-{version}-za.bin",
+        f"lrs-firmware-{version}-us.bin",
+        f"lrs-firmware-{version}-eu.bin",
     ]
 
 
@@ -396,11 +404,10 @@ def release_asset_names(repo: str, tag: str) -> Set[str]:
 def verify_full_asset_contract(
     repo: str,
     tag: str,
-    version: str,
+    expected: Set[str],
     timeout_seconds: int,
     poll_seconds: int = 15,
 ) -> None:
-    expected = set(expected_release_assets(version))
     deadline = time.time() + max(timeout_seconds, 0)
     last_missing: Set[str] = set(expected)
 
@@ -474,13 +481,18 @@ def parse_args() -> argparse.Namespace:
         "--verify-full-assets",
         dest="verify_full_assets",
         action="store_true",
-        help="Verify both repos contain the full 10-file release asset contract (default: enabled).",
+        help="Verify both repos contain the full 10-file release asset contract.",
     )
     verify_group.add_argument(
         "--no-verify-full-assets",
         dest="verify_full_assets",
         action="store_false",
-        help="Skip full release asset contract verification.",
+        help="Do not verify full 10-file release asset contract.",
+    )
+    ap.add_argument(
+        "--verify-firmware-only-assets",
+        action="store_true",
+        help="Verify only 3 firmware assets in both repos (use when flasher assets are added later).",
     )
     ap.add_argument(
         "--asset-verify-timeout-seconds",
@@ -489,7 +501,7 @@ def parse_args() -> argparse.Namespace:
         help="How long to wait for asynchronous asset uploads before failing verification (default: 1200).",
     )
     ap.set_defaults(post_bump_dev=True)
-    ap.set_defaults(verify_full_assets=True)
+    ap.set_defaults(verify_full_assets=False)
     return ap.parse_args()
 
 
@@ -547,12 +559,18 @@ def main() -> int:
     # Public Mirroring
     mirror_to_public(tag, title, notes_file, [a.path for a in assets], is_prerelease)
 
+    expected_set: Set[str] | None = None
     if args.verify_full_assets:
-        verify_full_asset_contract(args.repo, tag, version, args.asset_verify_timeout_seconds)
+        expected_set = set(expected_full_release_assets(version))
+    elif args.verify_firmware_only_assets:
+        expected_set = set(expected_firmware_assets(version))
+
+    if expected_set is not None:
+        verify_full_asset_contract(args.repo, tag, expected_set, args.asset_verify_timeout_seconds)
         verify_full_asset_contract(
             "warwickchapman/lora-rs-firmware",
             tag,
-            version,
+            expected_set,
             args.asset_verify_timeout_seconds,
         )
 

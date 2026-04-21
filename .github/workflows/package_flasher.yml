@@ -80,11 +80,20 @@ jobs:
       - id: set-matrix
         run: |
           PLATFORM="${{ github.event.inputs.platform || 'all' }}"
+          CREATE_RELEASE_INPUT="${{ github.event.inputs.create_release || 'false' }}"
           # Default matrix for tag-triggered release builds (cost-controlled):
           # macOS is intentionally excluded and handled by local/manual builds.
           TAG_MATRIX='{"include":[{"platform":"windows-x64","os":"windows-latest","target_triple":"x86_64-pc-windows-msvc"},{"platform":"linux-x64","os":"ubuntu-22.04","target_triple":"x86_64-unknown-linux-gnu"}]}'
           # Full matrix (manual only)
           ALL_MATRIX='{"include":[{"platform":"windows-x64","os":"windows-latest","target_triple":"x86_64-pc-windows-msvc"},{"platform":"macos-arm64","os":"macos-latest","target_triple":"aarch64-apple-darwin"},{"platform":"macos-x86_64","os":"macos-latest","target_triple":"x86_64-apple-darwin"},{"platform":"linux-x64","os":"ubuntu-22.04","target_triple":"x86_64-unknown-linux-gnu"}]}'
+
+          # Release guardrail: CI release mode supports Windows/Linux only.
+          # macOS release artifacts are built/uploaded locally.
+          if [[ "$CREATE_RELEASE_INPUT" == "true" && ( "$PLATFORM" == "all" || "$PLATFORM" == "macos" ) ]]; then
+            echo "ERROR: create_release=true does not allow platform=$PLATFORM."
+            echo "Use platform=windows and platform=linux in CI, then upload local macOS DMGs."
+            exit 1
+          fi
           
           if [[ "$PLATFORM" == "all" ]]; then
             if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
@@ -307,10 +316,10 @@ jobs:
           fi
 
           if [[ "${IS_RELEASE_BUILD}" == "true" && ( "${HAS_CERT}" != "true" || "${HAS_NOTARY_CREDS}" != "true" ) ]]; then
-            echo "ERROR: Release macOS build requires Developer ID certificate + notarization credentials."
-            echo "Required cert secrets: APPLE_DEVELOPER_ID_CERT_P12_BASE64, APPLE_DEVELOPER_ID_CERT_PASSWORD"
-            echo "Required notarization secrets: APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID OR APPLE_API_KEY_ID + APPLE_API_ISSUER_ID + APPLE_API_PRIVATE_KEY_BASE64"
-            exit 1
+            echo "WARNING: Release macOS build is running in ad-hoc mode (no Developer ID certificate/notarization credentials configured)."
+            echo "To enable notarized release builds, provide:"
+            echo "  - APPLE_DEVELOPER_ID_CERT_P12_BASE64 + APPLE_DEVELOPER_ID_CERT_PASSWORD"
+            echo "  - Notary credentials (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID OR APPLE_API_KEY_ID + APPLE_API_ISSUER_ID + APPLE_API_PRIVATE_KEY_BASE64)"
           fi
 
           SIGN_MODE="adhoc"

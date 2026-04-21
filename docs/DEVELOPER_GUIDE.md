@@ -238,13 +238,19 @@ Local non-release flasher version policy:
 - This rule applies to local DMGs and other flasher test artifacts; it is there to keep support/debugging truthful and avoid stale version leakage.
 
 Release execution guardrails:
-- Never trigger `package_flasher.yml` manually on `main` for standard releases.
+- Never trigger `package_flasher.yml` in release mode with `platform=all` or `platform=macos`.
 - Standard release path is tag-driven CI plus local macOS builds.
+- CI release mode is Windows/Linux only; local macOS DMGs are uploaded after CI.
+- `package_flasher.yml` now blocks `create_release=true` when `platform=all` or `platform=macos`.
 - Mandatory release order:
   1. Verify workflow matrix policy before tag push (tag-triggered path must exclude macOS CI).
   2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS installers locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
-  3. Push release tag and let CI publish Linux/Windows flasher artifacts.
-  4. Upload local macOS DMGs to the same release.
+  3. Push release tag and let CI publish Linux/Windows flasher artifacts, or dispatch explicitly:
+     - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
+  4. Upload local macOS DMGs to the same release:
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x64.dmg>`
+  5. Verify complete assets in both repos:
+     - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
 
 Conditional checklist: when `tools/flasher/**` changed in the release:
@@ -261,6 +267,11 @@ Release binary set contract:
 - Firmware: `za`, `us`, `eu` (`3` files)
 - Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg` (`7` files)
 - Total release binaries: `10`
+
+Release tooling notes:
+- `tools/release_manager.py` now defaults to no asset verification unless explicitly requested:
+  - `--verify-firmware-only-assets` checks only firmware files (`za/us/eu`) in both repos.
+  - `--verify-full-assets` checks full 10-file contract (use after flasher upload is complete).
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.

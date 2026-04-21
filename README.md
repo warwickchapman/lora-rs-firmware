@@ -82,6 +82,9 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - creates/updates GitHub release from `VERSION`
 - after successful publish to both repos, auto-bumps `VERSION` to next patch `-dev`, commits, and pushes (disable with `--no-post-bump-dev`)
 - applies George Bernard Shaw quote + one-word release name (name reuse allowed when the quote bank is exhausted)
+- optional verification mode:
+  - `--verify-firmware-only-assets` for firmware-first publish
+  - `--verify-full-assets` only after flasher assets are present
 
 Flasher rebuild policy (mandatory):
 - If any file under `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.
@@ -89,13 +92,18 @@ Flasher rebuild policy (mandatory):
 - If in doubt, rebuild flasher binaries.
 
 Release safety guardrails (mandatory):
-- Do not run `gh workflow run package_flasher.yml` on `main` during normal releases.
-- Tag-triggered CI is the default release path; manual workflow dispatch is exception-only and requires explicit owner approval.
+- Do not run `gh workflow run package_flasher.yml` with `platform=all` or `platform=macos` for releases.
+- In release mode, CI is Windows/Linux only; macOS DMGs are local-only.
+- `package_flasher.yml` now hard-fails release dispatches that try `platform=all` or `platform=macos` with `create_release=true`.
 - Enforce this order:
   1. Confirm workflow policy is already correct before tagging (tag runs must not include macOS CI).
   2. Run `python3 tools/flasher/sync_version.py` and then build/verify macOS installers locally.
-  3. Push tag/release so CI builds Linux/Windows assets only.
+  3. Push tag/release so CI builds Linux/Windows assets only, or dispatch only these two:
+     - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
   4. Upload local macOS assets to the same release.
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x64.dmg>`
+  5. Verify full asset contract:
+     - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
 
 When flasher files changed (`tools/flasher/**`) in a release:
@@ -119,7 +127,8 @@ cd /Users/warwick/Code/LoRa/lora_rs
 python3 tools/release_manager.py \
   --summary "Short release summary here." \
   --highlight "Feature highlight one" \
-  --highlight "Feature highlight two"
+  --highlight "Feature highlight two" \
+  --verify-firmware-only-assets
 ```
 
 ## Flash
