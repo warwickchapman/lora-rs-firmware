@@ -369,7 +369,7 @@ jobs:
           APP_NAME="Thanda LoRa Flasher.app"
           APP_PATH="tools/flasher/src-tauri/target/${TRIPLE}/release/bundle/macos/${APP_NAME}"
           BINARY_PATH="${APP_PATH}/Contents/MacOS/thanda-lora-flasher"
-          OUT_DMG="final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}.dmg"
+          OUT_ZIP="final_dist/thanda-lora-flasher-${VERSION}-macos-${ARCH}-portable.zip"
           
           # Architecture Verification (Prove architecture before signing)
           echo "### Architecture Verification for $TRIPLE ###"
@@ -400,45 +400,15 @@ jobs:
           codesign -dv --verbose=4 "$APP_PATH"
           spctl -a -vv "$APP_PATH" || true
 
-          # Build UX-friendly DMG layout (large icon + Applications on right).
-          brew install create-dmg
-          STAGE_DIR=$(mktemp -d)
-          cp -R "$APP_PATH" "$STAGE_DIR/"
-          create-dmg \
-            --volname "Thanda LoRa Flasher" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "${APP_NAME}" 150 150 \
-            --app-drop-link 450 150 \
-            "$OUT_DMG" \
-            "$STAGE_DIR/$APP_NAME"
+          # Portable macOS packaging: no DMG, no Applications link.
+          # Users run the .app directly from the extracted archive.
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUT_ZIP"
+          ls -lh "$OUT_ZIP"
 
           if [[ "${SIGN_MODE}" == "developer-id" ]]; then
-            codesign --force --timestamp --sign "${SIGN_IDENTITY}" "$OUT_DMG"
-            codesign --verify --verbose=2 "$OUT_DMG"
-
-            if [[ "${HAS_NOTARY_API}" == "true" ]]; then
-              API_KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
-              if ! printf '%s' "${APPLE_API_PRIVATE_KEY_BASE64}" | base64 --decode > "${API_KEY_PATH}" 2>/dev/null; then
-                printf '%s' "${APPLE_API_PRIVATE_KEY_BASE64}" | base64 -D > "${API_KEY_PATH}"
-              fi
-              xcrun notarytool submit "$OUT_DMG" --key "${API_KEY_PATH}" --key-id "${APPLE_API_KEY_ID}" --issuer "${APPLE_API_ISSUER_ID}" --wait
-            else
-              xcrun notarytool submit "$OUT_DMG" --apple-id "${APPLE_ID}" --password "${APPLE_APP_SPECIFIC_PASSWORD}" --team-id "${APPLE_TEAM_ID}" --wait
-            fi
-
-            xcrun stapler staple "$OUT_DMG"
-            xcrun stapler validate "$OUT_DMG"
-            spctl -a -vv "$OUT_DMG"
+            echo "Portable zip created from a Developer ID-signed app bundle."
+            echo "Notarization/stapling is not applied in portable-zip mode."
           fi
-
-          # Verify signature survived packaging by checking app inside the DMG.
-          MOUNT_POINT=$(mktemp -d)
-          hdiutil attach "$OUT_DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
-          codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/$APP_NAME"
-          codesign -dv --verbose=4 "$MOUNT_POINT/$APP_NAME"
-          spctl -a -vv "$MOUNT_POINT/$APP_NAME" || true
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-22.04'

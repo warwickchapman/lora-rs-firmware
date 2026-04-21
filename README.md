@@ -93,15 +93,15 @@ Flasher rebuild policy (mandatory):
 
 Release safety guardrails (mandatory):
 - Do not run `gh workflow run package_flasher.yml` with `platform=all` or `platform=macos` for releases.
-- In release mode, CI is Windows/Linux only; macOS DMGs are local-only.
+- In release mode, CI is Windows/Linux only; macOS portable ZIPs are local-only.
 - `package_flasher.yml` now hard-fails release dispatches that try `platform=all` or `platform=macos` with `create_release=true`.
 - Enforce this order:
   1. Confirm workflow policy is already correct before tagging (tag runs must not include macOS CI).
-  2. Run `python3 tools/flasher/sync_version.py` and then build/verify macOS installers locally.
+  2. Run `python3 tools/flasher/sync_version.py` and then build/verify macOS app bundles locally.
   3. Push tag/release so CI builds Linux/Windows assets only, or dispatch only these two:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
-  4. Upload local macOS assets to the same release.
-     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x64.dmg>`
+  4. Upload local macOS portable ZIP assets to the same release.
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x64-portable.zip>`
   5. Verify full asset contract:
      - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
@@ -109,7 +109,7 @@ Release safety guardrails (mandatory):
 When flasher files changed (`tools/flasher/**`) in a release:
 - Rebuild flasher installers from current source (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
 - Before any flasher build (local or CI), run `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` are aligned to `VERSION` (prevents stale `0.5.0`/`0.5.5` metadata leakage).
-- Verify local macOS outputs with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
+- Verify local macOS `.app` outputs with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2` before zipping.
 - Update `lora-rs-firmware` README with:
   - brief flasher summary (what it is),
   - supported platforms list,
@@ -118,7 +118,7 @@ When flasher files changed (`tools/flasher/**`) in a release:
 
 Release asset contract:
 - Firmware binaries: 3 (`za`, `us`, `eu`)
-- Flasher binaries: 7 (`windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg`)
+- Flasher binaries: 7 (`windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 portable zip`, `macos x64 portable zip`)
 - Total binaries per release: 10
 
 Example:

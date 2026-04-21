@@ -240,15 +240,15 @@ Local non-release flasher version policy:
 Release execution guardrails:
 - Never trigger `package_flasher.yml` in release mode with `platform=all` or `platform=macos`.
 - Standard release path is tag-driven CI plus local macOS builds.
-- CI release mode is Windows/Linux only; local macOS DMGs are uploaded after CI.
+- CI release mode is Windows/Linux only; local macOS portable ZIPs are uploaded after CI.
 - `package_flasher.yml` now blocks `create_release=true` when `platform=all` or `platform=macos`.
 - Mandatory release order:
   1. Verify workflow matrix policy before tag push (tag-triggered path must exclude macOS CI).
-  2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS installers locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
+  2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS app bundles locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
   3. Push release tag and let CI publish Linux/Windows flasher artifacts, or dispatch explicitly:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
-  4. Upload local macOS DMGs to the same release:
-     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x64.dmg>`
+  4. Upload local macOS portable ZIPs to the same release:
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x64-portable.zip>`
   5. Verify complete assets in both repos:
      - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
@@ -256,7 +256,7 @@ Release execution guardrails:
 Conditional checklist: when `tools/flasher/**` changed in the release:
 - Rebuild flasher installers from current source for all supported targets (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
 - Ensure flasher metadata is synchronized first via `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` match root `VERSION`.
-- Verify local macOS DMGs pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
+- Verify local macOS app bundles pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2` before zipping.
 - Update the public firmware repository (`lora-rs-firmware`) README with:
   - A brief "what the desktop flasher is" summary.
   - Current supported OS/architecture list.
@@ -265,7 +265,7 @@ Conditional checklist: when `tools/flasher/**` changed in the release:
 
 Release binary set contract:
 - Firmware: `za`, `us`, `eu` (`3` files)
-- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x64 dmg` (`7` files)
+- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 portable zip`, `macos x64 portable zip` (`7` files)
 - Total release binaries: `10`
 
 Release tooling notes:
