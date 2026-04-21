@@ -60,9 +60,36 @@ const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
 
 const LOCAL_OPTION = '__local_browse__';
+const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
+  'ssid',
+  'password',
+  'local_addr',
+  'remote_addr',
+  'mac',
+  'chip_id',
+  'serial',
+];
+const EU_COUNTRY_CODES = new Set([
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
+  'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
+  'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'NO', 'IS', 'LI',
+  'CH', 'GB',
+]);
+const US_COUNTRY_CODES = new Set(['US', 'UM', 'PR', 'GU', 'VI', 'AS', 'MP']);
+const ZA_COUNTRY_CODES = new Set(['ZA']);
+
 const hasActiveDeviceInfo = computed(() =>
   !!deviceInfo.value && deviceInfoPort.value === selectedPort.value
 );
+const orderedDeviceInfoEntries = computed((): Array<[keyof DeviceInfo, string | number]> => {
+  if (!deviceInfo.value) return [];
+  const info = deviceInfo.value;
+  const entries: Array<[keyof DeviceInfo, string | number]> = [];
+  for (const key of DEVICE_INFO_ORDER) {
+    entries.push([key, info[key]]);
+  }
+  return entries;
+});
 const crashCount = computed(() => countCrashEvents(logs.value));
 const monitorDeviceLabel = computed(() => {
   if (activeMonitorSsid.value) {
@@ -122,6 +149,43 @@ watch(selectedVersion, (newVal) => {
     openLocalFileDialog();
   }
 });
+
+function extractCountryCodes(locale: string): string[] {
+  return locale
+    .split(/[-_]/)
+    .filter(part => /^[A-Za-z]{2}$/.test(part))
+    .map(part => part.toUpperCase());
+}
+
+function detectRegionFromSystem(): 'ZA' | 'EU' | 'US' | null {
+  const localeCandidates: string[] = [];
+  const resolvedLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+  if (resolvedLocale) localeCandidates.push(resolvedLocale);
+  if (navigator.language) localeCandidates.push(navigator.language);
+  if (Array.isArray(navigator.languages)) {
+    localeCandidates.push(...navigator.languages);
+  }
+
+  const countryCodes = new Set<string>();
+  for (const locale of localeCandidates) {
+    for (const code of extractCountryCodes(locale)) {
+      countryCodes.add(code);
+    }
+  }
+
+  for (const code of countryCodes) {
+    if (ZA_COUNTRY_CODES.has(code)) return 'ZA';
+    if (US_COUNTRY_CODES.has(code)) return 'US';
+    if (EU_COUNTRY_CODES.has(code)) return 'EU';
+  }
+
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  if (timezone === 'Africa/Johannesburg') return 'ZA';
+  if (timezone.startsWith('Europe/')) return 'EU';
+  if (timezone.startsWith('US/')) return 'US';
+
+  return null;
+}
 
 async function refreshPorts() {
   if (isRefreshingPorts.value) return;
@@ -221,8 +285,8 @@ async function copyToClipboard(text: string, label: string) {
 
 function copyAllDeviceInfo() {
   if (!deviceInfo.value) return;
-  const block = Object.entries(deviceInfo.value)
-    .map(([key, val]) => `${formatLabel(key).toUpperCase()}: ${val}`)
+  const block = orderedDeviceInfoEntries.value
+    .map(([key, val]) => `${formatLabel(key)}: ${val}`)
     .join('\n');
   copyToClipboard(block, 'all device configuration');
 }
@@ -377,6 +441,14 @@ watch(logs, () => {
 }, { deep: true });
 
 onMounted(async () => {
+  const detectedRegion = detectRegionFromSystem();
+  if (detectedRegion) {
+    region.value = detectedRegion;
+    logs.value.push(`Region auto-detected from system locale/timezone: ${detectedRegion}`);
+  } else {
+    logs.value.push(`Region auto-detection unavailable; using default: ${region.value}`);
+  }
+
   refreshPorts();
   fetchFirmware();
   
@@ -666,7 +738,7 @@ function countCrashEvents(entries: string[]): number {
           </div>
           
           <div class="space-y-1">
-            <div v-for="(val, key) in deviceInfo" :key="key" class="group flex items-center justify-between text-xs border-b border-white/5 py-1.5 hover:bg-white/5 px-2 -mx-2 rounded transition-colors">
+            <div v-for="[key, val] in orderedDeviceInfoEntries" :key="key" class="group flex items-center justify-between text-xs border-b border-white/5 py-1.5 hover:bg-white/5 px-2 -mx-2 rounded transition-colors">
               <span class="text-slate-500">{{ formatLabel(key) }}</span>
               <div class="flex items-center gap-3">
                 <span class="font-mono text-slate-300">{{ val }}</span>
