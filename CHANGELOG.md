@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-18
+
 ### Changed
 - Active Fleet > Manage > LoRa provisioning now uses a single dedicated provisioning-status update path while discovery/provisioning is live, keeps footer memory/FW stats updating from that payload, and avoids the generic status SSE churn that could leave long runs looking stale near completion.
 - Provisioning throughput is higher in this pre-release firmware: the coordinator now sends bounded bursts of setup/apply frames for the current node instead of effectively one provisioning frame per tick, and verify timing is shorter so 8-device batches complete materially faster without changing the provisioning packet format.
