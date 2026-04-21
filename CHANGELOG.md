@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.2-alpha] - 2026-04-21
+
+### Changed
+- Flasher/esptool command selection is now runtime-compatible across bundled esptool variants: the desktop flasher probes `esptool -h` and automatically uses either hyphen (`erase-flash`/`write-flash`) or underscore (`erase_flash`/`write_flash`) operation names as supported by the sidecar binary.
+- Release automation now has a stricter asset-contract verifier in `tools/release_manager.py` that can validate both repositories contain the full expected firmware + flasher binary set and report explicit missing filenames instead of silently completing.
+- Completed `v0.6.1-alpha` release asset set in both repos by adding the missing macOS DMGs (`macos-arm64` and `macos-x86_64`) so both release pages now carry the same full binary lineup.
+
 ## [0.6.1-alpha] - 2026-04-21
 
 ### Changed
