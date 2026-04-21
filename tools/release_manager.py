@@ -23,7 +23,8 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Set, Tuple
+import time
 
 
 QUOTE_BANK: List[Tuple[str, str]] = [
@@ -367,6 +368,63 @@ def mirror_to_public(
         )
 
 
+def expected_release_assets(version: str) -> List[str]:
+    return [
+        f"lrs-firmware-{version}-za.bin",
+        f"lrs-firmware-{version}-us.bin",
+        f"lrs-firmware-{version}-eu.bin",
+        f"thanda-lora-flasher-{version}-macos-arm64.dmg",
+        f"thanda-lora-flasher-{version}-macos-x86_64.dmg",
+        f"thanda-lora-flasher-{version}-windows-x64.msi",
+        f"thanda-lora-flasher-{version}-windows-x64-portable.zip",
+        f"thanda-lora-flasher-{version}-linux-x64.deb",
+        f"thanda-lora-flasher-{version}-linux-x64.rpm",
+        f"thanda-lora-flasher-{version}-linux-x64.AppImage.tar.gz",
+    ]
+
+
+def release_asset_names(repo: str, tag: str) -> Set[str]:
+    raw = run(
+        ["gh", "release", "view", tag, "--repo", repo, "--json", "assets"],
+        capture=True,
+    )
+    payload = json.loads(raw)
+    assets = payload.get("assets", [])
+    return {str(asset.get("name", "")).strip() for asset in assets if asset.get("name")}
+
+
+def verify_full_asset_contract(
+    repo: str,
+    tag: str,
+    version: str,
+    timeout_seconds: int,
+    poll_seconds: int = 15,
+) -> None:
+    expected = set(expected_release_assets(version))
+    deadline = time.time() + max(timeout_seconds, 0)
+    last_missing: Set[str] = set(expected)
+
+    while True:
+        names = release_asset_names(repo, tag)
+        missing = expected - names
+        last_missing = missing
+        if not missing:
+            print(f"Asset contract OK for {repo}:{tag}")
+            return
+        if time.time() >= deadline:
+            break
+        print(
+            f"Waiting for release assets on {repo}:{tag} (missing {len(missing)}). "
+            f"Retrying in {poll_seconds}s..."
+        )
+        time.sleep(poll_seconds)
+
+    missing_list = ", ".join(sorted(last_missing))
+    raise RuntimeError(
+        f"Release asset contract incomplete for {repo}:{tag}. Missing: {missing_list}"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Build and publish lora-rs release from VERSION.")
     ap.add_argument("--repo", default="warwickchapman/lora-rs", help="GitHub repo in owner/name form.")
@@ -411,7 +469,27 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Disable automatic post-release VERSION bump to next patch -dev.",
     )
+    verify_group = ap.add_mutually_exclusive_group()
+    verify_group.add_argument(
+        "--verify-full-assets",
+        dest="verify_full_assets",
+        action="store_true",
+        help="Verify both repos contain the full 10-file release asset contract (default: enabled).",
+    )
+    verify_group.add_argument(
+        "--no-verify-full-assets",
+        dest="verify_full_assets",
+        action="store_false",
+        help="Skip full release asset contract verification.",
+    )
+    ap.add_argument(
+        "--asset-verify-timeout-seconds",
+        type=int,
+        default=1200,
+        help="How long to wait for asynchronous asset uploads before failing verification (default: 1200).",
+    )
     ap.set_defaults(post_bump_dev=True)
+    ap.set_defaults(verify_full_assets=True)
     return ap.parse_args()
 
 
@@ -468,6 +546,15 @@ def main() -> int:
 
     # Public Mirroring
     mirror_to_public(tag, title, notes_file, [a.path for a in assets], is_prerelease)
+
+    if args.verify_full_assets:
+        verify_full_asset_contract(args.repo, tag, version, args.asset_verify_timeout_seconds)
+        verify_full_asset_contract(
+            "warwickchapman/lora-rs-firmware",
+            tag,
+            version,
+            args.asset_verify_timeout_seconds,
+        )
 
     release_url = run(["gh", "release", "view", tag, "--repo", args.repo, "--json", "url", "--jq", ".url"], capture=True)
 
