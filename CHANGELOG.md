@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.1-alpha] - 2026-04-21
+
+### Changed
+- MQTT reconnect behavior now uses bounded Fibonacci backoff (up to 300 seconds), with reconnect-failure log telemetry carrying the active retry delay.
+- Runtime cleanup from the mDNS removal pass now also removes MDNS logging category/classification and drops `lan_mdns` from MQTT discovery payloads.
+- Config defaults were aligned for current hardware/field behavior:
+  - `mqtt_host` remains `venus.local` (explicitly restored)
+  - DS18B20 sensor support defaults to opt-in (`sensor_temp_enabled=false`).
+- Flasher macOS startup now offers a one-click move-to-`/Applications` flow for non-debug builds, then relaunches the installed app.
+- OTA host defaults in `platformio.ini` were updated away from `lrs.local` to direct `192.168.4.1` for the US OTA environment, and stale mDNS build-flag remnants were removed.
+- Release tooling now auto-advances `VERSION` to next patch `-dev` after successful publish to both repos, commits the bump, and pushes to `main` by default.
+- Release/process docs were updated to reflect the auto post-release version bump and current ad-hoc local build versioning expectations.
+
 ## [0.6.0] - 2026-04-18
 
 ### Changed
