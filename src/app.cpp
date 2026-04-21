@@ -11,7 +11,6 @@
 
 namespace {
 constexpr uint32_t kStaConnectTimeoutMs = 20000;
-constexpr uint32_t kStaReconnectIntervalMs = 10000;
 constexpr uint32_t kApDisableDelayAfterStaMs = 60000;
 constexpr uint32_t kNtpPollNoFixMs = 5000;
 constexpr uint32_t kNtpPollFixedMs = 60000;
@@ -26,11 +25,14 @@ constexpr uint32_t kOtaStartupMinMaxBlockBytes = 1200;
 constexpr uint32_t kSteadySlowPhaseWarnMs = 50;
 constexpr uint32_t kSteadySlowPhaseWarnRateLimitMs = 5000;
 constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
-constexpr uint32_t kStaReconnectMinFreeHeapBytes = 9000;
-constexpr uint32_t kStaReconnectMinMaxBlockBytes = 6000;
+// Keep a critical-only guard for STA reconnect attempts. Removing this guard
+// entirely can cause reconnect churn under fragmentation-heavy conditions.
+constexpr uint32_t kStaReconnectCriticalMinFreeHeapBytes = 5000;
+constexpr uint32_t kStaReconnectCriticalMinMaxBlockBytes = 2500;
 constexpr uint32_t kStaReconnectHeapLogIntervalMs = 30000;
 constexpr uint8_t kStaFailureResetThreshold = 10;
 constexpr uint8_t kStaStackResetLimit = 10;
+constexpr uint32_t kStaReconnectFibMaxDelayS = 300;
 
 } // namespace
 
@@ -331,6 +333,7 @@ void App::startNetworking() {
   wifi_stack_disabled_ = false;
   sta_connect_consecutive_failures_ = 0;
   sta_stack_reset_count_ = 0;
+  resetStaReconnectFibonacci();
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.setOutputPower(20.5f);
@@ -373,6 +376,7 @@ void App::updateNetworking() {
       wifi_sta_connecting_ = false;
       sta_connect_consecutive_failures_ = 0;
       sta_stack_reset_count_ = 0;
+      resetStaReconnectFibonacci();
       sta_connected_since_ms_ = millis();
       sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
@@ -443,6 +447,7 @@ void App::updateNetworking() {
           lrslog::event("sta_stack_disabled", 0, sta_stack_reset_count_, 0);
         }
       }
+      advanceStaReconnectFibonacci();
     }
     return;
   }
@@ -452,6 +457,7 @@ void App::updateNetworking() {
       sta_connected_ = true;
       sta_connect_consecutive_failures_ = 0;
       sta_stack_reset_count_ = 0;
+      resetStaReconnectFibonacci();
       sta_connected_since_ms_ = millis();
       sta_reconnect_heap_block_log_ms_ = 0;
       const int rssi = WiFi.RSSI();
@@ -473,25 +479,29 @@ void App::updateNetworking() {
     wifi_sta_retry_ms_ = millis();
   }
 
+  const uint32_t reconnectDelayMs = sta_reconnect_fib_curr_s_ * 1000UL;
   if (cfg.wifi_sta_ssid.length() >= 1 &&
-      millis() - wifi_sta_retry_ms_ >= kStaReconnectIntervalMs) {
+      millis() - wifi_sta_retry_ms_ >= reconnectDelayMs) {
     const uint32_t freeHeap = lrslog::heapFree();
     const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
-    const bool lowHeapForScan = (freeHeap < kStaReconnectMinFreeHeapBytes) ||
-                                (maxBlock < kStaReconnectMinMaxBlockBytes);
-    if (lowHeapForScan) {
+    const bool criticalLowHeapForReconnect =
+        (freeHeap < kStaReconnectCriticalMinFreeHeapBytes) ||
+        (maxBlock < kStaReconnectCriticalMinMaxBlockBytes);
+    if (criticalLowHeapForReconnect) {
       const uint32_t nowMs = millis();
       if (sta_reconnect_heap_block_log_ms_ == 0U ||
           static_cast<int32_t>(nowMs - sta_reconnect_heap_block_log_ms_) >=
               static_cast<int32_t>(kStaReconnectHeapLogIntervalMs)) {
         sta_reconnect_heap_block_log_ms_ = nowMs;
         LRS_LOGW(WIFI,
-                 "event=sta_reconnect_deferred reason=low_heap heap_free=%lu "
-                 "max_free_block=%lu min_free=%lu min_max_block=%lu",
+                 "event=sta_reconnect_deferred reason=critical_low_heap "
+                 "heap_free=%lu max_free_block=%lu min_free=%lu "
+                 "min_max_block=%lu reconnect_delay_ms=%lu",
                  static_cast<unsigned long>(freeHeap),
                  static_cast<unsigned long>(maxBlock),
-                 static_cast<unsigned long>(kStaReconnectMinFreeHeapBytes),
-                 static_cast<unsigned long>(kStaReconnectMinMaxBlockBytes));
+                 static_cast<unsigned long>(kStaReconnectCriticalMinFreeHeapBytes),
+                 static_cast<unsigned long>(kStaReconnectCriticalMinMaxBlockBytes),
+                 static_cast<unsigned long>(reconnectDelayMs));
       }
       ensureApEnabled();
     } else {
@@ -501,6 +511,19 @@ void App::updateNetworking() {
   } else {
     ensureApEnabled();
   }
+}
+
+void App::advanceStaReconnectFibonacci() {
+  uint32_t next = sta_reconnect_fib_prev_s_ + sta_reconnect_fib_curr_s_;
+  if (next > kStaReconnectFibMaxDelayS)
+    next = kStaReconnectFibMaxDelayS;
+  sta_reconnect_fib_prev_s_ = sta_reconnect_fib_curr_s_;
+  sta_reconnect_fib_curr_s_ = next;
+}
+
+void App::resetStaReconnectFibonacci() {
+  sta_reconnect_fib_prev_s_ = 0;
+  sta_reconnect_fib_curr_s_ = 1;
 }
 
 void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {

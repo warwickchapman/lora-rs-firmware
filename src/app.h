@@ -67,4 +67,9 @@ class App {
   void startOta();
   void refreshCachedStaHostname();
   String normalizeHostname(const String &input) const;
+  void advanceStaReconnectFibonacci();
+  void resetStaReconnectFibonacci();
+
+  uint32_t sta_reconnect_fib_prev_s_ = 0;
+  uint32_t sta_reconnect_fib_curr_s_ = 1;
 };
