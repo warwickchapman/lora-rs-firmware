@@ -4,6 +4,8 @@ pub mod services;
 use serde::Serialize;
 use std::time::Duration;
 use tauri::Emitter;
+#[cfg(target_os = "macos")]
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[derive(Serialize, Clone)]
 struct SerialPortsChangedEvent {
@@ -36,6 +38,83 @@ fn start_serial_port_watcher(app: tauri::AppHandle) {
     });
 }
 
+#[cfg(target_os = "macos")]
+fn app_bundle_from_exe_path(exe_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    exe_path
+        .ancestors()
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("app"))
+        .map(std::path::Path::to_path_buf)
+}
+
+#[cfg(target_os = "macos")]
+fn is_installed_path(path: &std::path::Path) -> bool {
+    if path.starts_with("/Applications") {
+        return true;
+    }
+
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .map(|home| path.starts_with(home.join("Applications")))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn maybe_offer_move_to_applications(app: &tauri::AppHandle) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+
+    let exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+
+    let source_app = match app_bundle_from_exe_path(&exe_path) {
+        Some(path) => path,
+        None => return,
+    };
+
+    if is_installed_path(&source_app) {
+        return;
+    }
+
+    let destination_app = std::path::PathBuf::from("/Applications")
+        .join(source_app.file_name().unwrap_or(std::ffi::OsStr::new("Thanda LoRa Flasher.app")));
+
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        let move_now = app_handle
+            .dialog()
+            .message("Move Thanda LoRa Flasher to Applications?")
+            .title("Install Flasher")
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Move to Applications".to_string(),
+                "Run once".to_string(),
+            ))
+            .blocking_show();
+
+        if !move_now {
+            return;
+        }
+
+        let copy_status = std::process::Command::new("ditto")
+            .arg(&source_app)
+            .arg(&destination_app)
+            .status();
+
+        if !copy_status.map(|status| status.success()).unwrap_or(false) {
+            return;
+        }
+
+        let _ = std::process::Command::new("open")
+            .arg("-n")
+            .arg(&destination_app)
+            .spawn();
+
+        app_handle.exit(0);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -43,6 +122,8 @@ pub fn run() {
             running: std::sync::Arc::new(tokio::sync::Mutex::new(false)),
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            maybe_offer_move_to_applications(&app.handle().clone());
             start_serial_port_watcher(app.handle().clone());
             Ok(())
         })
