@@ -4,9 +4,10 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 DEFAULT_ESPOTA = "/Users/warwick/.platformio/packages/framework-arduinoespressif8266/tools/espota.py"
@@ -33,20 +34,72 @@ LOCATIONS: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
+def normalize_chip_id(value: str) -> str:
+    raw = value.strip().lower()
+    if raw.startswith("lrs-"):
+        raw = raw[4:]
+    if raw.startswith("lrs_"):
+        raw = raw[4:]
+    if raw.startswith("0x"):
+        raw = raw[2:]
+    if not re.fullmatch(r"[0-9a-f]{1,8}", raw):
+        raise ValueError(f"Invalid chip id or host: {value}")
+    return raw.zfill(8)
+
+
 def chip_id_from_host(host: str) -> str:
-    # host format: lrs-<hex> or lrs_<hex>
-    parts = host.replace("_", "-").split("-")
-    if len(parts) < 2:
-        raise ValueError(f"Invalid host format: {host}")
-    chip = parts[-1].lower().strip()
-    if not all(c in "0123456789abcdef" for c in chip):
-        raise ValueError(f"Invalid chip id in host: {host}")
-    return chip.zfill(8)
+    return normalize_chip_id(host)
 
 
 def ota_password(chip_id_hex: str) -> str:
     payload = f"{PRODUCT_SECRET}:{chip_id_hex}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8]
+
+
+def normalize_host_label(value: str) -> str:
+    chip = normalize_chip_id(value)
+    return f"lrs-{chip}"
+
+
+def parse_cli_target(spec: str) -> Dict[str, Any]:
+    raw = spec.strip()
+    if not raw:
+        raise ValueError("Empty device spec")
+
+    label = raw
+    target = raw
+    if "=" in raw:
+        label, target = raw.split("=", 1)
+    elif "@" in raw:
+        label, target = raw.split("@", 1)
+
+    label = label.strip()
+    target = target.strip()
+    if not label:
+        raise ValueError(f"Missing device label in spec: {spec}")
+    if not target:
+        raise ValueError(f"Missing target host/IP in spec: {spec}")
+
+    chip = normalize_chip_id(label)
+    host = normalize_host_label(label)
+    return {
+        "host": host,
+        "ip": target,
+        "chip_id": chip,
+    }
+
+
+def resolve_devices(args: argparse.Namespace) -> Tuple[List[Dict[str, Any]], str]:
+    devices: List[Dict[str, Any]] = []
+    source = ""
+    if args.devices:
+        for spec in args.devices:
+            devices.append(parse_cli_target(spec))
+        source = "cli"
+    elif args.location:
+        devices = list(LOCATIONS.get(args.location, []))
+        source = f"location:{args.location}"
+    return devices, source
 
 
 def run_ota(espota: str, ip: str, password: str, firmware: str, port: int) -> None:
@@ -135,9 +188,70 @@ def as_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def describe_device_plan(dev: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    host = str(dev.get("host", "")).strip()
+    ip = str(dev.get("ip", host)).strip()
+    chip = str(dev.get("chip_id", "")).strip() or chip_id_from_host(host)
+    pw = ota_password(chip)
+    dev_factory_reset = as_bool(dev.get("factory_reset"), args.factory_reset)
+    dev_keep_wifi = as_bool(dev.get("keep_wifi"), args.keep_wifi)
+    dev_keep_fleet = as_bool(dev.get("keep_fleet"), args.keep_fleet)
+    dev_use_http = dev_factory_reset or dev_keep_wifi or dev_keep_fleet
+    dev_admin_pass = str(dev.get("admin_pass", args.admin_pass or "")).strip()
+    ota_mode = "HTTP OTA" if dev_use_http else "ESPOTA"
+    return {
+        "host": host,
+        "ip": ip,
+        "chip": chip,
+        "password": pw,
+        "factory_reset": dev_factory_reset,
+        "keep_wifi": dev_keep_wifi,
+        "keep_fleet": dev_keep_fleet,
+        "use_http": dev_use_http,
+        "admin_pass": dev_admin_pass,
+        "ota_mode": ota_mode,
+    }
+
+
+def print_device_plan(plan: Dict[str, Any], attempt_label: str = "") -> None:
+    prefix = f"{attempt_label} " if attempt_label else ""
+    print(
+        f"{prefix}{plan['ota_mode']} {plan['host']} {plan['ip']} chip={plan['chip']} pw={plan['password']} "
+        f"factory_reset={1 if plan['factory_reset'] else 0} "
+        f"keep_wifi={1 if plan['keep_wifi'] else 0} keep_fleet={1 if plan['keep_fleet'] else 0}"
+    )
+
+
+def execute_device_plan(plan: Dict[str, Any], args: argparse.Namespace) -> None:
+    if plan["use_http"]:
+        if not plan["admin_pass"]:
+            raise RuntimeError(
+                "HTTP OTA requested but admin password is missing (set --admin-pass or device admin_pass)"
+            )
+        flags = {
+            "factory_reset_after_update": "1" if plan["factory_reset"] else "0",
+            "keep_wifi_credentials_after_update": "1" if plan["keep_wifi"] else "0",
+            "keep_shared_fleet_key_after_update": "1" if plan["keep_fleet"] else "0",
+        }
+        admin_pass = plan["password"] if plan["admin_pass"] == "ota" else plan["admin_pass"]
+        run_ota_http(plan["ip"], admin_pass, args.fw, flags)
+    else:
+        run_ota(args.espota, plan["ip"], plan["password"], args.fw, args.port)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batch OTA uploader")
-    parser.add_argument("--location", required=True, choices=sorted(LOCATIONS.keys()))
+    parser.add_argument("--location", choices=sorted(LOCATIONS.keys()))
+    parser.add_argument(
+        "--device",
+        dest="devices",
+        action="append",
+        default=[],
+        help=(
+            "Target a device directly. Accepts lrs-<chipid>, <chipid>, "
+            "or label=host-or-ip / label@host-or-ip. Repeat for multiple devices."
+        ),
+    )
     parser.add_argument("--fw", default=DEFAULT_FW, help="Firmware .bin path")
     parser.add_argument("--espota", default=DEFAULT_ESPOTA, help="Path to espota.py")
     parser.add_argument("--port", type=int, default=8266, help="OTA port")
@@ -164,9 +278,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    devices = LOCATIONS.get(args.location, [])
+    devices, source = resolve_devices(args)
+    if bool(args.location) == bool(args.devices):
+        print("Specify exactly one of --location or one-or-more --device options.")
+        return 1
     if not devices:
-        print(f"No devices configured for location '{args.location}'.")
+        print(f"No devices configured for source '{source or 'unspecified'}'.")
         return 1
 
     if not os.path.isfile(args.fw):
@@ -177,54 +294,71 @@ def main() -> int:
         return 1
 
     failures = 0
-    use_http = args.factory_reset or args.keep_wifi or args.keep_fleet
-    if use_http and not args.admin_pass:
+    require_http_flags = args.factory_reset or args.keep_wifi or args.keep_fleet
+    if require_http_flags and not args.admin_pass:
         print("Flags requested but --admin-pass not provided.")
         return 1
 
+    failed_devices: List[Dict[str, Any]] = []
     for dev in devices:
-        host = dev["host"]
-        ip = dev["ip"]
         try:
-            chip = chip_id_from_host(host)
-            pw = ota_password(chip)
+            plan = describe_device_plan(dev, args)
         except ValueError as exc:
+            host = str(dev.get("host", "")).strip()
+            ip = str(dev.get("ip", host)).strip()
             print(f"SKIP {host} ({ip}): {exc}")
             failures += 1
             continue
 
-        dev_factory_reset = as_bool(dev.get("factory_reset"), args.factory_reset)
-        dev_keep_wifi = as_bool(dev.get("keep_wifi"), args.keep_wifi)
-        dev_keep_fleet = as_bool(dev.get("keep_fleet"), args.keep_fleet)
-        dev_use_http = dev_factory_reset or dev_keep_wifi or dev_keep_fleet
-        dev_admin_pass = str(dev.get("admin_pass", args.admin_pass or "")).strip()
-        print(
-            f"OTA {host} {ip} chip={chip} pw={pw} "
-            f"factory_reset={1 if dev_factory_reset else 0} "
-            f"keep_wifi={1 if dev_keep_wifi else 0} keep_fleet={1 if dev_keep_fleet else 0}"
-        )
+        print_device_plan(plan)
         if args.dry_run:
             continue
         try:
-            if dev_use_http:
-                if not dev_admin_pass:
-                    raise RuntimeError("HTTP OTA requested but admin password is missing (set --admin-pass or device admin_pass)")
-                flags = {
-                    "factory_reset_after_update": "1" if dev_factory_reset else "0",
-                    "keep_wifi_credentials_after_update": "1" if dev_keep_wifi else "0",
-                    "keep_shared_fleet_key_after_update": "1" if dev_keep_fleet else "0",
-                }
-                admin_pass = pw if dev_admin_pass == "ota" else dev_admin_pass
-                run_ota_http(ip, admin_pass, args.fw, flags)
-            else:
-                run_ota(args.espota, ip, pw, args.fw, args.port)
-            print(f"OK  {host} {ip}")
+            execute_device_plan(plan, args)
+            print(f"OK  {plan['ota_mode']} {plan['host']} {plan['ip']}")
         except subprocess.CalledProcessError as exc:
-            print(f"FAIL {host} {ip}: {exc}")
-            failures += 1
+            print(f"FAIL {plan['host']} {plan['ip']}: {exc}")
+            failed_devices.append(dev)
         except Exception as exc:
-            print(f"FAIL {host} {ip}: {exc}")
-            failures += 1
+            print(f"FAIL {plan['host']} {plan['ip']}: {exc}")
+            failed_devices.append(dev)
+
+    for retry_round in range(1, 4):
+        if not failed_devices or args.dry_run:
+            break
+        retry_batch = failed_devices
+        failed_devices = []
+        print(
+            f"Retry round {retry_round}/3 for {len(retry_batch)} failed "
+            f"{'device' if len(retry_batch) == 1 else 'devices'}..."
+        )
+        for dev in retry_batch:
+            try:
+                plan = describe_device_plan(dev, args)
+            except ValueError as exc:
+                host = str(dev.get("host", "")).strip()
+                ip = str(dev.get("ip", host)).strip()
+                print(f"SKIP {host} ({ip}): {exc}")
+                failures += 1
+                continue
+            print_device_plan(plan, attempt_label=f"Retry {retry_round}/3")
+            try:
+                execute_device_plan(plan, args)
+                print(f"OK  {plan['ota_mode']} {plan['host']} {plan['ip']}")
+            except subprocess.CalledProcessError as exc:
+                print(f"FAIL {plan['host']} {plan['ip']}: {exc}")
+                failed_devices.append(dev)
+            except Exception as exc:
+                print(f"FAIL {plan['host']} {plan['ip']}: {exc}")
+                failed_devices.append(dev)
+
+    failures += len(failed_devices)
+    if failed_devices:
+        print("Giving up on the following devices after 3 retry rounds:")
+        for dev in failed_devices:
+            host = str(dev.get("host", "")).strip()
+            ip = str(dev.get("ip", host)).strip()
+            print(f" - {host} {ip}")
 
     return 0 if failures == 0 else 2
 
