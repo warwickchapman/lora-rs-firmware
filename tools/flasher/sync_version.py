@@ -37,9 +37,14 @@ def update_tauri_conf(path: Path, version: str) -> None:
 
 def update_cargo_toml(path: Path, version: str) -> None:
     text = path.read_text(encoding="utf-8")
-    text_new = re.sub(r'(?m)^version = ".*"$', f'version = "{version}"', text, count=1)
-    if text_new == text:
-        raise RuntimeError(f"Failed to update version in {path}")
+    match = re.search(r'(?m)^version = ".*"$', text)
+    if not match:
+        raise RuntimeError(f"Failed to find version field in {path}")
+    current_line = match.group(0)
+    desired_line = f'version = "{version}"'
+    if current_line == desired_line:
+        return
+    text_new = text[: match.start()] + desired_line + text[match.end() :]
     path.write_text(text_new, encoding="utf-8")
 
 
