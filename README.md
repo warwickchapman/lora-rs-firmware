@@ -68,10 +68,11 @@ Main entrypoint:
 Local non-release flasher build policy:
 - Do not reuse the last released version string for one-off local test builds.
 - Release builds use the exact value from `VERSION`.
-- Local ad-hoc flasher builds after a release should identify themselves as:
-  - clean tree: `<next-patch>-dev.<shortsha>`
-  - dirty tree: `<next-patch>-dev.<shortsha>.dirty`
-- Example: after release `0.6.0`, a local test build from commit `abc1234` should be labeled `0.6.1-dev.abc1234` (or `0.6.1-dev.abc1234.dirty` if the tree is modified).
+- After a successful release, `tools/release_manager.py` now auto-advances `VERSION` to the next patch `-dev`, commits it, and pushes it to `main` (default behavior).
+- Example: releasing `0.6.1-alpha` auto-bumps `VERSION` to `0.6.2-dev`.
+- Local ad-hoc builds can then append git identity in artifact labels as needed:
+  - clean tree: `<version>.<shortsha>` or `<version>-<shortsha>`
+  - dirty tree: `<version>.<shortsha>.dirty`
 - This keeps bug reports and screenshots unambiguous and prevents newer test builds from appearing older than the last shipped release.
 
 ## Release Automation Script
@@ -79,6 +80,7 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - builds fresh `lrs_za` + `lrs_us` firmware
 - generates named assets + SHA256 checksums
 - creates/updates GitHub release from `VERSION`
+- after successful publish to both repos, auto-bumps `VERSION` to next patch `-dev`, commits, and pushes (disable with `--no-post-bump-dev`)
 - applies George Bernard Shaw quote + one-word release name (name reuse allowed when the quote bank is exhausted)
 
 Flasher rebuild policy (mandatory):

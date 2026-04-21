@@ -72,6 +72,24 @@ def read_version(root: Path) -> str:
     return raw.lstrip("v")
 
 
+def derive_next_patch_dev_version(version: str) -> str:
+    """
+    Convert X.Y.Z[-suffix] into X.Y.(Z+1)-dev.
+    Examples:
+      0.6.1-alpha -> 0.6.2-dev
+      0.6.1       -> 0.6.2-dev
+    """
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z0-9._-]+)?", version)
+    if not m:
+        raise RuntimeError(
+            f"VERSION '{version}' is not parseable semver-ish (expected X.Y.Z or X.Y.Z-suffix)"
+        )
+    major = int(m.group(1))
+    minor = int(m.group(2))
+    patch = int(m.group(3))
+    return f"{major}.{minor}.{patch + 1}-dev"
+
+
 def ensure_clean_tracked_tree(root: Path) -> None:
     dirty = run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root, capture=True)
     if dirty:
@@ -142,6 +160,35 @@ def pick_unique_quote(repo: str) -> Tuple[str, str]:
 
 def get_head_commit(root: Path) -> str:
     return run(["git", "rev-parse", "HEAD"], cwd=root, capture=True)
+
+
+def post_release_bump_dev(root: Path, released_tag: str, released_version: str) -> str:
+    next_dev = derive_next_patch_dev_version(released_version)
+    version_file = root / "VERSION"
+    current = version_file.read_text(encoding="utf-8").strip().lstrip("v")
+    if current != released_version:
+        raise RuntimeError(
+            f"Refusing post-bump: VERSION changed during release (expected {released_version}, found {current})"
+        )
+
+    if released_version == next_dev:
+        raise RuntimeError("Refusing post-bump: derived dev version equals current release version")
+
+    version_file.write_text(f"{next_dev}\n", encoding="utf-8")
+    after_write = version_file.read_text(encoding="utf-8").strip().lstrip("v")
+    if after_write != next_dev:
+        raise RuntimeError("Failed to write next dev version to VERSION")
+
+    if current == after_write:
+        raise RuntimeError("Refusing post-bump: VERSION did not change (no-op)")
+
+    run(["git", "add", "VERSION"], cwd=root)
+    run(
+        ["git", "commit", "-m", f"chore(version): bump to {next_dev} after {released_tag}"],
+        cwd=root,
+    )
+    run(["git", "push", "origin", "HEAD:main"], cwd=root)
+    return next_dev
 
 
 def build_release_notes(
@@ -351,6 +398,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Explicitly tell the CI to SKIP the flasher build (by setting release notes flag).",
     )
+    bump_group = ap.add_mutually_exclusive_group()
+    bump_group.add_argument(
+        "--post-bump-dev",
+        dest="post_bump_dev",
+        action="store_true",
+        help="After successful release publish, bump VERSION to next patch -dev, commit, and push (default: enabled).",
+    )
+    bump_group.add_argument(
+        "--no-post-bump-dev",
+        dest="post_bump_dev",
+        action="store_false",
+        help="Disable automatic post-release VERSION bump to next patch -dev.",
+    )
+    ap.set_defaults(post_bump_dev=True)
     return ap.parse_args()
 
 
@@ -416,6 +477,30 @@ def main() -> int:
     print(f"- title: {title}")
     print(f"- assets: {[a.path.name for a in assets]}")
     print(f"- url: {release_url}")
+
+    if args.post_bump_dev:
+        try:
+            next_dev = post_release_bump_dev(root, tag, version)
+            print(f"- post_release_version_bump: VERSION -> {next_dev} (committed and pushed)")
+        except Exception as exc:
+            print(
+                "WARNING: Release published, but automatic post-release VERSION bump failed.",
+                file=sys.stderr,
+            )
+            print(f"WARNING: {exc}", file=sys.stderr)
+            try:
+                suggested_next = derive_next_patch_dev_version(version)
+            except Exception:
+                suggested_next = "<next-patch>-dev"
+            print("Follow-up commands:", file=sys.stderr)
+            print(f"  printf '{suggested_next}\\n' > VERSION", file=sys.stderr)
+            print("  git add VERSION", file=sys.stderr)
+            print(
+                f"  git commit -m \"chore(version): bump to {suggested_next} after {tag}\"",
+                file=sys.stderr,
+            )
+            print("  git push origin HEAD:main", file=sys.stderr)
+
     return 0
 
 

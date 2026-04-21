@@ -230,10 +230,11 @@ Release alignment policy:
 Local non-release flasher version policy:
 - Do not label local one-off test builds with the last shipped release version.
 - Release builds use the exact root `VERSION`.
-- Local ad-hoc flasher builds should derive from the next patch version and current git state:
-  - clean tree: `<next-patch>-dev.<shortsha>`
-  - dirty tree: `<next-patch>-dev.<shortsha>.dirty`
-- Example: if the last release is `0.6.0`, local test DMGs should use `0.6.1-dev.<shortsha>` instead of `0.6.0` or an older prerelease label.
+- After successful release publish to both repos, `tools/release_manager.py` auto-bumps `VERSION` to the next patch `-dev`, commits it, and pushes to `main` (default behavior).
+- Example: release `0.6.1-alpha` -> automatic `VERSION` bump to `0.6.2-dev`.
+- Local ad-hoc flasher artifact labels can then add git identity:
+  - clean tree: `<version>.<shortsha>` (for example `0.6.2-dev.abc1234`)
+  - dirty tree: `<version>.<shortsha>.dirty`
 - This rule applies to local DMGs and other flasher test artifacts; it is there to keep support/debugging truthful and avoid stale version leakage.
 
 Release execution guardrails:
