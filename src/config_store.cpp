@@ -27,6 +27,11 @@ constexpr char kRoleTransmitter[] = "transmitter";
 constexpr char kRoleReceiver[] = "receiver";
 constexpr char kRoleCoordinator[] = "coordinator";
 constexpr char kRoleNode[] = "node";
+#ifdef REGION_US
+constexpr long kLockedLoraFrequencyHz = 915000000L;
+#else
+constexpr long kLockedLoraFrequencyHz = 433000000L;
+#endif
 
 constexpr const char *kAllowedFields[] = {
     "schema_version",
@@ -285,7 +290,8 @@ bool ConfigStore::begin() {
       parseAddressList(root["allowed_controller_addresses"], cfg_.allowed_controller_addresses, Settings::kAddressListCap);
   cfg_.known_peer_count = parseAddressList(root["known_peer_addresses"], cfg_.known_peer_addresses, Settings::kAddressListCap);
 
-  cfg_.lora_frequency_hz = root["lora_frequency_hz"] | 433000000L;
+  cfg_.lora_frequency_hz = root["lora_frequency_hz"] | kLockedLoraFrequencyHz;
+  cfg_.lora_frequency_hz = kLockedLoraFrequencyHz;
   cfg_.lora_tx_power = root["lora_tx_power"] | 17;
   cfg_.lora_spreading_factor = root["lora_spreading_factor"] | 7;
   cfg_.lora_bandwidth_hz = root["lora_bandwidth_hz"] | 125000L;
@@ -688,7 +694,7 @@ void ConfigStore::setDefaults() {
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
 
-  cfg_.lora_frequency_hz = 433000000L;
+  cfg_.lora_frequency_hz = kLockedLoraFrequencyHz;
   cfg_.lora_tx_power = 17;
   cfg_.lora_spreading_factor = 7;
   cfg_.lora_bandwidth_hz = 125000L;
@@ -752,11 +758,7 @@ void ConfigStore::ensureProvisionedDefaults() {
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
 
-#ifdef REGION_US
-  cfg_.lora_frequency_hz = 915000000L;
-#else
-  cfg_.lora_frequency_hz = 433000000L;
-#endif
+  cfg_.lora_frequency_hz = kLockedLoraFrequencyHz;
 
   const String chipHex = chipIdHex();
   cfg_.lan_hostname = defaultLanHostname();

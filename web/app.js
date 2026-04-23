@@ -238,26 +238,26 @@ function refreshFreqPreset() {
   const f915 = document.getElementById('freq_915');
   const txt = document.getElementById('freq_selected_text');
   if (!input || !f433 || !f915) return;
+  f433.disabled = true;
+  f915.disabled = true;
   const mhz = Number(input.value);
   const near = (a, b) => Math.abs(a - b) < 0.01;
-  if (near(mhz, 433.0)) { f433.checked = true; if (txt) txt.innerText = 'Selected: 433.000 MHz'; return; }
-  if (near(mhz, 915.0)) { f915.checked = true; if (txt) txt.innerText = 'Selected: 915.000 MHz'; return; }
+  if (near(mhz, 433.0)) { f433.checked = true; f915.checked = false; if (txt) txt.innerText = 'Locked: 433.000 MHz (ZA firmware)'; return; }
+  if (near(mhz, 915.0)) { f915.checked = true; f433.checked = false; if (txt) txt.innerText = 'Locked: 915.000 MHz (US firmware)'; return; }
+  if (mhz >= 700.0) {
+    f915.checked = true;
+    f433.checked = false;
+    input.value = '915.000';
+    if (txt) txt.innerText = 'Locked: 915.000 MHz (US firmware)';
+    return;
+  }
   f433.checked = true;
+  f915.checked = false;
   input.value = '433.000';
-  if (txt) txt.innerText = 'Selected: 433.000 MHz';
+  if (txt) txt.innerText = 'Locked: 433.000 MHz (ZA firmware)';
 }
 function bindFreqPreset() {
-  const input = document.getElementById('lora_frequency_mhz');
-  const f433 = document.getElementById('freq_433');
-  const f915 = document.getElementById('freq_915');
-  if (!input || !f433 || !f915) return;
-  const apply = () => {
-    if (f433.checked) { input.value = '433.000'; refreshFreqPreset(); return; }
-    input.value = '915.000';
-    refreshFreqPreset();
-  };
-  f433.addEventListener('change', apply);
-  f915.addEventListener('change', apply);
+  refreshFreqPreset();
 }
 function escapeHtml(v) {
   return String(v === undefined || v === null ? '' : v).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));

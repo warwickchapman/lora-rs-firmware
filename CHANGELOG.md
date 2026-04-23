@@ -10,6 +10,9 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Addressing defaults now align with a gateway-at-the-top convention:
   - Fresh TX/gateway defaults now start at local address `254` with first remote target `1`.
   - Provisioned RX/controller expectations remain low-to-high (`1..32` in current fleet provisioning auto-assignment).
+- LoRa frequency is now firmware-region locked end-to-end:
+  - `REGION_US` builds force `915 MHz` and prevent user selection.
+  - `REGION_ZA` builds force `433 MHz` and prevent user selection.
 
 ## [0.6.2-alpha] - 2026-04-21
 

@@ -278,9 +278,8 @@ void WebConsole::handlePostSettings() {
   if (hasFleetPassphraseField && !isDefaultDeploymentKey(cfg.fleet_passphrase)) {
     cfg.fleet_setup_prompt_dismissed = true;
   }
-  if (cfg.lora_frequency_hz < kMinFrequencyHz || cfg.lora_frequency_hz > kMaxFrequencyHz) {
-    cfg.lora_frequency_hz = kDefaultFrequencyHz;
-  }
+  // Frequency is region-locked by firmware build target.
+  cfg.lora_frequency_hz = kDefaultFrequencyHz;
   if (cfg.mode == "paired") {
     if (cfg.heartbeat_ms < kMinHeartbeatMs) cfg.heartbeat_ms = kMinHeartbeatMs;
     if (cfg.heartbeat_ms > kMaxHeartbeatMs) cfg.heartbeat_ms = kMaxHeartbeatMs;
