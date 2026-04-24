@@ -35,7 +35,7 @@ interface DeviceInfo {
 
 const ports = ref<SerialPort[]>([]);
 const selectedPort = ref('');
-const firmwareVersions = ref<string[]>([]);
+const firmwareVersions = ref<string[]>(['__local_browse__']);
 const selectedVersion = ref('');
 const selectedLocalPath = ref('');
 const region = ref('ZA');
@@ -260,6 +260,9 @@ async function fetchFirmware() {
     }
     await new Promise(resolve => setTimeout(resolve, 400));
   } catch (e) {
+    // Keep local-flash path available even when network release fetch fails.
+    const localEntry = firmwareVersions.value.find(v => v.startsWith('Local: '));
+    firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : [])];
     notify('Error fetching firmware: ' + e);
   } finally {
     isFetchingFirmware.value = false;
