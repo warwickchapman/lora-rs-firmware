@@ -226,6 +226,9 @@ Release alignment policy:
 - Use release tags in `v<version>` form (for example `v0.4.3-alpha`) while `VERSION` remains plain (for example `0.4.3-alpha`).
 - Flasher reuse guard: if `tools/flasher/**` changed, do not reuse prior flasher assets; rebuild all flasher installers from current source.
 - Flasher asset reuse is permitted only when `tools/flasher/**` is unchanged (for example firmware-only/documentation-only releases).
+- Firmware-only release mode is supported:
+  - `--reuse-flasher <source-tag>` to copy prior flasher assets
+  - `--reuse-flasher-keep-names` to keep source-tag flasher filenames in the new release (no binary rename)
 
 Local non-release flasher version policy:
 - Do not label local one-off test builds with the last shipped release version.
@@ -272,6 +275,7 @@ Release tooling notes:
 - `tools/release_manager.py` now defaults to no asset verification unless explicitly requested:
   - `--verify-firmware-only-assets` checks only firmware files (`za/us/eu`) in both repos.
   - `--verify-full-assets` checks full 10-file contract (use after flasher upload is complete).
+- In firmware-only reuse mode (`--reuse-flasher --reuse-flasher-keep-names`), `--verify-full-assets` validates firmware at new version and flasher filenames at the reused source-tag version.
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.

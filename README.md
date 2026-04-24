@@ -82,6 +82,9 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - creates/updates GitHub release from `VERSION`
 - after successful publish to both repos, auto-bumps `VERSION` to next patch `-dev`, commits, and pushes (disable with `--no-post-bump-dev`)
 - applies George Bernard Shaw quote + one-word release name (name reuse allowed when the quote bank is exhausted)
+- supports firmware-only releases that reuse prior flasher binaries:
+  - `--reuse-flasher vX.Y.Z-alpha` reuses flasher assets from that release
+  - `--reuse-flasher-keep-names` keeps original flasher filenames (for example `0.6.3-alpha` names in a `0.6.4-alpha` release)
 - optional verification mode:
   - `--verify-firmware-only-assets` for firmware-first publish
   - `--verify-full-assets` only after flasher assets are present
@@ -90,6 +93,9 @@ Flasher rebuild policy (mandatory):
 - If any file under `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.
 - Reusing flasher binaries from an older tag is allowed only when `tools/flasher/**` is unchanged.
 - If in doubt, rebuild flasher binaries.
+- If flasher code is unchanged and you intentionally want firmware-only release cadence, reuse is allowed:
+  - Use `--reuse-flasher <source-tag> --reuse-flasher-keep-names`.
+  - This copies prior flasher binaries into the new release without version renaming.
 
 Release safety guardrails (mandatory):
 - Do not run `gh workflow run package_flasher.yml` with `platform=all` or `platform=macos` for releases.
@@ -120,6 +126,7 @@ Release asset contract:
 - Firmware binaries: 3 (`za`, `us`, `eu`)
 - Flasher binaries: 7 (`windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 portable zip`, `macos x64 portable zip`)
 - Total binaries per release: 10
+- In reuse-with-keep-names mode, firmware assets use the new release version and flasher assets retain source-tag version in filenames.
 
 Example:
 ```bash

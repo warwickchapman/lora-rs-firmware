@@ -108,7 +108,7 @@ Otherwise packet is dropped and logged.
 - On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
-- Paired TX input-control retries use bounded Fibonacci-like backoff with small jitter and a hard retry deadline (`tx_command_retry_timeout_ms`).
+- Paired TX input-control retries use a low-latency bounded backoff (first retry in sub-second range), with small jitter and a hard retry deadline (`tx_command_retry_timeout_ms`).
 
 ## Timing Defaults
 - `heartbeat_ms`: 60000 (60 s)

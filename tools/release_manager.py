@@ -284,9 +284,12 @@ def upsert_release(
         )
 
 
-def reuse_flasher_assets(repo: str, source_tag: str, target_version: str) -> List[Path]:
-    """Downloads flasher assets from source_tag and renames them for target_version."""
-    print(f"Reusing Flasher assets from {source_tag} for {target_version}...")
+def reuse_flasher_assets(
+    repo: str, source_tag: str, target_version: str, keep_original_names: bool = False
+) -> List[Path]:
+    """Downloads flasher assets from source_tag; optionally renames them for target_version."""
+    mode = "original names" if keep_original_names else f"renamed to {target_version}"
+    print(f"Reusing Flasher assets from {source_tag} ({mode})...")
     tmp_dir = Path(tempfile.mkdtemp())
     
     # Download matching flasher binaries
@@ -298,11 +301,16 @@ def reuse_flasher_assets(repo: str, source_tag: str, target_version: str) -> Lis
         print(f"Warning: Some flasher assets could not be downloaded from {source_tag}: {e}")
     
     inherited = []
-    # Rename them to the new version pattern
-    # Pattern: thanda-lora-flasher-{OLD_VER}-{OS}-{ARCH}.{EXT}
-    old_ver = source_tag.lstrip('v')
+    old_ver = source_tag.lstrip("v")
     for f in tmp_dir.iterdir():
-        if f.is_file() and old_ver in f.name:
+        if not f.is_file():
+            continue
+        if old_ver not in f.name:
+            continue
+        if keep_original_names:
+            inherited.append(f)
+            print(f"  - Inherited: {f.name}")
+        else:
             new_name = f.name.replace(old_ver, target_version)
             new_path = f.parent / new_name
             f.rename(new_path)
@@ -368,11 +376,8 @@ def mirror_to_public(
         )
 
 
-def expected_full_release_assets(version: str) -> List[str]:
+def expected_flasher_assets(version: str) -> List[str]:
     return [
-        f"lrs-firmware-{version}-za.bin",
-        f"lrs-firmware-{version}-us.bin",
-        f"lrs-firmware-{version}-eu.bin",
         f"thanda-lora-flasher-{version}-macos-arm64-portable.zip",
         f"thanda-lora-flasher-{version}-macos-x86_64-portable.zip",
         f"thanda-lora-flasher-{version}-windows-x64.msi",
@@ -381,6 +386,21 @@ def expected_full_release_assets(version: str) -> List[str]:
         f"thanda-lora-flasher-{version}-linux-x64.rpm",
         f"thanda-lora-flasher-{version}-linux-x64.AppImage.tar.gz",
     ]
+
+
+def expected_full_release_assets(
+    version: str, reuse_flasher_tag: str | None = None, reuse_keep_names: bool = False
+) -> List[str]:
+    flasher_version = (
+        reuse_flasher_tag.lstrip("v")
+        if (reuse_flasher_tag and reuse_keep_names)
+        else version
+    )
+    return [
+        f"lrs-firmware-{version}-za.bin",
+        f"lrs-firmware-{version}-us.bin",
+        f"lrs-firmware-{version}-eu.bin",
+    ] + expected_flasher_assets(flasher_version)
 
 
 def expected_firmware_assets(version: str) -> List[str]:
@@ -459,6 +479,11 @@ def parse_args() -> argparse.Namespace:
         help="Existing release tag to inherit Flasher binaries from (Binary Reuse).",
     )
     ap.add_argument(
+        "--reuse-flasher-keep-names",
+        action="store_true",
+        help="When reusing flasher assets, keep original source-tag filenames instead of renaming to this release version.",
+    )
+    ap.add_argument(
         "--no-build-flasher",
         action="store_true",
         help="Explicitly tell the CI to SKIP the flasher build (by setting release notes flag).",
@@ -532,7 +557,9 @@ def main() -> int:
     
     inherited_assets = []
     if args.reuse_flasher:
-        inherited_assets = reuse_flasher_assets(args.repo, args.reuse_flasher, version)
+        inherited_assets = reuse_flasher_assets(
+            args.repo, args.reuse_flasher, version, args.reuse_flasher_keep_names
+        )
 
     za_asset, us_asset, eu_asset = assets
     
@@ -556,12 +583,16 @@ def main() -> int:
     # Main Repo Release
     upsert_release(args.repo, tag, title, notes_file, commit, all_release_assets, is_prerelease)
 
-    # Public Mirroring
-    mirror_to_public(tag, title, notes_file, [a.path for a in assets], is_prerelease)
+    # Public Mirroring (firmware + reused/built flasher assets)
+    mirror_to_public(tag, title, notes_file, all_release_assets, is_prerelease)
 
     expected_set: Set[str] | None = None
     if args.verify_full_assets:
-        expected_set = set(expected_full_release_assets(version))
+        expected_set = set(
+            expected_full_release_assets(
+                version, args.reuse_flasher, args.reuse_flasher_keep_names
+            )
+        )
     elif args.verify_firmware_only_assets:
         expected_set = set(expected_firmware_assets(version))
 

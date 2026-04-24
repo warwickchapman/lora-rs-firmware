@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.4-alpha] - 2026-04-24
+
+### Changed
+- Paired TX input-control confirmation is now more consistent under packet loss: retry scheduling starts in sub-second intervals (instead of multi-second first retries), reducing cases where the local TX relay mirror waits several seconds for remote ACK confirmation.
+
 ## [0.6.3-alpha] - 2026-04-24
 
 ### Changed
