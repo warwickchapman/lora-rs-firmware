@@ -12,7 +12,9 @@ constexpr uint8_t kInputPin = 4;
 constexpr uint8_t kRelayPin = 5;
 constexpr uint32_t kDebounceMs = 50;
 constexpr uint32_t kTxRelayEchoDelayMs = 500;
-constexpr uint32_t kAckRetryScheduleMs[] = {3000, 5000, 8000, 13000, 21000, 34000, 55000};
+// Paired dry-contact control is latency-sensitive; retry quickly first, then
+// back off to limit sustained airtime when a peer is unavailable.
+constexpr uint32_t kAckRetryScheduleMs[] = {350, 650, 1000, 1500, 2500, 4000, 6500, 10000, 16000, 25000, 40000, 55000};
 constexpr uint8_t kAckRetryJitterPct = 15;
 constexpr uint32_t kMqttRetryScheduleMs[] = {1000, 2000, 3000, 5000, 8000, 13000, 21000, 34000, 55000};
 constexpr uint32_t kDefaultRemotePollIntervalMs = 60000;
