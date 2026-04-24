@@ -343,9 +343,13 @@ async function saveCommissioning(){
   mqtt_client_enabled: !!document.getElementById('mqtt_client_enabled').checked,
   mqtt_control_enabled: !!document.getElementById('mqtt_control_enabled').checked,
   input_control_paired_lora_enabled: !!document.getElementById('input_control_paired_lora_enabled').checked,
-  wifi_sta_ssid: String(document.getElementById('wifi_sta_ssid').value || ''),
-  wifi_sta_password: String(document.getElementById('wifi_sta_password').value || ''),
  };
+ const wifiSsid = String(document.getElementById('wifi_sta_ssid').value || '').trim();
+ const wifiPass = String(document.getElementById('wifi_sta_password').value || '');
+ if (wifiSsid.length) {
+  body.wifi_sta_ssid = wifiSsid;
+  body.wifi_sta_password = wifiPass;
+ }
  if(body.mqtt_control_enabled && !body.mqtt_client_enabled){
   showMsg('MQTT control requires MQTT client enabled.', false);
   return;

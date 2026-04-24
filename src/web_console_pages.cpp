@@ -341,9 +341,15 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.input_control_paired_lora_enabled = inputControlPairedLoRaEnabled;
   cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
 
-  cfg.wifi_sta_ssid = doc["wifi_sta_ssid"] | cfg.wifi_sta_ssid.c_str();
-  cfg.wifi_sta_password =
-      doc["wifi_sta_password"] | cfg.wifi_sta_password.c_str();
+  const char *requestedSsid = doc["wifi_sta_ssid"] | nullptr;
+  if (requestedSsid != nullptr) {
+    String ssid = String(requestedSsid);
+    ssid.trim();
+    if (ssid.length() > 0) {
+      cfg.wifi_sta_ssid = ssid;
+      cfg.wifi_sta_password = String(doc["wifi_sta_password"] | "");
+    }
+  }
   cfg.mqtt_controller_addresses =
       doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str();
   if (cfg.lan_hostname.length() == 0) {
