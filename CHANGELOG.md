@@ -6,14 +6,19 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.3-alpha] - 2026-04-24
+
 ### Changed
 - Addressing defaults now align with a gateway-at-the-top convention:
-  - Fresh TX/gateway defaults now start at local address `254` with first remote target `1`.
+  - Fresh TX/gateway defaults start at local address `254` with first remote target `1`.
   - Provisioned RX/controller expectations remain low-to-high (`1..32` in current fleet provisioning auto-assignment).
 - Addressing now follows a single canonical source (`remote_address`) across runtime and web APIs; role-specific address arrays are synchronized from that canonical value so Settings and Status stay consistent after saves.
 - LoRa frequency is now firmware-region locked end-to-end:
   - `REGION_US` builds force `915 MHz` and prevent user selection.
   - `REGION_ZA` builds force `433 MHz` and prevent user selection.
+- Flasher region handling is more resilient in live workflows:
+  - Region auto-detection and device-details ordering are improved for clearer operator context.
+  - Local firmware file selection now remains available when cloud release metadata is unavailable (offline-safe flashing path).
 
 ## [0.6.2-alpha] - 2026-04-21
 
