@@ -382,12 +382,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
 void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.role_tx = cfg.role_tx;
   runtime_.local_address = cfg.local_address;
-  if (cfg.role_tx) {
-    runtime_.remote_address = (cfg.paired_target_count > 0) ? cfg.paired_target_addresses[0] : cfg.remote_address;
-  } else {
-    runtime_.remote_address =
-        (cfg.allowed_controller_count > 0) ? cfg.allowed_controller_addresses[0] : cfg.remote_address;
-  }
+  runtime_.remote_address = cfg.remote_address;
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;

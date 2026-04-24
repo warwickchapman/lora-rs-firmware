@@ -345,10 +345,12 @@ bool ConfigStore::begin() {
     cfg_.paired_target_count = 1;
     cfg_.paired_target_addresses[0] = cfg_.remote_address;
   } else if (cfg_.paired_target_count > 0) {
-    cfg_.remote_address = cfg_.paired_target_addresses[0];
+    cfg_.paired_target_addresses[0] = cfg_.remote_address;
   }
   if (cfg_.allowed_controller_count == 0 && cfg_.remote_address >= 1 && cfg_.remote_address <= 254) {
     cfg_.allowed_controller_count = 1;
+    cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
+  } else if (cfg_.allowed_controller_count > 0) {
     cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
   }
   if (cfg_.mqtt_control_enabled && !cfg_.mqtt_client_enabled) {

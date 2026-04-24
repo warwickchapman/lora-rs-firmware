@@ -173,6 +173,9 @@ void WebConsole::handlePostSettings() {
   cfg.mode = doc["mode"] | cfg.mode.c_str();
   cfg.role = doc["role"] | cfg.role.c_str();
   cfg.role_tx = parseBoolField(doc["role_tx"], cfg.role_tx);
+  const bool hasRemoteAddressField = !doc["remote_address"].isNull();
+  const bool hasPairedTargetsField = !doc["paired_target_addresses"].isNull();
+  const bool hasAllowedControllersField = !doc["allowed_controller_addresses"].isNull();
   if (cfg.mode == "paired") {
     cfg.role = cfg.role_tx ? "transmitter" : "receiver";
   } else if (cfg.mode.length() == 0) {
@@ -181,11 +184,11 @@ void WebConsole::handlePostSettings() {
   }
   cfg.local_address = parseAddressField(doc["local_address"], cfg.local_address);
   cfg.remote_address = parseAddressField(doc["remote_address"], cfg.remote_address);
-  if (!doc["paired_target_addresses"].isNull()) {
+  if (hasPairedTargetsField) {
     cfg.paired_target_count =
         parseAddressArrayField(doc["paired_target_addresses"], cfg.paired_target_addresses, Settings::kAddressListCap);
   }
-  if (!doc["allowed_controller_addresses"].isNull()) {
+  if (hasAllowedControllersField) {
     cfg.allowed_controller_count = parseAddressArrayField(doc["allowed_controller_addresses"], cfg.allowed_controller_addresses,
                                                           Settings::kAddressListCap);
   }
@@ -245,21 +248,24 @@ void WebConsole::handlePostSettings() {
 
   if (cfg.local_address < 1) cfg.local_address = 1;
   if (cfg.local_address > 254) cfg.local_address = 254;
+  if (!hasRemoteAddressField) {
+    if (cfg.role_tx && hasPairedTargetsField && cfg.paired_target_count > 0) {
+      cfg.remote_address = cfg.paired_target_addresses[0];
+    } else if (!cfg.role_tx && hasAllowedControllersField &&
+               cfg.allowed_controller_count > 0) {
+      cfg.remote_address = cfg.allowed_controller_addresses[0];
+    }
+  }
   if (cfg.remote_address < 1) cfg.remote_address = 1;
   if (cfg.remote_address > 254) cfg.remote_address = 254;
-  if (cfg.role_tx) {
-    if (cfg.paired_target_count == 0) {
-      cfg.paired_target_count = 1;
-      cfg.paired_target_addresses[0] = cfg.remote_address;
-    }
-    cfg.remote_address = cfg.paired_target_addresses[0];
-  } else {
-    if (cfg.allowed_controller_count == 0) {
-      cfg.allowed_controller_count = 1;
-      cfg.allowed_controller_addresses[0] = cfg.remote_address;
-    }
-    cfg.remote_address = cfg.allowed_controller_addresses[0];
+  if (cfg.paired_target_count == 0) {
+    cfg.paired_target_count = 1;
   }
+  cfg.paired_target_addresses[0] = cfg.remote_address;
+  if (cfg.allowed_controller_count == 0) {
+    cfg.allowed_controller_count = 1;
+  }
+  cfg.allowed_controller_addresses[0] = cfg.remote_address;
   cfg.fleet_passphrase.trim();
   const bool hasFleetPassphraseField = !doc["fleet_passphrase"].isNull();
   const bool allowDefaultDeploymentKey = parseBoolField(doc["allow_default_deployment_key"], false);
@@ -330,6 +336,9 @@ void WebConsole::handlePostSettings() {
     return;
   }
 
+  status_live_cache_.built_ms = 0;
+  status_static_cache_.built_ms = 0;
+  status_lite_cache_.built_ms = 0;
   server_.send(200, "text/plain", "saved");
   if (on_apply_) on_apply_(networkChanged, otaAuthChanged);
 }

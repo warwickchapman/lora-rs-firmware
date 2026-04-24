@@ -138,6 +138,9 @@ bool WebConsole::buildStatusStaticCache() {
   doc["factory_serial"] = cfg.factory_serial;
   doc["mode"] = cfg.mode;
   doc["role_name"] = cfg.role;
+  doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
   doc["lan_hostname"] = cfg.lan_hostname;
   doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
   doc["deployment_key"] = cfg.fleet_passphrase.length()
@@ -191,6 +194,8 @@ bool WebConsole::buildStatusLiteCache() {
   doc["mode"] = cfg.mode;
   doc["role_name"] = cfg.role;
   doc["role"] = cfg.role_tx ? "tx" : "rx";
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
   doc["lan_hostname"] = cfg.lan_hostname;
   doc["relay_state"] = sm_ ? sm_->relayState() : 0;
   doc["lora_last_rssi"] = sm_ ? sm_->lastPacketRssi() : 0;
