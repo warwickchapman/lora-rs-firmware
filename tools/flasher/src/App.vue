@@ -14,6 +14,7 @@ const status = ref<SystemStatus>({ ready: false, message: 'Checking System...' }
 const appVersion = ref('');
 const isFullscreen = ref(true);
 const isTogglingWindowMode = ref(false);
+const WINDOW_MODE_KEY = 'flasher.windowMode';
 
 async function fetchVersion() {
   try {
@@ -41,6 +42,25 @@ async function syncWindowMode() {
 }
 
 const isMacOS = /mac os x/.test(navigator.userAgent.toLowerCase());
+
+function getSavedFullscreenPreference(): boolean | null {
+  try {
+    const value = localStorage.getItem(WINDOW_MODE_KEY);
+    if (value === 'fullscreen') return true;
+    if (value === 'windowed') return false;
+  } catch {
+    // Ignore storage read failures and use runtime state.
+  }
+  return null;
+}
+
+function saveFullscreenPreference(fullscreen: boolean) {
+  try {
+    localStorage.setItem(WINDOW_MODE_KEY, fullscreen ? 'fullscreen' : 'windowed');
+  } catch {
+    // Ignore storage write failures; runtime toggle still works.
+  }
+}
 
 async function sleep(ms: number) {
   await new Promise(resolve => setTimeout(resolve, ms));
@@ -86,6 +106,19 @@ async function setWindowFullscreenMode(fullscreen: boolean) {
   }
 }
 
+async function applySavedWindowModePreference() {
+  const preferredFullscreen = getSavedFullscreenPreference();
+  if (preferredFullscreen === null) return;
+
+  const window = getCurrentWindow();
+  const currentlyFullscreen = await window.isFullscreen();
+  if (currentlyFullscreen === preferredFullscreen) {
+    return;
+  }
+
+  await setWindowFullscreenMode(preferredFullscreen);
+}
+
 async function toggleWindowMode() {
   if (isTogglingWindowMode.value) return;
   isTogglingWindowMode.value = true;
@@ -99,13 +132,17 @@ async function toggleWindowMode() {
   } finally {
     isTogglingWindowMode.value = false;
     await syncWindowMode();
+    saveFullscreenPreference(isFullscreen.value);
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   checkStatus();
   fetchVersion();
-  syncWindowMode();
+  await syncWindowMode();
+  await applySavedWindowModePreference();
+  await syncWindowMode();
+  saveFullscreenPreference(isFullscreen.value);
 });
 </script>
 
