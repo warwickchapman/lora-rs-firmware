@@ -219,13 +219,16 @@ jobs:
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             # MSI internal app version must be numeric-only (no prerelease suffix).
             python3 sync_version.py --windows-msi-safe
-            python3 sync_version.py --windows-msi-safe --check
           else
             python3 sync_version.py
-            python3 sync_version.py --check
           fi
 
           npm install
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            python3 sync_version.py --windows-msi-safe --check
+          else
+            python3 sync_version.py --check
+          fi
           # Unset PKG_CONFIG_PATH on Linux to avoid python-cache interference with system libs
           if [[ "${{ matrix.os }}" == "ubuntu-22.04" ]]; then unset PKG_CONFIG_PATH; fi
           # Note: MacOS handles ad-hoc signing (-) if no secrets provided
