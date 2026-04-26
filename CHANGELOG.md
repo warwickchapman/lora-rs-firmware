@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.6.5-alpha] - 2026-04-26
+
 ### Added
 - Flasher now has a Network mode for current-LAN LRS discovery, one-device-at-a-time HTTP OTA updates, direct Web UI opening, per-device admin password override, and UDP log monitoring on fixed port `5514` after OTA or on demand.
 
