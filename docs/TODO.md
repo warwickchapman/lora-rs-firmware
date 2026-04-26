@@ -87,6 +87,12 @@
 - If DS18B20 is detected later, activate automatically without requiring a reboot or config rewrite.
 - Do not auto-disable DS18B20 config on failed detection (avoid boot-time false negatives becoming sticky state).
 - Consider configurable RX fail-safe in paired-input mode: latch last state indefinitely if TX stream disappears.
+- Add runtime/API-visible Web UI enabled-state reporting (`webui_enabled=true/false`).
+- Add runtime/API-visible REST API enabled-state reporting (`restapi_enabled=true/false`) if Web UI and API are independently controllable.
+- Add HTTP and MQTT commands to enable/disable the Web UI to save memory, and report current Web UI state.
+- Evaluate two-level memory-control model:
+  - `webui_enabled=true/false`
+  - `restapi_enabled=true/false`
 
 ## Observability / Logging
 - Implement structured logging with levels: `ERROR`, `WARN`, `INFO` (default), `DEBUG`, `TRACE`.
@@ -105,6 +111,26 @@
 - In low-memory mode, Web UI should either be disabled until reboot or run as a minimal hook/stub endpoint.
 - When the hook is accessed, start full Web UI on demand.
 - After a configurable inactivity timeout, revert from full Web UI back to low-memory mode.
+
+## Testing / Stability
+- Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.
+- Update Devmon uptime monitoring to treat monotonic uptime as the primary health signal during stability runs; ignore Unix time drift/resets for pass/fail.
+- Test automation on a standalone unit first, then implement and verify automation behavior across multiple units.
+- Validate `mesh` mode (gateway + multiple nodes) responsiveness and MQTT control reliability before wider deployment.
+- Plan and execute a full field deployment test once `mesh` mode is confirmed stable on the bench.
+
+## Devmon / Flasher Tooling
+- Extend Devmon to run over serial on a Raspberry Pi instead of UDP so it can capture boot logs and reboot causes directly.
+- Add reboot/crash pattern detection to the serial Devmon flow, including reset/reboot code extraction from serial logs.
+- Port the crash/reboot detection logic from the flasher tool into the Raspberry Pi Devmon extension.
+
+## Mesh Mode
+- Verify `mesh` mode commissioning and runtime behavior for one gateway with multiple nodes.
+- Confirm that MQTT-enabled mesh nodes remain responsive and that gateway-side control/status propagation is reliable under load.
+
+## Paired Mode
+- Implement multi-unit paired-mode workflow with unique addresses per unit.
+- Ensure paired-mode TX builds an MQTT-readable tree of remote units and relay states for one-to-many simultaneous switching with status visibility.
 
 ## Deferred From Addressing/Fleet Release
 - Standalone LoRa telemetry-only behavior (local-only control with optional LoRa status broadcasting).
