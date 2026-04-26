@@ -90,6 +90,8 @@ const isNetworkOta = ref(false);
 const isNetworkUdpMonitoring = ref(false);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
+const serialUptimeMs = ref<number | null>(null);
+const networkUptimeMs = ref<number | null>(null);
 const deviceInfo = ref<DeviceInfo | null>(null);
 const deviceInfoPort = ref('');
 const isLoadingInfo = ref(false);
@@ -118,6 +120,8 @@ const networkScanProgress = ref<NetworkScanProgressEvent | null>(null);
 const networkPasswordCheckSeq = ref<Record<string, number>>({});
 
 const LOCAL_OPTION = '__local_browse__';
+const NETWORK_UDP_LOG_TTL_S = 1800;
+const NETWORK_UDP_LOG_RENEW_MS = 5 * 60 * 1000;
 const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'ssid',
   'password',
@@ -194,6 +198,8 @@ const activityFullscreen = computed(() =>
   (activeMode.value === 'serial' && isMonitoring.value) ||
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
 );
+const serialUptimeLabel = computed(() => formatUptime(serialUptimeMs.value));
+const networkUptimeLabel = computed(() => formatUptime(networkUptimeMs.value));
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -201,11 +207,13 @@ let unlistenPortsChanged: UnlistenFn | null = null;
 let unlistenNetworkMonitor: UnlistenFn | null = null;
 let unlistenNetworkScanProgress: UnlistenFn | null = null;
 let unlistenNetworkDeviceFound: UnlistenFn | null = null;
+let networkUdpRenewalTimer: ReturnType<typeof window.setInterval> | null = null;
 const networkPasswordCheckTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
 function pushSerialLog(line: string) {
   if (!line) return;
   serialLogs.value.push(line);
+  updateUptimeFromLog(line, serialUptimeMs);
   if (serialLogs.value.length > 2000) {
     serialLogs.value = serialLogs.value.slice(-2000);
   }
@@ -214,6 +222,7 @@ function pushSerialLog(line: string) {
 function pushNetworkLog(line: string) {
   if (!line) return;
   networkLogs.value.push(line);
+  updateUptimeFromLog(line, networkUptimeMs);
   if (networkLogs.value.length > 2000) {
     networkLogs.value = networkLogs.value.slice(-2000);
   }
@@ -222,9 +231,44 @@ function pushNetworkLog(line: string) {
 function clearActivityLog() {
   if (activeMode.value === 'network') {
     networkLogs.value = [];
+    networkUptimeMs.value = null;
   } else {
     serialLogs.value = [];
+    serialUptimeMs.value = null;
   }
+}
+
+function updateUptimeFromLog(line: string, target: typeof serialUptimeMs) {
+  const uptime = parseLogUptimeMs(line);
+  if (uptime !== null) {
+    target.value = uptime;
+  }
+}
+
+function parseLogUptimeMs(line: string): number | null {
+  const match = line.match(/\bt=(\d+)\b/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function formatUptime(ms: number | null): string {
+  if (ms === null) return '';
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes}m ${seconds.toString().padStart(2, '0')}s`;
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (totalHours < 24) return `${totalHours}h ${minutes.toString().padStart(2, '0')}m`;
+
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days}d ${hours.toString().padStart(2, '0')}h`;
 }
 
 async function openLocalFileDialog() {
@@ -246,7 +290,7 @@ async function openLocalFileDialog() {
       firmwareVersions.value = firmwareVersions.value.filter(v => !v.startsWith('Local: '));
       firmwareVersions.value.splice(1, 0, localLabel); // Insert after LOCAL_OPTION
       selectedVersion.value = localLabel;
-      serialLogs.value.push(`Local firmware selected: ${selected}`);
+      pushSerialLog(`Local firmware selected: ${selected}`);
     } else {
       // If cancelled and we were on "browse", revert to previous or first available
       if (selectedVersion.value === LOCAL_OPTION) {
@@ -708,6 +752,7 @@ async function openNetworkDeviceConsole(device: NetworkDevice | null) {
 
 async function startNetworkUdpMonitor(device: NetworkDevice | null) {
   if (!device) return;
+  clearNetworkUdpRenewal();
   selectedNetworkIp.value = device.ip;
   const password = passwordForNetworkDevice(device).trim();
   if (!password) {
@@ -717,20 +762,21 @@ async function startNetworkUdpMonitor(device: NetworkDevice | null) {
   try {
     const started = await invoke<string>('start_network_udp_monitor');
     pushNetworkLog(started);
-    const enabled = await invoke<string>('enable_network_udp_logging', {
-      ip: device.ip,
-      options: { password, ttl_s: 300 }
-    });
+    const enabled = await enableNetworkUdpLoggingLease(device.ip, password);
     isNetworkUdpMonitoring.value = true;
     networkUdpTarget.value = device.ip;
     pushNetworkLog(enabled);
+    pushNetworkLog(`Flasher will renew UDP logging every ${Math.round(NETWORK_UDP_LOG_RENEW_MS / 60000)} minutes while monitoring.`);
+    startNetworkUdpRenewal();
   } catch (e) {
     pushNetworkLog('UDP monitor error: ' + e);
     notify('UDP monitor error: ' + e);
+    clearNetworkUdpRenewal();
   }
 }
 
 async function stopNetworkUdpMonitor() {
+  clearNetworkUdpRenewal();
   try {
     const stopped = await invoke<string>('stop_network_udp_monitor');
     pushNetworkLog(stopped);
@@ -739,6 +785,41 @@ async function stopNetworkUdpMonitor() {
   } finally {
     isNetworkUdpMonitoring.value = false;
     networkUdpTarget.value = '';
+  }
+}
+
+async function enableNetworkUdpLoggingLease(ip: string, password: string): Promise<string> {
+  return await invoke<string>('enable_network_udp_logging', {
+    ip,
+    options: { password, ttl_s: NETWORK_UDP_LOG_TTL_S }
+  });
+}
+
+function startNetworkUdpRenewal() {
+  clearNetworkUdpRenewal();
+  networkUdpRenewalTimer = window.setInterval(async () => {
+    if (!isNetworkUdpMonitoring.value || !networkUdpTarget.value) {
+      clearNetworkUdpRenewal();
+      return;
+    }
+    const device = networkDevices.value.find(d => d.ip === networkUdpTarget.value) || activeNetworkDevice.value;
+    const password = device ? passwordForNetworkDevice(device).trim() : '';
+    if (!password) {
+      pushNetworkLog('UDP logging renewal skipped: missing admin password');
+      return;
+    }
+    try {
+      await enableNetworkUdpLoggingLease(networkUdpTarget.value, password);
+    } catch (e) {
+      pushNetworkLog('UDP logging renewal failed: ' + e);
+    }
+  }, NETWORK_UDP_LOG_RENEW_MS);
+}
+
+function clearNetworkUdpRenewal() {
+  if (networkUdpRenewalTimer) {
+    window.clearInterval(networkUdpRenewalTimer);
+    networkUdpRenewalTimer = null;
   }
 }
 
@@ -817,7 +898,7 @@ async function openActiveDeviceConsole() {
   const url = staIp ? `http://${staIp}` : 'http://192.168.4.1';
   try {
     await openUrl(url);
-    serialLogs.value.push(`Opened ${url}`);
+    pushSerialLog(`Opened ${url}`);
   } catch (e) {
     notify('Failed to open device URL: ' + e);
   }
@@ -829,14 +910,14 @@ async function readDeviceInfo() {
   isLoadingInfo.value = true;
   deviceInfo.value = null;
   deviceInfoPort.value = '';
-  serialLogs.value.push('Reading device information...');
+  pushSerialLog('Reading device information...');
   try {
     deviceInfo.value = await invoke('get_device_info', { port });
     deviceInfoPort.value = port;
-    serialLogs.value.push('Device info read successfully');
+    pushSerialLog('Device info read successfully');
     return true;
   } catch (e) {
-    serialLogs.value.push('Failed to read device info: ' + e);
+    pushSerialLog('Failed to read device info: ' + e);
     return false;
   } finally {
     isLoadingInfo.value = false;
@@ -847,11 +928,11 @@ async function startFlash() {
   if (!selectedPort.value || !selectedVersion.value) return;
   
   isFlashing.value = true;
-  serialLogs.value.push('--- Preparing Firmware ---');
+  pushSerialLog('--- Preparing Firmware ---');
   
   try {
     if (!hasActiveDeviceInfo.value) {
-      serialLogs.value.push('Loading device information before flash...');
+      pushSerialLog('Loading device information before flash...');
       const loaded = await readDeviceInfo();
       if (!loaded) throw new Error('Unable to read device information before flashing');
     }
@@ -867,7 +948,7 @@ async function startFlash() {
       region: isLocal ? null : region.value,
       eraseFirst: eraseBeforeFlash.value
     });
-    serialLogs.value.push(result as string);
+    pushSerialLog(result as string);
     
     // Auto-monitor transition
     if (monitorAfterFlash.value) {
@@ -875,7 +956,7 @@ async function startFlash() {
       toggleMonitor();
     }
   } catch (e) {
-    serialLogs.value.push('Flash failed: ' + e);
+    pushSerialLog('Flash failed: ' + e);
     notify('Flash failed: ' + e);
   } finally {
     isFlashing.value = false;
@@ -900,14 +981,14 @@ async function toggleMonitor() {
     if (targetState) {
       activeMonitorPort.value = port;
       activeMonitorSsid.value = deviceInfo.value?.ssid?.trim() || '';
-      serialLogs.value.push(`Serial monitor started for ${monitorContextLabel.value}`);
+      pushSerialLog(`Serial monitor started for ${monitorContextLabel.value}`);
     } else {
-      serialLogs.value.push(`Serial monitor stopped for ${monitorContextLabel.value}`);
+      pushSerialLog(`Serial monitor stopped for ${monitorContextLabel.value}`);
       activeMonitorPort.value = '';
       activeMonitorSsid.value = '';
     }
   } catch (e) {
-    serialLogs.value.push('Monitor error: ' + e);
+    pushSerialLog('Monitor error: ' + e);
   }
 }
 
@@ -951,15 +1032,15 @@ onMounted(async () => {
   const detected = detectRegionFromSystem();
   if (detected.region && detected.reliable) {
     region.value = detected.region;
-    serialLogs.value.push(`Region auto-detected: ${detected.region} (${detected.reason})`);
+    pushSerialLog(`Region auto-detected: ${detected.region} (${detected.reason})`);
   } else if (rememberedRegion) {
     region.value = rememberedRegion;
-    serialLogs.value.push(`Region auto-detect not confident; using last selected region: ${rememberedRegion} (${detected.reason})`);
+    pushSerialLog(`Region auto-detect not confident; using last selected region: ${rememberedRegion} (${detected.reason})`);
   } else if (detected.region) {
     region.value = detected.region;
-    serialLogs.value.push(`Region auto-detect weak signal; using best guess: ${detected.region} (${detected.reason})`);
+    pushSerialLog(`Region auto-detect weak signal; using best guess: ${detected.region} (${detected.reason})`);
   } else {
-    serialLogs.value.push(`Region auto-detection unavailable; using default: ${region.value}`);
+    pushSerialLog(`Region auto-detection unavailable; using default: ${region.value}`);
   }
 
   refreshPorts();
@@ -1024,6 +1105,7 @@ watch(region, (next) => {
 
 onUnmounted(() => {
   clearNetworkPasswordChecks();
+  clearNetworkUdpRenewal();
   if (unlistenFlash) unlistenFlash();
   if (unlistenMonitor) unlistenMonitor();
   if (unlistenNetworkMonitor) unlistenNetworkMonitor();
@@ -1099,6 +1181,11 @@ function countCrashEvents(entries: string[]): number {
               <span class="font-mono text-slate-300">{{ monitorDeviceLabel }}</span>
               <span class="text-slate-500">on</span>
               <span class="font-mono text-slate-400">{{ activeMonitorPort || selectedPort }}</span>
+              <template v-if="serialUptimeLabel">
+                <span class="text-slate-600">·</span>
+                <span>Uptime</span>
+                <span class="font-mono text-slate-400">{{ serialUptimeLabel }}</span>
+              </template>
             </div>
             <div
               v-if="networkLogActive"
@@ -1108,6 +1195,11 @@ function countCrashEvents(entries: string[]): number {
               <span class="font-mono text-slate-300">{{ networkUdpTarget }}</span>
               <span class="text-slate-500">on</span>
               <span class="font-mono text-slate-400">5514</span>
+              <template v-if="networkUptimeLabel">
+                <span class="text-slate-600">·</span>
+                <span>Uptime</span>
+                <span class="font-mono text-slate-400">{{ networkUptimeLabel }}</span>
+              </template>
             </div>
           </div>
           <div class="flex items-center gap-4">
@@ -1232,8 +1324,8 @@ function countCrashEvents(entries: string[]): number {
               :title="isMonitoring ? 'Stop monitor' : 'Start monitor'"
               :aria-label="isMonitoring ? 'Stop monitor' : 'Start monitor'"
             >
-              <svg v-if="isMonitoring" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+              <svg v-if="isMonitoring" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
               </svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a4 4 0 0 1 4-4z"></path>
@@ -1251,8 +1343,8 @@ function countCrashEvents(entries: string[]): number {
               title="Stop monitor"
               aria-label="Stop monitor"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
               </svg>
             </button>
             <button @click="clearActivityLog" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
@@ -1556,8 +1648,8 @@ function countCrashEvents(entries: string[]): number {
                       :title="isNetworkUdpMonitoring && networkUdpTarget === device.ip ? 'Stop monitor' : 'Start monitor'"
                       :aria-label="isNetworkUdpMonitoring && networkUdpTarget === device.ip ? 'Stop monitor' : 'Start monitor'"
                     >
-                      <svg v-if="isNetworkUdpMonitoring && networkUdpTarget === device.ip" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                      <svg v-if="isNetworkUdpMonitoring && networkUdpTarget === device.ip" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
                       </svg>
                       <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a4 4 0 0 1 4-4z"></path>

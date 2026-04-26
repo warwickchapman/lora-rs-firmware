@@ -27,6 +27,6 @@ Network mode handles one LRS device at a time over the current LAN:
 - remembers a successfully tested non-factory admin password for that device and prefers it over the derived password on future scans
 - shows authenticated firmware version/build details when login succeeds
 - keeps per-device actions in the discovered-device row: direct Web UI opening, password check, OTA upload, and UDP logs
-- listens for UDP logs on fixed port `5514` after OTA or on demand, with the expanded log view retaining copy-log, copy-password, open-Web-UI, and stop controls
+- listens for UDP logs on fixed port `5514` after OTA or on demand, renewing the device-side UDP logging lease while monitoring is active, with the expanded log view retaining copy-log, copy-password, open-Web-UI, and stop controls
 
 Network mode intentionally does not include bulk OTA yet. The UI can enumerate multiple devices, but update and UDP-log actions target the selected device only.
