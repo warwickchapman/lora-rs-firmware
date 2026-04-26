@@ -16,6 +16,18 @@
 - Introduce explicit protocol version field in packet.
 - Add backward/compatibility migration policy for future payload changes.
 
+## Security Review Actions (2026-04-26)
+- Immediate containment: rotate credentials for devices whose OTA/admin auth values were committed, remove real OTA secrets from `platformio.ini`, and replace tracked per-device OTA environments with placeholder templates plus an ignored local operator profile.
+- Firmware credential redesign: replace deterministic chip-ID-derived AP/admin credentials with per-device random factory credentials, record them in controlled factory outputs, and force admin password rotation during first commissioning.
+- Flasher/release trust: add a signed release manifest containing firmware asset names, regions, versions, and SHA256 hashes; make the flasher verify the manifest signature and asset hash before flashing downloaded firmware.
+- Runtime randomness: add a central ESP8266 secure-random helper seeded during boot and use it for web session tokens, LoRa packet nonces, boot nonces, provisioning session nonces, and transfer IDs.
+- Network security documentation: document isolated installer/OT network requirements for HTTP admin, ArduinoOTA, MQTT control, fleet provisioning, and support access; treat MQTT control as requiring broker ACLs plus VLAN/VPN isolation unless TLS is later proven practical.
+- SoftAP posture: decide whether `ap_always_on` should default off after successful STA commissioning and document the recovery path if the AP is disabled.
+- Secret export/support handling: make normal config export redacted by default, add an explicit include-secrets path if needed, and document how to handle stickers, CSVs, screenshots, flasher logs, and support bundles.
+- Flasher hardening: add a restrictive Tauri CSP, keep shell permissions limited to the esptool sidecar, and avoid remote UI assets.
+- LoRa operational risk: document jamming/interference limits, required link-margin checks, and intentional RX fail-safe selection for each installation.
+- Reference report: `docs/internal/security-review-2026-04-26.md`.
+
 ## Provisioning
 - Add pair-mode provisioning flow (first unit TX, second unit RX, linked output records).
 

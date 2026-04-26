@@ -121,6 +121,7 @@ pub fn run() {
         .manage(crate::commands::monitor::MonitorState {
             running: std::sync::Arc::new(tokio::sync::Mutex::new(false)),
         })
+        .manage(crate::commands::network::UdpMonitorState::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             maybe_offer_move_to_applications(&app.handle().clone());
@@ -139,6 +140,12 @@ pub fn run() {
             crate::commands::status::get_app_version,
             crate::commands::device::get_device_info,
             crate::commands::monitor::toggle_serial_monitor,
+            crate::commands::network::discover_network_devices,
+            crate::commands::network::authenticate_network_device,
+            crate::commands::network::ota_network_device,
+            crate::commands::network::start_network_udp_monitor,
+            crate::commands::network::stop_network_udp_monitor,
+            crate::commands::network::enable_network_udp_logging,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

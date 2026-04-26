@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+### Added
+- Flasher now has a Network mode for current-LAN LRS discovery, one-device-at-a-time HTTP OTA updates, direct Web UI opening, per-device admin password override, and UDP log monitoring on fixed port `5514` after OTA or on demand.
+
+### Changed
+- Flasher network discovery uses local adapter IPv4 netmasks to derive scan ranges and direct-IP HTTP probing only; it does not use mDNS or `lrs-*.local` hostnames.
+
 ## [0.6.4-alpha] - 2026-04-24
 
 ### Changed

@@ -33,14 +33,50 @@ interface DeviceInfo {
   ssid: string;
 }
 
+interface LanSubnet {
+  interface_name: string;
+  address: string;
+  netmask: string;
+  cidr: number;
+  network: string;
+  broadcast: string;
+  host_count: number;
+}
+
+interface NetworkDevice {
+  ip: string;
+  identity: string;
+  chip_id: string;
+  derived_password: string;
+  auth_status: string;
+  fw_version: string;
+  fw_display: string;
+  role: string;
+  mode: string;
+  lan_hostname: string;
+  message: string;
+}
+
+interface NetworkDiscoveryResult {
+  subnets: LanSubnet[];
+  devices: NetworkDevice[];
+  scanned_hosts: number;
+}
+
+type RegionCode = 'ZA' | 'EU' | 'US';
+
 const ports = ref<SerialPort[]>([]);
 const selectedPort = ref('');
 const firmwareVersions = ref<string[]>(['__local_browse__']);
 const selectedVersion = ref('');
 const selectedLocalPath = ref('');
-const region = ref('ZA');
+const region = ref<RegionCode>('ZA');
+const activeMode = ref<'serial' | 'network'>('serial');
 const isFlashing = ref(false);
 const isMonitoring = ref(false);
+const isNetworkDiscovering = ref(false);
+const isNetworkOta = ref(false);
+const isNetworkUdpMonitoring = ref(false);
 const logs = ref<string[]>([]);
 const deviceInfo = ref<DeviceInfo | null>(null);
 const deviceInfoPort = ref('');
@@ -58,6 +94,13 @@ const portSeenCounter = ref(0);
 const stickLogToBottom = ref(true);
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
+const networkDevices = ref<NetworkDevice[]>([]);
+const networkSubnets = ref<LanSubnet[]>([]);
+const scannedNetworkHosts = ref(0);
+const selectedNetworkIp = ref('');
+const networkPasswords = ref<Record<string, string>>({});
+const networkStatusMessage = ref('Ready to scan the current LAN.');
+const networkUdpTarget = ref('');
 
 const LOCAL_OPTION = '__local_browse__';
 const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
@@ -77,6 +120,9 @@ const EU_COUNTRY_CODES = new Set([
 ]);
 const US_COUNTRY_CODES = new Set(['US', 'UM', 'PR', 'GU', 'VI', 'AS', 'MP']);
 const ZA_COUNTRY_CODES = new Set(['ZA']);
+const REGION_STORAGE_KEY = 'lrs_flasher_region';
+const REGION_CONFIDENT_MIN_SCORE = 5;
+const REGION_CONFIDENT_MIN_GAP = 2;
 
 const hasActiveDeviceInfo = computed(() =>
   !!deviceInfo.value && deviceInfoPort.value === selectedPort.value
@@ -108,10 +154,22 @@ const monitorContextLabel = computed(() => {
   }
   return parts.join(' on ');
 });
+const selectedNetworkDevice = computed(() =>
+  networkDevices.value.find(d => d.ip === selectedNetworkIp.value) || null
+);
+const networkSubnetLabel = computed(() => {
+  if (networkSubnets.value.length === 0) return 'No LAN subnet detected yet';
+  return networkSubnets.value
+    .map(s => `${s.interface_name} ${s.network}/${s.cidr}`)
+    .join(', ');
+});
+const networkLogActive = computed(() => activeMode.value === 'network' && isNetworkUdpMonitoring.value);
+const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value);
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
 let unlistenPortsChanged: UnlistenFn | null = null;
+let unlistenNetworkMonitor: UnlistenFn | null = null;
 
 async function openLocalFileDialog() {
   try {
@@ -157,7 +215,14 @@ function extractCountryCodes(locale: string): string[] {
     .map(part => part.toUpperCase());
 }
 
-function detectRegionFromSystem(): 'ZA' | 'EU' | 'US' | null {
+function detectRegionFromSystem(): { region: RegionCode | null; reliable: boolean; reason: string } {
+  const score: Record<RegionCode, number> = { ZA: 0, EU: 0, US: 0 };
+  const clues: string[] = [];
+  const addScore = (target: RegionCode, weight: number, clue: string) => {
+    score[target] += weight;
+    clues.push(`${target}+${weight}:${clue}`);
+  };
+
   const localeCandidates: string[] = [];
   const resolvedLocale = Intl.DateTimeFormat().resolvedOptions().locale;
   if (resolvedLocale) localeCandidates.push(resolvedLocale);
@@ -166,25 +231,38 @@ function detectRegionFromSystem(): 'ZA' | 'EU' | 'US' | null {
     localeCandidates.push(...navigator.languages);
   }
 
-  const countryCodes = new Set<string>();
-  for (const locale of localeCandidates) {
-    for (const code of extractCountryCodes(locale)) {
-      countryCodes.add(code);
-    }
-  }
-
-  for (const code of countryCodes) {
-    if (ZA_COUNTRY_CODES.has(code)) return 'ZA';
-    if (US_COUNTRY_CODES.has(code)) return 'US';
-    if (EU_COUNTRY_CODES.has(code)) return 'EU';
-  }
-
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-  if (timezone === 'Africa/Johannesburg') return 'ZA';
-  if (timezone.startsWith('Europe/')) return 'EU';
-  if (timezone.startsWith('US/')) return 'US';
+  if (timezone === 'Africa/Johannesburg') addScore('ZA', 8, `timezone=${timezone}`);
+  if (timezone.startsWith('Europe/')) addScore('EU', 6, `timezone=${timezone}`);
+  if (timezone.startsWith('US/')) addScore('US', 6, `timezone=${timezone}`);
 
-  return null;
+  const seen = new Set<string>();
+  localeCandidates
+    .filter(Boolean)
+    .forEach((locale, idx) => {
+      const norm = String(locale).trim();
+      if (!norm || seen.has(norm)) return;
+      seen.add(norm);
+      const weight = idx === 0 ? 3 : idx === 1 ? 2 : 1;
+      for (const code of extractCountryCodes(norm)) {
+        if (ZA_COUNTRY_CODES.has(code)) addScore('ZA', weight, `locale=${norm}`);
+        if (US_COUNTRY_CODES.has(code)) addScore('US', weight, `locale=${norm}`);
+        if (EU_COUNTRY_CODES.has(code)) addScore('EU', weight, `locale=${norm}`);
+      }
+    });
+
+  const ranked = (Object.entries(score) as Array<[RegionCode, number]>).sort((a, b) => b[1] - a[1]);
+  const top = ranked[0];
+  const second = ranked[1];
+  const hasSignal = top[1] > 0;
+  const reliable =
+    hasSignal &&
+    top[1] >= REGION_CONFIDENT_MIN_SCORE &&
+    (top[1] - second[1]) >= REGION_CONFIDENT_MIN_GAP;
+  const reason = clues.length ? clues.join(', ') : 'no locale/timezone signal';
+
+  if (!hasSignal) return { region: null, reliable: false, reason };
+  return { region: top[0], reliable, reason };
 }
 
 async function refreshPorts() {
@@ -309,6 +387,203 @@ function copyActivePassword() {
     return;
   }
   copyToClipboard(password, 'password');
+}
+
+function passwordForNetworkDevice(device: NetworkDevice): string {
+  const stored = networkPasswords.value[device.ip];
+  return stored !== undefined ? stored : device.derived_password;
+}
+
+function setNetworkPassword(ip: string, value: string) {
+  networkPasswords.value = { ...networkPasswords.value, [ip]: value };
+}
+
+function mergeNetworkDevice(updated: NetworkDevice) {
+  const idx = networkDevices.value.findIndex(d => d.ip === updated.ip);
+  if (idx >= 0) {
+    const next = [...networkDevices.value];
+    next[idx] = { ...next[idx], ...updated };
+    networkDevices.value = next;
+  } else {
+    networkDevices.value = [...networkDevices.value, updated].sort((a, b) => ipSortKey(a.ip) - ipSortKey(b.ip));
+  }
+  if (!networkPasswords.value[updated.ip]) {
+    setNetworkPassword(updated.ip, updated.derived_password || '');
+  }
+}
+
+function ipSortKey(ip: string): number {
+  return ip.split('.').reduce((acc, part) => (acc * 256) + Number(part || 0), 0);
+}
+
+function networkAuthLabel(status: string): string {
+  if (status === 'derived_ok') return 'Default OK';
+  if (status === 'custom_ok') return 'Password OK';
+  if (status === 'auth_error') return 'Auth error';
+  return 'Password needed';
+}
+
+function networkAuthClass(status: string): string {
+  if (status === 'derived_ok' || status === 'custom_ok') return 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10';
+  if (status === 'auth_error') return 'text-amber-300 border-amber-500/30 bg-amber-500/10';
+  return 'text-slate-300 border-slate-700 bg-slate-800/50';
+}
+
+async function discoverNetworkDevices() {
+  if (isNetworkDiscovering.value) return;
+  activeMode.value = 'network';
+  isNetworkDiscovering.value = true;
+  networkStatusMessage.value = 'Scanning current LAN adapters...';
+  logs.value.push('--- Network discovery ---');
+  try {
+    const result = await invoke<NetworkDiscoveryResult>('discover_network_devices');
+    networkSubnets.value = result.subnets || [];
+    scannedNetworkHosts.value = result.scanned_hosts || 0;
+    networkDevices.value = (result.devices || []).sort((a, b) => ipSortKey(a.ip) - ipSortKey(b.ip));
+    const nextPasswords: Record<string, string> = { ...networkPasswords.value };
+    for (const device of networkDevices.value) {
+      if (!nextPasswords[device.ip]) nextPasswords[device.ip] = device.derived_password || '';
+    }
+    networkPasswords.value = nextPasswords;
+    if (!selectedNetworkIp.value && networkDevices.value.length > 0) {
+      selectedNetworkIp.value = networkDevices.value[0].ip;
+    }
+    networkStatusMessage.value = `Found ${networkDevices.value.length} device${networkDevices.value.length === 1 ? '' : 's'} across ${scannedNetworkHosts.value} hosts.`;
+    logs.value.push(`${networkStatusMessage.value} ${networkSubnetLabel.value}`);
+  } catch (e) {
+    networkStatusMessage.value = 'Network discovery failed: ' + e;
+    logs.value.push(networkStatusMessage.value);
+    notify(networkStatusMessage.value);
+  } finally {
+    isNetworkDiscovering.value = false;
+  }
+}
+
+async function authenticateSelectedNetworkDevice() {
+  const device = selectedNetworkDevice.value;
+  if (!device) return;
+  const password = passwordForNetworkDevice(device).trim();
+  if (!password) {
+    notify('Enter an admin password for this device');
+    return;
+  }
+  logs.value.push(`Authenticating ${device.identity || device.ip} at ${device.ip}...`);
+  try {
+    const updated = await invoke<NetworkDevice>('authenticate_network_device', {
+      ip: device.ip,
+      password
+    });
+    mergeNetworkDevice(updated);
+    networkStatusMessage.value = `${updated.identity || updated.ip} authenticated.`;
+    logs.value.push(networkStatusMessage.value);
+  } catch (e) {
+    networkStatusMessage.value = `Authentication failed for ${device.ip}: ${e}`;
+    logs.value.push(networkStatusMessage.value);
+    notify(networkStatusMessage.value);
+  }
+}
+
+async function openSelectedNetworkDeviceConsole() {
+  const device = selectedNetworkDevice.value;
+  if (!device) return;
+  const url = `http://${device.ip}`;
+  try {
+    await openUrl(url);
+    logs.value.push(`Opened ${url}`);
+  } catch (e) {
+    notify('Failed to open device URL: ' + e);
+  }
+}
+
+async function startNetworkUdpMonitorForSelected() {
+  const device = selectedNetworkDevice.value;
+  if (!device) return;
+  const password = passwordForNetworkDevice(device).trim();
+  if (!password) {
+    notify('Enter an admin password for this device');
+    return;
+  }
+  try {
+    const started = await invoke<string>('start_network_udp_monitor');
+    logs.value.push(started);
+    const enabled = await invoke<string>('enable_network_udp_logging', {
+      ip: device.ip,
+      options: { password, ttl_s: 300 }
+    });
+    isNetworkUdpMonitoring.value = true;
+    networkUdpTarget.value = device.ip;
+    logs.value.push(enabled);
+  } catch (e) {
+    logs.value.push('UDP monitor error: ' + e);
+    notify('UDP monitor error: ' + e);
+  }
+}
+
+async function stopNetworkUdpMonitor() {
+  try {
+    const stopped = await invoke<string>('stop_network_udp_monitor');
+    logs.value.push(stopped);
+  } catch (e) {
+    logs.value.push('UDP monitor stop error: ' + e);
+  } finally {
+    isNetworkUdpMonitoring.value = false;
+    networkUdpTarget.value = '';
+  }
+}
+
+async function startNetworkOta() {
+  const device = selectedNetworkDevice.value;
+  if (!device || !selectedVersion.value) return;
+  const password = passwordForNetworkDevice(device).trim();
+  if (!password) {
+    notify('Enter an admin password for this device');
+    return;
+  }
+  const isLocal = selectedVersion.value.startsWith('Local: ');
+  const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
+  if (isLocal && !firmwarePath) {
+    notify('Local file path missing');
+    return;
+  }
+
+  isNetworkOta.value = true;
+  logs.value.push(`--- Network OTA ${device.identity || device.ip} (${device.ip}) ---`);
+  try {
+    const result = await invoke<string>('ota_network_device', {
+      ip: device.ip,
+      options: {
+        password,
+        firmware_path: firmwarePath,
+        region: isLocal ? null : region.value
+      }
+    });
+    logs.value.push(result);
+    logs.value.push('OTA upload complete. Waiting for reboot and WiFi reconnect before UDP logging...');
+    await waitForNetworkDevice(device.ip, password, 90000);
+    await startNetworkUdpMonitorForSelected();
+  } catch (e) {
+    logs.value.push('Network OTA failed: ' + e);
+    notify('Network OTA failed: ' + e);
+  } finally {
+    isNetworkOta.value = false;
+  }
+}
+
+async function waitForNetworkDevice(ip: string, password: string, timeoutMs: number) {
+  const started = Date.now();
+  await new Promise(resolve => setTimeout(resolve, 7000));
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const updated = await invoke<NetworkDevice>('authenticate_network_device', { ip, password });
+      mergeNetworkDevice(updated);
+      logs.value.push(`${updated.identity || ip} is back online.`);
+      return;
+    } catch {
+      logs.value.push(`Waiting for ${ip} to return...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+  throw new Error('Device did not return before the 90s wait expired');
 }
 
 function latestStaIpFromLogs(): string | null {
@@ -444,10 +719,24 @@ watch(logs, () => {
 }, { deep: true });
 
 onMounted(async () => {
-  const detectedRegion = detectRegionFromSystem();
-  if (detectedRegion) {
-    region.value = detectedRegion;
-    logs.value.push(`Region auto-detected from system locale/timezone: ${detectedRegion}`);
+  const rememberedRegion = (() => {
+    try {
+      const saved = localStorage.getItem(REGION_STORAGE_KEY);
+      return saved === 'ZA' || saved === 'EU' || saved === 'US' ? (saved as RegionCode) : null;
+    } catch (_) {
+      return null;
+    }
+  })();
+  const detected = detectRegionFromSystem();
+  if (detected.region && detected.reliable) {
+    region.value = detected.region;
+    logs.value.push(`Region auto-detected: ${detected.region} (${detected.reason})`);
+  } else if (rememberedRegion) {
+    region.value = rememberedRegion;
+    logs.value.push(`Region auto-detect not confident; using last selected region: ${rememberedRegion} (${detected.reason})`);
+  } else if (detected.region) {
+    region.value = detected.region;
+    logs.value.push(`Region auto-detect weak signal; using best guess: ${detected.region} (${detected.reason})`);
   } else {
     logs.value.push(`Region auto-detection unavailable; using default: ${region.value}`);
   }
@@ -484,6 +773,19 @@ onMounted(async () => {
     }
   });
 
+  unlistenNetworkMonitor = await listen<MonitorEvent>('network-monitor-log', (event) => {
+    const rawLine = event.payload.line;
+    const lines = rawLine.split(/[\r\n]+/);
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed) logs.value.push(trimmed);
+    });
+
+    if (logs.value.length > 2000) {
+      logs.value = logs.value.slice(-2000);
+    }
+  });
+
   unlistenPortsChanged = await listen<PortsChangedEvent>('serial-ports-changed', () => {
     if (!isFlashing.value) {
       refreshPorts();
@@ -491,10 +793,22 @@ onMounted(async () => {
   });
 });
 
+watch(region, (next) => {
+  try {
+    localStorage.setItem(REGION_STORAGE_KEY, next);
+  } catch (_) {
+    // Ignore storage failures and continue with in-memory value.
+  }
+});
+
 onUnmounted(() => {
   if (unlistenFlash) unlistenFlash();
   if (unlistenMonitor) unlistenMonitor();
+  if (unlistenNetworkMonitor) unlistenNetworkMonitor();
   if (unlistenPortsChanged) unlistenPortsChanged();
+  if (isNetworkUdpMonitoring.value) {
+    invoke('stop_network_udp_monitor').catch(() => {});
+  }
 });
 
 function formatLabel(key: string) {
@@ -544,23 +858,47 @@ function countCrashEvents(entries: string[]): number {
 
 <template>
   <div class="relative h-full flex flex-col">
-    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', isMonitoring ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
+    <div class="mb-4 flex w-full max-w-md rounded-md border border-slate-700 bg-slate-900/60 p-1">
+      <button
+        @click="activeMode = 'serial'"
+        :class="['m-0 flex-1 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+      >
+        Serial
+      </button>
+      <button
+        @click="activeMode = 'network'"
+        :class="['m-0 flex-1 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+      >
+        Network
+      </button>
+    </div>
+
+    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', activeMode === 'serial' && isMonitoring ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
       <div :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
         <div class="flex items-center justify-between border-b border-white/5 pb-4">
           <div class="flex flex-col gap-1">
             <h2 class="text-lg font-semibold text-slate-300 flex items-center gap-2">
-              <span :class="['w-2 h-2 rounded-full', isMonitoring || isFlashing ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600']"></span>
+              <span :class="['w-2 h-2 rounded-full', activityBusy ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600']"></span>
               Activity log
             </h2>
             <div
-              v-if="isMonitoring"
+              v-if="activeMode === 'serial' && isMonitoring"
               class="flex items-center gap-1 pl-4 text-xs text-slate-500"
             >
               <span>Monitoring</span>
               <span class="font-mono text-slate-300">{{ monitorDeviceLabel }}</span>
               <span class="text-slate-500">on</span>
               <span class="font-mono text-slate-400">{{ activeMonitorPort || selectedPort }}</span>
+            </div>
+            <div
+              v-if="networkLogActive"
+              class="flex items-center gap-1 pl-4 text-xs text-slate-500"
+            >
+              <span>UDP logs</span>
+              <span class="font-mono text-slate-300">{{ networkUdpTarget }}</span>
+              <span class="text-slate-500">on</span>
+              <span class="font-mono text-slate-400">5514</span>
             </div>
           </div>
           <div class="flex items-center gap-4">
@@ -594,7 +932,7 @@ function countCrashEvents(entries: string[]): number {
               </svg>
             </button>
             <button
-              v-if="isMonitoring"
+              v-if="activeMode === 'serial' && isMonitoring"
               @click="copyActivePassword"
               :disabled="!hasActiveDeviceInfo"
               :class="[
@@ -614,7 +952,7 @@ function countCrashEvents(entries: string[]): number {
               </svg>
             </button>
             <button
-              v-if="isMonitoring"
+              v-if="activeMode === 'serial' && isMonitoring"
               @click="openActiveDeviceConsole"
               :disabled="!hasActiveDeviceInfo"
               :class="[
@@ -633,8 +971,11 @@ function countCrashEvents(entries: string[]): number {
                 <path d="M12 3a14 14 0 0 0 0 18"></path>
               </svg>
             </button>
-            <button @click="toggleMonitor" :class="['px-3 py-1 rounded-md text-xs font-bold transition-all border', isMonitoring ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500']">
+            <button v-if="activeMode === 'serial'" @click="toggleMonitor" :class="['px-3 py-1 rounded-md text-xs font-bold transition-all border', isMonitoring ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500']">
               {{ isMonitoring ? 'Stop monitor' : 'Start monitor' }}
+            </button>
+            <button v-if="activeMode === 'network' && isNetworkUdpMonitoring" @click="stopNetworkUdpMonitor" class="px-3 py-1 rounded-md text-xs font-bold transition-all border bg-indigo-500/20 border-indigo-500 text-indigo-400">
+              Stop UDP
             </button>
             <button @click="logs = []" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
           </div>
@@ -651,7 +992,7 @@ function countCrashEvents(entries: string[]): number {
       </div>
 
       <!-- Right Panel (Controls + Details) - Hidden in Monitor Mode -->
-      <div v-if="!isMonitoring" class="flex flex-col gap-6 h-full overflow-hidden transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
+      <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-6 h-full overflow-hidden transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
         <!-- Device Configuration Panel -->
         <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
           <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
@@ -757,6 +1098,131 @@ function countCrashEvents(entries: string[]): number {
               <span class="animate-spin text-4xl">◌</span>
               Reading device descriptors...
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="activeMode === 'network'" class="flex flex-col gap-6 h-full overflow-hidden">
+        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                Network OTA
+              </h2>
+              <p class="mt-1 text-xs text-slate-400">{{ networkSubnetLabel }}</p>
+            </div>
+            <button
+              @click="discoverNetworkDevices"
+              :disabled="isNetworkDiscovering || isNetworkOta"
+              class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isNetworkDiscovering }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+              <span>{{ isNetworkDiscovering ? 'Scanning...' : 'Scan LAN' }}</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Region</label>
+              <select v-model="region" class="glass-input h-10 appearance-none">
+                <option v-for="r in ['ZA', 'EU', 'US']" :key="r" :value="r">{{ r }}</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Firmware version</label>
+              <div class="flex gap-2">
+                <select v-model="selectedVersion" class="glass-input h-10 flex-1 appearance-none">
+                  <option v-for="v in firmwareVersions" :key="v" :value="v">
+                    {{ v === LOCAL_OPTION ? 'Choose a file' : v }}
+                  </option>
+                </select>
+                <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400', { 'animate-bounce text-indigo-500': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="text-xs text-slate-400">{{ networkStatusMessage }}</div>
+        </div>
+
+        <div class="glass-card p-5 flex flex-col gap-4 text-left flex-1 min-h-0 overflow-hidden">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold text-slate-300">Discovered devices</h2>
+            <span class="text-xs text-slate-500">{{ networkDevices.length }} found</span>
+          </div>
+
+          <div v-if="networkDevices.length === 0" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
+            Scan the current LAN to find LRS devices.
+          </div>
+
+          <div v-else class="flex-1 min-h-0 overflow-auto custom-scrollbar pr-1">
+            <div
+              v-for="device in networkDevices"
+              :key="device.ip"
+              @click="selectedNetworkIp = device.ip"
+              :class="['rounded-md border p-3 mb-3 cursor-pointer transition-all', selectedNetworkIp === device.ip ? 'border-indigo-500/60 bg-indigo-500/10' : 'border-slate-800 bg-slate-900/30 hover:border-slate-600']"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="font-mono text-sm text-slate-200 truncate">{{ device.identity || device.ip }}</div>
+                  <div class="font-mono text-xs text-slate-500">{{ device.ip }}</div>
+                </div>
+                <span :class="['shrink-0 rounded border px-2 py-1 text-[10px] font-bold', networkAuthClass(device.auth_status)]">
+                  {{ networkAuthLabel(device.auth_status) }}
+                </span>
+              </div>
+              <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span class="text-slate-500">Version</span>
+                  <div class="font-mono text-slate-300 truncate">{{ device.fw_display || device.fw_version || '-' }}</div>
+                </div>
+                <div>
+                  <span class="text-slate-500">Mode</span>
+                  <div class="font-mono text-slate-300">{{ device.mode || '-' }} {{ device.role || '' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="selectedNetworkDevice" class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-bold text-slate-300">{{ selectedNetworkDevice.identity || selectedNetworkDevice.ip }}</h2>
+              <div class="font-mono text-xs text-slate-500">{{ selectedNetworkDevice.ip }}</div>
+            </div>
+            <button @click="openSelectedNetworkDeviceConsole" class="glass-input m-0 h-10 px-3 text-xs hover:bg-white/10">
+              Open Web UI
+            </button>
+          </div>
+
+          <div class="flex flex-col gap-1.5 text-xs">
+            <label class="font-medium text-slate-400">Admin password</label>
+            <input
+              :value="passwordForNetworkDevice(selectedNetworkDevice)"
+              @input="setNetworkPassword(selectedNetworkDevice.ip, ($event.target as HTMLInputElement).value)"
+              class="glass-input h-10"
+              type="password"
+              autocomplete="current-password"
+            />
+          </div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <button @click="authenticateSelectedNetworkDevice" :disabled="isNetworkOta" class="glass-input h-11 hover:bg-white/10 flex items-center justify-center text-xs font-bold">
+              Check
+            </button>
+            <button @click="startNetworkOta" :disabled="isNetworkOta || isNetworkDiscovering" class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold">
+              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isNetworkOta }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+              <span>{{ isNetworkOta ? 'Updating...' : 'OTA' }}</span>
+            </button>
+            <button
+              @click="isNetworkUdpMonitoring && networkUdpTarget === selectedNetworkDevice.ip ? stopNetworkUdpMonitor() : startNetworkUdpMonitorForSelected()"
+              :disabled="isNetworkOta"
+              class="glass-input h-11 hover:bg-white/10 flex items-center justify-center text-xs font-bold"
+            >
+              {{ isNetworkUdpMonitoring && networkUdpTarget === selectedNetworkDevice.ip ? 'Stop UDP' : 'UDP logs' }}
+            </button>
           </div>
         </div>
       </div>
