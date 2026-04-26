@@ -1,4 +1,3 @@
-use crate::commands::flash::LogEvent;
 use crate::services::{firmware, network};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -7,7 +6,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 #[derive(Clone, Default)]
 pub struct UdpMonitorState {
@@ -24,33 +23,51 @@ pub struct NetworkDiscoveryResult {
     pub subnets: Vec<network::LanSubnet>,
     pub devices: Vec<network::NetworkDevice>,
     pub scanned_hosts: usize,
+    pub duration_ms: u128,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct NetworkScanProgressEvent {
+    pub scanned_hosts: usize,
+    pub total_hosts: usize,
+    pub found_devices: usize,
+    pub subnet_label: String,
 }
 
 #[tauri::command]
-pub async fn discover_network_devices() -> Result<NetworkDiscoveryResult, String> {
+pub async fn discover_network_devices(app: AppHandle) -> Result<NetworkDiscoveryResult, String> {
+    let started = std::time::Instant::now();
     let subnets = network::local_lan_subnets()?;
+    let subnet_label = subnets
+        .iter()
+        .map(|s| format!("{} {}/{}", s.interface_name, s.network, s.cidr))
+        .collect::<Vec<_>>()
+        .join(", ");
     let targets = network::scan_targets_for_subnets(&subnets);
     let scanned_hosts = targets.len();
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(900))
+        .timeout(Duration::from_millis(1500))
         .pool_max_idle_per_host(0)
         .build()
         .map_err(|e| e.to_string())?;
 
     let mut devices = Vec::new();
-    for chunk in targets.chunks(64) {
-        let mut tasks = Vec::new();
+    let mut completed_hosts = 0usize;
+    emit_scan_progress(&app, completed_hosts, scanned_hosts, devices.len(), &subnet_label);
+    for chunk in targets.chunks(32) {
+        let mut tasks = JoinSet::new();
         for ip in chunk {
             let client = client.clone();
             let ip = ip.clone();
-            tasks.push(tokio::spawn(async move {
-                network::probe_device(client, ip).await
-            }));
+            tasks.spawn(async move { network::probe_device(client, ip).await });
         }
-        for task in tasks {
-            if let Ok(Some(device)) = task.await {
+        while let Some(result) = tasks.join_next().await {
+            completed_hosts += 1;
+            if let Ok(Some(device)) = result {
+                let _ = app.emit("network-device-found", device.clone());
                 devices.push(device);
             }
+            emit_scan_progress(&app, completed_hosts, scanned_hosts, devices.len(), &subnet_label);
         }
     }
     devices.sort_by(|a, b| ip_sort_key(&a.ip).cmp(&ip_sort_key(&b.ip)));
@@ -59,7 +76,26 @@ pub async fn discover_network_devices() -> Result<NetworkDiscoveryResult, String
         subnets,
         devices,
         scanned_hosts,
+        duration_ms: started.elapsed().as_millis(),
     })
+}
+
+fn emit_scan_progress(
+    app: &AppHandle,
+    scanned_hosts: usize,
+    total_hosts: usize,
+    found_devices: usize,
+    subnet_label: &str,
+) {
+    let _ = app.emit(
+        "network-scan-progress",
+        NetworkScanProgressEvent {
+            scanned_hosts,
+            total_hosts,
+            found_devices,
+            subnet_label: subnet_label.to_string(),
+        },
+    );
 }
 
 #[tauri::command]
@@ -89,9 +125,9 @@ pub async fn ota_network_device(
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| "firmware.bin".into());
     let _ = app.emit(
-        "flash-log",
-        LogEvent {
-            message: format!("Network OTA: {} SHA256 {}", filename, sha256),
+        "network-monitor-log",
+        UdpLogEvent {
+            line: format!("Network OTA: {} SHA256 {}", filename, sha256),
         },
     );
     network::upload_ota(&ip, options.password.trim(), firmware_path).await

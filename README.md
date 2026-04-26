@@ -114,7 +114,8 @@ Release safety guardrails (mandatory):
 
 When flasher files changed (`tools/flasher/**`) in a release:
 - Rebuild flasher installers from current source (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
-- Before any flasher build (local or CI), run `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` are aligned to `VERSION` (prevents stale `0.5.0`/`0.5.5` metadata leakage).
+- Before any flasher build (local or CI), run `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` are aligned to `VERSION` (prevents stale metadata leakage).
+- Fail fast on drift with `python3 tools/flasher/sync_version.py --check` (this also checks `package-lock.json` when present).
 - Verify local macOS `.app` outputs with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2` before zipping.
 - Update `lora-rs-firmware` README with:
   - brief flasher summary (what it is),

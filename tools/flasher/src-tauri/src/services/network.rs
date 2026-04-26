@@ -157,6 +157,13 @@ fn parse_login_identity(body: &str) -> String {
         .unwrap_or_default()
 }
 
+fn looks_like_lrs_login(body: &str) -> bool {
+    body.contains("LRS Device Console Login")
+        || body.contains("LRS Console")
+        || body.contains("lrs-device-id")
+        || body.contains("/api/login")
+}
+
 fn cookie_from_headers(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get("set-cookie")?.to_str().ok()?;
     raw.split(';')
@@ -228,21 +235,37 @@ pub async fn probe_device(client: reqwest::Client, ip: String) -> Option<Network
     }
     let body = login_response.text().await.ok()?;
     let identity = parse_login_identity(&body);
-    if !identity.starts_with("lrs-") {
+    if !identity.starts_with("lrs-") && !looks_like_lrs_login(&body) {
         return None;
     }
 
     let chip_id = chip_from_identity(&identity);
-    let derived_password = derive_ota_password(&chip_id);
+    let derived_password = if chip_id.is_empty() {
+        String::new()
+    } else {
+        derive_ota_password(&chip_id)
+    };
     let mut device = NetworkDevice {
         ip,
-        identity,
+        identity: if identity.is_empty() {
+            "LRS device".into()
+        } else {
+            identity
+        },
         chip_id,
         derived_password: derived_password.clone(),
         auth_status: "auth_needed".into(),
-        message: "Device found; admin password needed for version and OTA.".into(),
+        message: if derived_password.is_empty() {
+            "Older LRS login page found; enter admin password for version and OTA.".into()
+        } else {
+            "Device found; admin password needed for version and OTA.".into()
+        },
         ..Default::default()
     };
+
+    if derived_password.is_empty() {
+        return Some(device);
+    }
 
     match login(&client, &device.ip, &derived_password).await {
         Ok(cookie) => match fetch_status_static(&client, &device.ip, &cookie).await {

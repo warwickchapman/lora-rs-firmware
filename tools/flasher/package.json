@@ -4,6 +4,8 @@
   "version": "0.6.5-dev",
   "type": "module",
   "scripts": {
+    "sync:version": "python3 sync_version.py",
+    "check:version": "python3 sync_version.py --check",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",

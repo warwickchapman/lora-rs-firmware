@@ -11,6 +11,9 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ### Changed
 - Flasher network discovery uses local adapter IPv4 netmasks to derive scan ranges and direct-IP HTTP probing only; it does not use mDNS or `lrs-*.local` hostnames.
+- Flasher LAN scans now report progress, list devices as they are found, and accept older LRS login pages even when device identity metadata is unavailable, showing those devices as password-required instead of hiding them.
+- Flasher Network mode now keeps per-host Web UI, password copy, OTA, and UDP actions inside each discovered-device row, with derived-password and build-detail hints shown inline and expanded UDP logs retaining copy/open/stop controls.
+- Flasher now remembers successfully tested non-factory Network admin passwords per device and uses them ahead of derived factory passwords on future scans; Serial device details now label the derived value as `Factory password`.
 
 ## [0.6.4-alpha] - 2026-04-24
 

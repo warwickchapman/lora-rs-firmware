@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { exit } from '@tauri-apps/plugin-process';
@@ -15,6 +15,17 @@ const appVersion = ref('');
 const isFullscreen = ref(true);
 const isTogglingWindowMode = ref(false);
 const WINDOW_MODE_KEY = 'flasher.windowMode';
+const MODE_STORAGE_KEY = 'thanda-flasher-active-mode';
+
+function initialActiveMode(): 'serial' | 'network' {
+  try {
+    return localStorage.getItem(MODE_STORAGE_KEY) === 'network' ? 'network' : 'serial';
+  } catch {
+    return 'serial';
+  }
+}
+
+const activeMode = ref<'serial' | 'network'>(initialActiveMode());
 
 async function fetchVersion() {
   try {
@@ -144,6 +155,14 @@ onMounted(async () => {
   await syncWindowMode();
   saveFullscreenPreference(isFullscreen.value);
 });
+
+watch(activeMode, (mode) => {
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage failures; the mode toggle itself should stay responsive.
+  }
+});
 </script>
 
 <template>
@@ -156,6 +175,20 @@ onMounted(async () => {
         </h1>
         <p class="text-slate-400 text-sm mt-1">{{ appVersion }}</p>
       </div>
+      <div class="absolute left-1/2 -translate-x-1/2 top-6 w-full max-w-xs rounded-md border border-slate-700 bg-slate-900/60 p-1">
+        <button
+          @click="activeMode = 'serial'"
+          :class="['m-0 w-1/2 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+        >
+          Serial
+        </button>
+        <button
+          @click="activeMode = 'network'"
+          :class="['m-0 w-1/2 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+        >
+          Network
+        </button>
+      </div>
       <div class="flex gap-4">
         <div :class="['glass-card px-3 py-2 flex items-center gap-2 text-sm transition-all', 
                      status.ready ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-red-500/10 border-red-500/20']"
@@ -165,8 +198,9 @@ onMounted(async () => {
         <button
           @click="toggleWindowMode"
           :disabled="isTogglingWindowMode"
-          class="glass-card px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center gap-2"
+          class="glass-card p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center justify-center disabled:opacity-60"
           :title="isFullscreen ? 'Switch to normal windowed mode' : 'Switch to full screen mode'"
+          :aria-label="isFullscreen ? 'Switch to normal windowed mode' : 'Switch to full screen mode'"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path v-if="isFullscreen" d="M8 3H5a2 2 0 0 0-2 2v3"></path>
@@ -178,17 +212,23 @@ onMounted(async () => {
             <path v-if="!isFullscreen" d="M21 3l-7 7"></path>
             <path v-if="!isFullscreen" d="M3 21l7-7"></path>
           </svg>
-          {{ isFullscreen ? 'Windowed mode' : 'Full screen' }}
         </button>
-        <button @click="exit()" class="glass-card px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-          Exit
+        <button
+          @click="exit()"
+          class="glass-card p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center justify-center"
+          title="Close"
+          aria-label="Close"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6 6 18"></path>
+            <path d="m6 6 12 12"></path>
+          </svg>
         </button>
       </div>
     </header>
 
     <main class="max-w-7xl w-full mx-auto flex-1 min-h-0">
-      <Flasher />
+      <Flasher v-model:active-mode="activeMode" />
     </main>
   </div>
 </template>

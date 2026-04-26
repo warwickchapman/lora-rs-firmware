@@ -48,6 +48,59 @@ def update_cargo_toml(path: Path, version: str) -> None:
     path.write_text(text_new, encoding="utf-8")
 
 
+def read_package_json_version(path: Path) -> str:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return str(data.get("version", "")).strip()
+
+
+def read_tauri_conf_version(path: Path) -> str:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return str(data.get("version", "")).strip()
+
+
+def read_cargo_toml_version(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version = "(.*)"$', text)
+    if not match:
+        raise RuntimeError(f"Failed to find version field in {path}")
+    return match.group(1).strip()
+
+
+def read_package_lock_version(path: Path) -> str:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return str(data.get("version", "")).strip()
+
+
+def check_versions(repo_root: Path, release_version: str, package_version: str) -> int:
+    flasher_root = repo_root / "tools" / "flasher"
+    checks = [
+        ("package.json", read_package_json_version(flasher_root / "package.json"), release_version),
+        ("tauri.conf.json", read_tauri_conf_version(flasher_root / "src-tauri" / "tauri.conf.json"), package_version),
+        ("Cargo.toml", read_cargo_toml_version(flasher_root / "src-tauri" / "Cargo.toml"), package_version),
+    ]
+
+    lock_path = flasher_root / "package-lock.json"
+    if lock_path.exists():
+        checks.append(("package-lock.json", read_package_lock_version(lock_path), release_version))
+
+    mismatches = [(name, current, expected) for (name, current, expected) in checks if current != expected]
+    if not mismatches:
+        print(
+            "Version sync check passed: "
+            f"release={release_version}, package={package_version}, "
+            f"lockfile_checked={'yes' if lock_path.exists() else 'no'}"
+        )
+        return 0
+
+    print("Version sync check failed. Mismatches:")
+    for name, current, expected in mismatches:
+        print(f"  - {name}: current={current or '<empty>'} expected={expected}")
+    print("Fix with: python3 tools/flasher/sync_version.py")
+    if lock_path.exists():
+        print("Then refresh lockfile: cd tools/flasher && npm install")
+    return 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sync flasher version fields from VERSION.")
     ap.add_argument(
@@ -60,6 +113,11 @@ def main() -> int:
         action="store_true",
         help="Use numeric-only package version for tauri/Cargo (MSI requirement).",
     )
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="Check versions only (no writes). Exit non-zero when drift is detected.",
+    )
     args = ap.parse_args()
 
     repo_root = (
@@ -71,6 +129,9 @@ def main() -> int:
 
     release_version = read_repo_version(repo_root)
     package_version = release_version.split("-", 1)[0] if args.windows_msi_safe else release_version
+
+    if args.check:
+        return check_versions(repo_root, release_version, package_version)
 
     update_package_json(flasher_root / "package.json", release_version)
     update_tauri_conf(flasher_root / "src-tauri" / "tauri.conf.json", package_version)

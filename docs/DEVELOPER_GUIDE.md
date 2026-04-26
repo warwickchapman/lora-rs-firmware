@@ -259,6 +259,7 @@ Release execution guardrails:
 Conditional checklist: when `tools/flasher/**` changed in the release:
 - Rebuild flasher installers from current source for all supported targets (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
 - Ensure flasher metadata is synchronized first via `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` match root `VERSION`.
+- Run `python3 tools/flasher/sync_version.py --check` to fail fast if any metadata (or `package-lock.json`, when present) drifts from `VERSION`.
 - Verify local macOS app bundles pass `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2` before zipping.
 - Update the public firmware repository (`lora-rs-firmware`) README with:
   - A brief "what the desktop flasher is" summary.
