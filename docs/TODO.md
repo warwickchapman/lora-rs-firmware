@@ -1,5 +1,11 @@
 # TODO
 
+## Done
+- Build-time log level override support (`LRS_LOG_LEVEL_DEFAULT`) is implemented and usable from `platformio.ini` build flags.
+- Log level numeric mapping for `LRS_LOG_LEVEL_DEFAULT` (`0=ERROR`, `1=WARN`, `2=INFO`, `3=DEBUG`) is implemented.
+- MQTT dependency guard is implemented: `mqtt_control_enabled` requires `mqtt_client_enabled` across UI and API validation paths.
+- Security review reference report captured at `docs/internal/security-review-2026-04-26.md`.
+
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
 - Add UI and payload mapping for tank level model(s).
@@ -16,6 +22,88 @@
 - Introduce explicit protocol version field in packet.
 - Add backward/compatibility migration policy for future payload changes.
 
+## Radio Configuration Change Protocol
+- Implement a safe gateway-controlled staged protocol for changing shared LoRa radio parameters across paired devices.
+- Shared radio parameters that must remain coordinated across participating radios:
+  - frequency
+  - spreading factor
+  - bandwidth
+  - coding rate
+  - explicit/implicit header mode
+  - CRC setting
+  - preamble assumptions
+- Keep TX power gateway-managed as part of the same workflow even though it does not affect packet decode compatibility.
+- During normal paired operation, prevent manual local changes to shared radio parameters on remote units.
+- Allow local/manual override only in factory mode, unpaired mode, recovery mode, or explicit installer/service mode.
+- Implement staged flow:
+  - `PREPARE` on current radio config
+  - `COMMIT` on current radio config
+  - `VERIFY` on new radio config
+  - `CONFIRM` on new radio config
+- `PREPARE_RADIO_CONFIG` must carry:
+  - `tx_id`
+  - `new_frequency`
+  - `new_spreading_factor`
+  - `new_bandwidth`
+  - `new_coding_rate`
+  - `new_tx_power`
+  - `new_preamble`
+  - `new_crc_mode`
+  - `new_header_mode`
+- Remote behavior on `PREPARE`:
+  - validate requested config
+  - store pending config in RAM or temporary storage only
+  - do not apply yet
+  - ACK readiness on the current working config
+- Gateway rule: if any required remote does not ACK `PREPARE`, do not proceed to global `COMMIT`.
+- `COMMIT_RADIO_CONFIG` must carry:
+  - `tx_id`
+  - `switch_at_time`
+  - `confirm_timeout_s`
+- Remote behavior on `COMMIT`:
+  - ACK commit received on the current working config
+  - switch to pending config at `switch_at_time`
+  - do not save permanently yet
+  - start confirm timeout after switching
+- Gateway behavior on `VERIFY`:
+  - switch to new radio config at `switch_at_time`
+  - poll each remote on the new config
+  - verify reply from each required remote on the new config
+- Recovery behavior for missing remotes after switch:
+  - try missing remote on the new config
+  - if still no reply, switch back to old config and try the missing remote there
+  - re-run `PREPARE` / `COMMIT` individually for that remote
+- `CONFIRM_RADIO_CONFIG` behavior:
+  - gateway sends `CONFIRM` only after required remotes are verified on the new config
+  - remotes save new config permanently to flash
+  - remotes clear pending config
+  - remotes treat the new config as known-good
+- Auto-revert safety rule:
+  - if a remote switches to pending config but does not receive `CONFIRM` before timeout, revert to the previous known-good config
+- Suggested confirm timeout ranges:
+  - `SF9/SF10`: `20-30 s`
+  - `SF11`: `45-60 s`
+  - `SF12`: `60-90 s`
+- Boot safety rule:
+  - if pending radio config exists but was not confirmed, discard pending config and boot using previous known-good config
+- Persistence rule:
+  - never permanently save a new radio config until `CONFIRM` is received on the new config
+- UI/configuration rule:
+  - disable direct manual editing of shared radio parameters on paired remote units by default
+  - show shared radio parameters as gateway-managed/read-only on remotes during normal operation
+  - gateway UI may allow changes, but must apply them through this staged protocol only
+- Advanced override mode:
+  - protect with password or installer/service access
+  - allow manual editing of frequency, spreading factor, bandwidth, coding rate, and header/CRC if exposed
+  - warn clearly that changing these settings may break communication with the gateway
+  - on override, apply immediately, mark device `out-of-sync with gateway`, and attempt reconnect using the new settings
+  - provide recovery options: revert to last known-good config, or revert to factory defaults (for example `SF7`)
+  - gateway should flag unreachable remotes after override as `Radio config mismatch / device unreachable`
+- Design intent:
+  - normal users get safe, coordinated changes via gateway only
+  - advanced users retain a controlled manual recovery path
+  - prevent permanent RF mismatch bricking while preserving field recovery options
+
 ## Security Review Actions (2026-04-26)
 - Immediate containment: rotate credentials for devices whose OTA/admin auth values were committed, remove real OTA secrets from `platformio.ini`, and replace tracked per-device OTA environments with placeholder templates plus an ignored local operator profile.
 - Firmware credential redesign: replace deterministic chip-ID-derived AP/admin credentials with per-device random factory credentials, record them in controlled factory outputs, and force admin password rotation during first commissioning.
@@ -26,7 +114,6 @@
 - Secret export/support handling: make normal config export redacted by default, add an explicit include-secrets path if needed, and document how to handle stickers, CSVs, screenshots, flasher logs, and support bundles.
 - Flasher hardening: add a restrictive Tauri CSP, keep shell permissions limited to the esptool sidecar, and avoid remote UI assets.
 - LoRa operational risk: document jamming/interference limits, required link-margin checks, and intentional RX fail-safe selection for each installation.
-- Reference report: `docs/internal/security-review-2026-04-26.md`.
 
 ## Provisioning
 - Add pair-mode provisioning flow (first unit TX, second unit RX, linked output records).
@@ -38,8 +125,6 @@
 ## Flasher
 
 ## Logging / Observability
-- Build-time log level override (`LRS_LOG_LEVEL_DEFAULT`): set in `platformio.ini` via `build_flags` (e.g. `-DLRS_LOG_LEVEL_DEFAULT=3`) to change the default runtime verbosity for a build.
-- Log level numeric values for `LRS_LOG_LEVEL_DEFAULT`: `0=ERROR`, `1=WARN`, `2=INFO` (normal default), `3=DEBUG`.
 - Use `DEBUG` temporarily for diagnostics (startup watchdog investigation, provisioning flow tracing, API polling behavior); revert to `INFO` after testing to reduce log volume/serial overhead.
 - Add lightweight crash breadcrumbs for ESP8266 Web UI instability: keep a documented exception-decoding workflow for bench/support use, persist last-reset context (`reset reason`, `heap_free`, `max_free_block`, and active web feature/path if known), and avoid building a heavyweight always-on crash-report pipeline unless later evidence shows it is needed.
 - Phase 1 (minimal patch, ESP8266-safe): keep structured logging focused on diagnosability with low overhead: levels (`ERROR/WARN/INFO/DEBUG`), categories (`SYS/WIFI/NTP/LORA/SENSOR/WEB/API/FS`), redaction helpers, web/API request summaries (status + duration), and heap diagnostics on high-risk endpoints (`/api/status`, `/api/fleet`, `/api/provisioning/status`); keep default level at `INFO`; keep polling endpoints (`/api/status`, `/api/session`) at `DEBUG`.
@@ -48,13 +133,16 @@
 
 ## MQTT / Heap Discipline
 - Measure fragmentation impact of recent MQTT topic-churn reduction using paired before/after probes (`heap_free`, `max_free_block`, `heap_frag_percent`) around `applyConfig()`, MQTT enable/disable, reconnect, and steady-state publish loops; treat `max_free_block` as the primary success metric.
-- In the Web UI, only enable the `MQTT control enabled` checkbox when `MQTT client enabled` is ticked; keep the dependency obvious in the form state instead of relying on save-time validation alone.
 - Deferred optimization (only if needed): tighten MQTT topic buffer sizes, reduce persistent topic buffers, and move rarely used topic buffers to stack/cold helpers to claw back static RAM **only after** confirming the publish-path refactor improves `max_free_block` stability.
 
 ## Fleet (Fleet-Wide Tools / Actions)
 - Broadcast WiFi provisioning (current feature; keep as anchor item).
 - Add fleet WiFi provisioning acknowledgements/status tracking (LoRa per-device ACK + optional WiFi join result) so UI can show `sent/acked/connected/failed` instead of broadcast-send-only feedback.
 - Add fleet-wide remote factory reset for `selected` or `all` devices, with `keep fleet key` option.
+- Add remote unit `Identify` action so a gateway can request a specific remote to flash its LED for physical identification.
+- Expose `Identify` from `Fleet > Devices` and via MQTT command path.
+- Use a deliberately distinctive identify pattern that does not resemble normal link/signal indication. Suggested pattern: three rapid flashes, one long flash, pause, repeat for 10-15 seconds.
+- Verify current LED behavior and reserve `Identify` as a higher-priority temporary LED mode so it remains visually distinct from normal RSSI / link-state indication.
 - Add staged fleet key rotation workflow.
 - Add broadcast poll / discovery refresh.
 - Add fleet-wide schedule defaults push.
