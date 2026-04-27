@@ -264,6 +264,7 @@ void WebConsole::handleSetupCommissioningApi() {
   filter["input_control_paired_lora_enabled"] = true;
   filter["ap_always_on"] = true;
   filter["wifi_sta_ssid"] = true;
+  filter["wifi_selected_ssid"] = true;
   filter["wifi_sta_password"] = true;
   filter["mqtt_controller_addresses"] = true;
 
@@ -342,16 +343,17 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
 
   bool wifiConfigured = false;
-  const char *requestedSsid = doc["wifi_sta_ssid"] | nullptr;
-  if (requestedSsid != nullptr) {
-    String ssid = String(requestedSsid);
-    ssid.trim();
-    if (ssid.length() > 0) {
-      cfg.wifi_sta_ssid = ssid;
-      cfg.wifi_sta_password = String(doc["wifi_sta_password"] | "");
-      cfg.wifi_admin_enabled = true;
-      wifiConfigured = true;
-    }
+  String requestedSsid = String(doc["wifi_sta_ssid"] | "");
+  requestedSsid.trim();
+  if (requestedSsid.length() == 0) {
+    requestedSsid = String(doc["wifi_selected_ssid"] | "");
+    requestedSsid.trim();
+  }
+  if (requestedSsid.length() > 0) {
+    cfg.wifi_sta_ssid = requestedSsid;
+    cfg.wifi_sta_password = String(doc["wifi_sta_password"] | "");
+    cfg.wifi_admin_enabled = true;
+    wifiConfigured = true;
   }
   cfg.mqtt_controller_addresses =
       doc["mqtt_controller_addresses"] | cfg.mqtt_controller_addresses.c_str();

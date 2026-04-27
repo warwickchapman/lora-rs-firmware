@@ -185,6 +185,7 @@ const roleEl=document.getElementById('role');
 const installTypeEl=document.getElementById('install_type');
 const fleetKeyEl=document.getElementById('fleet');
 let setupWifiScanInFlight=false;
+let selectedSetupWifiSsid='';
 const READABLE_KEY_CONSONANTS='bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS='aeiou';
 function setBusy(b){ saveBtn.disabled=b; skipBtn.disabled=b; }
@@ -211,6 +212,16 @@ function wifiBarsHtml(rssi){
   bars += `<i style="display:inline-block;width:3px;height:${h}px;margin-right:2px;border-radius:2px;background:${on?'#4ade80':'rgba(255,255,255,.22)'}"></i>`;
  }
  return `<span aria-hidden="true" style="display:inline-flex;align-items:flex-end;vertical-align:-2px;margin-right:6px;height:14px">${bars}</span>`;
+}
+function setSetupWifiSsid(ssid){
+ selectedSetupWifiSsid = String(ssid || '').trim();
+ const ssidEl=document.getElementById('wifi_sta_ssid');
+ if(ssidEl) ssidEl.value=selectedSetupWifiSsid;
+}
+function currentSetupWifiSsid(){
+ const ssidEl=document.getElementById('wifi_sta_ssid');
+ const visible = ssidEl ? String(ssidEl.value || '').trim() : '';
+ return visible || selectedSetupWifiSsid;
 }
 async function scanSetupWifi(){
  if(setupWifiScanInFlight || !setupWifiScanHost) return;
@@ -243,9 +254,8 @@ async function scanSetupWifi(){
   setupWifiScanHost.querySelectorAll('button[data-ssid]').forEach(btn=>{
    btn.addEventListener('click',()=>{
     const ssid=btn.getAttribute('data-ssid') || '';
-    const ssidEl=document.getElementById('wifi_sta_ssid');
     const passEl=document.getElementById('wifi_sta_password');
-    if(ssidEl) ssidEl.value=ssid;
+    setSetupWifiSsid(ssid);
     if(passEl){ passEl.focus(); passEl.select(); }
    });
   });
@@ -333,6 +343,11 @@ document.getElementById('mqtt_control_enabled').addEventListener('change', ()=>{
  const control = document.getElementById('mqtt_control_enabled').checked;
  if(control){ document.getElementById('mqtt_client_enabled').checked = true; }
 });
+const setupSsidEl=document.getElementById('wifi_sta_ssid');
+if(setupSsidEl){
+ setupSsidEl.addEventListener('input',()=>{ selectedSetupWifiSsid=String(setupSsidEl.value||'').trim(); });
+ setupSsidEl.addEventListener('change',()=>{ selectedSetupWifiSsid=String(setupSsidEl.value||'').trim(); });
+}
 async function saveCommissioning(){
  const fleetKey = String(document.getElementById('fleet').value || '').trim();
  if(fleetKey.length < 16){ showMsg('Fleet key must be at least 16 characters.', false); return; }
@@ -345,13 +360,14 @@ async function saveCommissioning(){
   mqtt_control_enabled: !!document.getElementById('mqtt_control_enabled').checked,
   input_control_paired_lora_enabled: !!document.getElementById('input_control_paired_lora_enabled').checked,
  };
- const wifiSsid = String(document.getElementById('wifi_sta_ssid').value || '').trim();
+ const wifiSsid = currentSetupWifiSsid();
  const wifiPass = String(document.getElementById('wifi_sta_password').value || '');
  if (!wifiSsid.length && wifiPass.length) {
   showMsg('Select or enter a WiFi SSID before saving the WiFi password.', false);
   return;
  }
  body.wifi_sta_ssid = wifiSsid;
+ body.wifi_selected_ssid = selectedSetupWifiSsid;
  body.wifi_sta_password = wifiSsid.length ? wifiPass : '';
  if(body.mqtt_control_enabled && !body.mqtt_client_enabled){
   showMsg('MQTT control requires MQTT client enabled.', false);
