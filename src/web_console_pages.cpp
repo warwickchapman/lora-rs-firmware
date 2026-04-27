@@ -372,8 +372,6 @@ void WebConsole::handleSetupCommissioningApi() {
                               (cfg.wifi_sta_password != prevStaPassword) ||
                               (cfg.lan_hostname != prevLanHost) ||
                               (cfg.ap_always_on != prevApAlwaysOn);
-  if (on_apply_)
-    on_apply_(networkChanged, false);
   JsonDocument out;
   out["ok"] = true;
   out["wifi_configured"] = wifiConfigured || (cfg.wifi_sta_ssid.length() > 0);
@@ -382,6 +380,9 @@ void WebConsole::handleSetupCommissioningApi() {
   markResponseStatus(200);
   server_.send(200, "application/json", "");
   serializeJson(out, server_.client());
+  delay(80);
+  if (on_apply_)
+    on_apply_(networkChanged, false);
   LRS_LOGI(API,
            "event=commissioning_setup_saved mode=%s role=%s mqtt_client=%u "
            "mqtt_control=%u input_control=%u wifi_configured=%u ssid_len=%u",
