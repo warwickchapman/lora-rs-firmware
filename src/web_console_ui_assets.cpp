@@ -42,7 +42,7 @@ body.light .theme-btn:hover{background:rgba(255,255,255,0.6)}
 const char kLoginHtml_Part3[] PROGMEM = R"HTML(</div>
 <h1>LRS Device Console Login</h1>
 <p id="hint">Use the device admin password. Username is not required.</p>
-<form id="loginForm" autocomplete="on">
+<form id="loginForm" method="post" action="/api/login" autocomplete="on">
 <input id="uname" name="username" type="text" autocomplete="username" value="admin" aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" />
 <label for="pw">Admin password</label>
 <div class="pass-field"><input id="pw" name="password" type="password" autocomplete="current-password" placeholder="Enter admin password" /><button class="pass-toggle" type="button" onclick="togglePasswordField('pw',this)" title="Show password" aria-label="Show password">👁</button></div>
@@ -52,6 +52,7 @@ const char kLoginHtml_Part3[] PROGMEM = R"HTML(</div>
 </div>
 <script>
 const q=new URLSearchParams(location.search);
+if(q.has('username') || q.has('password')) history.replaceState(null,'','/login');
 if(q.get('expired')==='1') document.getElementById('hint').innerText='Session expired. Please login again.';
 if(q.get('logged_out')==='1') document.getElementById('hint').innerText='You have been logged out.';
 const btn=document.getElementById('btn');
