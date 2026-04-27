@@ -194,22 +194,24 @@ jobs:
           TRIPLE="${{ matrix.target_triple }}"
           
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-win64.zip"
-            curl -L -o esptool.zip "$URL"
-            unzip esptool.zip -d bin_tmp
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-windows-amd64.zip"
+            curl -fL -o esptool.zip "$URL"
+            unzip -q esptool.zip -d bin_tmp
             find bin_tmp -name esptool.exe -exec cp {} "esptool-${TRIPLE}.exe" \;
           elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos.zip"
-            curl -L -o esptool.zip "$URL"
-            unzip esptool.zip -d bin_tmp
+            MAC_ARCH="amd64"
+            if [[ "$TRIPLE" == "aarch64-apple-darwin" ]]; then MAC_ARCH="arm64"; fi
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-macos-${MAC_ARCH}.tar.gz"
+            curl -fL -o esptool.tar.gz "$URL"
+            tar -xzf esptool.tar.gz -C bin_tmp
             find bin_tmp -name esptool -type f -exec cp {} "esptool-${TRIPLE}" \;
           else
-            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.zip"
-            curl -L -o esptool.zip "$URL"
-            unzip esptool.zip -d bin_tmp
+            URL="https://github.com/espressif/esptool/releases/download/${VERSION_ESP}/esptool-${VERSION_ESP}-linux-amd64.tar.gz"
+            curl -fL -o esptool.tar.gz "$URL"
+            tar -xzf esptool.tar.gz -C bin_tmp
             find bin_tmp -name esptool -type f -exec cp {} "esptool-${TRIPLE}" \;
           fi
-          rm -rf bin_tmp esptool.zip
+          rm -rf bin_tmp esptool.zip esptool.tar.gz
           chmod +x esptool*
 
       - name: Build Tauri App
