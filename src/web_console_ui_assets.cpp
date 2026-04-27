@@ -165,7 +165,7 @@ button.alt{background:rgba(255,255,255,.1)}
 <div id="wifi_scan_list_setup" class="wifi-list" style="display:none"></div>
 <div class="grid" style="margin-top:10px">
 <div><label for="wifi_sta_ssid">WiFi SSID (optional)</label><input id="wifi_sta_ssid" /></div>
-<div><label for="wifi_sta_password">WiFi password (optional)</label><input id="wifi_sta_password" type="password" /></div>
+<div><label for="wifi_sta_password">WiFi password (optional)</label><input id="wifi_sta_password" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" /></div>
 </div>
 </div>
 
