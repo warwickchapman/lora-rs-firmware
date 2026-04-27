@@ -10,7 +10,7 @@
 using namespace webconsole_internal;
 
 void WebConsole::handleWifiScan() {
-  if (!requireAuth(true)) return;
+  if (!needsFleetSetupPrompt() && !requireAuth(true)) return;
   const int scanState = WiFi.scanComplete();
   if (scanState == WIFI_SCAN_RUNNING) {
     sendTracked(200, "application/json", "{\"ok\":true,\"status\":\"scanning\"}");
@@ -49,8 +49,8 @@ void WebConsole::handleWifiScan() {
 }
 
 void WebConsole::handleTestSta() {
-  if (!requireAuth(true)) return;
   if (!needsFleetSetupPrompt()) {
+    if (!requireAuth(true)) return;
     server_.send(403, "application/json", "{\"ok\":false,\"error\":\"setup_only\"}");
     return;
   }

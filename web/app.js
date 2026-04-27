@@ -45,6 +45,7 @@ let provUiSessionActive = false;
 let provUiSessionState = 'idle';
 let settingsPageLoaded = false;
 let settingsPageLoadInFlight = false;
+let settingsPayloadReady = false;
 let wifiScanInFlight = false;
 let wifiProvisionResultTimer = 0;
 let statusStaticCache = null;
@@ -541,6 +542,7 @@ function showSettingsTab(tab) {
     if (btn) btn.classList.toggle('active', p === target);
   });
   if (target === 'system') { showSystemTab(activeSystemTab); }
+  if (target === 'network') { closeStatusLiveSse(); }
   updateMobileActionBar();
 }
 function showSystemTab(tab) {
@@ -1012,7 +1014,7 @@ function showPage(page) {
     if (sec) sec.classList.toggle('active', p === activePage);
     if (nav) nav.classList.toggle('active', p === activePage);
   });
-  if (activePage === 'settings') { showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(() => { }); scanWifi().catch(() => { }); }
+  if (activePage === 'settings') { closeStatusLiveSse(); showSettingsTab(activeSettingsTab); loadSettingsPageData(false).catch(() => { }); }
   if (activePage === 'automations') { loadAutomationsPageData(false).catch(() => { }); }
   if (activePage === 'status') {
     statusStaticCache = null;
@@ -1233,6 +1235,9 @@ function closeStatusLiveSse() {
   refreshStatusLiveNotice();
 }
 function shouldUseStatusLiveSse() {
+  if (activePage === 'settings') {
+    return false;
+  }
   if (activePage === 'fleet' && activeFleetTab === 'manage' && activeFleetManageTab === 'lora' && isProvisioningUiBusy()) {
     return false;
   }
@@ -1677,10 +1682,19 @@ async function loadSettingsPageData(force) {
   settingsPageLoadInFlight = true;
   try {
     const s = await apiJson('/api/settings', { silent: true, timeoutMs: 6000 });
-    if (!s) return;
+    if (!s || s.ok === false) {
+      settingsPayloadReady = false;
+      const reason = s && s.error === 'low_heap' ? 'Device is low on heap. Wait a few seconds and reopen Settings.' : 'Settings could not be loaded.';
+      showToast(reason, true);
+      return;
+    }
+    settingsPayloadReady = true;
     lastRoleIsTx = !!s.role_tx;
     lastMode = String(s.mode || 'paired').toLowerCase();
     applyFleetTabVisibility();
+    if (!s.lan_hostname && s.computed_lan_hostname) {
+      s.lan_hostname = s.computed_lan_hostname;
+    }
     Object.keys(s).forEach(k => {
       const el = document.getElementById(k);
       if (!el) return;
@@ -1804,6 +1818,10 @@ async function save() {
 }
 async function postSettings(body, options) {
   const opts = Object.assign({ skipReload: false }, options || {});
+  if (!settingsPayloadReady) {
+    showToast('Settings are still loading. Save blocked to protect current device config.', true);
+    return false;
+  }
   const btns = [...document.querySelectorAll('button')];
   btns.forEach(b => b.disabled = true);
   showToast('Saving...');
@@ -1894,7 +1912,8 @@ function collectNetworkBody() {
   body.ap_always_on = document.getElementById('ap_always_on').checked;
   body.wifi_sleep_enabled = document.getElementById('wifi_sleep_enabled').checked;
   body.wifi_static_ip_enabled = document.getElementById('wifi_static_ip_enabled').checked;
-  body.wifi_admin_enabled = document.getElementById('wifi_admin_enabled').checked;
+  const wifiAdminEl = document.getElementById('wifi_admin_enabled');
+  if (wifiAdminEl) { body.wifi_admin_enabled = wifiAdminEl.checked; }
   body.wifi_tx_power_dbm = Number(document.getElementById('wifi_tx_power_dbm').value || 0);
   body.wifi_channel_override = Math.floor(Number(document.getElementById('wifi_channel_override').value || 0));
   return body;
@@ -1937,6 +1956,10 @@ async function saveLora() {
   await postSettings(body);
 }
 async function saveNetwork() {
+  if (!settingsPayloadReady) {
+    showToast('Settings are still loading. Save blocked to protect current WiFi config.', true);
+    return;
+  }
   const body = collectNetworkBody();
   await postSettings(body);
 }

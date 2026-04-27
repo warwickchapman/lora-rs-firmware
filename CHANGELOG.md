@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+### Fixed
+- Settings > Wi-Fi no longer allows saving a half-loaded form after a low-heap settings fetch failure, preventing accidental `wifi_admin_enabled=false` saves.
+- Settings > Wi-Fi now pauses live status SSE and avoids automatic Wi-Fi scanning on page open to reduce ESP8266 heap pressure while loading the settings form.
+- Wi-Fi scan and commissioning save/skip endpoints remain usable during first-use setup even when the captive browser has no active web-console session.
+- Empty LAN hostname fields are populated with the computed `lrs-<chipid>` hostname so OTA/network identity matches the header.
+- Wi-Fi admin shutdown now marks the Wi-Fi stack disabled after turning the interface off, avoiding repeated `wifi_admin_disabled` log spam.
+
 ## [0.7.0-beta] - 2026-04-27
 
 ### Changed

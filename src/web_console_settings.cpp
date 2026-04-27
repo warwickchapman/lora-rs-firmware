@@ -78,7 +78,7 @@ void WebConsole::handleGetSettings() {
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = "";
   doc["wifi_sta_password_set"] = (cfg.wifi_sta_password.length() > 0);
-  doc["lan_hostname"] = cfg.lan_hostname;
+  doc["lan_hostname"] = cfg.lan_hostname.length() > 0 ? cfg.lan_hostname : config_->defaultLanHostname();
   doc["computed_lan_hostname"] = config_->defaultLanHostname();
   doc["fleet_passphrase"] = "";
   doc["fleet_passphrase_set"] = (cfg.fleet_passphrase.length() > 0);

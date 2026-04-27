@@ -190,7 +190,7 @@ void WebConsole::handleLoginApi() {
 }
 
 void WebConsole::handleFleetSetupApi() {
-  if (!requireAuth(true))
+  if (!needsFleetSetupPrompt() && !requireAuth(true))
     return;
 
   JsonDocument doc;
@@ -251,7 +251,7 @@ void WebConsole::handleFleetSetupApi() {
 }
 
 void WebConsole::handleSetupCommissioningApi() {
-  if (!requireAuth(true))
+  if (!needsFleetSetupPrompt() && !requireAuth(true))
     return;
 
   JsonDocument doc;

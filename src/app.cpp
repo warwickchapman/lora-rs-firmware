@@ -844,6 +844,7 @@ void App::applyWifiRuntimeSettings() {
 }
 
 void App::stopWifiForAdminDisable() {
+  wifi_stack_disabled_ = true;
   WiFi.disconnect(true);
   delay(50);
   WiFi.softAPdisconnect(true);
