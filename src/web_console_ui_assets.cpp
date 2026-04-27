@@ -380,6 +380,10 @@ async function saveCommissioning(){
   const out=await res.json().catch(()=>({}));
   if(!res.ok){ showMsg(out.error || 'Save failed.', false); return; }
   if(wifiSsid.length && !out.wifi_configured){ showMsg('Commissioning saved, but WiFi credentials were not stored.', false); return; }
+  if(wifiSsid.length){
+   showMsg('Commissioning saved. WiFi is connecting; wait 20-30 seconds, then open the LAN address or refresh this page.', true);
+   return;
+  }
   showMsg('Commissioning saved.', true);
   location.href='/';
  }catch(e){

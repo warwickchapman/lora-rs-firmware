@@ -11,6 +11,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Commissioning now refuses to save a Wi-Fi password without an SSID and reports whether Wi-Fi credentials were actually stored.
 - Commissioning now sends its save response before applying Wi-Fi/network restarts so the captive browser does not misread a successful Wi-Fi save as failed.
 - Commissioning Wi-Fi selection now keeps a separate selected-SSID state so mobile captive browsers cannot visually show an SSID while posting an empty one.
+- Commissioning no longer redirects straight into the full Status UI after saving Wi-Fi credentials, avoiding heap pressure while STA association is in progress.
 - Settings > Wi-Fi no longer allows saving a half-loaded form after a low-heap settings fetch failure, preventing accidental `wifi_admin_enabled=false` saves.
 - Settings > Wi-Fi now pauses live status SSE and avoids automatic Wi-Fi scanning on page open to reduce ESP8266 heap pressure while loading the settings form.
 - Wi-Fi scan and commissioning save/skip endpoints remain usable during first-use setup even when the captive browser has no active web-console session.
