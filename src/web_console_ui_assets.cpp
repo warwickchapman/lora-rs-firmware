@@ -164,7 +164,7 @@ button.alt{background:rgba(255,255,255,.1)}
 <div class="row" style="margin-top:6px"><button id="wifiScanBtn" class="alt" type="button" onclick="scanSetupWifi()">Scan</button></div>
 <div id="wifi_scan_list_setup" class="wifi-list" style="display:none"></div>
 <div class="grid" style="margin-top:10px">
-<div><label for="wifi_sta_ssid">WiFi SSID (optional)</label><input id="wifi_sta_ssid" /></div>
+<div><label for="wifi_sta_ssid">WiFi SSID (optional)</label><input id="wifi_sta_ssid" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" /></div>
 <div><label for="wifi_sta_password">WiFi password (optional)</label><input id="wifi_sta_password" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" /></div>
 </div>
 </div>
@@ -347,10 +347,12 @@ async function saveCommissioning(){
  };
  const wifiSsid = String(document.getElementById('wifi_sta_ssid').value || '').trim();
  const wifiPass = String(document.getElementById('wifi_sta_password').value || '');
- if (wifiSsid.length) {
-  body.wifi_sta_ssid = wifiSsid;
-  body.wifi_sta_password = wifiPass;
+ if (!wifiSsid.length && wifiPass.length) {
+  showMsg('Select or enter a WiFi SSID before saving the WiFi password.', false);
+  return;
  }
+ body.wifi_sta_ssid = wifiSsid;
+ body.wifi_sta_password = wifiSsid.length ? wifiPass : '';
  if(body.mqtt_control_enabled && !body.mqtt_client_enabled){
   showMsg('MQTT control requires MQTT client enabled.', false);
   return;
@@ -361,6 +363,7 @@ async function saveCommissioning(){
   const res=await fetch('/api/setup/commissioning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const out=await res.json().catch(()=>({}));
   if(!res.ok){ showMsg(out.error || 'Save failed.', false); return; }
+  if(wifiSsid.length && !out.wifi_configured){ showMsg('Commissioning saved, but WiFi credentials were not stored.', false); return; }
   showMsg('Commissioning saved.', true);
   location.href='/';
  }catch(e){

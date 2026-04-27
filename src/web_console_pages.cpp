@@ -341,6 +341,7 @@ void WebConsole::handleSetupCommissioningApi() {
   cfg.input_control_paired_lora_enabled = inputControlPairedLoRaEnabled;
   cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
 
+  bool wifiConfigured = false;
   const char *requestedSsid = doc["wifi_sta_ssid"] | nullptr;
   if (requestedSsid != nullptr) {
     String ssid = String(requestedSsid);
@@ -348,6 +349,8 @@ void WebConsole::handleSetupCommissioningApi() {
     if (ssid.length() > 0) {
       cfg.wifi_sta_ssid = ssid;
       cfg.wifi_sta_password = String(doc["wifi_sta_password"] | "");
+      cfg.wifi_admin_enabled = true;
+      wifiConfigured = true;
     }
   }
   cfg.mqtt_controller_addresses =
@@ -371,14 +374,23 @@ void WebConsole::handleSetupCommissioningApi() {
                               (cfg.ap_always_on != prevApAlwaysOn);
   if (on_apply_)
     on_apply_(networkChanged, false);
-  sendTracked(200, "application/json", "{\"ok\":true}");
+  JsonDocument out;
+  out["ok"] = true;
+  out["wifi_configured"] = wifiConfigured || (cfg.wifi_sta_ssid.length() > 0);
+  const size_t len = measureJson(out);
+  server_.setContentLength(len);
+  markResponseStatus(200);
+  server_.send(200, "application/json", "");
+  serializeJson(out, server_.client());
   LRS_LOGI(API,
            "event=commissioning_setup_saved mode=%s role=%s mqtt_client=%u "
-           "mqtt_control=%u input_control=%u",
+           "mqtt_control=%u input_control=%u wifi_configured=%u ssid_len=%u",
            cfg.mode.c_str(), cfg.role.c_str(),
            cfg.mqtt_client_enabled ? 1U : 0U,
            cfg.mqtt_control_enabled ? 1U : 0U,
-           cfg.input_control_paired_lora_enabled ? 1U : 0U);
+           cfg.input_control_paired_lora_enabled ? 1U : 0U,
+           (cfg.wifi_sta_ssid.length() > 0) ? 1U : 0U,
+           static_cast<unsigned>(cfg.wifi_sta_ssid.length()));
 }
 
 void WebConsole::handleLogoutApi() {
