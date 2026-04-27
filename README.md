@@ -129,6 +129,10 @@ Release asset contract:
 - Total binaries per release: 10
 - In reuse-with-keep-names mode, firmware assets use the new release version and flasher assets retain source-tag version in filenames.
 
+Changelog/release-notes rule:
+- Release notes and `CHANGELOG.md` entries must describe deltas from the immediately previous release, not generic project capability lists.
+- Include all non-trivial firmware/flasher changes since the previous release as the baseline draft for release announcements.
+
 Example:
 ```bash
 cd /Users/warwick/Code/LoRa/lora_rs

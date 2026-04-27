@@ -6,18 +6,27 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.7.0-beta] - 2026-04-27
+
 ### Changed
-- Wi-Fi defaults and controls are now range-oriented:
-  - STA reconnect now scans for the configured SSID and connects with channel+BSSID instead of blind `WiFi.begin`.
-  - Default PHY is `11b`, sleep is off, and TX power is region-capped (`20.5 dBm` ZA/EU, `19.37 dBm` US).
-  - Settings > Wi-Fi now exposes practical advanced controls for TX power, PHY mode, sleep, static IP, channel lock, local Wi-Fi enable, and disconnected Soft AP fallback policy.
-  - Default host identity is consistently `lrs-<chipid>` for Wi-Fi/OTA display and use.
-- TX devices can now disable or re-enable remote Wi-Fi over LoRa, with runtime Fleet/MQTT visibility of each remote's confirmed Wi-Fi state.
-- Fleet > Devices now exposes explicit master-list management for known remotes with a clear `12`-device cap:
+- Wi-Fi behavior and controls were expanded from `0.6.5-alpha` with practical range/stability tuning:
+  - STA reconnect now scans for the configured SSID and reconnects with channel+BSSID instead of blind `WiFi.begin`.
+  - Default PHY is `11b`, Wi-Fi sleep is off, and default TX power is region-capped (`20.5 dBm` ZA/EU, `19.37 dBm` US).
+  - Settings > Wi-Fi now exposes advanced controls for TX power, PHY mode, sleep, static IP, channel lock, local Wi-Fi enable, and disconnected Soft AP fallback policy.
+  - Default host identity is consistently `lrs-<chipid>` for Wi-Fi/OTA display and usage.
+- TX now supports remote Wi-Fi enable/disable over LoRa, with Fleet/MQTT visibility of each remote device's confirmed Wi-Fi state.
+- Fleet > Devices moved from passive discovery-only behavior to explicit master-list management (12-device cap):
   - Added `Add Device` by LoRa address (`1..254`).
-  - Added persistent `Delete` behavior for fleet devices (replaces runtime-only forget semantics in the UI flow).
-  - `/api/fleet` now reports known-peer count/cap metadata so the UI can show master-list occupancy.
-  - Fleet table remains scan/live-status aware while preserving known-only entries for visibility.
+  - Replaced runtime-only `Forget` UX with persistent `Delete` behavior for known peers.
+  - `/api/fleet` now reports known-peer count/cap metadata so UI can show occupancy and known-vs-visible context.
+  - Fleet Devices view was hardened against initial-load race conditions so table rendering remains stable.
+- Web login flow is now safer than `0.6.5-alpha`:
+  - Login form explicitly posts to `/api/login`.
+  - Username/password query params are scrubbed from `/login` URL state to avoid lingering credential traces.
+- Flasher monitoring UX was improved with clearer serial activity behavior and release-side esptool hygiene:
+  - Activity monitor behavior and visibility were improved in the flasher UI.
+  - Release packaging now fetches `esptool v5.2.0`.
+  - Repo now stops tracking `tools/flasher/src-tauri/esptool-*` sidecar binaries directly (fetched at packaging/release time).
 
 ## [0.6.5-alpha] - 2026-04-26
 
