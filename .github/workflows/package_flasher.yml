@@ -190,7 +190,7 @@ jobs:
         run: |
           cd tools/flasher/src-tauri
           mkdir -p bin_tmp
-          VERSION_ESP="v4.8.1"
+          VERSION_ESP="v5.2.0"
           TRIPLE="${{ matrix.target_triple }}"
           
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
