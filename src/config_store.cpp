@@ -16,7 +16,7 @@ constexpr char kPostOtaActionPath[] = "/post_ota_action.json";
 constexpr char kPostOtaActionTmpPath[] = "/post_ota_action.tmp";
 constexpr size_t kConfigMaxBytes = 8192;
 constexpr size_t kPostOtaActionMaxBytes = 256;
-constexpr uint16_t kConfigSchemaVersion = 2;
+constexpr uint16_t kConfigSchemaVersion = 3;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
 constexpr char kModeStandalone[] = "standalone";
@@ -29,8 +29,10 @@ constexpr char kRoleCoordinator[] = "coordinator";
 constexpr char kRoleNode[] = "node";
 #ifdef REGION_US
 constexpr long kLockedLoraFrequencyHz = 915000000L;
+constexpr float kDefaultWifiTxPowerDbm = 19.37f;
 #else
 constexpr long kLockedLoraFrequencyHz = 433000000L;
+constexpr float kDefaultWifiTxPowerDbm = 20.5f;
 #endif
 
 constexpr const char *kAllowedFields[] = {
@@ -63,6 +65,16 @@ constexpr const char *kAllowedFields[] = {
     "wifi_sta_password",
     "lan_hostname",
     "ap_always_on",
+    "wifi_phy_mode",
+    "wifi_tx_power_dbm",
+    "wifi_sleep_enabled",
+    "wifi_static_ip_enabled",
+    "wifi_static_ip",
+    "wifi_static_gateway",
+    "wifi_static_subnet",
+    "wifi_channel_override",
+    "wifi_ap_fallback_policy",
+    "wifi_admin_enabled",
     "mqtt_client_enabled",
     "mqtt_control_enabled",
     "mqtt_controller_addresses",
@@ -313,6 +325,16 @@ bool ConfigStore::begin() {
   cfg_.wifi_sta_password = String(static_cast<const char *>(root["wifi_sta_password"] | ""));
   cfg_.lan_hostname = String(static_cast<const char *>(root["lan_hostname"] | ""));
   cfg_.ap_always_on = root["ap_always_on"] | true;
+  cfg_.wifi_phy_mode = String(static_cast<const char *>(root["wifi_phy_mode"] | "11b"));
+  cfg_.wifi_tx_power_dbm = root["wifi_tx_power_dbm"] | kDefaultWifiTxPowerDbm;
+  cfg_.wifi_sleep_enabled = root["wifi_sleep_enabled"] | false;
+  cfg_.wifi_static_ip_enabled = root["wifi_static_ip_enabled"] | false;
+  cfg_.wifi_static_ip = String(static_cast<const char *>(root["wifi_static_ip"] | ""));
+  cfg_.wifi_static_gateway = String(static_cast<const char *>(root["wifi_static_gateway"] | ""));
+  cfg_.wifi_static_subnet = String(static_cast<const char *>(root["wifi_static_subnet"] | "255.255.255.0"));
+  cfg_.wifi_channel_override = static_cast<uint8_t>(root["wifi_channel_override"] | 0);
+  cfg_.wifi_ap_fallback_policy = String(static_cast<const char *>(root["wifi_ap_fallback_policy"] | "fallback_on_disconnect"));
+  cfg_.wifi_admin_enabled = root["wifi_admin_enabled"] | true;
   cfg_.mqtt_client_enabled = root["mqtt_client_enabled"] | false;
   cfg_.mqtt_control_enabled = root["mqtt_control_enabled"] | false;
   cfg_.mqtt_controller_addresses = String(static_cast<const char *>(root["mqtt_controller_addresses"] | ""));
@@ -384,6 +406,23 @@ bool ConfigStore::begin() {
     ensureProvisionedDefaults();
     return save();
   }
+  cfg_.wifi_phy_mode.trim();
+  cfg_.wifi_phy_mode.toLowerCase();
+  if (cfg_.wifi_phy_mode != "11b" && cfg_.wifi_phy_mode != "11g" && cfg_.wifi_phy_mode != "11n") {
+    cfg_.wifi_phy_mode = "11b";
+  }
+  if (cfg_.wifi_tx_power_dbm < 0.0f) cfg_.wifi_tx_power_dbm = 0.0f;
+  if (cfg_.wifi_tx_power_dbm > kDefaultWifiTxPowerDbm) cfg_.wifi_tx_power_dbm = kDefaultWifiTxPowerDbm;
+#ifdef REGION_US
+  if (cfg_.wifi_channel_override > 11) cfg_.wifi_channel_override = 0;
+#else
+  if (cfg_.wifi_channel_override > 13) cfg_.wifi_channel_override = 0;
+#endif
+  cfg_.wifi_ap_fallback_policy.trim();
+  cfg_.wifi_ap_fallback_policy.toLowerCase();
+  if (cfg_.wifi_ap_fallback_policy != "fallback_on_disconnect" && cfg_.wifi_ap_fallback_policy != "secure_sta_only") {
+    cfg_.wifi_ap_fallback_policy = "fallback_on_disconnect";
+  }
 
   cfg_.audit_boot_count += 1;
   LRS_LOGI(FS,
@@ -400,6 +439,7 @@ bool ConfigStore::begin() {
 }
 
 Settings &ConfigStore::settings() { return cfg_; }
+const Settings &ConfigStore::settings() const { return cfg_; }
 
 bool ConfigStore::save() {
   JsonDocument doc;
@@ -436,6 +476,16 @@ bool ConfigStore::save() {
   doc["wifi_sta_password"] = cfg_.wifi_sta_password;
   doc["lan_hostname"] = cfg_.lan_hostname;
   doc["ap_always_on"] = cfg_.ap_always_on;
+  doc["wifi_phy_mode"] = cfg_.wifi_phy_mode;
+  doc["wifi_tx_power_dbm"] = cfg_.wifi_tx_power_dbm;
+  doc["wifi_sleep_enabled"] = cfg_.wifi_sleep_enabled;
+  doc["wifi_static_ip_enabled"] = cfg_.wifi_static_ip_enabled;
+  doc["wifi_static_ip"] = cfg_.wifi_static_ip;
+  doc["wifi_static_gateway"] = cfg_.wifi_static_gateway;
+  doc["wifi_static_subnet"] = cfg_.wifi_static_subnet;
+  doc["wifi_channel_override"] = cfg_.wifi_channel_override;
+  doc["wifi_ap_fallback_policy"] = cfg_.wifi_ap_fallback_policy;
+  doc["wifi_admin_enabled"] = cfg_.wifi_admin_enabled;
   doc["mqtt_client_enabled"] = cfg_.mqtt_client_enabled;
   doc["mqtt_control_enabled"] = cfg_.mqtt_control_enabled;
   doc["mqtt_controller_addresses"] = cfg_.mqtt_controller_addresses;
@@ -716,8 +766,18 @@ void ConfigStore::setDefaults() {
 
   cfg_.wifi_sta_ssid = "";
   cfg_.wifi_sta_password = "";
-  cfg_.lan_hostname = "";
+  cfg_.lan_hostname = defaultLanHostname();
   cfg_.ap_always_on = true;
+  cfg_.wifi_phy_mode = "11b";
+  cfg_.wifi_tx_power_dbm = kDefaultWifiTxPowerDbm;
+  cfg_.wifi_sleep_enabled = false;
+  cfg_.wifi_static_ip_enabled = false;
+  cfg_.wifi_static_ip = "";
+  cfg_.wifi_static_gateway = "";
+  cfg_.wifi_static_subnet = "255.255.255.0";
+  cfg_.wifi_channel_override = 0;
+  cfg_.wifi_ap_fallback_policy = "fallback_on_disconnect";
+  cfg_.wifi_admin_enabled = true;
   cfg_.mqtt_client_enabled = false;
   cfg_.mqtt_control_enabled = false;
   cfg_.mqtt_controller_addresses = "";

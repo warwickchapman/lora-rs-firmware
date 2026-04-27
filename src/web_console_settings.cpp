@@ -79,6 +79,7 @@ void WebConsole::handleGetSettings() {
   doc["wifi_sta_password"] = "";
   doc["wifi_sta_password_set"] = (cfg.wifi_sta_password.length() > 0);
   doc["lan_hostname"] = cfg.lan_hostname;
+  doc["computed_lan_hostname"] = config_->defaultLanHostname();
   doc["fleet_passphrase"] = "";
   doc["fleet_passphrase_set"] = (cfg.fleet_passphrase.length() > 0);
   doc["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
@@ -86,6 +87,16 @@ void WebConsole::handleGetSettings() {
   doc["admin_password"] = "";
   doc["admin_password_set"] = (cfg.admin_password.length() > 0);
   doc["ap_always_on"] = cfg.ap_always_on;
+  doc["wifi_phy_mode"] = cfg.wifi_phy_mode;
+  doc["wifi_tx_power_dbm"] = cfg.wifi_tx_power_dbm;
+  doc["wifi_sleep_enabled"] = cfg.wifi_sleep_enabled;
+  doc["wifi_static_ip_enabled"] = cfg.wifi_static_ip_enabled;
+  doc["wifi_static_ip"] = cfg.wifi_static_ip;
+  doc["wifi_static_gateway"] = cfg.wifi_static_gateway;
+  doc["wifi_static_subnet"] = cfg.wifi_static_subnet;
+  doc["wifi_channel_override"] = cfg.wifi_channel_override;
+  doc["wifi_ap_fallback_policy"] = cfg.wifi_ap_fallback_policy;
+  doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
   doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
   doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
   doc["mqtt_controller_addresses"] = cfg.mqtt_controller_addresses;
@@ -136,6 +147,16 @@ void WebConsole::handlePostSettings() {
   filter["wifi_sta_ssid"] = true;
   filter["wifi_sta_password"] = true;
   filter["lan_hostname"] = true;
+  filter["wifi_phy_mode"] = true;
+  filter["wifi_tx_power_dbm"] = true;
+  filter["wifi_sleep_enabled"] = true;
+  filter["wifi_static_ip_enabled"] = true;
+  filter["wifi_static_ip"] = true;
+  filter["wifi_static_gateway"] = true;
+  filter["wifi_static_subnet"] = true;
+  filter["wifi_channel_override"] = true;
+  filter["wifi_ap_fallback_policy"] = true;
+  filter["wifi_admin_enabled"] = true;
   filter["fleet_passphrase"] = true;
   filter["allow_default_deployment_key"] = true;
   filter["admin_password"] = true;
@@ -164,6 +185,16 @@ void WebConsole::handlePostSettings() {
   const String prevStaPassword = cfg.wifi_sta_password;
   const String prevLanHost = cfg.lan_hostname;
   const bool prevApAlwaysOn = cfg.ap_always_on;
+  const String prevWifiPhyMode = cfg.wifi_phy_mode;
+  const float prevWifiTxPowerDbm = cfg.wifi_tx_power_dbm;
+  const bool prevWifiSleepEnabled = cfg.wifi_sleep_enabled;
+  const bool prevWifiStaticIpEnabled = cfg.wifi_static_ip_enabled;
+  const String prevWifiStaticIp = cfg.wifi_static_ip;
+  const String prevWifiStaticGateway = cfg.wifi_static_gateway;
+  const String prevWifiStaticSubnet = cfg.wifi_static_subnet;
+  const uint8_t prevWifiChannelOverride = cfg.wifi_channel_override;
+  const String prevWifiApFallbackPolicy = cfg.wifi_ap_fallback_policy;
+  const bool prevWifiAdminEnabled = cfg.wifi_admin_enabled;
   const String prevAdminPassword = cfg.admin_password;
   const String oldDefaultHost = config_->defaultLanHostname();
   const String oldLegacyDefaultHost = String("lrs-") + config_->chipIdHex();
@@ -229,6 +260,16 @@ void WebConsole::handlePostSettings() {
       cfg.lan_hostname = postedLanHost;
     }
   }
+  cfg.wifi_phy_mode = doc["wifi_phy_mode"] | cfg.wifi_phy_mode.c_str();
+  cfg.wifi_tx_power_dbm = doc["wifi_tx_power_dbm"] | cfg.wifi_tx_power_dbm;
+  cfg.wifi_sleep_enabled = parseBoolField(doc["wifi_sleep_enabled"], cfg.wifi_sleep_enabled);
+  cfg.wifi_static_ip_enabled = parseBoolField(doc["wifi_static_ip_enabled"], cfg.wifi_static_ip_enabled);
+  cfg.wifi_static_ip = doc["wifi_static_ip"] | cfg.wifi_static_ip.c_str();
+  cfg.wifi_static_gateway = doc["wifi_static_gateway"] | cfg.wifi_static_gateway.c_str();
+  cfg.wifi_static_subnet = doc["wifi_static_subnet"] | cfg.wifi_static_subnet.c_str();
+  cfg.wifi_channel_override = static_cast<uint8_t>(doc["wifi_channel_override"] | cfg.wifi_channel_override);
+  cfg.wifi_ap_fallback_policy = doc["wifi_ap_fallback_policy"] | cfg.wifi_ap_fallback_policy.c_str();
+  cfg.wifi_admin_enabled = parseBoolField(doc["wifi_admin_enabled"], cfg.wifi_admin_enabled);
   cfg.fleet_passphrase = doc["fleet_passphrase"] | cfg.fleet_passphrase.c_str();
   cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
   cfg.mqtt_client_enabled = parseBoolField(doc["mqtt_client_enabled"], cfg.mqtt_client_enabled);
@@ -316,6 +357,40 @@ void WebConsole::handlePostSettings() {
   if (cfg.rx_failsafe_timeout_ms > 3600000UL) cfg.rx_failsafe_timeout_ms = 3600000UL;
   if (cfg.mqtt_port == 0) cfg.mqtt_port = 1883;
   if (cfg.mqtt_topic_root.length() == 0) cfg.mqtt_topic_root = "lora";
+  cfg.wifi_phy_mode.trim();
+  cfg.wifi_phy_mode.toLowerCase();
+  if (cfg.wifi_phy_mode != "11b" && cfg.wifi_phy_mode != "11g" && cfg.wifi_phy_mode != "11n") {
+    restoreOnFailure();
+    server_.send(400, "text/plain", "wifi_phy_mode must be 11b, 11g, or 11n");
+    return;
+  }
+  const float maxWifiPower =
+#ifdef REGION_US
+      19.37f;
+#else
+      20.5f;
+#endif
+  if (cfg.wifi_tx_power_dbm < 0.0f || cfg.wifi_tx_power_dbm > maxWifiPower) {
+    restoreOnFailure();
+    server_.send(400, "text/plain", "wifi_tx_power_dbm out of range");
+    return;
+  }
+#ifdef REGION_US
+  if (cfg.wifi_channel_override > 11) {
+#else
+  if (cfg.wifi_channel_override > 13) {
+#endif
+    restoreOnFailure();
+    server_.send(400, "text/plain", "wifi_channel_override out of range");
+    return;
+  }
+  cfg.wifi_ap_fallback_policy.trim();
+  cfg.wifi_ap_fallback_policy.toLowerCase();
+  if (cfg.wifi_ap_fallback_policy != "fallback_on_disconnect" && cfg.wifi_ap_fallback_policy != "secure_sta_only") {
+    restoreOnFailure();
+    server_.send(400, "text/plain", "wifi_ap_fallback_policy invalid");
+    return;
+  }
   if (cfg.mqtt_control_enabled && !cfg.mqtt_client_enabled) {
     restoreOnFailure();
     server_.send(400, "text/plain", "mqtt_control_enabled requires mqtt_client_enabled");
@@ -327,7 +402,17 @@ void WebConsole::handlePostSettings() {
   const bool networkChanged = (cfg.wifi_sta_ssid != prevStaSsid) ||
                               (cfg.wifi_sta_password != prevStaPassword) ||
                               (cfg.lan_hostname != prevLanHost) ||
-                              (cfg.ap_always_on != prevApAlwaysOn);
+                              (cfg.ap_always_on != prevApAlwaysOn) ||
+                              (cfg.wifi_phy_mode != prevWifiPhyMode) ||
+                              (cfg.wifi_tx_power_dbm != prevWifiTxPowerDbm) ||
+                              (cfg.wifi_sleep_enabled != prevWifiSleepEnabled) ||
+                              (cfg.wifi_static_ip_enabled != prevWifiStaticIpEnabled) ||
+                              (cfg.wifi_static_ip != prevWifiStaticIp) ||
+                              (cfg.wifi_static_gateway != prevWifiStaticGateway) ||
+                              (cfg.wifi_static_subnet != prevWifiStaticSubnet) ||
+                              (cfg.wifi_channel_override != prevWifiChannelOverride) ||
+                              (cfg.wifi_ap_fallback_policy != prevWifiApFallbackPolicy) ||
+                              (cfg.wifi_admin_enabled != prevWifiAdminEnabled);
   const bool otaAuthChanged = (cfg.admin_password != prevAdminPassword);
 
   if (!config_->save()) {
@@ -376,6 +461,16 @@ void WebConsole::handleExportSettings() {
   doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
   doc["wifi_sta_password"] = cfg.wifi_sta_password;
   doc["lan_hostname"] = cfg.lan_hostname;
+  doc["wifi_phy_mode"] = cfg.wifi_phy_mode;
+  doc["wifi_tx_power_dbm"] = cfg.wifi_tx_power_dbm;
+  doc["wifi_sleep_enabled"] = cfg.wifi_sleep_enabled;
+  doc["wifi_static_ip_enabled"] = cfg.wifi_static_ip_enabled;
+  doc["wifi_static_ip"] = cfg.wifi_static_ip;
+  doc["wifi_static_gateway"] = cfg.wifi_static_gateway;
+  doc["wifi_static_subnet"] = cfg.wifi_static_subnet;
+  doc["wifi_channel_override"] = cfg.wifi_channel_override;
+  doc["wifi_ap_fallback_policy"] = cfg.wifi_ap_fallback_policy;
+  doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
   doc["fleet_passphrase"] = cfg.fleet_passphrase;
   doc["admin_password"] = cfg.admin_password;
   doc["ap_always_on"] = cfg.ap_always_on;

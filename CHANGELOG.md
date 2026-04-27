@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+### Changed
+- Wi-Fi defaults and controls are now range-oriented:
+  - STA reconnect now scans for the configured SSID and connects with channel+BSSID instead of blind `WiFi.begin`.
+  - Default PHY is `11b`, sleep is off, and TX power is region-capped (`20.5 dBm` ZA/EU, `19.37 dBm` US).
+  - Settings > Wi-Fi now exposes practical advanced controls for TX power, PHY mode, sleep, static IP, channel lock, local Wi-Fi enable, and disconnected Soft AP fallback policy.
+  - Default host identity is consistently `lrs-<chipid>` for Wi-Fi/OTA display and use.
+- TX devices can now disable or re-enable remote Wi-Fi over LoRa, with runtime Fleet/MQTT visibility of each remote's confirmed Wi-Fi state.
+- Fleet > Devices now exposes explicit master-list management for known remotes with a clear `12`-device cap:
+  - Added `Add Device` by LoRa address (`1..254`).
+  - Added persistent `Delete` behavior for fleet devices (replaces runtime-only forget semantics in the UI flow).
+  - `/api/fleet` now reports known-peer count/cap metadata so the UI can show master-list occupancy.
+  - Fleet table remains scan/live-status aware while preserving known-only entries for visibility.
+
 ## [0.6.5-alpha] - 2026-04-26
 
 ### Added

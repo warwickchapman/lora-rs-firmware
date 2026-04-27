@@ -154,7 +154,7 @@ function refreshHostnamePreview() {
   if (hint) hint.innerText = 'Used as the device hostname for WiFi and OTA.';
   if (wrap) wrap.style.display = '';
   if (!preview) return;
-  const raw = (document.getElementById('lan_hostname').value || '').trim() || 'lrs';
+  const raw = (document.getElementById('lan_hostname').value || '').trim() || 'lrs-00000000';
   preview.innerText = raw;
 }
 function isDefaultDeploymentKey(v) {
@@ -1779,11 +1779,11 @@ async function scanWifi() {
       return;
     }
     out.networks.sort((a, b) => Number(b.rssi) - Number(a.rssi));
-    host.innerHTML = '<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table>';
+    host.innerHTML = '<table class="wifi-table"><thead><tr><th>SSID</th><th>Signal</th><th>Ch</th><th></th></tr></thead><tbody></tbody></table>';
     const tbody = host.querySelector('tbody');
     out.networks.forEach(n => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi, 'scan')}${escapeHtml(n.rssi)} dBm</td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
+      tr.innerHTML = `<td>${escapeHtml(n.ssid)}</td><td>${sigIconHtml(n.rssi, 'scan')}${escapeHtml(n.rssi)} dBm</td><td>${escapeHtml(n.channel || '')}</td><td><button type="button" data-ssid="${escapeHtml(n.ssid)}">Use</button></td>`;
       tbody.appendChild(tr);
     });
     host.querySelectorAll('button[data-ssid]').forEach(useBtn => {
@@ -1887,11 +1887,16 @@ function collectLoraBody() {
   return body;
 }
 function collectNetworkBody() {
-  const ids = ['wifi_sta_ssid', 'lan_hostname'];
+  const ids = ['wifi_sta_ssid', 'lan_hostname', 'wifi_phy_mode', 'wifi_static_ip', 'wifi_static_gateway', 'wifi_static_subnet', 'wifi_ap_fallback_policy'];
   const body = {}; ids.forEach(id => body[id] = document.getElementById(id).value);
   const staPass = String(document.getElementById('wifi_sta_password').value || '');
   if (staPass.length) { body.wifi_sta_password = staPass; }
   body.ap_always_on = document.getElementById('ap_always_on').checked;
+  body.wifi_sleep_enabled = document.getElementById('wifi_sleep_enabled').checked;
+  body.wifi_static_ip_enabled = document.getElementById('wifi_static_ip_enabled').checked;
+  body.wifi_admin_enabled = document.getElementById('wifi_admin_enabled').checked;
+  body.wifi_tx_power_dbm = Number(document.getElementById('wifi_tx_power_dbm').value || 0);
+  body.wifi_channel_override = Math.floor(Number(document.getElementById('wifi_channel_override').value || 0));
   return body;
 }
 function collectSystemBody() {
@@ -2502,7 +2507,7 @@ async function provisionFleetWifi(targetAddr, overrideSsid, overridePass) {
     return;
   }
   if (out && out.error === 'ssid_required') {
-    const msg = 'Enter STA SSID in Settings > Network, then retry.';
+    const msg = 'Enter STA SSID in Settings > Wi-Fi, then retry.';
     el.className = 'result-line show err';
     el.innerText = msg;
     showToast(msg, true);
@@ -2520,6 +2525,23 @@ async function provisionFleetWifi(targetAddr, overrideSsid, overridePass) {
   el.className = 'result-line show err';
   el.innerText = msg;
   showToast(msg, true);
+}
+async function disableFleetWifiAll() {
+  const el = document.getElementById('wifiProvisionResult');
+  if (!el) return;
+  el.className = 'result-line show';
+  el.innerText = 'Sending WiFi disable broadcast over LoRa...';
+  const out = await apiJson('/api/fleet/actions/wifi-disable-all', { method: 'POST', silent: true, allowHttpError: true, timeoutMs: 10000 });
+  if (out && out.ok) {
+    el.className = 'result-line show ok';
+    el.innerText = 'WiFi disable broadcast sent.';
+    showToast('WiFi disable broadcast sent');
+    return;
+  }
+  const err = (out && out.error) ? out.error : 'request_failed';
+  el.className = 'result-line show err';
+  el.innerText = `WiFi disable broadcast failed: ${err}`;
+  showToast(el.innerText, true);
 }
 function provisionFleetWifiTo(addr) {
   const ssidEl = document.getElementById(`wifi-override-ssid-${addr}`);
@@ -2540,16 +2562,20 @@ function renderFleetWifiTargets(devices) {
     const addr = Number(d.address || 0);
     const seenAge = (Number(d.last_seen_ms || 0) > 0) ? humanAgeMsShort(d.last_seen_age_ms || 0) : 'unknown';
     const state = Number(d.last_seen_ms || 0) > 0 ? 'online' : 'cached';
+    const wifiState = d.wifi_state_known ? (d.wifi_enabled ? 'enabled' : 'disabled') : 'unknown';
+    const wifiAction = d.wifi_enabled ? 'wifi-disable' : 'wifi-enable';
+    const wifiLabel = d.wifi_enabled ? 'Disable' : 'Enable';
     return `<tr>
       <td class="mono">${escapeHtml(fleetDeviceAddrHex(d))}</td>
       <td>${escapeHtml(state)}</td>
       <td>${escapeHtml(seenAge)}</td>
+      <td>${escapeHtml(wifiState)}</td>
       <td><input id="wifi-override-ssid-${addr}" type="text" placeholder="Optional SSID override" /></td>
       <td><input id="wifi-override-pass-${addr}" type="password" placeholder="Optional password override" /></td>
-      <td><button type="button" onclick="provisionFleetWifiTo(${addr})">Send</button></td>
+      <td><button type="button" onclick="provisionFleetWifiTo(${addr})">Send</button><button type="button" onclick="fleetDeviceAction('${wifiAction}', ${addr})">${wifiLabel}</button></td>
     </tr>`;
   }).join('');
-  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Status</th><th>Last Seen</th><th>SSID Override</th><th>Password Override</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+  host.innerHTML = `<table class="fleet-table"><thead><tr><th>Device</th><th>Status</th><th>Last Seen</th><th>WiFi</th><th>SSID Override</th><th>Password Override</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 async function testMqtt() {
   const body = collectMqttBody();
@@ -2585,6 +2611,8 @@ async function fleetDeviceAction(action, addr, intervalS, enabled, extraBody) {
     set_interval: `/api/fleet/${addr}/actions/poll-interval`,
     set_schedule: `/api/fleet/${addr}/actions/schedule`,
     factory_reset: `/api/fleet/${addr}/actions/factory-reset`,
+    'wifi-enable': `/api/fleet/${addr}/actions/wifi-enable`,
+    'wifi-disable': `/api/fleet/${addr}/actions/wifi-disable`,
   };
   const path = pathByAction[action];
   if (!path) {

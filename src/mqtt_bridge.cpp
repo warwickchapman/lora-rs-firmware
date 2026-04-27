@@ -1,6 +1,7 @@
 #include "mqtt_bridge.h"
 
 #include <ArduinoJson.h>
+#include <ctype.h>
 
 #include "build_info.h"
 #include "logger.h"
@@ -140,6 +141,35 @@ bool parseSignedPayloadLong(const uint8_t *payload, unsigned int length, long &o
   if (end == nullptr || *end != '\0') return false;
   out = parsed;
   return true;
+}
+
+bool parseBoolPayload(const uint8_t *payload, unsigned int length, bool &out) {
+  if (payload == nullptr || length == 0 || length >= 32) return false;
+  char buf[32];
+  unsigned int n = 0;
+  for (unsigned int i = 0; i < length && n < sizeof(buf) - 1; ++i) {
+    const char c = static_cast<char>(payload[i]);
+    if (c == '\r' || c == '\n' || c == '\t' || c == ' ') continue;
+    buf[n++] = static_cast<char>(tolower(c));
+  }
+  buf[n] = '\0';
+  if (strcmp(buf, "1") == 0 || strcmp(buf, "on") == 0 || strcmp(buf, "enable") == 0 || strcmp(buf, "enabled") == 0 ||
+      strcmp(buf, "true") == 0) {
+    out = true;
+    return true;
+  }
+  if (strcmp(buf, "0") == 0 || strcmp(buf, "off") == 0 || strcmp(buf, "disable") == 0 || strcmp(buf, "disabled") == 0 ||
+      strcmp(buf, "false") == 0) {
+    out = false;
+    return true;
+  }
+  JsonDocument doc;
+  auto err = deserializeJson(doc, payload, length);
+  if (!err && doc["enabled"].is<bool>()) {
+    out = doc["enabled"].as<bool>();
+    return true;
+  }
+  return false;
 }
 }
 
@@ -405,6 +435,16 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
+    if (strcmp(leaf, "wifi") == 0) {
+      bool enabled = true;
+      if (!parseBoolPayload(payload, length, enabled)) return;
+      sm_->mqttSetPeerWifi(addr, enabled);
+      {
+        lrslog::event(enabled ? "mqtt_remote_wifi_enable" : "mqtt_remote_wifi_disable", 0, 0, addr);
+      }
+      return;
+    }
+
     if (strcmp(leaf, "forget") == 0) {
       const bool forget = (length > 0 && payload[0] != '0');
       if (!forget) return;
@@ -434,6 +474,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
       "relay",           "input",          "ack_state",        "addr_hex",         "addr_dec",
       "uplink_rssi_dbm", "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter", "poll_interval_s",
       "last_poll_tx_ms", "poll_state",     "temp_c",           "forget",           "poll_now",
+      "wifi",
   };
 
   char topic[kMqttTopicBufBytes];
@@ -481,6 +522,7 @@ bool MqttBridge::connectIfNeeded() {
     char topic[kMqttTopicBufBytes];
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
+    if (buildPeerTopic(topic, sizeof(topic), "+", "wifi")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
   }
 
@@ -617,6 +659,11 @@ void MqttBridge::publishStatus() {
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
+        if (node.wifi_state_known) {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, node.wifi_enabled ? "1" : "0");
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
+        }
         if (node.temp_valid) {
           dtostrf(static_cast<float>(node.temp_c), 0, 1, numBuf);
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, numBuf);

@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
+#include <cstring>
 
 #include "config_store.h"
 #include "web_console_internal.h"
@@ -34,6 +35,8 @@ void WebConsole::handleWifiScan() {
     JsonObject n = arr.add<JsonObject>();
     n["ssid"] = ssid;
     n["rssi"] = WiFi.RSSI(i);
+    n["channel"] = WiFi.channel(i);
+    n["bssid"] = WiFi.BSSIDstr(i);
     n["secure"] = WiFi.encryptionType(i) != ENC_TYPE_NONE;
   }
   WiFi.scanDelete();
@@ -85,7 +88,28 @@ void WebConsole::handleTestSta() {
     return;
   }
 
-  WiFi.begin(ssid, pass);
+  int bestIndex = -1;
+  int bestRssi = -1000;
+  const int scanCount = WiFi.scanNetworks(false, true);
+  for (int i = 0; i < scanCount; ++i) {
+    if (!WiFi.SSID(i).equals(ssid)) continue;
+    const int rssi = WiFi.RSSI(i);
+    if (bestIndex < 0 || rssi > bestRssi) {
+      bestIndex = i;
+      bestRssi = rssi;
+    }
+  }
+  if (bestIndex < 0) {
+    WiFi.scanDelete();
+    server_.send(200, "application/json", "{\"ok\":false,\"status_code\":1,\"status_text\":\"NO_SSID_AVAIL\"}");
+    return;
+  }
+  uint8_t bssid[6]{};
+  const uint8_t *scanBssid = WiFi.BSSID(bestIndex);
+  if (scanBssid != nullptr) memcpy(bssid, scanBssid, sizeof(bssid));
+  const int32_t channel = WiFi.channel(bestIndex);
+  WiFi.scanDelete();
+  WiFi.begin(ssid, pass, channel, bssid);
   wl_status_t st = WL_IDLE_STATUS;
   for (int i = 0; i < kStaTestMaxAttempts; i++) {
     delay(100);
@@ -103,6 +127,7 @@ void WebConsole::handleTestSta() {
   if (ok) {
     doc["ip"] = WiFi.localIP().toString();
     doc["rssi"] = WiFi.RSSI();
+    doc["channel"] = channel;
   }
 
   const size_t len = measureJson(doc);

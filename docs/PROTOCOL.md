@@ -89,6 +89,11 @@ Otherwise packet is dropped and logged.
 - Transfer format is `start`, `data`, `commit` messages over multiple packets.
 - WiFi provisioning is broadcast to `0xFF` and accepted only by devices in the same fleet (same fleet key / valid MAC).
 - Receiver validates transfer completeness and hash before applying credentials.
+- `WifiControl` (`'Y'`) carries remote Wi-Fi enable/disable control and status.
+- TX sends `WifiControl` op `set` (`payload b0=1`) with desired enabled state in `payload b1` (`1` enabled, `0` disabled).
+- Broadcast disable uses destination `0xFF`; targeted enable/disable uses the remote LoRa address.
+- RX persists the requested Wi-Fi enabled state, replies with `WifiControl` op `status` (`payload b0=2`), and echoes the command counter in payload bytes `b8..b11`.
+- TX stores Wi-Fi state confirmations in runtime peer state only; polling/status responses can refresh the state after reboot.
 - `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
 - `FactoryReset` supports an option to preserve the current shared fleet key during reset.
 
@@ -103,11 +108,13 @@ Otherwise packet is dropped and logged.
 - TX accepts peer control leaves:
   - `poll_interval_s`
   - `poll_now`
+  - `wifi` (`1`/`0`, `on`/`off`, `enable`/`disable`, or JSON `{ "enabled": true|false }`)
   - `forget` (payload `1` removes node from TX runtime and clears retained peer subtree topics)
 - TX rejects destination `0x00` and `0xFF`.
 - On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
+- TX publishes confirmed peer Wi-Fi state under `<root>/lrs-<tx_chipid>/peer/0xNN/wifi` as retained `1`, `0`, or empty when unknown.
 - Paired TX input-control retries use a low-latency bounded backoff (first retry in sub-second range), with small jitter and a hard retry deadline (`tx_command_retry_timeout_ms`).
 
 ## Timing Defaults
@@ -122,4 +129,4 @@ Otherwise packet is dropped and logged.
 The current 12-byte payload format is not wire-compatible with older 8-byte payload firmware.
 Upgrade paired nodes together.
 
-Within the current 12-byte protocol generation, `WifiProvision`/`FactoryReset` do not change frame size; they only define additional message types and alternate payload semantics.
+Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`FactoryReset` do not change frame size; they only define additional message types and alternate payload semantics.

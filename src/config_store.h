@@ -41,6 +41,16 @@ struct Settings {
   String wifi_sta_password;
   String lan_hostname;
   bool ap_always_on;
+  String wifi_phy_mode;
+  float wifi_tx_power_dbm;
+  bool wifi_sleep_enabled;
+  bool wifi_static_ip_enabled;
+  String wifi_static_ip;
+  String wifi_static_gateway;
+  String wifi_static_subnet;
+  uint8_t wifi_channel_override;
+  String wifi_ap_fallback_policy;
+  bool wifi_admin_enabled;
 
   bool mqtt_client_enabled;
   bool mqtt_control_enabled;
@@ -71,6 +81,7 @@ class ConfigStore {
  public:
   bool begin();
   Settings &settings();
+  const Settings &settings() const;
   bool save();
   bool factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials = false);
   bool schedulePostOtaFactoryReset(bool keepSharedFleetKey = false, bool keepWifiCredentials = false);

@@ -32,6 +32,35 @@ bool listAppendUnique(uint8_t *list, uint8_t &count, uint8_t addr) {
   list[count++] = addr;
   return true;
 }
+
+bool listRemoveAddress(uint8_t *list, uint8_t &count, uint8_t addr) {
+  if (list == nullptr || addr == 0 || addr == 255)
+    return false;
+  const uint8_t capped =
+      (count > Settings::kAddressListCap) ? Settings::kAddressListCap : count;
+  for (uint8_t i = 0; i < capped; ++i) {
+    if (list[i] != addr)
+      continue;
+    for (uint8_t j = i; (j + 1) < capped; ++j) {
+      list[j] = list[j + 1];
+    }
+    if (count > 0)
+      --count;
+    if (count < Settings::kAddressListCap)
+      list[count] = 0;
+    return true;
+  }
+  return false;
+}
+
+bool saveKnownPeerList(ConfigStore *config, const char *savedBy) {
+  if (config == nullptr)
+    return false;
+  auto &cfg = config->settings();
+  cfg.audit_last_saved_by = savedBy ? savedBy : "fleet_known_peers";
+  cfg.audit_last_saved_ms = millis();
+  return config->save();
+}
 } // namespace
 
 void WebConsole::buildFleetJson(JsonDocument &doc) {
@@ -46,6 +75,18 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
   doc["tx_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
   doc["tx_default_poll_interval_ms"] =
       cfg.tx_mqtt_remote_default_poll_interval_ms;
+  const uint8_t knownCapped = (cfg.known_peer_count > Settings::kAddressListCap)
+                                  ? Settings::kAddressListCap
+                                  : cfg.known_peer_count;
+  doc["known_peer_count"] = knownCapped;
+  doc["known_peer_cap"] = Settings::kAddressListCap;
+  JsonArray knownArr = doc["known_peer_addresses"].to<JsonArray>();
+  for (uint8_t i = 0; i < knownCapped; ++i) {
+    const uint8_t addr = cfg.known_peer_addresses[i];
+    if (addr < 1 || addr > 254)
+      continue;
+    knownArr.add(addr);
+  }
   const uint32_t now = millis();
   doc["uptime_ms"] = now;
   if (cfg.role_tx && sm_ != nullptr) {
@@ -131,6 +172,14 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
       r["last_poll_age_ms"] = pollAgeMs;
       r["poll_pending"] = node.poll_pending;
       r["poll_state"] = node.poll_pending ? "pending" : "idle";
+      r["wifi_state_known"] = node.wifi_state_known;
+      r["wifi_enabled"] = node.wifi_enabled;
+      r["wifi_last_confirm_ms"] = node.wifi_last_confirm_ms;
+      const uint32_t wifiConfirmAgeMs =
+          (node.wifi_last_confirm_ms > 0 && now >= node.wifi_last_confirm_ms)
+              ? (now - node.wifi_last_confirm_ms)
+              : 0;
+      r["wifi_last_confirm_age_ms"] = wifiConfirmAgeMs;
       const uint32_t expectedIntervalMs =
           (node.poll_interval_ms > 0) ? node.poll_interval_ms : 300000U;
       uint32_t staleAfterMs = expectedIntervalMs * 3U;
@@ -143,9 +192,6 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
     }
 
     // Include cached known peers even before live scan replies arrive.
-    const uint8_t knownCapped = (cfg.known_peer_count > Settings::kAddressListCap)
-                                    ? Settings::kAddressListCap
-                                    : cfg.known_peer_count;
     for (uint8_t i = 0; i < knownCapped; ++i) {
       const uint8_t addr = cfg.known_peer_addresses[i];
       if (addr == 0 || addr == 255 || listHasAddress(activeAddrs, activeCount, addr)) {
@@ -173,6 +219,10 @@ void WebConsole::buildFleetJson(JsonDocument &doc) {
       r["last_poll_age_ms"] = 0;
       r["poll_pending"] = false;
       r["poll_state"] = "idle";
+      r["wifi_state_known"] = false;
+      r["wifi_enabled"] = true;
+      r["wifi_last_confirm_ms"] = 0;
+      r["wifi_last_confirm_age_ms"] = 0;
       r["expected_interval_ms"] = 0;
       r["stale_after_ms"] = 0;
       r["stale_threshold_ms"] = 0;
@@ -223,6 +273,28 @@ bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
   if (!uri.startsWith(prefix))
     return false;
   const String suffix = uri.substring(prefix.length());
+  if (suffix == "actions/wifi-disable-all") {
+    if (!requireAuth(true))
+      return true;
+    auto &cfg = config_->settings();
+    if (cfg.mode == "standalone") {
+      server_.send(409, "application/json",
+                   "{\"ok\":false,\"error\":\"fleet_disabled_in_standalone\"}");
+      return true;
+    }
+    if (!cfg.role_tx || sm_ == nullptr) {
+      server_.send(400, "application/json",
+                   "{\"ok\":false,\"error\":\"tx_only\"}");
+      return true;
+    }
+    if (!sm_->sendBroadcastWifiDisable()) {
+      server_.send(409, "application/json",
+                   "{\"ok\":false,\"error\":\"action_failed\"}");
+      return true;
+    }
+    server_.send(200, "application/json", "{\"ok\":true}");
+    return true;
+  }
   const int slash = suffix.indexOf('/');
   if (slash <= 0) {
     server_.send(404, "application/json",
@@ -273,8 +345,31 @@ bool WebConsole::handleFleetDeviceActionRoute(const String &uri) {
   bool ok = false;
   if (action == "poll-now") {
     ok = sm_->mqttPollPeerNow(addr);
-  } else if (action == "forget") {
-    ok = sm_->mqttForgetPeer(addr);
+  } else if (action == "wifi-enable" || action == "wifi-disable") {
+    ok = sm_->mqttSetPeerWifi(addr, action == "wifi-enable");
+  } else if (action == "forget" || action == "delete") {
+    const bool runtimeForgot = sm_->mqttForgetPeer(addr);
+    const bool knownRemoved = listRemoveAddress(cfg.known_peer_addresses, cfg.known_peer_count, addr);
+    if (knownRemoved && !saveKnownPeerList(config_, "fleet_known_delete")) {
+      server_.send(500, "application/json",
+                   "{\"ok\":false,\"error\":\"save_failed\"}");
+      return true;
+    }
+    ok = runtimeForgot || knownRemoved || action == "delete";
+  } else if (action == "add") {
+    if (listHasAddress(cfg.known_peer_addresses, cfg.known_peer_count, addr)) {
+      ok = true;
+    } else if (!listAppendUnique(cfg.known_peer_addresses, cfg.known_peer_count, addr)) {
+      server_.send(409, "application/json",
+                   "{\"ok\":false,\"error\":\"known_list_full\"}");
+      return true;
+    } else if (!saveKnownPeerList(config_, "fleet_known_add")) {
+      server_.send(500, "application/json",
+                   "{\"ok\":false,\"error\":\"save_failed\"}");
+      return true;
+    } else {
+      ok = true;
+    }
   } else if (action == "poll-interval") {
     uint32_t sec = doc["interval_s"] | 0;
     if (sec > 0 && sec < 60U)

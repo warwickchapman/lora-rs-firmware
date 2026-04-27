@@ -2,6 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
+extern "C" {
+#include <user_interface.h>
+}
 
 #include "build_info.h"
 #include "config_store.h"
@@ -65,6 +68,13 @@ bool WebConsole::buildStatusLiveCache() {
   doc["sta_rssi"] = WiFi.isConnected() ? WiFi.RSSI() : -127;
   doc["sta_status_code"] = static_cast<int>(st);
   doc["sta_status_text"] = wifiStatusText(st);
+  doc["sta_sdk_status"] = static_cast<int>(wifi_station_get_connect_status());
+  doc["sta_channel"] = WiFi.isConnected() ? WiFi.channel() : 0;
+  doc["sta_bssid"] = WiFi.isConnected() ? WiFi.BSSIDstr() : "";
+  doc["wifi_phy_mode"] = cfg.wifi_phy_mode;
+  doc["wifi_tx_power_dbm"] = cfg.wifi_tx_power_dbm;
+  doc["wifi_sleep_enabled"] = cfg.wifi_sleep_enabled;
+  doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
   doc["heap_free_bytes"] = ESP.getFreeHeap();
   doc["heap_frag_percent"] = lrslog::heapFragPercent();
   doc["max_free_block_bytes"] = lrslog::heapMaxFreeBlock();
@@ -142,6 +152,7 @@ bool WebConsole::buildStatusStaticCache() {
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
   doc["lan_hostname"] = cfg.lan_hostname;
+  doc["computed_lan_hostname"] = config_->defaultLanHostname();
   doc["sta_target_ssid"] = cfg.wifi_sta_ssid;
   doc["deployment_key"] = cfg.fleet_passphrase.length()
                               ? lrslog::maskSecret(cfg.fleet_passphrase)

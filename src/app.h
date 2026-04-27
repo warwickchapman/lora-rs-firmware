@@ -31,6 +31,9 @@ class App {
 #endif
 
   bool wifi_sta_connecting_ = false;
+  bool wifi_sta_scanning_ = false;
+  uint32_t wifi_sta_scan_started_ms_ = 0;
+  uint32_t wifi_sta_connect_attempt_started_ms_ = 0;
   uint32_t wifi_sta_started_ms_ = 0;
   uint32_t wifi_sta_retry_ms_ = 0;
   bool sta_connected_ = false;
@@ -53,6 +56,10 @@ class App {
   uint8_t sta_stack_reset_count_ = 0;
   bool wifi_stack_disabled_ = false;
   String cached_sta_hostname_;
+  uint8_t sta_target_bssid_[6]{};
+  int32_t sta_target_channel_ = 0;
+  int32_t sta_last_sdk_status_ = 0;
+  uint32_t sta_last_connect_time_ms_ = 0;
   DNSServer dns_;
 
   void startNetworking();
@@ -61,6 +68,16 @@ class App {
   void maybeDisableAp();
   void refreshCaptiveDns();
   void beginStaConnect();
+  void startStaScan();
+  void finishStaScan(int scanCount);
+  void failStaConnectAttempt(const char *reason, wl_status_t status);
+  void resetWifiStaAttempt();
+  void applyWifiRuntimeSettings();
+  void stopWifiForAdminDisable();
+  bool shouldEnableSoftAp() const;
+  bool parseIpAddress(const String &raw, IPAddress &out) const;
+  WiFiPhyMode_t configuredWifiPhyMode() const;
+  const char *configuredWifiPhyModeText() const;
   void startNtpClient();
   void tickTimeSync();
   void applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth);

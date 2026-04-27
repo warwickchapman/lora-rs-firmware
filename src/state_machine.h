@@ -46,6 +46,13 @@ enum class PeerAckState : uint8_t {
   Timeout,
 };
 
+enum class PairedGroupPhase : uint8_t {
+  Idle,
+  AwaitInitialAcks,
+  RetryMissingSequential,
+  Complete,
+};
+
 struct PeerStatusSnapshot {
   uint8_t address = 0;
   uint8_t relay_state = 0;
@@ -61,6 +68,9 @@ struct PeerStatusSnapshot {
   uint32_t poll_interval_ms = 0;
   uint32_t last_poll_tx_ms = 0;
   bool poll_pending = false;
+  bool wifi_state_known = false;
+  bool wifi_enabled = true;
+  uint32_t wifi_last_confirm_ms = 0;
 };
 
 struct FleetScanSnapshot {
@@ -158,6 +168,11 @@ class NodeStateMachine {
   bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
   bool mqttPollPeerNow(uint8_t dstAddress);
   bool mqttForgetPeer(uint8_t dstAddress);
+  bool mqttSetPeerWifi(uint8_t dstAddress, bool enabled);
+  bool sendBroadcastWifiDisable();
+  bool hasPendingWifiControl() const;
+  bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
+  bool sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter);
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
   bool fleetScanSnapshot(FleetScanSnapshot &out) const;
@@ -261,6 +276,26 @@ class NodeStateMachine {
   uint8_t tx_retry_step_ = 0;
   uint32_t tx_next_retry_ms_ = 0;
   uint32_t tx_command_retry_deadline_ms_ = 0;
+  PairedGroupPhase tx_group_phase_ = PairedGroupPhase::Idle;
+  uint32_t tx_group_command_id_ = 0;
+  uint32_t tx_group_expected_bitmap_ = 0;
+  uint32_t tx_group_acked_bitmap_ = 0;
+  uint32_t tx_group_retry_bitmap_ = 0;
+  uint8_t tx_group_targets[Settings::kAddressListCap]{};
+  uint8_t tx_group_target_count_ = 0;
+  uint32_t tx_group_window_deadline_ms_ = 0;
+  uint8_t tx_group_initial_send_cursor_ = 0;
+  uint8_t tx_group_retry_cursor_ = 0;
+  uint8_t tx_group_retry_addr_ = 0;
+  uint32_t tx_group_retry_deadline_ms_ = 0;
+  uint8_t tx_group_desired_relay_state_ = 0;
+  uint8_t tx_group_desired_input_state_ = 0;
+  bool rx_deferred_ack_pending_ = false;
+  uint32_t rx_deferred_ack_due_ms_ = 0;
+  uint32_t rx_deferred_ack_command_id_ = 0;
+  uint8_t rx_deferred_ack_dst_ = 0;
+  uint8_t rx_deferred_ack_relay_ = 0;
+  uint8_t rx_deferred_ack_input_ = 0;
   bool rx_push_pending_ = false;
   uint32_t rx_last_push_ms_ = 0;
   uint32_t last_rx_control_ms_ = 0;
@@ -278,6 +313,13 @@ class NodeStateMachine {
     uint32_t last_seen_ms = 0;
     uint32_t last_cmd_counter = 0;
     PeerAckState ack_state = PeerAckState::Unknown;
+    bool wifi_state_known = false;
+    bool wifi_enabled = true;
+    uint32_t wifi_last_confirm_ms = 0;
+    bool wifi_pending = false;
+    bool wifi_pending_enabled = true;
+    uint32_t wifi_pending_counter = 0;
+    uint32_t wifi_pending_deadline_ms = 0;
     bool pending = false;
     uint8_t pending_relay = 0;
     uint8_t retry_step = 0;
@@ -328,6 +370,10 @@ class NodeStateMachine {
   String wifi_prov_pending_ssid_;
   String wifi_prov_pending_password_;
   uint8_t wifi_prov_pending_src_ = 0;
+  bool wifi_control_pending_ = false;
+  bool wifi_control_pending_enabled_ = true;
+  uint8_t wifi_control_pending_src_ = 0;
+  uint32_t wifi_control_pending_counter_ = 0;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;
   uint8_t factory_reset_pending_src_ = 0;
@@ -443,6 +489,7 @@ class NodeStateMachine {
   void resetPollStorage();
   void freePollStorage();
   bool handleWifiProvisionFrame(const ProtocolMessage &msg);
+  bool handleWifiControlFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
   bool isAuthorizedMqttController(uint8_t src) const;
@@ -465,6 +512,21 @@ class NodeStateMachine {
   bool sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8_t assignedAddress);
   bool confirmProvisioningByFleetResponse(const ProtocolMessage &msg);
   bool ackMatchesPendingCommand(const ProtocolMessage &msg) const;
+  bool isPairedTargetAddress(uint8_t addr) const;
+  bool buildTxGroupTargets();
+  uint8_t txGroupTargetIndexForAddress(uint8_t addr) const;
+  uint32_t txGroupMissingBitmap() const;
+  bool txGroupHasMissingTargets() const;
+  void resetTxGroupState();
+  void startTxGroupCommand(uint8_t relayState, uint8_t inputState);
+  void tickTxGroupCommand(uint32_t now);
+  bool sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase);
+  void finishTxGroupSuccess();
+  void finishTxGroupPartial();
+  void updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState);
+  uint8_t pairedAckRankForLocalAddress() const;
+  void scheduleDeferredAck(uint8_t dst, uint8_t relayState, uint8_t inputState, uint32_t commandId);
+  void tickDeferredAck(uint32_t now);
   void applyReceiverFailsafe(uint32_t now);
   uint32_t tick_watchdog_last_log_ms_ = 0;
 };
