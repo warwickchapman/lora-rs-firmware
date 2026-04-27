@@ -36,6 +36,7 @@ let headerStatusRefreshInFlight = false;
 let sessionRefreshInFlight = false;
 let fleetRefreshInFlight = false;
 let fleetRefreshDebounceTimer = 0;
+let fleetRefreshRequestToken = 0;
 let fleetScanState = { active: false, start_address: 1, end_address: 32, next_address: 1, interval_ms: 120, sent: 0, total: 0, scanned: 0, progress_pct: 0 };
 let fleetLandingDecisionToken = 0;
 let provStatusInFlight = false;
@@ -571,20 +572,10 @@ function showFleetTab(tab) {
 }
 async function resolveFleetLandingTab() {
   if (activePage !== 'fleet' || !lastRoleIsTx || lastMode === 'standalone') return;
-  const token = ++fleetLandingDecisionToken;
-  if (Array.isArray(fleetDevicesCache) && fleetDevicesCache.length > 0) {
-    showFleetTab('devices');
-    return;
-  }
-  showFleetTab('manage');
-  const out = await apiJson('/api/fleet', { silent: true, timeoutMs: 2500 });
-  if (activePage !== 'fleet' || !lastRoleIsTx || token !== fleetLandingDecisionToken) return;
-  const role = String((out && out.role) || '').toLowerCase();
-  if (role !== 'tx') return;
-  updateFleetScanUi((out && out.scan) || {});
-  const devices = Array.isArray(out && out.devices) ? out.devices : [];
-  fleetDevicesCache = devices;
-  showFleetTab(devices.length > 0 ? 'devices' : 'manage');
+  fleetLandingDecisionToken++;
+  // Keep Fleet > Devices deterministic: always land on Devices for TX.
+  // The table can then load known peers first and enrich with live status.
+  showFleetTab('devices');
 }
 function showFleetManageTab(tab) {
   const target = (tab === 'lora') ? 'lora' : 'wifi';
@@ -2587,8 +2578,10 @@ async function testMqtt() {
 }
 async function fleetDeviceAction(action, addr, intervalS, enabled, extraBody) {
   const pathByAction = {
+    add: `/api/fleet/${addr}/actions/add`,
     poll_now: `/api/fleet/${addr}/actions/poll-now`,
     forget: `/api/fleet/${addr}/actions/forget`,
+    delete: `/api/fleet/${addr}/actions/delete`,
     set_interval: `/api/fleet/${addr}/actions/poll-interval`,
     set_schedule: `/api/fleet/${addr}/actions/schedule`,
     factory_reset: `/api/fleet/${addr}/actions/factory-reset`,
@@ -2649,10 +2642,25 @@ async function fleetDevicePollNow(addr) {
   await refreshFleet();
 }
 async function fleetDeviceForget(addr) {
-  if (!confirm(`Forget ${toHexByte(addr)}?`)) return;
-  const ok = await fleetDeviceAction('forget', addr);
+  if (!confirm(`Delete ${toHexByte(addr)} from Fleet devices?`)) return;
+  const ok = await fleetDeviceAction('delete', addr);
   if (!ok) return;
-  showToast(`Forgot ${toHexByte(addr)}`);
+  showToast(`Deleted ${toHexByte(addr)} from Fleet devices`);
+  selectedFleetDeviceAddr = 0;
+  await refreshFleet();
+}
+async function fleetAddKnownDevice() {
+  const input = document.getElementById('fleetAddAddress');
+  const addr = Math.floor(Number(input ? input.value : NaN));
+  if (!Number.isFinite(addr) || addr < 1 || addr > 254) {
+    showToast('Address must be 1..254', true);
+    return;
+  }
+  const ok = await fleetDeviceAction('add', addr);
+  if (!ok) return;
+  if (input) input.value = '';
+  selectedFleetDeviceAddr = addr;
+  showToast(`Added ${toHexByte(addr)} to Fleet devices`);
   await refreshFleet();
 }
 function fleetDeviceIntervalFromInput() {
@@ -2732,7 +2740,7 @@ function renderFleetDeviceDetail() {
    <button type="button" onclick="fleetDeviceSetInterval(${addr})">Set interval</button>
    <button type="button" onclick="fleetDeviceSetSchedule(${addr},${intervalS === 0 ? 'true' : 'false'})">${intervalS === 0 ? 'Enable schedule' : 'Disable schedule'}</button>
    <button type="button" onclick="fleetDeviceFactoryReset(${addr})">Factory reset</button>
-   <button type="button" onclick="fleetDeviceForget(${addr})">Forget</button>
+   <button type="button" onclick="fleetDeviceForget(${addr})">Delete</button>
  </div>`;
   host.innerHTML = `
   <div class="fleet-detail-tabs">
@@ -2812,7 +2820,9 @@ function renderFleetTable(devices, fleetMeta) {
   const list = Array.isArray(devices) ? devices : [];
   const pollMs = Number((fleetMeta && fleetMeta.tx_default_poll_interval_ms) || 60000);
   const pollEnabled = !!(fleetMeta && fleetMeta.tx_polling_enabled);
-  summary.innerText = `Discovered devices: ${list.length} | Global schedule default: ${Math.max(60, Math.round(pollMs / 1000))}s | Global polling: ${pollEnabled ? 'enabled' : 'disabled'}`;
+  const knownCount = Number((fleetMeta && fleetMeta.known_peer_count) || 0);
+  const knownCap = Number((fleetMeta && fleetMeta.known_peer_cap) || 12);
+  summary.innerText = `Fleet devices: ${knownCount}/${knownCap} | Visible devices: ${list.length} | Global schedule default: ${Math.max(60, Math.round(pollMs / 1000))}s | Global polling: ${pollEnabled ? 'enabled' : 'disabled'}`;
   if (list.length === 0) {
     host.innerHTML = 'No devices discovered yet.';
     if (detail) detail.innerHTML = 'No device selected.';
@@ -2853,7 +2863,12 @@ async function refreshFleet() {
   const detail = document.getElementById('fleetDetailHost');
   if (!host || !summary) return;
   fleetRefreshInFlight = true;
+  const requestToken = ++fleetRefreshRequestToken;
   const out = await apiJson('/api/fleet', { silent: true });
+  if (!(activePage === 'fleet' && activeFleetTab === 'devices') || requestToken !== fleetRefreshRequestToken) {
+    fleetRefreshInFlight = false;
+    return;
+  }
   if (!out) {
     summary.innerText = 'Fleet device list unavailable.';
     host.innerHTML = 'Fleet device list unavailable.';
@@ -2861,12 +2876,18 @@ async function refreshFleet() {
     fleetRefreshInFlight = false;
     return;
   }
-  const role = String(out.role || '').toLowerCase();
+  const roleRaw = String(out.role || '').toLowerCase();
+  const role = (roleRaw === 'tx' || roleRaw === 'rx') ? roleRaw : (lastRoleIsTx ? 'tx' : '');
   updateFleetScanUi(out.scan || {});
-  if (role !== 'tx') {
+  if (role === 'rx') {
     summary.innerText = 'Fleet view is TX-only in this firmware.';
     host.innerHTML = 'Switch role to TX to manage discovered devices.';
     if (detail) detail.innerHTML = 'Switch role to TX to view device details.';
+    fleetRefreshInFlight = false;
+    return;
+  }
+  if (role !== 'tx') {
+    // Unknown transient role payload: do not replace a valid table with a warning.
     fleetRefreshInFlight = false;
     return;
   }
