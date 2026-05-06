@@ -189,6 +189,13 @@ void WebConsole::handleLoginApi() {
            needsFleetSetupPrompt() ? 1U : 0U);
 }
 
+void WebConsole::handleUiActivity() {
+  if (!requireAuth(true))
+    return;
+  markUserActivity();
+  sendTracked(204, "text/plain", "");
+}
+
 void WebConsole::handleFleetSetupApi() {
   if (!needsFleetSetupPrompt() && !requireAuth(true))
     return;

@@ -42,6 +42,11 @@ void WebConsole::routes() {
     handleLogoutApi();
     finishRequestLog();
   });
+  server_.on("/api/ui/activity", HTTP_POST, [this]() {
+    beginRequestLog("/api/ui/activity", true, false, false);
+    handleUiActivity();
+    finishRequestLog();
+  });
 
   server_.on("/generate_204", HTTP_GET,
              [this]() { handleCaptiveProbe(); }); // Android
@@ -162,6 +167,11 @@ void WebConsole::routes() {
   server_.on("/api/logging/udp", HTTP_POST, [this]() {
     beginRequestLog("/api/logging/udp", true, false, true);
     handleUdpLogging();
+    finishRequestLog();
+  });
+  server_.on("/api/system/identify", HTTP_POST, [this]() {
+    beginRequestLog("/api/system/identify", true, false, true);
+    handleIdentify();
     finishRequestLog();
   });
   server_.on("/api/settings", HTTP_GET, [this]() {

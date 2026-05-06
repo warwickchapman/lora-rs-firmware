@@ -240,8 +240,8 @@ void WebConsole::tickStatusLiveSse() {
   const uint32_t now = millis();
 
   if (last_user_activity_ms_ != 0U &&
-      (now - last_user_activity_ms_) >= kSseIdleTimeoutMs &&
-      (now - status_live_sse_connect_ms_) >= kSseIdleTimeoutMs) {
+      (now - last_user_activity_ms_) >= kUiIdleTimeoutMs &&
+      (now - status_live_sse_connect_ms_) >= kUiIdleTimeoutMs) {
     closeStatusLiveSse();
     return;
   }

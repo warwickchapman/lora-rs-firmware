@@ -100,6 +100,12 @@ void App::begin() {
         automations_.requestReload();
 #endif
       });
+  serial_admin_.begin(
+      &config_, &sm_,
+      [this](bool restartNetwork, bool restartOtaAuth) {
+        applyUpdatedConfig(restartNetwork, restartOtaAuth);
+      },
+      [this](uint32_t durationMs) { web_.enableForMaintenance(durationMs); });
 
   startOta();
   startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
@@ -181,6 +187,9 @@ void App::tick() {
   }
 
   uint32_t phaseStartMs = millis();
+  serial_admin_.tick();
+  phaseSlowWarn("serial_admin_tick", phaseStartMs);
+  phaseStartMs = millis();
   updateNetworking();
   phaseSlowWarn("update_networking", phaseStartMs);
   phaseStartMs = millis();
@@ -344,8 +353,10 @@ void App::tick() {
              static_cast<unsigned long>(millis()));
   }
   phaseStartMs = millis();
-  web_.tick();
-  phaseSlowWarn("web_tick", phaseStartMs);
+  if (web_.isWebServing()) {
+    web_.tick();
+    phaseSlowWarn("web_tick", phaseStartMs);
+  }
   if (!startupDeferNonEssential) {
     if (ota_enabled_) {
       phaseStartMs = millis();
@@ -659,10 +670,12 @@ void App::maybeDisableAp() {
 }
 
 void App::refreshCaptiveDns() {
-  if (!ap_enabled_) {
+  if (!ap_enabled_ || !web_.isWebServing()) {
     if (dns_running_) {
       dns_.stop();
       dns_running_ = false;
+      LRS_LOGI(WIFI, "event=captive_dns_stopped reason=%s",
+               ap_enabled_ ? "web_ui_inactive" : "ap_inactive");
     }
     return;
   }

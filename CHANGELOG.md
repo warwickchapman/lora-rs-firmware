@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+### Changed
+- Web UI runtime policy is now maintenance-window based: HTTP handling, status SSE, and captive DNS start on boot, but the web console disables itself after 60 seconds without explicit user activity so steady-state firmware work is not paying Web UI overhead.
+- Fleet provisioning now uses one consistent ESP8266 gateway cap of 12 remotes, matching the known-peer and paired-target limits instead of mixing 8-device discovery with 12-device fleet state.
+- Firmware now exposes a small `LRS:`-prefixed USB serial admin protocol for Flasher-driven EasyPair foundations: identity, gateway configuration, LoRa discovery/provisioning status/actions, target-list finalization, Web UI maintenance re-enable, and reboot.
+- Flasher now starts on a Pair Devices workflow, with the previous Serial and Network tools retained as USB Cable and Network maintenance modes.
+- Pair Devices now generates Web UI-compatible readable fleet keys, supports show/copy controls, offers a quick fill for the derived gateway factory password, and moves manual provisioning steps behind an advanced section so the primary operator action is unambiguous.
+- Pair Devices now includes WiFi setup: scan networks from the selected USB gateway, save gateway STA credentials, and send those credentials to paired remotes over LoRa using the existing fleet WiFi provisioning path.
+- Firmware now supports an authenticated Identify LED command over USB serial admin and HTTP; Flasher exposes it on Pair Devices and USB Cable with a matching three-flash/pause/three-flash UI animation.
+- EasyPair now keeps scan capacity separate from runtime relay targets: the gateway no longer stores speculative `1..N` paired addresses during prepare, and Flasher finalizes the gateway target list from verified provisioned devices only.
+
 ### Fixed
 - Commissioning Wi-Fi password entry now suppresses password-manager generated-password prompts.
 - Commissioning now refuses to save a Wi-Fi password without an SSID and reports whether Wi-Fi credentials were actually stored.

@@ -55,6 +55,7 @@ let statusLiveSseBackoffMs = 1000;
 let statusLiveUiTicker = 0;
 let statusLiveHasLiveData = false;
 let lastUserInteractionMs = Date.now();
+let lastUiActivityPostMs = 0;
 const sseIdleTimeoutMs = 60000;
 let statusDegradedLiteMode = false;
 let mobileActionSourceEl = null;
@@ -1655,13 +1656,25 @@ refreshStatusLiveNotice();
 }
 }
 }
-['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
-document.addEventListener(evt, () => {
+function noteUserActivity() {
 lastUserInteractionMs = Date.now();
 if (!statusLiveSseConnected && shouldUseStatusLiveSse()) {
 syncStatusLiveSse();
 }
-}, { passive: true });
+if (location.pathname !== '/') return;
+const now = Date.now();
+if (now - lastUiActivityPostMs < 10000) return;
+lastUiActivityPostMs = now;
+try {
+fetch('/api/ui/activity', {
+method: 'POST',
+cache: 'no-store',
+keepalive: true
+}).catch(() => { });
+} catch (e) { }
+}
+['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
+document.addEventListener(evt, noteUserActivity, { passive: true });
 });
 async function loadSettingsPageData(force) {
 if (settingsPageLoadInFlight) return;
@@ -2405,7 +2418,7 @@ syncStatusLiveSse(true);
 }
 async function startFleetProvisioningDiscovery() {
 const result = document.getElementById('provWizardResult');
-const est = 8;
+const est = 12;
 suspendGlobalPollsUntilMs = Date.now() + 5000;
 if (result) { result.className = 'result-line show'; result.innerText = 'Scan in progress.'; }
 const out = await apiJson('/api/provisioning/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estimated_count: est }), silent: true, allowHttpError: true });

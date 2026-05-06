@@ -13,6 +13,16 @@ Factory script:
 API-first provisioning helper:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py`
 
+Firmware USB serial admin protocol:
+- Flasher-facing commands are newline-delimited JSON prefixed with `LRS:`.
+- The selected USB-connected device can be configured as the TX/gateway with `configure_gateway`.
+- The gateway can then run LoRa discovery/provisioning through `start_discovery`, `provisioning_status`, `provision_all`, and `cancel_provisioning`.
+- `expected_remotes` is scan capacity only. `configure_gateway` must not leave speculative runtime targets behind.
+- After provisioning, Flasher should call `set_gateway_targets` with only verified remote addresses that should remain in the gateway's paired/known target list.
+- Flasher can scan WiFi from the selected USB gateway with `wifi_scan`, save the gateway STA credentials with `configure_wifi`, and send the same credentials to remotes over LoRa with `provision_fleet_wifi`.
+- Flasher can call `identify` to flash the selected USB device LED with the same 3 fast flashes, pause, 3 fast flashes pattern shown in the desktop UI.
+- Mutating commands require the current admin password. If that password is lost, use physical erase-and-reflash recovery rather than resetting the password in place.
+
 Example:
 - `python3 /Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py --port /dev/cu.usbserial-XXXX --env lrs_za --flash --csv factory_sticker.csv`
 - Optional: generate deployment key per batch automatically by passing `--batch-id <YYMMDD>` (or explicit `--deployment-key <value>`).
@@ -41,7 +51,7 @@ A CSV row with:
 - Factory role: TX
 - Addresses:
   - TX/GW defaults to local `254` with first remote target `1`
-  - RX units are assigned from `1` upwards during fleet provisioning (`1..32` currently)
+  - RX units are assigned from `1` upwards during fleet provisioning (`1..32` address range; 12 remotes per ESP8266 gateway currently)
 - AP/admin password: deterministic by chip ID + product secret
 - AP SSID: `lrs-<chipid>` (role-independent so TX/RX changes do not force AP SSID changes)
 - Deployment key: generated as readable three-word key per batch run unless explicitly provided
@@ -87,7 +97,7 @@ Web Console operator cues (Fleet -> Manage -> LoRa):
 - Discovery reliability: factory-key targets now transmit two announce frames per discover command (short jitter before the second frame). Coordinator device list remains deduped by `chip_id`.
 - Discovery timing model is two-phase: coordinator sends a short `DiscoverStart` burst first, then remains silent while targets reply on randomized jitter within the declared reply window.
 - Discovery is now single-pass (no automatic retry cycle). If another scan is desired, the operator explicitly presses `Start Discovery` again.
-- Discovery start prompts for expected device count (`1..8`) and stops on expected count reached or `120s`.
+- Discovery start prompts for expected device count (`1..12` on ESP8266) and stops on expected count reached or `120s`.
 - During discovery/readiness UI updates, discovered rows are sticky by `chip_id` and remain visible until `Provision All` is started (or session is cancelled).
 - Address auto-assignment for provisioning is constrained to `1..32`.
 - If `verify` is missed after apply, coordinator performs a fleet-key probe on the assigned address before final classification; status may show `applied_unconfirmed` when apply likely succeeded but confirmation was not observed.

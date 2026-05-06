@@ -215,13 +215,13 @@ void WebConsole::handleProvisioningStart() {
       return;
     }
   }
-  uint16_t estimated = 8;
+  uint16_t estimated = LRS_PROVISIONING_MAX_DEVICES;
   if (!body["estimated_count"].isNull()) {
     int v = body["estimated_count"].as<int>();
     if (v < 1)
       v = 1;
-    if (v > 8)
-      v = 8;
+    if (v > LRS_PROVISIONING_MAX_DEVICES)
+      v = LRS_PROVISIONING_MAX_DEVICES;
     estimated = static_cast<uint16_t>(v);
   }
   if (!sm_->provisioningStartDiscovery(estimated)) {

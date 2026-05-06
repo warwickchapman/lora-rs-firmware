@@ -7,7 +7,7 @@
 #include "radio_protocol.h"
 
 #ifndef LRS_PROVISIONING_MAX_DEVICES
-#define LRS_PROVISIONING_MAX_DEVICES 8
+#define LRS_PROVISIONING_MAX_DEVICES 12
 #endif
 
 #ifndef LRS_MAX_PEERS
@@ -139,6 +139,8 @@ struct ProvisioningDeviceSnapshot {
 
 class NodeStateMachine {
  public:
+  static constexpr uint32_t kIdentifyLedDurationMs = 6000;
+
   bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);
   void tick();
@@ -191,7 +193,8 @@ class NodeStateMachine {
   bool hasPendingFleetProvisionApply() const;
   bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, uint8_t &controllerAddress,
                                          String &fleetKey);
- bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
+  bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
+  void triggerIdentify(uint32_t durationMs = kIdentifyLedDurationMs);
 
  private:
   static constexpr size_t kMaxPeers = LRS_MAX_PEERS;
@@ -228,6 +231,8 @@ class NodeStateMachine {
   uint8_t relay_state_ = 0;
   uint8_t input_state_ = 0;
   int last_input_raw_ = LOW;
+  uint32_t identify_led_started_ms_ = 0;
+  uint32_t identify_led_until_ms_ = 0;
 
   uint32_t last_heartbeat_ms_ = 0;
   uint32_t wait_ack_since_ms_ = 0;
@@ -466,6 +471,7 @@ class NodeStateMachine {
   void tickReceive();
   void tickFleetScan(uint32_t now);
   void tickLed();
+  bool tickIdentifyLed(uint32_t now);
   void tickProvisioningCoordinator(uint32_t now);
   void tickProvisioningTarget(uint32_t now);
   void refreshRuntimeCfg(const Settings &cfg);

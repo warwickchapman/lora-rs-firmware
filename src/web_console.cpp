@@ -38,10 +38,27 @@ bool WebConsole::begin(ConfigStore *config, NodeStateMachine *sm,
 
   routes();
   server_.begin();
+  web_serving_ = true;
+  web_started_ms_ = millis();
+  web_idle_timeout_ms_ = kUiIdleTimeoutMs;
+  last_user_activity_ms_ = web_started_ms_;
+  LRS_LOGI(WEB, "event=web_ui_enabled reason=boot timeout_ms=%lu",
+           static_cast<unsigned long>(kUiIdleTimeoutMs));
   return true;
 }
 
 void WebConsole::tick() {
+  if (!web_serving_)
+    return;
+  const uint32_t now = millis();
+  const uint32_t lastActivity =
+      (last_user_activity_ms_ != 0U) ? last_user_activity_ms_ : web_started_ms_;
+  if (lastActivity != 0U &&
+      static_cast<uint32_t>(now - lastActivity) >= web_idle_timeout_ms_ &&
+      static_cast<uint32_t>(now - web_started_ms_) >= web_idle_timeout_ms_) {
+    stopServing("idle_timeout");
+    return;
+  }
   server_.handleClient();
   tickStatusLiveSse();
 }
@@ -53,6 +70,43 @@ bool WebConsole::isWebActive() const {
       static_cast<int32_t>(now - last_web_pressure_ms_) <
           static_cast<int32_t>(kStatusLiveSsePressureWindowMs);
   return status_live_sse_active_ || request_log_.active || recentPressure;
+}
+
+bool WebConsole::isWebServing() const { return web_serving_; }
+
+void WebConsole::markUserActivity() { last_user_activity_ms_ = millis(); }
+
+void WebConsole::enableForMaintenance(uint32_t durationMs) {
+  const uint32_t now = millis();
+  if (!web_serving_) {
+    server_.begin();
+    web_serving_ = true;
+    web_started_ms_ = now;
+  }
+  if (durationMs < kUiIdleTimeoutMs)
+    durationMs = kUiIdleTimeoutMs;
+  web_idle_timeout_ms_ = durationMs;
+  web_started_ms_ = now;
+  last_user_activity_ms_ = now;
+  LRS_LOGI(WEB, "event=web_ui_enabled reason=serial_maintenance timeout_ms=%lu",
+           static_cast<unsigned long>(durationMs));
+}
+
+void WebConsole::stopServing(const char *reason) {
+  if (!web_serving_)
+    return;
+  closeStatusLiveSse();
+  clearSession();
+  server_.close();
+  web_serving_ = false;
+  web_idle_timeout_ms_ = kUiIdleTimeoutMs;
+  LRS_LOGI(WEB,
+           "event=web_ui_disabled reason=%s uptime_ms=%lu heap_free=%lu "
+           "max_free_block=%lu",
+           reason ? reason : "unknown",
+           static_cast<unsigned long>(millis() - web_started_ms_),
+           static_cast<unsigned long>(lrslog::heapFree()),
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
 }
 
 void WebConsole::beginRequestLog(const char *path, bool api, bool poll,
@@ -71,8 +125,9 @@ void WebConsole::beginRequestLog(const char *path, bool api, bool poll,
   request_log_.client_ip[3] = remote[3];
 
   if (!poll && path != nullptr &&
-      strcmp(path, "/api/status-live/events") != 0) {
-    last_user_activity_ms_ = request_log_.started_ms;
+      strcmp(path, "/api/status-live/events") != 0 &&
+      strcmp(path, "/api/ui/activity") != 0) {
+    markUserActivity();
   }
 }
 

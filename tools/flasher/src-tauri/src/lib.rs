@@ -146,6 +146,7 @@ pub fn run() {
             crate::commands::network::start_network_udp_monitor,
             crate::commands::network::stop_network_udp_monitor,
             crate::commands::network::enable_network_udp_logging,
+            crate::commands::easy_pair::serial_admin_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

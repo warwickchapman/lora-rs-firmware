@@ -69,6 +69,7 @@ This ordering keeps LoRa control priority above MQTT.
 - `GET /setup`
 - `POST /api/login`
 - `POST /api/logout`
+- `POST /api/ui/activity`
 - `POST /api/setup/fleet-key`
 - `POST /api/setup/commissioning`
 - `GET /api/status-live`
@@ -106,8 +107,24 @@ This ordering keeps LoRa control priority above MQTT.
 Fleet/Provisioning implementation notes:
 - Fleet endpoints are disabled in `standalone` mode (`fleet_disabled_in_standalone`).
 - Fleet devices response includes both live peers and cached known peers (bounded to 12) so Devices page can render before a fresh scan.
+- ESP8266 provisioning supports up to 12 remotes per gateway, matching `Settings::kAddressListCap` and `LRS_MAX_PEERS`.
 - Provisioning status no longer uses compact/count-only response mode; rows remain authoritative for UI state.
 - `/api/network/provision-fleet` supports optional `target_address` for per-device sends (`255` broadcast default).
+- `POST /api/system/identify` flashes the local LED with the Identify pattern for physical unit lookup. It is authenticated and accepts optional `duration_ms` clamped to 1000..30000.
+
+Web UI lifecycle:
+- The Web UI is a boot-time maintenance surface, not a steady-state runtime dependency.
+- HTTP handling and status SSE start on boot, then stop after 60 seconds without explicit user activity.
+- Background polling, SSE keepalives, and captive-portal probes must not extend the maintenance window.
+- When the window closes, `App::tick()` skips `web_.tick()` and captive DNS processing stops until the next reboot or the USB `enable_web` maintenance command.
+
+USB serial admin protocol:
+- Flasher commands are line-delimited JSON prefixed with `LRS:` so responses can be separated from normal serial logs.
+- Replies use the same `LRS:` prefix and include `ok`, `cmd`, optional `id`, and command-specific fields.
+- Read-only commands: `hello`, `identity`, `provisioning_status`.
+- Password-gated commands: `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `enable_web`, `reboot`.
+- `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
+- Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
 
 ## 8. Packet and Compatibility
 Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.

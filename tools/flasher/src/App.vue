@@ -17,15 +17,18 @@ const isTogglingWindowMode = ref(false);
 const WINDOW_MODE_KEY = 'flasher.windowMode';
 const MODE_STORAGE_KEY = 'thanda-flasher-active-mode';
 
-function initialActiveMode(): 'serial' | 'network' {
+type ActiveMode = 'pair' | 'serial' | 'network';
+
+function initialActiveMode(): ActiveMode {
   try {
-    return localStorage.getItem(MODE_STORAGE_KEY) === 'network' ? 'network' : 'serial';
+    const saved = localStorage.getItem(MODE_STORAGE_KEY);
+    return saved === 'serial' || saved === 'network' ? saved : 'pair';
   } catch {
-    return 'serial';
+    return 'pair';
   }
 }
 
-const activeMode = ref<'serial' | 'network'>(initialActiveMode());
+const activeMode = ref<ActiveMode>(initialActiveMode());
 
 async function fetchVersion() {
   try {
@@ -175,16 +178,22 @@ watch(activeMode, (mode) => {
         </h1>
         <p class="text-slate-400 text-sm mt-1">{{ appVersion }}</p>
       </div>
-      <div class="absolute left-1/2 -translate-x-1/2 top-6 w-full max-w-xs rounded-md border border-slate-700 bg-slate-900/60 p-1">
+      <div class="absolute left-1/2 -translate-x-1/2 top-6 w-full max-w-md rounded-md border border-slate-700 bg-slate-900/60 p-1">
+        <button
+          @click="activeMode = 'pair'"
+          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'pair' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+        >
+          Pair Devices
+        </button>
         <button
           @click="activeMode = 'serial'"
-          :class="['m-0 w-1/2 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
-          Serial
+          USB Cable
         </button>
         <button
           @click="activeMode = 'network'"
-          :class="['m-0 w-1/2 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
           Network
         </button>

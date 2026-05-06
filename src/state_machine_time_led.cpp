@@ -66,6 +66,8 @@ uint32_t NodeStateMachine::currentUnixTimeS(uint32_t nowMs) const {
 
 void NodeStateMachine::tickLed() {
   const uint32_t now = millis();
+  if (tickIdentifyLed(now)) return;
+
   uint32_t blinkInterval = kNoLinkFastIntervalMs;
 
   if (last_packet_ms_ != 0 && (now - last_packet_ms_) <= (runtime_.heartbeat_ms * 2U)) {
@@ -83,4 +85,34 @@ void NodeStateMachine::tickLed() {
     led_on_ = !led_on_;
     digitalWrite(kLedPin, led_on_ ? LOW : HIGH);
   }
+}
+
+void NodeStateMachine::triggerIdentify(uint32_t durationMs) {
+  if (durationMs == 0) durationMs = kIdentifyLedDurationMs;
+  const uint32_t now = millis();
+  identify_led_started_ms_ = now;
+  identify_led_until_ms_ = now + durationMs;
+  led_on_ = false;
+  last_led_toggle_ms_ = now;
+  tickIdentifyLed(now);
+}
+
+bool NodeStateMachine::tickIdentifyLed(uint32_t now) {
+  if (identify_led_until_ms_ == 0) return false;
+  if (static_cast<int32_t>(now - identify_led_until_ms_) >= 0) {
+    identify_led_until_ms_ = 0;
+    identify_led_started_ms_ = 0;
+    led_on_ = false;
+    digitalWrite(kLedPin, HIGH);
+    return false;
+  }
+
+  const uint32_t t = (now - identify_led_started_ms_) % 2000U;
+  const bool on =
+      (t < 120U) || (t >= 240U && t < 360U) || (t >= 480U && t < 600U) ||
+      (t >= 980U && t < 1100U) || (t >= 1220U && t < 1340U) ||
+      (t >= 1460U && t < 1580U);
+  led_on_ = on;
+  digitalWrite(kLedPin, on ? LOW : HIGH);
+  return true;
 }

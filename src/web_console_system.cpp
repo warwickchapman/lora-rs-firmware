@@ -9,6 +9,7 @@
 #include "build_info.h"
 #include "config_store.h"
 #include "logger.h"
+#include "state_machine.h"
 #include "web_console_internal.h"
 
 using namespace webconsole_internal;
@@ -224,6 +225,39 @@ void WebConsole::handleUdpLogging() {
            static_cast<unsigned long>(ttlS * 1000UL),
            static_cast<unsigned long>(lrslog::udpMirrorRemainingMs()));
   sendTracked(200, "application/json", resp);
+}
+
+void WebConsole::handleIdentify() {
+  if (!requireAuth(true)) return;
+  if (sm_ == nullptr) {
+    server_.send(503, "application/json",
+                 "{\"ok\":false,\"error\":\"runtime_unavailable\"}");
+    return;
+  }
+
+  JsonDocument body;
+  const auto err = deserializeJson(body, server_.arg("plain"));
+  if (err && server_.arg("plain").length() > 0) {
+    server_.send(400, "application/json",
+                 "{\"ok\":false,\"error\":\"invalid json\"}");
+    return;
+  }
+  uint32_t durationMs =
+      body["duration_ms"] | NodeStateMachine::kIdentifyLedDurationMs;
+  if (durationMs < 1000UL) durationMs = 1000UL;
+  if (durationMs > 30000UL) durationMs = 30000UL;
+  sm_->triggerIdentify(durationMs);
+
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["duration_ms"] = durationMs;
+  doc["pattern"] = "triple_flash_pause_triple_flash";
+  const size_t len = measureJson(doc);
+  server_.setContentLength(len);
+  server_.send(200, "application/json", "");
+  serializeJson(doc, server_.client());
+  LRS_LOGI(API, "event=http_identify_led duration_ms=%lu",
+           static_cast<unsigned long>(durationMs));
 }
 
 void WebConsole::handleOtaUpload() {

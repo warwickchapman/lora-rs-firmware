@@ -30,3 +30,16 @@ Network mode handles one LRS device at a time over the current LAN:
 - listens for UDP logs on fixed port `5514` after OTA or on demand, renewing the device-side UDP logging lease while monitoring is active, with the expanded log view retaining copy-log, copy-password, open-Web-UI, and stop controls
 
 Network mode intentionally does not include bulk OTA yet. The UI can enumerate multiple devices, but update and UDP-log actions target the selected device only.
+
+## EasyPair foundation
+
+New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
+
+- commands are newline-delimited JSON prefixed with `LRS:`
+- the generic Tauri command is `serial_admin_command`
+- the selected USB device is configured as the TX/gateway
+- remotes are discovered and provisioned over LoRa by that selected gateway
+- final gateway target lists should be written with `set_gateway_targets`
+- Pair Devices and USB Cable include an Identify LED action that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
+
+The app opens on Pair Devices. The existing Serial and Network tools remain available as USB Cable and Network maintenance modes for flashing, OTA, log viewing, password checks, and Web UI access.

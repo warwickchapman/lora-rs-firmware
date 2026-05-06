@@ -18,6 +18,8 @@ public:
              std::function<void()> onAutomationsSaved = {});
   void tick();
   bool isWebActive() const;
+  bool isWebServing() const;
+  void enableForMaintenance(uint32_t durationMs);
 
 private:
   ESP8266WebServer server_{80};
@@ -33,6 +35,9 @@ private:
   uint32_t session_expires_ms_ = 0;
   bool ota_upload_ok_ = false;
   String ota_upload_error_;
+  bool web_serving_ = false;
+  uint32_t web_started_ms_ = 0;
+  uint32_t web_idle_timeout_ms_ = 60000;
 
   bool requireAuth(bool api = true);
   bool hasSession() const;
@@ -52,6 +57,9 @@ private:
                           uint32_t minMaxBlockBytes = 0);
   bool isSoftApActive() const;
   void handleCaptiveProbe();
+  void handleUiActivity();
+  void markUserActivity();
+  void stopServing(const char *reason);
 
   void handleIndex();
   void handleLoginPage();
@@ -86,6 +94,7 @@ private:
   void handleProvisioningCancel();
   void handleTestMqtt();
   void handleUdpLogging();
+  void handleIdentify();
   void handleOtaUpload();
   void handleOtaUploadChunk();
   void handleLogsCsv();
@@ -167,7 +176,7 @@ private:
   uint32_t status_live_sse_last_prov_push_ms_ = 0;
   uint32_t last_web_pressure_ms_ = 0;
   uint32_t last_user_activity_ms_ = 0;
-  static constexpr uint32_t kSseIdleTimeoutMs = 60000;
+  static constexpr uint32_t kUiIdleTimeoutMs = 60000;
   bool status_live_cache_building_ = false;
   bool status_static_cache_building_ = false;
   bool status_lite_cache_building_ = false;

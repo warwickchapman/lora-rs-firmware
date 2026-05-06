@@ -5,7 +5,9 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-const activeMode = defineModel<'serial' | 'network'>('activeMode', { default: 'serial' });
+type ActiveMode = 'pair' | 'serial' | 'network';
+
+const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 
 interface SerialPort {
   port_name: string;
@@ -73,9 +75,55 @@ interface NetworkScanProgressEvent {
   subnet_label: string;
 }
 
+interface EasyPairDevice {
+  chip_id_hex: string;
+  current_address: number;
+  assigned_address: number;
+  role_tx: boolean;
+  fw_major: number;
+  fw_minor: number;
+  fw_patch: number;
+  rssi: number;
+  selected: boolean;
+  address_conflict: boolean;
+  state: string;
+}
+
+interface EasyPairStatus {
+  ok: boolean;
+  cmd: string;
+  session?: {
+    active: boolean;
+    state: string;
+    estimated_count: number;
+    discovered_count: number;
+    selected_count: number;
+    verified_count: number;
+    failed_count: number;
+    conflict_count: number;
+  };
+  devices?: EasyPairDevice[];
+}
+
+interface WifiNetwork {
+  ssid: string;
+  rssi: number;
+  channel: number;
+  bssid: string;
+  secure: boolean;
+}
+
+interface WifiScanResponse {
+  ok: boolean;
+  cmd: string;
+  networks?: WifiNetwork[];
+}
+
 type RegionCode = 'ZA' | 'EU' | 'US';
 
 const SAVED_NETWORK_PASSWORDS_KEY = 'lrs_flasher_network_passwords';
+const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
+const READABLE_KEY_VOWELS = 'aeiou';
 
 const ports = ref<SerialPort[]>([]);
 const selectedPort = ref('');
@@ -90,6 +138,7 @@ const isNetworkOta = ref(false);
 const isNetworkUdpMonitoring = ref(false);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
+const pairLogs = ref<string[]>([]);
 const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
 const deviceInfo = ref<DeviceInfo | null>(null);
@@ -100,6 +149,7 @@ const isFetchingFirmware = ref(false);
 const showToast = ref(false);
 const toastMessage = ref('');
 const logContainer = ref<HTMLElement | null>(null);
+const deviceInfoReadSeq = ref(0);
 const monitorAfterFlash = ref(true);
 const eraseBeforeFlash = ref(false);
 const lastPortSnapshot = ref<string[]>([]);
@@ -118,6 +168,26 @@ const networkStatusMessage = ref('Ready to scan the current LAN.');
 const networkUdpTarget = ref('');
 const networkScanProgress = ref<NetworkScanProgressEvent | null>(null);
 const networkPasswordCheckSeq = ref<Record<string, number>>({});
+const pairExpectedCount = ref(12);
+const pairPanelTab = ref<'pair' | 'wifi'>('pair');
+const pairFleetKey = ref('');
+const pairAdminPassword = ref('');
+const showPairFleetKey = ref(false);
+const showPairAdminPassword = ref(false);
+const pairStatus = ref<EasyPairStatus | null>(null);
+const isPairBusy = ref(false);
+const isGatewayLoading = ref(false);
+const gatewayLoadedPort = ref('');
+const pairStatusPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
+const wifiNetworks = ref<WifiNetwork[]>([]);
+const pairWifiSsid = ref('');
+const pairWifiPassword = ref('');
+const showPairWifiPassword = ref(false);
+const isWifiScanning = ref(false);
+const isWifiApplying = ref(false);
+const isFleetWifiSending = ref(false);
+const isIdentifying = ref(false);
+const identifyTimer = ref<ReturnType<typeof window.setTimeout> | null>(null);
 
 const LOCAL_OPTION = '__local_browse__';
 const NETWORK_UDP_LOG_TTL_S = 1800;
@@ -155,7 +225,11 @@ const orderedDeviceInfoEntries = computed((): Array<[keyof DeviceInfo, string | 
   }
   return entries;
 });
-const activeLogs = computed(() => activeMode.value === 'network' ? networkLogs.value : serialLogs.value);
+const activeLogs = computed(() => {
+  if (activeMode.value === 'network') return networkLogs.value;
+  if (activeMode.value === 'pair') return pairLogs.value;
+  return serialLogs.value;
+});
 const crashCount = computed(() => countCrashEvents(activeLogs.value));
 const monitorDeviceLabel = computed(() => {
   if (activeMonitorSsid.value) {
@@ -193,7 +267,11 @@ const networkSubnetLabel = computed(() => {
     .join(', ');
 });
 const networkLogActive = computed(() => activeMode.value === 'network' && isNetworkUdpMonitoring.value);
-const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value);
+const gatewayReady = computed(() => !!selectedPort.value && gatewayLoadedPort.value === selectedPort.value && !!pairAdminPassword.value.trim());
+const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
+const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
+const identifyDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value);
+const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value);
 const activityFullscreen = computed(() =>
   (activeMode.value === 'serial' && isMonitoring.value) ||
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
@@ -228,8 +306,18 @@ function pushNetworkLog(line: string) {
   }
 }
 
+function pushPairLog(line: string) {
+  if (!line) return;
+  pairLogs.value.push(line);
+  if (pairLogs.value.length > 2000) {
+    pairLogs.value = pairLogs.value.slice(-2000);
+  }
+}
+
 function clearActivityLog() {
-  if (activeMode.value === 'network') {
+  if (activeMode.value === 'pair') {
+    pairLogs.value = [];
+  } else if (activeMode.value === 'network') {
     networkLogs.value = [];
     networkUptimeMs.value = null;
   } else {
@@ -377,7 +465,7 @@ async function refreshPorts() {
     const previousSet = new Set(lastPortSnapshot.value);
     const newPorts = currentNames.filter(name => !previousSet.has(name));
     const selectedExists = currentNames.includes(selectedPort.value);
-    const hasActiveOperation = isFlashing.value || isLoadingInfo.value || isMonitoring.value;
+    const hasActiveOperation = isFlashing.value || isLoadingInfo.value || isMonitoring.value || isGatewayLoading.value;
 
     // Track first-seen order so Windows can prefer most recently connected devices.
     for (const portName of newPorts) {
@@ -487,6 +575,62 @@ function copyActivePassword() {
     return;
   }
   copyToClipboard(password, 'factory password');
+}
+
+function randomIndex(max: number): number {
+  if (max <= 1) return 0;
+  try {
+    if (window.crypto && window.crypto.getRandomValues) {
+      const arr = new Uint32Array(1);
+      const lim = Math.floor(0x100000000 / max) * max;
+      let value = 0;
+      do {
+        window.crypto.getRandomValues(arr);
+        value = arr[0];
+      } while (value >= lim);
+      return value % max;
+    }
+  } catch (_) {
+    // Fall through to Math.random below.
+  }
+  return Math.floor(Math.random() * max);
+}
+
+function generateReadableFleetKey(): string {
+  const groups: string[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    groups.push(
+      READABLE_KEY_CONSONANTS[randomIndex(READABLE_KEY_CONSONANTS.length)] +
+      READABLE_KEY_VOWELS[randomIndex(READABLE_KEY_VOWELS.length)] +
+      READABLE_KEY_CONSONANTS[randomIndex(READABLE_KEY_CONSONANTS.length)] +
+      READABLE_KEY_VOWELS[randomIndex(READABLE_KEY_VOWELS.length)] +
+      READABLE_KEY_CONSONANTS[randomIndex(READABLE_KEY_CONSONANTS.length)]
+    );
+  }
+  return groups.join('-');
+}
+
+function generatePairFleetKey(force = false) {
+  if (!force && pairFleetKey.value.trim()) return;
+  pairFleetKey.value = generateReadableFleetKey();
+}
+
+function copyPairFleetKey() {
+  const key = pairFleetKey.value.trim();
+  if (!key) {
+    notify('Generate a fleet key first');
+    return;
+  }
+  copyToClipboard(key, 'fleet key');
+}
+
+function copyPairAdminPassword() {
+  const password = pairAdminPassword.value.trim();
+  if (!password) {
+    notify('Load gateway first to copy the password');
+    return;
+  }
+  copyToClipboard(password, 'gateway password');
 }
 
 function passwordForNetworkDevice(device: NetworkDevice): string {
@@ -878,6 +1022,383 @@ async function waitForNetworkDevice(ip: string, password: string, timeoutMs: num
   throw new Error('Device did not return before the 90s wait expired');
 }
 
+function pairPassword(): string {
+  return pairAdminPassword.value.trim() || (hasActiveDeviceInfo.value ? deviceInfo.value?.password?.trim() || '' : '');
+}
+
+async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
+  if (!selectedPort.value) throw new Error('Select the USB gateway first');
+  return await invoke<T>('serial_admin_command', {
+    port: selectedPort.value,
+    request: { cmd, ...payload },
+    timeoutMs
+  });
+}
+
+function serialFeatureError(feature: string, err: unknown): string {
+  const text = String(err || 'serial command failed');
+  if (text.includes('unknown_cmd')) {
+    return `${feature} failed: unknown_cmd - Flash this gateway with the latest firmware and try again.`;
+  }
+  if (text.includes(' failed: ')) return text;
+  return `${feature} failed: ${text}`;
+}
+
+function startIdentifyUiPattern(durationMs: number) {
+  if (identifyTimer.value) {
+    window.clearTimeout(identifyTimer.value);
+    identifyTimer.value = null;
+  }
+  isIdentifying.value = true;
+  identifyTimer.value = window.setTimeout(() => {
+    isIdentifying.value = false;
+    identifyTimer.value = null;
+  }, Math.max(1000, durationMs));
+}
+
+async function activeSerialAdminPassword(): Promise<string> {
+  if (activeMode.value === 'pair') {
+    return pairPassword();
+  }
+  return deviceInfo.value?.password?.trim() || '';
+}
+
+async function triggerIdentify() {
+  if (!selectedPort.value) {
+    notify('Select a USB device first');
+    return;
+  }
+  if (!hasActiveDeviceInfo.value) {
+    notify('Load device details first');
+    return;
+  }
+  if (isIdentifying.value) return;
+  isIdentifying.value = true;
+  const log = activeMode.value === 'pair' ? pushPairLog : pushSerialLog;
+  log('Starting identify LED pattern...');
+  try {
+    const password = await activeSerialAdminPassword();
+    if (!password) throw new Error('factory password unavailable');
+    const out = await sendEasyPairCommand<any>('identify', {
+      admin_password: password,
+      duration_ms: 6000
+    }, 5000);
+    startIdentifyUiPattern(Number(out.duration_ms || 6000));
+    log('Identify pattern started: 3 fast flashes, pause, 3 fast flashes.');
+  } catch (e) {
+    isIdentifying.value = false;
+    const msg = serialFeatureError('Identify', e);
+    log(msg);
+    notify(msg);
+  }
+}
+
+async function loadEasyPairGateway() {
+  if (!selectedPort.value) return;
+  const port = selectedPort.value;
+  isGatewayLoading.value = true;
+  gatewayLoadedPort.value = '';
+  pushPairLog('Reading USB gateway identity...');
+  try {
+    const ok = await readDeviceInfo();
+    if (!ok || !deviceInfo.value) throw new Error('Unable to read gateway factory details');
+    if (selectedPort.value !== port) return;
+    pairAdminPassword.value = deviceInfo.value.password || '';
+    const hello = await sendEasyPairCommand<any>('hello', {}, 4000);
+    if (selectedPort.value !== port) return;
+    gatewayLoadedPort.value = port;
+    pushPairLog(`Gateway ready on ${selectedPort.value}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
+  } catch (e) {
+    if (selectedPort.value === port) {
+      pairAdminPassword.value = '';
+      gatewayLoadedPort.value = '';
+    }
+    pushPairLog('Gateway check failed: ' + e);
+    notify('Gateway check failed: ' + e);
+  } finally {
+    isGatewayLoading.value = false;
+  }
+}
+
+async function configureEasyPairGateway() {
+  const fleetKey = pairFleetKey.value.trim();
+  const password = pairPassword();
+  if (!fleetKey) {
+    notify('Enter the fleet key before pairing');
+    return;
+  }
+  if (!password) {
+    notify('Load the gateway factory password first');
+    return;
+  }
+  isPairBusy.value = true;
+  pushPairLog('Configuring selected USB device as gateway...');
+  try {
+    await sendEasyPairCommand('configure_gateway', {
+      admin_password: password,
+      fleet_passphrase: fleetKey,
+      expected_remotes: pairExpectedCount.value
+    }, 10000);
+    pushPairLog(`Gateway configured for up to ${pairExpectedCount.value} remote device${pairExpectedCount.value === 1 ? '' : 's'}.`);
+  } catch (e) {
+    pushPairLog('Gateway configuration failed: ' + e);
+    notify('Gateway configuration failed: ' + e);
+  } finally {
+    isPairBusy.value = false;
+  }
+}
+
+async function runEasyPair() {
+  const expected = Math.max(1, Math.min(12, Number(pairExpectedCount.value) || 12));
+  pairExpectedCount.value = expected;
+  const fleetKey = pairFleetKey.value.trim();
+  if (!fleetKey) {
+    notify('Enter the fleet key before pairing');
+    return;
+  }
+  isPairBusy.value = true;
+  pushPairLog('--- EasyPair ---');
+  try {
+    if (!gatewayReady.value) {
+      await loadEasyPairGateway();
+      if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    }
+    const password = pairPassword();
+    await sendEasyPairCommand('configure_gateway', {
+      admin_password: password,
+      fleet_passphrase: fleetKey,
+      expected_remotes: expected
+    }, 10000);
+    pushPairLog(`Gateway prepared. Scanning for ${expected} remote device${expected === 1 ? '' : 's'}...`);
+    await sendEasyPairCommand('start_discovery', {
+      admin_password: password,
+      expected_remotes: expected
+    }, 10000);
+    startEasyPairStatusPolling();
+    await waitForEasyPairState(['ready', 'error'], 130000);
+    if (pairStatus.value?.session?.state === 'error') throw new Error('Discovery ended with an error');
+    const found = pairStatus.value?.session?.discovered_count || 0;
+    if (found === 0) throw new Error('No remote devices found');
+    pushPairLog(`Found ${found} remote device${found === 1 ? '' : 's'}. Provisioning...`);
+    await sendEasyPairCommand('provision_all', { admin_password: password }, 10000);
+    await waitForEasyPairState(['complete', 'error'], 180000);
+    if (pairStatus.value?.session?.state === 'error') throw new Error('Provisioning ended with an error');
+    await saveEasyPairTargets();
+  } catch (e) {
+    pushPairLog('EasyPair failed: ' + e);
+    notify('EasyPair failed: ' + e);
+  } finally {
+    isPairBusy.value = false;
+  }
+}
+
+async function refreshEasyPairStatus(log = false) {
+  try {
+    pairStatus.value = await sendEasyPairCommand<EasyPairStatus>('provisioning_status', {}, 5000);
+    if (log && pairStatus.value.session) {
+      const s = pairStatus.value.session;
+      pushPairLog(`Status: ${s.state}, found ${s.discovered_count}, verified ${s.verified_count}, failed ${s.failed_count}.`);
+    }
+  } catch (e) {
+    if (log) pushPairLog('Status refresh failed: ' + e);
+  }
+}
+
+async function waitForEasyPairState(states: string[], timeoutMs: number) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await refreshEasyPairStatus(false);
+    const state = pairStatus.value?.session?.state || '';
+    if (states.includes(state)) return;
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  throw new Error(`Timed out waiting for ${states.join(' or ')}`);
+}
+
+function startEasyPairStatusPolling() {
+  stopEasyPairStatusPolling();
+  pairStatusPollTimer.value = window.setInterval(() => {
+    refreshEasyPairStatus(false);
+  }, 2000);
+}
+
+function stopEasyPairStatusPolling() {
+  if (pairStatusPollTimer.value) {
+    window.clearInterval(pairStatusPollTimer.value);
+    pairStatusPollTimer.value = null;
+  }
+}
+
+async function startEasyPairDiscovery() {
+  const password = pairPassword();
+  if (!password) {
+    notify('Load the gateway factory password first');
+    return;
+  }
+  isPairBusy.value = true;
+  pushPairLog(`Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
+  try {
+    await sendEasyPairCommand('start_discovery', {
+      admin_password: password,
+      expected_remotes: pairExpectedCount.value
+    }, 10000);
+    startEasyPairStatusPolling();
+    await refreshEasyPairStatus(true);
+  } catch (e) {
+    pushPairLog('Discovery failed: ' + e);
+    notify('Discovery failed: ' + e);
+  } finally {
+    isPairBusy.value = false;
+  }
+}
+
+async function provisionEasyPairDevices() {
+  const password = pairPassword();
+  if (!password) {
+    notify('Load the gateway factory password first');
+    return;
+  }
+  isPairBusy.value = true;
+  pushPairLog('Provisioning discovered remotes...');
+  try {
+    await sendEasyPairCommand('provision_all', { admin_password: password }, 10000);
+    startEasyPairStatusPolling();
+    await refreshEasyPairStatus(true);
+  } catch (e) {
+    pushPairLog('Provisioning failed: ' + e);
+    notify('Provisioning failed: ' + e);
+  } finally {
+    isPairBusy.value = false;
+  }
+}
+
+async function saveEasyPairTargets() {
+  const password = pairPassword();
+  const addresses = (pairStatus.value?.devices || [])
+    .filter(d =>
+      d.selected &&
+      !d.address_conflict &&
+      d.state === 'verified' &&
+      d.assigned_address > 0 &&
+      d.assigned_address < 255
+    )
+    .map(d => d.assigned_address);
+  if (!password || addresses.length === 0) {
+    notify('No provisioned target addresses to save yet');
+    return;
+  }
+  isPairBusy.value = true;
+  pushPairLog(`Saving gateway target list: ${addresses.join(', ')}`);
+  try {
+    await sendEasyPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
+    pushPairLog('Pairing complete.');
+    await refreshEasyPairStatus(false);
+  } catch (e) {
+    pushPairLog('Saving target list failed: ' + e);
+    notify('Saving target list failed: ' + e);
+  } finally {
+    isPairBusy.value = false;
+  }
+}
+
+async function cancelEasyPair() {
+  const password = pairPassword();
+  if (!password) return;
+  try {
+    await sendEasyPairCommand('cancel_provisioning', { admin_password: password }, 5000);
+    stopEasyPairStatusPolling();
+    await refreshEasyPairStatus(true);
+  } catch (e) {
+    pushPairLog('Cancel failed: ' + e);
+  }
+}
+
+function wifiSignalLabel(rssi: number): string {
+  if (rssi >= -60) return 'Excellent';
+  if (rssi >= -70) return 'Good';
+  if (rssi >= -80) return 'Fair';
+  return 'Weak';
+}
+
+async function scanGatewayWifi() {
+  const password = pairPassword();
+  if (!password) {
+    notify('Load gateway first to use the factory password');
+    return;
+  }
+  isWifiScanning.value = true;
+  pushPairLog('Scanning WiFi networks from the USB gateway...');
+  try {
+    const out = await sendEasyPairCommand<WifiScanResponse>('wifi_scan', {
+      admin_password: password
+    }, 20000);
+    const networks = (out.networks || [])
+      .filter(n => n && n.ssid)
+      .sort((a, b) => Number(b.rssi || -999) - Number(a.rssi || -999));
+    wifiNetworks.value = networks;
+    if (!pairWifiSsid.value && networks.length > 0) {
+      pairWifiSsid.value = networks[0].ssid;
+    }
+    pushPairLog(`Found ${networks.length} WiFi network${networks.length === 1 ? '' : 's'}.`);
+  } catch (e) {
+    const msg = serialFeatureError('WiFi scan', e);
+    pushPairLog(msg);
+    notify(msg);
+  } finally {
+    isWifiScanning.value = false;
+  }
+}
+
+async function connectGatewayWifi() {
+  const password = pairPassword();
+  const ssid = pairWifiSsid.value.trim();
+  if (!password || !ssid) {
+    notify('Select a WiFi network and load the gateway password first');
+    return;
+  }
+  isWifiApplying.value = true;
+  pushPairLog(`Saving WiFi credentials on gateway for ${ssid}...`);
+  try {
+    await sendEasyPairCommand('configure_wifi', {
+      admin_password: password,
+      wifi_sta_ssid: ssid,
+      wifi_sta_password: pairWifiPassword.value
+    }, 10000);
+    pushPairLog('Gateway WiFi saved. It will connect as normal firmware networking runs.');
+  } catch (e) {
+    const msg = serialFeatureError('WiFi save', e);
+    pushPairLog(msg);
+    notify(msg);
+  } finally {
+    isWifiApplying.value = false;
+  }
+}
+
+async function sendWifiToRemotes() {
+  const password = pairPassword();
+  const ssid = pairWifiSsid.value.trim();
+  if (!password || !ssid) {
+    notify('Select a WiFi network and load the gateway password first');
+    return;
+  }
+  isFleetWifiSending.value = true;
+  pushPairLog(`Sending WiFi credentials to remotes over LoRa for ${ssid}...`);
+  try {
+    const out = await sendEasyPairCommand<any>('provision_fleet_wifi', {
+      admin_password: password,
+      wifi_sta_ssid: ssid,
+      wifi_sta_password: pairWifiPassword.value
+    }, 20000);
+    pushPairLog(`LoRa WiFi provisioning sent (${out.packets || '?'} packets).`);
+  } catch (e) {
+    const msg = serialFeatureError('WiFi provisioning', e);
+    pushPairLog(msg);
+    notify(msg);
+  } finally {
+    isFleetWifiSending.value = false;
+  }
+}
+
 function latestStaIpFromLogs(): string | null {
   for (let i = serialLogs.value.length - 1; i >= 0; i--) {
     const line = String(serialLogs.value[i] || '');
@@ -907,25 +1428,39 @@ async function openActiveDeviceConsole() {
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
   const port = selectedPort.value;
+  const seq = deviceInfoReadSeq.value + 1;
+  deviceInfoReadSeq.value = seq;
   isLoadingInfo.value = true;
   deviceInfo.value = null;
   deviceInfoPort.value = '';
-  pushSerialLog('Reading device information...');
+  pushSerialLog(`Reading device information from ${port}...`);
   try {
-    deviceInfo.value = await invoke('get_device_info', { port });
+    const info = await invoke<DeviceInfo>('get_device_info', { port });
+    if (deviceInfoReadSeq.value !== seq || selectedPort.value !== port) {
+      pushSerialLog(`Ignored stale device info from ${port}`);
+      return false;
+    }
+    deviceInfo.value = info;
     deviceInfoPort.value = port;
     pushSerialLog('Device info read successfully');
     return true;
   } catch (e) {
+    if (deviceInfoReadSeq.value !== seq || selectedPort.value !== port) {
+      pushSerialLog(`Ignored stale device info error from ${port}`);
+      return false;
+    }
     pushSerialLog('Failed to read device info: ' + e);
     return false;
   } finally {
-    isLoadingInfo.value = false;
+    if (deviceInfoReadSeq.value === seq) {
+      isLoadingInfo.value = false;
+    }
   }
 }
 
 async function startFlash() {
   if (!selectedPort.value || !selectedVersion.value) return;
+  const flashPort = selectedPort.value;
   
   isFlashing.value = true;
   pushSerialLog('--- Preparing Firmware ---');
@@ -943,17 +1478,15 @@ async function startFlash() {
     if (isLocal && !firmwarePath) throw new Error('Local file path missing');
 
     const result = await invoke('flash_firmware', { 
-      port: selectedPort.value,
+      port: flashPort,
       firmwarePath,
       region: isLocal ? null : region.value,
       eraseFirst: eraseBeforeFlash.value
     });
     pushSerialLog(result as string);
     
-    // Auto-monitor transition
     if (monitorAfterFlash.value) {
-      await nextTick();
-      toggleMonitor();
+      await startSerialMonitor(flashPort, false);
     }
   } catch (e) {
     pushSerialLog('Flash failed: ' + e);
@@ -963,26 +1496,36 @@ async function startFlash() {
   }
 }
 
+async function startSerialMonitor(port: string, readInfoFirst = true) {
+  if (readInfoFirst && !hasActiveDeviceInfo.value) {
+    await readDeviceInfo();
+  }
+
+  await invoke('toggle_serial_monitor', {
+    port,
+    baud: 115200,
+    enable: true
+  });
+  isMonitoring.value = true;
+  activeMonitorPort.value = port;
+  activeMonitorSsid.value = deviceInfo.value?.ssid?.trim() || '';
+  pushSerialLog(`Serial monitor started for ${monitorContextLabel.value}`);
+}
+
 async function toggleMonitor() {
   const targetState = !isMonitoring.value;
   const port = targetState ? selectedPort.value : (activeMonitorPort.value || selectedPort.value);
   if (!port) return;
   try {
-    if (targetState && !hasActiveDeviceInfo.value) {
-      await readDeviceInfo();
-    }
-
-    await invoke('toggle_serial_monitor', { 
-      port, 
-      baud: 115200, 
-      enable: targetState 
-    });
-    isMonitoring.value = targetState;
     if (targetState) {
-      activeMonitorPort.value = port;
-      activeMonitorSsid.value = deviceInfo.value?.ssid?.trim() || '';
-      pushSerialLog(`Serial monitor started for ${monitorContextLabel.value}`);
+      await startSerialMonitor(port, true);
     } else {
+      await invoke('toggle_serial_monitor', {
+        port,
+        baud: 115200,
+        enable: false
+      });
+      isMonitoring.value = false;
       pushSerialLog(`Serial monitor stopped for ${monitorContextLabel.value}`);
       activeMonitorPort.value = '';
       activeMonitorSsid.value = '';
@@ -1016,11 +1559,30 @@ watch(networkLogs, () => {
   }
 }, { deep: true });
 
-watch(activeMode, () => {
+watch(activeMode, (mode) => {
   nextTick(() => scrollToBottom());
+  if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value) {
+    readDeviceInfo();
+  }
+});
+
+watch(selectedPort, (port) => {
+  deviceInfoReadSeq.value += 1;
+  isLoadingInfo.value = false;
+  deviceInfo.value = null;
+  deviceInfoPort.value = '';
+  pairStatus.value = null;
+  wifiNetworks.value = [];
+  pairWifiSsid.value = '';
+  gatewayLoadedPort.value = '';
+  pairAdminPassword.value = '';
+  if (port && activeMode.value === 'serial') {
+    readDeviceInfo();
+  }
 });
 
 onMounted(async () => {
+  generatePairFleetKey(false);
   const rememberedRegion = (() => {
     try {
       const saved = localStorage.getItem(REGION_STORAGE_KEY);
@@ -1104,6 +1666,8 @@ watch(region, (next) => {
 });
 
 onUnmounted(() => {
+  stopEasyPairStatusPolling();
+  if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
   clearNetworkPasswordChecks();
   clearNetworkUdpRenewal();
   if (unlistenFlash) unlistenFlash();
@@ -1361,13 +1925,257 @@ function countCrashEvents(entries: string[]): number {
         </div>
       </div>
 
+      <div v-if="activeMode === 'pair'" class="flex flex-col gap-6 h-full overflow-hidden">
+        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                Pair Devices
+              </h2>
+              <p class="mt-1 text-xs text-slate-400">Selected USB device becomes the LoRa gateway.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                v-if="hasActiveDeviceInfo && !identifyDisabled"
+                @click="triggerIdentify"
+                :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all', { 'identify-led-active': isIdentifying }]"
+                title="Identify gateway"
+                aria-label="Identify gateway"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
+                </svg>
+              </button>
+              <button
+                @click="loadEasyPairGateway"
+                :disabled="isGatewayLoading || isPairBusy || !selectedPort"
+                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+                <span>{{ isGatewayLoading ? 'Loading...' : 'Load Gateway' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 rounded-md border border-slate-800 bg-slate-950/30 p-1 text-xs font-bold">
+            <button
+              @click="pairPanelTab = 'pair'"
+              :class="['m-0 h-9 rounded px-3 transition-all', pairPanelTab === 'pair' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
+            >
+              Pair
+            </button>
+            <button
+              @click="pairPanelTab = 'wifi'"
+              :class="['m-0 h-9 rounded px-3 transition-all', pairPanelTab === 'wifi' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
+            >
+              WiFi
+            </button>
+          </div>
+
+          <div v-if="pairPanelTab === 'pair'" class="flex flex-col gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">USB gateway</label>
+              <div class="flex gap-2">
+                <select v-model="selectedPort" :disabled="isLoadingInfo" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+                  <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
+                    {{ port.port_name }}
+                  </option>
+                  <option v-if="ports.length === 0" disabled>Scanning...</option>
+                </select>
+                <button @click="refreshPorts" :disabled="isRefreshingPorts" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-spin text-indigo-500': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Remote count</label>
+              <input v-model.number="pairExpectedCount" class="glass-input h-10" type="number" min="1" max="12" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Fleet key</label>
+              <div class="grid grid-cols-[3rem_minmax(0,1fr)_3rem_3rem] gap-2">
+                <button @click="generatePairFleetKey(true)" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" title="Generate fleet key" aria-label="Generate fleet key">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
+                </button>
+                <input v-model="pairFleetKey" class="glass-input h-10 flex-1 font-mono" :type="showPairFleetKey ? 'text' : 'password'" autocomplete="new-password" />
+                <button @click="showPairFleetKey = !showPairFleetKey" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" :title="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'" :aria-label="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'">
+                  <svg v-if="!showPairFleetKey" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
+                </button>
+                <button @click="copyPairFleetKey" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" title="Copy fleet key" aria-label="Copy fleet key">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Gateway admin password</label>
+              <div class="grid grid-cols-[minmax(0,1fr)_3rem_3rem] gap-2">
+                <input v-model="pairAdminPassword" class="glass-input h-10 min-w-0 font-mono" :type="showPairAdminPassword ? 'text' : 'password'" autocomplete="current-password" />
+                <button @click="showPairAdminPassword = !showPairAdminPassword" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" :title="showPairAdminPassword ? 'Hide password' : 'Show password'" :aria-label="showPairAdminPassword ? 'Hide password' : 'Show password'">
+                  <svg v-if="!showPairAdminPassword" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
+                </button>
+                <button @click="copyPairAdminPassword" :disabled="!pairAdminPassword" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center disabled:opacity-50" title="Copy gateway password" aria-label="Copy gateway password">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <button @click="runEasyPair" :disabled="pairPrimaryDisabled" class="primary-btn h-12 flex items-center justify-center gap-3 text-sm font-bold">
+            <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isPairBusy }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
+            <span>{{ isPairBusy ? 'Pairing...' : 'Pair Devices' }}</span>
+          </button>
+
+          <details class="rounded-md border border-slate-800 bg-slate-900/30 px-3 py-2">
+            <summary class="cursor-pointer select-none text-xs font-semibold text-slate-500 hover:text-slate-300">Advanced steps</summary>
+            <div class="mt-3 grid grid-cols-2 xl:grid-cols-5 gap-3">
+              <button @click="configureEasyPairGateway" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Configure the USB device as gateway">Prepare</button>
+              <button @click="startEasyPairDiscovery" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa">Scan</button>
+              <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Pair All</button>
+              <button @click="saveEasyPairTargets" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Save discovered remote addresses on the gateway">Finish</button>
+              <button @click="cancelEasyPair" :disabled="!gatewayReady" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Stop the current discovery or provisioning session">Stop</button>
+            </div>
+          </details>
+          </div>
+
+          <div v-else class="flex flex-col gap-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-bold text-slate-300">WiFi</h2>
+              <p class="mt-1 text-xs text-slate-400">Scan from the USB gateway, connect it, then send the same credentials to remotes.</p>
+            </div>
+            <button
+              @click="scanGatewayWifi"
+              :disabled="isWifiScanning || !gatewayReady"
+              class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isWifiScanning }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+              <span>{{ isWifiScanning ? 'Scanning...' : 'Scan WiFi' }}</span>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">WiFi network</label>
+              <select v-model="pairWifiSsid" class="glass-input h-10 appearance-none">
+                <option v-for="network in wifiNetworks" :key="`${network.ssid}-${network.bssid}`" :value="network.ssid">
+                  {{ network.ssid }} · {{ wifiSignalLabel(network.rssi) }} · ch {{ network.channel }}
+                </option>
+                <option v-if="wifiNetworks.length === 0" disabled>Scan to choose a network</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">WiFi password</label>
+              <div class="flex gap-2">
+                <input v-model="pairWifiPassword" class="glass-input h-10 flex-1" :type="showPairWifiPassword ? 'text' : 'password'" autocomplete="new-password" />
+                <button @click="showPairWifiPassword = !showPairWifiPassword" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" :title="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'" :aria-label="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'">
+                  <svg v-if="!showPairWifiPassword" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button @click="connectGatewayWifi" :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid" class="glass-input h-11 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold">Connect Gateway</button>
+            <button @click="sendWifiToRemotes" :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid" class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold">Send to Remotes</button>
+          </div>
+          </div>
+        </div>
+
+        <div class="glass-card p-5 flex flex-col gap-4 text-left flex-1 min-h-0 overflow-hidden">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold text-slate-300">Discovered devices</h2>
+            <button @click="refreshEasyPairStatus(true)" :disabled="isPairBusy || !gatewayReady" class="text-xs text-slate-500 hover:text-indigo-400">Refresh</button>
+          </div>
+          <div v-if="pairStatus?.session" class="grid grid-cols-4 gap-3 text-xs">
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">State</div>
+              <div class="font-mono text-slate-300 truncate">{{ pairStatus.session.state }}</div>
+            </div>
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">Found</div>
+              <div class="font-mono text-slate-300">{{ pairStatus.session.discovered_count }} / {{ pairStatus.session.estimated_count }}</div>
+            </div>
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">Verified</div>
+              <div class="font-mono text-slate-300">{{ pairStatus.session.verified_count }}</div>
+            </div>
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">Failed</div>
+              <div class="font-mono text-slate-300">{{ pairStatus.session.failed_count }}</div>
+            </div>
+          </div>
+
+          <div v-if="!pairStatus?.devices?.length" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
+            Power the remote devices, then scan from the selected USB gateway.
+          </div>
+
+          <div v-else class="flex-1 min-h-0 overflow-auto custom-scrollbar pr-1">
+            <div
+              v-for="device in pairStatus.devices"
+              :key="device.chip_id_hex"
+              class="rounded-md border border-slate-800 bg-slate-900/30 p-3 mb-3"
+            >
+              <div class="grid grid-cols-[minmax(8rem,1fr)_repeat(4,minmax(4rem,auto))] gap-3 items-center text-xs">
+                <div class="min-w-0">
+                  <div class="font-mono text-slate-200 truncate">{{ device.chip_id_hex }}</div>
+                  <div class="font-mono text-slate-500">RSSI {{ device.rssi }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-500">Current</div>
+                  <div class="font-mono text-slate-300">{{ device.current_address }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-500">Assigned</div>
+                  <div class="font-mono text-slate-300">{{ device.assigned_address || '-' }}</div>
+                </div>
+                <div>
+                  <div class="text-slate-500">Firmware</div>
+                  <div class="font-mono text-slate-300">{{ device.fw_major }}.{{ device.fw_minor }}.{{ device.fw_patch }}</div>
+                </div>
+                <div class="text-right">
+                  <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.address_conflict ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800/40 text-slate-300']">
+                    {{ device.address_conflict ? 'Conflict' : device.state }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Right Panel (Controls + Details) - Hidden in Monitor Mode -->
       <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-6 h-full overflow-hidden transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
         <!-- Device Configuration Panel -->
         <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
-          <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-            Device configuration
-          </h2>
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              Device configuration
+            </h2>
+            <button
+              v-if="hasActiveDeviceInfo && !identifyDisabled"
+              @click="triggerIdentify"
+              :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all', { 'identify-led-active': isIdentifying }]"
+              title="Identify USB device"
+              aria-label="Identify USB device"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
+              </svg>
+            </button>
+          </div>
           
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="flex flex-col gap-1.5 text-xs">
@@ -1380,7 +2188,7 @@ function countCrashEvents(entries: string[]): number {
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Serial port</label>
               <div class="flex gap-2">
-                <select v-model="selectedPort" class="glass-input h-10 flex-1 appearance-none">
+                <select v-model="selectedPort" :disabled="isLoadingInfo" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
                   <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                     {{ port.port_name }}
                   </option>
@@ -1719,5 +2527,36 @@ function countCrashEvents(entries: string[]): number {
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
   transform: translate(-50%, 20px);
+}
+
+.identify-led-icon {
+  color: rgb(148 163 184);
+}
+
+.identify-led-active .identify-led-icon {
+  animation: identify-led-pattern 2s linear infinite;
+}
+
+@keyframes identify-led-pattern {
+  0%, 5.9%,
+  12%, 17.9%,
+  24%, 29.9%,
+  49%, 54.9%,
+  61%, 66.9%,
+  73%, 78.9% {
+    color: rgb(129 140 248);
+    filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.9));
+    opacity: 1;
+  }
+  6%, 11.9%,
+  18%, 23.9%,
+  30%, 48.9%,
+  55%, 60.9%,
+  67%, 72.9%,
+  79%, 100% {
+    color: rgb(71 85 105);
+    filter: none;
+    opacity: 0.42;
+  }
 }
 </style>

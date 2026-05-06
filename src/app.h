@@ -8,6 +8,7 @@
 #include "mqtt_bridge.h"
 #include "radio_protocol.h"
 #include "sensor_manager.h"
+#include "serial_admin.h"
 #include "state_machine.h"
 #include "web_console.h"
 #if LRS_ENABLE_AUTOMATIONS
@@ -26,6 +27,7 @@ class App {
   SensorManager sensors_;
   NodeStateMachine sm_;
   WebConsole web_;
+  SerialAdmin serial_admin_;
 #if LRS_ENABLE_AUTOMATIONS
   AutomationRulesEngine automations_;
 #endif

@@ -5,3 +5,4 @@ pub mod status;
 pub mod device;
 pub mod monitor;
 pub mod network;
+pub mod easy_pair;
