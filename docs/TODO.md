@@ -5,6 +5,8 @@
 - Log level numeric mapping for `LRS_LOG_LEVEL_DEFAULT` (`0=ERROR`, `1=WARN`, `2=INFO`, `3=DEBUG`) is implemented.
 - MQTT dependency guard is implemented: `mqtt_control_enabled` requires `mqtt_client_enabled` across UI and API validation paths.
 - Security review reference report captured at `docs/internal/security-review-2026-04-26.md`.
+- Flasher-first EasyPair commissioning foundation is implemented: USB serial admin protocol, selected USB gateway, LoRa remote discovery/provisioning, verified target finalization, WiFi credential provisioning, and local Identify LED action.
+- Web UI maintenance lifecycle is implemented: Web UI starts on boot, explicit user activity extends the 60-second window, background polling/SSE/captive probes do not extend it, and HTTP/SSE/captive DNS runtime work stops after inactivity. USB serial admin can re-enable it with `enable_web`.
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
@@ -116,7 +118,8 @@
 - LoRa operational risk: document jamming/interference limits, required link-margin checks, and intentional RX fail-safe selection for each installation.
 
 ## Provisioning
-- Add pair-mode provisioning flow (first unit TX, second unit RX, linked output records).
+- Validate full 12-device EasyPair sessions on real hardware, including serial `provisioning_status` response sizing and operator-visible progress.
+- Add production output records for EasyPair runs (gateway chip/serial, verified remote chip/address list, fleet key handling policy, firmware version, timestamp/operator).
 
 ## UX / API Cleanup
 - Unify `deployment_key` and `fleet_passphrase` terminology under user-facing `Shared Fleet Key` (short form: `Fleet Key` where space is tight); place helper text directly under the key input explaining it is the shared passphrase used to derive LoRa encryption/authentication keys; choose one canonical API field name and treat old names as temporary input aliases only.
@@ -141,8 +144,8 @@
 - Add fleet-wide remote factory reset for `selected` or `all` devices, with `keep fleet key` option.
 - Add remote unit `Identify` action so a gateway can request a specific remote to flash its LED for physical identification.
 - Expose `Identify` from `Fleet > Devices` and via MQTT command path.
-- Use a deliberately distinctive identify pattern that does not resemble normal link/signal indication. Suggested pattern: three rapid flashes, one long flash, pause, repeat for 10-15 seconds.
-- Verify current LED behavior and reserve `Identify` as a higher-priority temporary LED mode so it remains visually distinct from normal RSSI / link-state indication.
+- Keep the current Identify pattern reserved and consistent across firmware and Flasher UI: three fast flashes, pause, three fast flashes.
+- Verify remote Identify uses the same higher-priority temporary LED mode so it remains visually distinct from normal RSSI / link-state indication.
 - Add staged fleet key rotation workflow.
 - Add broadcast poll / discovery refresh.
 - Add fleet-wide schedule defaults push.
@@ -175,12 +178,9 @@
 - If DS18B20 is detected later, activate automatically without requiring a reboot or config rewrite.
 - Do not auto-disable DS18B20 config on failed detection (avoid boot-time false negatives becoming sticky state).
 - Consider configurable RX fail-safe in paired-input mode: latch last state indefinitely if TX stream disappears.
-- Add runtime/API-visible Web UI enabled-state reporting (`webui_enabled=true/false`).
-- Add runtime/API-visible REST API enabled-state reporting (`restapi_enabled=true/false`) if Web UI and API are independently controllable.
-- Add HTTP and MQTT commands to enable/disable the Web UI to save memory, and report current Web UI state.
-- Evaluate two-level memory-control model:
-  - `webui_enabled=true/false`
-  - `restapi_enabled=true/false`
+- Add runtime-visible Web UI maintenance state reporting (`webui_enabled=true/false`, idle timeout remaining, last activity age, re-enable source) where it is useful for Flasher/support tooling.
+- Consider whether a non-USB re-enable path is still worth adding. Current recovery path is reboot or USB serial admin `enable_web`; avoid adding HTTP/MQTT toggles unless there is a clear field-support need.
+- Keep REST/API lifecycle coupled to Web UI for ESP8266 simplicity unless a future support workflow strongly justifies a separate always-on API surface.
 
 ## Observability / Logging
 - Implement structured logging with levels: `ERROR`, `WARN`, `INFO` (default), `DEBUG`, `TRACE`.
@@ -195,10 +195,8 @@
 - Cloud dashboard (future workstream): capture requirements and architecture options, but do not begin implementation yet.
 
 ## Memory / Stability
-- Add post-commissioning low-memory Web UI mode to reduce heap pressure and improve stability.
-- In low-memory mode, Web UI should either be disabled until reboot or run as a minimal hook/stub endpoint.
-- When the hook is accessed, start full Web UI on demand.
-- After a configurable inactivity timeout, revert from full Web UI back to low-memory mode.
+- Measure steady-state heap and `max_free_block` before/after Web UI idle shutdown to confirm HTTP/SSE/captive DNS shutdown removes normal-operation pressure as intended.
+- Keep the Web UI disabled-after-inactivity model simple on ESP8266. Do not add a separate low-memory hook/stub mode unless real field data shows reboot/USB re-enable is insufficient.
 
 ## Testing / Stability
 - Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.
