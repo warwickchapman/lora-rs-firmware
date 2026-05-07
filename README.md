@@ -78,6 +78,7 @@ Local non-release flasher build policy:
 ## Release Automation Script
 Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same release flow end-to-end:
 - builds fresh `lrs_za` + `lrs_us` firmware
+- captures firmware RAM/Flash usage for both environments and prints deltas vs previous release in the release run output
 - generates named assets + SHA256 checksums
 - creates/updates GitHub release from `VERSION`
 - after successful publish to both repos, auto-bumps `VERSION` to next patch `-dev`, commits, and pushes (disable with `--no-post-bump-dev`)
@@ -88,6 +89,11 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - optional verification mode:
   - `--verify-firmware-only-assets` for firmware-first publish
   - `--verify-full-assets` only after flasher assets are present
+
+Release build metrics history:
+- Historical table: `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.md`
+- Canonical data source: `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.csv`
+- Updated automatically by `tools/release_manager.py` after publish.
 
 Flasher rebuild policy (mandatory):
 - If any file under `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.

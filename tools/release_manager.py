@@ -13,6 +13,7 @@ Flow:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -22,8 +23,9 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 import time
 
 
@@ -55,6 +57,21 @@ QUOTE_BANK: List[Tuple[str, str]] = [
 class AssetInfo:
     path: Path
     sha256: str
+
+
+@dataclass
+class BuildMetrics:
+    env: str
+    ram_used: int
+    ram_total: int
+    flash_used: int
+    flash_total: int
+
+
+@dataclass
+class MetricsDelta:
+    ram_delta: Optional[int]
+    flash_delta: Optional[int]
 
 
 def run(cmd: List[str], cwd: Path | None = None, capture: bool = False) -> str:
@@ -99,9 +116,45 @@ def ensure_clean_tracked_tree(root: Path) -> None:
         )
 
 
-def build_firmware(root: Path) -> None:
-    run([sys.executable, "-m", "platformio", "run", "-e", "lrs_za"], cwd=root)
-    run([sys.executable, "-m", "platformio", "run", "-e", "lrs_us"], cwd=root)
+def parse_platformio_metrics(output: str, env: str) -> BuildMetrics:
+    ram_m = re.search(r"RAM:\s+\[[^\]]+\]\s+\d+(?:\.\d+)?%\s+\(used\s+(\d+)\s+bytes\s+from\s+(\d+)\s+bytes\)", output)
+    flash_m = re.search(r"Flash:\s+\[[^\]]+\]\s+\d+(?:\.\d+)?%\s+\(used\s+(\d+)\s+bytes\s+from\s+(\d+)\s+bytes\)", output)
+    if not ram_m or not flash_m:
+        raise RuntimeError(f"Unable to parse RAM/Flash metrics from PlatformIO output for {env}")
+    return BuildMetrics(
+        env=env,
+        ram_used=int(ram_m.group(1)),
+        ram_total=int(ram_m.group(2)),
+        flash_used=int(flash_m.group(1)),
+        flash_total=int(flash_m.group(2)),
+    )
+
+
+def build_env_and_collect_metrics(root: Path, env: str) -> BuildMetrics:
+    cmd = [sys.executable, "-m", "platformio", "run", "-e", env]
+    printable = " ".join(shlex.quote(part) for part in cmd)
+    print(f"$ {printable}")
+    proc = subprocess.run(
+        cmd,
+        cwd=str(root),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.stdout:
+        print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n")
+    if proc.stderr:
+        print(proc.stderr, end="" if proc.stderr.endswith("\n") else "\n", file=sys.stderr)
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    return parse_platformio_metrics(proc.stdout + "\n" + proc.stderr, env)
+
+
+def build_firmware(root: Path) -> List[BuildMetrics]:
+    return [
+        build_env_and_collect_metrics(root, "lrs_za"),
+        build_env_and_collect_metrics(root, "lrs_us"),
+    ]
 
 
 def sha256_for(path: Path) -> str:
@@ -133,6 +186,17 @@ def fetch_release_bodies(repo: str) -> List[dict]:
         capture=True,
     )
     return json.loads(raw)
+
+
+def release_published_at(repo: str, tag: str) -> Optional[str]:
+    try:
+        published_at = run(
+            ["gh", "release", "view", tag, "--repo", repo, "--json", "publishedAt", "--jq", ".publishedAt"],
+            capture=True,
+        ).strip()
+        return published_at or None
+    except Exception:
+        return None
 
 
 def pick_unique_quote(repo: str) -> Tuple[str, str]:
@@ -224,6 +288,180 @@ def build_release_notes(
         ]
     )
     return "\n".join(lines)
+
+
+def parse_version_for_sort(v: str) -> Tuple[int, int, int, str]:
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$", v)
+    if not m:
+        return (0, 0, 0, v)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4) or "")
+
+
+def find_previous_release_tag(repo: str, current_version: str, current_tag: str) -> Optional[str]:
+    releases = fetch_release_bodies(repo)
+    current_key = parse_version_for_sort(current_version)
+    candidates: List[Tuple[Tuple[int, int, int, str], str]] = []
+    for rel in releases:
+        tag = str(rel.get("tag_name") or "").strip()
+        if not tag:
+            continue
+        if tag == current_tag:
+            continue
+        v = tag.lstrip("v")
+        key = parse_version_for_sort(v)
+        if key < current_key:
+            candidates.append((key, tag))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def metrics_history_path(root: Path) -> Path:
+    return root / "docs" / "release_build_metrics.csv"
+
+
+def metrics_history_markdown_path(root: Path) -> Path:
+    return root / "docs" / "release_build_metrics.md"
+
+
+def load_metrics_rows(path: Path) -> List[Dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def save_metrics_rows(path: Path, rows: List[Dict[str, str]]) -> None:
+    fieldnames = [
+        "date_utc",
+        "tag",
+        "repo",
+        "commit",
+        "env",
+        "ram_used",
+        "ram_total",
+        "flash_used",
+        "flash_total",
+        "ram_delta_vs_prev",
+        "flash_delta_vs_prev",
+        "previous_tag",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def render_metrics_markdown(path: Path, rows: List[Dict[str, str]]) -> None:
+    lines = [
+        "# Release Build Metrics",
+        "",
+        "Historical firmware memory/flash usage captured at release time.",
+        "",
+        "| Date (UTC) | Tag | Env | RAM Used | RAM Total | Flash Used | Flash Total | RAM Delta vs Prev | Flash Delta vs Prev | Previous Tag | Commit |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|",
+    ]
+    ordered = sorted(rows, key=lambda r: (r.get("date_utc", ""), r.get("tag", ""), r.get("env", "")))
+    for r in ordered:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    r.get("date_utc", ""),
+                    r.get("tag", ""),
+                    r.get("env", ""),
+                    r.get("ram_used", ""),
+                    r.get("ram_total", ""),
+                    r.get("flash_used", ""),
+                    r.get("flash_total", ""),
+                    r.get("ram_delta_vs_prev", ""),
+                    r.get("flash_delta_vs_prev", ""),
+                    r.get("previous_tag", ""),
+                    r.get("commit", ""),
+                ]
+            )
+            + " |"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def latest_metrics_by_env(rows: List[Dict[str, str]], env: str) -> Optional[Dict[str, str]]:
+    env_rows = [r for r in rows if r.get("env") == env]
+    if not env_rows:
+        return None
+    env_rows.sort(key=lambda r: (r.get("date_utc", ""), parse_version_for_sort(str(r.get("tag", "")).lstrip("v"))))
+    return env_rows[-1]
+
+
+def append_or_update_metrics_history(
+    root: Path,
+    tag: str,
+    commit: str,
+    metrics: List[BuildMetrics],
+    previous_tag: Optional[str],
+) -> List[MetricsDelta]:
+    path = metrics_history_path(root)
+    rows = load_metrics_rows(path)
+    now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    deltas: List[MetricsDelta] = []
+
+    by_env_prev: Dict[str, Optional[Dict[str, str]]] = {}
+    for m in metrics:
+        by_env_prev[m.env] = latest_metrics_by_env(rows, m.env)
+
+    rows = [r for r in rows if not (r.get("tag") == tag and r.get("repo") == "warwickchapman/lora-rs")]
+    for m in metrics:
+        prev = by_env_prev.get(m.env)
+        ram_delta: Optional[int] = None
+        flash_delta: Optional[int] = None
+        if prev:
+            try:
+                ram_delta = m.ram_used - int(prev["ram_used"])
+                flash_delta = m.flash_used - int(prev["flash_used"])
+            except Exception:
+                ram_delta = None
+                flash_delta = None
+        deltas.append(MetricsDelta(ram_delta=ram_delta, flash_delta=flash_delta))
+        rows.append(
+            {
+                "date_utc": now_iso,
+                "tag": tag,
+                "repo": "warwickchapman/lora-rs",
+                "commit": commit,
+                "env": m.env,
+                "ram_used": str(m.ram_used),
+                "ram_total": str(m.ram_total),
+                "flash_used": str(m.flash_used),
+                "flash_total": str(m.flash_total),
+                "ram_delta_vs_prev": "" if ram_delta is None else str(ram_delta),
+                "flash_delta_vs_prev": "" if flash_delta is None else str(flash_delta),
+                "previous_tag": previous_tag or "",
+            }
+        )
+    rows.sort(key=lambda r: (r.get("date_utc", ""), r.get("tag", ""), r.get("env", "")))
+    save_metrics_rows(path, rows)
+    render_metrics_markdown(metrics_history_markdown_path(root), rows)
+    return deltas
+
+
+def format_delta(val: Optional[int]) -> str:
+    if val is None:
+        return "n/a"
+    return f"{val:+d}"
+
+
+def print_metrics_report(metrics: List[BuildMetrics], deltas: List[MetricsDelta], previous_tag: Optional[str]) -> None:
+    baseline = previous_tag or "n/a"
+    print("\nFirmware build metrics:")
+    print(f"- baseline release: {baseline}")
+    for m, d in zip(metrics, deltas):
+        print(
+            f"- {m.env}: RAM {m.ram_used}/{m.ram_total} ({format_delta(d.ram_delta)} vs prev), "
+            f"Flash {m.flash_used}/{m.flash_total} ({format_delta(d.flash_delta)} vs prev)"
+        )
 
 
 def release_exists(repo: str, tag: str) -> bool:
@@ -552,7 +790,7 @@ def main() -> int:
 
     tag = f"v{version}"
     print(f"Preparing release {tag}")
-    build_firmware(root)
+    build_metrics = build_firmware(root)
     assets = stage_assets(root, version)
     
     inherited_assets = []
@@ -606,6 +844,9 @@ def main() -> int:
         )
 
     release_url = run(["gh", "release", "view", tag, "--repo", args.repo, "--json", "url", "--jq", ".url"], capture=True)
+    prev_tag = find_previous_release_tag(args.repo, version, tag)
+    deltas = append_or_update_metrics_history(root, tag, commit, build_metrics, prev_tag)
+    print_metrics_report(build_metrics, deltas, prev_tag)
 
     print("\nRelease complete")
     print(f"- commit: {commit}")

@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.8.0-beta] - 2026-05-07
+
 ### Changed
 - Web UI runtime policy is now maintenance-window based: HTTP handling, status SSE, and captive DNS start on boot, but the web console disables itself after 60 seconds without explicit user activity so steady-state firmware work is not paying Web UI overhead.
 - Fleet provisioning now uses one consistent ESP8266 gateway cap of 12 remotes, matching the known-peer and paired-target limits instead of mixing 8-device discovery with 12-device fleet state.
@@ -16,6 +18,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Firmware now supports an authenticated Identify LED command over USB serial admin and HTTP; Flasher exposes it on Pair Devices and USB Cable with a matching three-flash/pause/three-flash UI animation.
 - EasyPair now keeps scan capacity separate from runtime relay targets: the gateway no longer stores speculative `1..N` paired addresses during prepare, and Flasher finalizes the gateway target list from verified provisioned devices only.
 - Flasher serial actions now coordinate USB-port ownership across flashing, device-info reads, serial monitoring, and EasyPair commands; leaving USB Cable stops the serial monitor, the USB port selection and last-read device details are shared between USB Cable and Pair Devices, and the erase-before-flash and monitor-after-flash checkboxes remember their last state.
+- Release automation now captures PlatformIO RAM/Flash usage for `lrs_za` and `lrs_us`, prints per-release deltas versus the previous release in run output, and appends historical metrics records under `docs/release_build_metrics.csv` + `docs/release_build_metrics.md`.
 
 ### Fixed
 - Commissioning Wi-Fi password entry now suppresses password-manager generated-password prompts.

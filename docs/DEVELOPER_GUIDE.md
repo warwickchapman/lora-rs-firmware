@@ -296,6 +296,9 @@ Release tooling notes:
   - `--verify-firmware-only-assets` checks only firmware files (`za/us/eu`) in both repos.
   - `--verify-full-assets` checks full 10-file contract (use after flasher upload is complete).
 - In firmware-only reuse mode (`--reuse-flasher --reuse-flasher-keep-names`), `--verify-full-assets` validates firmware at new version and flasher filenames at the reused source-tag version.
+- `tools/release_manager.py` captures firmware memory/flash stats for `lrs_za` and `lrs_us` from PlatformIO output, prints deltas vs the previous release in the release run output, and appends them to:
+  - `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.csv` (canonical)
+  - `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.md` (human-readable table)
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.
