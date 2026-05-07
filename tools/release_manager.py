@@ -131,7 +131,7 @@ def parse_platformio_metrics(output: str, env: str) -> BuildMetrics:
 
 
 def build_env_and_collect_metrics(root: Path, env: str) -> BuildMetrics:
-    cmd = [sys.executable, "-m", "platformio", "run", "-e", env]
+    cmd = ["pio", "run", "-e", env]
     printable = " ".join(shlex.quote(part) for part in cmd)
     print(f"$ {printable}")
     proc = subprocess.run(
