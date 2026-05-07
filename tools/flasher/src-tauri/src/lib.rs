@@ -119,8 +119,11 @@ fn maybe_offer_move_to_applications(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .manage(crate::commands::monitor::MonitorState {
-            running: std::sync::Arc::new(tokio::sync::Mutex::new(false)),
+            status: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::commands::monitor::MonitorStatus::default(),
+            )),
         })
+        .manage(crate::services::serial_port_coordinator::SerialPortCoordinator::default())
         .manage(crate::commands::network::UdpMonitorState::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]

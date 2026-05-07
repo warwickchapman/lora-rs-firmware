@@ -15,6 +15,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Pair Devices now includes WiFi setup: scan networks from the selected USB gateway, save gateway STA credentials, and send those credentials to paired remotes over LoRa using the existing fleet WiFi provisioning path.
 - Firmware now supports an authenticated Identify LED command over USB serial admin and HTTP; Flasher exposes it on Pair Devices and USB Cable with a matching three-flash/pause/three-flash UI animation.
 - EasyPair now keeps scan capacity separate from runtime relay targets: the gateway no longer stores speculative `1..N` paired addresses during prepare, and Flasher finalizes the gateway target list from verified provisioned devices only.
+- Flasher serial actions now coordinate USB-port ownership across flashing, device-info reads, serial monitoring, and EasyPair commands; leaving USB Cable stops the serial monitor, the USB port selection and last-read device details are shared between USB Cable and Pair Devices, and the erase-before-flash and monitor-after-flash checkboxes remember their last state.
 
 ### Fixed
 - Commissioning Wi-Fi password entry now suppresses password-manager generated-password prompts.
@@ -27,6 +28,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Wi-Fi scan and commissioning save/skip endpoints remain usable during first-use setup even when the captive browser has no active web-console session.
 - Empty LAN hostname fields are populated with the computed `lrs-<chipid>` hostname so OTA/network identity matches the header.
 - Wi-Fi admin shutdown now marks the Wi-Fi stack disabled after turning the interface off, avoiding repeated `wifi_admin_disabled` log spam.
+- Flasher now hides Identify LED actions until the selected USB port has confirmed LRS serial-admin firmware support, preventing blank or unsupported boards from showing an unusable identify control.
+- Flasher device-info reads now reuse the MAC address from the initial esptool chip probe when available, avoiding a second esptool call on the normal path.
 
 ## [0.7.0-beta] - 2026-04-27
 

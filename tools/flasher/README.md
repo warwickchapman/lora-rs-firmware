@@ -12,6 +12,7 @@ Serial mode is the original guided workflow:
 - select release firmware or choose a local `.bin`
 - flash over USB serial
 - optionally start serial monitoring immediately after flashing
+- remember the last monitor-after-flash and erase-before-flash checkbox states
 - read and copy device identity/factory-password details
 
 ### Network
@@ -40,6 +41,8 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 - the selected USB device is configured as the TX/gateway
 - remotes are discovered and provisioned over LoRa by that selected gateway
 - final gateway target lists should be written with `set_gateway_targets`
-- Pair Devices and USB Cable include an Identify LED action that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
+- Pair Devices and USB Cable include an Identify LED action, shown only after the selected port confirms LRS serial-admin support, that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
+
+Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and EasyPair. Switching away from USB Cable stops the serial monitor so Pair Devices can take the selected gateway port cleanly. USB Cable and Pair Devices share the same selected USB port and cache the last device details per port until that port is unplugged.
 
 The app opens on Pair Devices. The existing Serial and Network tools remain available as USB Cable and Network maintenance modes for flashing, OTA, log viewing, password checks, and Web UI access.

@@ -143,6 +143,7 @@ const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
 const deviceInfo = ref<DeviceInfo | null>(null);
 const deviceInfoPort = ref('');
+const deviceInfoByPort = ref<Record<string, DeviceInfo>>({});
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
@@ -178,6 +179,7 @@ const pairStatus = ref<EasyPairStatus | null>(null);
 const isPairBusy = ref(false);
 const isGatewayLoading = ref(false);
 const gatewayLoadedPort = ref('');
+const serialAdminSupportedPorts = ref<Record<string, boolean>>({});
 const pairStatusPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const wifiNetworks = ref<WifiNetwork[]>([]);
 const pairWifiSsid = ref('');
@@ -210,6 +212,8 @@ const EU_COUNTRY_CODES = new Set([
 const US_COUNTRY_CODES = new Set(['US', 'UM', 'PR', 'GU', 'VI', 'AS', 'MP']);
 const ZA_COUNTRY_CODES = new Set(['ZA']);
 const REGION_STORAGE_KEY = 'lrs_flasher_region';
+const MONITOR_AFTER_FLASH_STORAGE_KEY = 'lrs_flasher_monitor_after_flash';
+const ERASE_BEFORE_FLASH_STORAGE_KEY = 'lrs_flasher_erase_before_flash';
 const REGION_CONFIDENT_MIN_SCORE = 5;
 const REGION_CONFIDENT_MIN_GAP = 2;
 
@@ -270,7 +274,24 @@ const networkLogActive = computed(() => activeMode.value === 'network' && isNetw
 const gatewayReady = computed(() => !!selectedPort.value && gatewayLoadedPort.value === selectedPort.value && !!pairAdminPassword.value.trim());
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
 const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
-const identifyDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value);
+const identifyAvailable = computed(() => hasActiveDeviceInfo.value && !!serialAdminSupportedPorts.value[selectedPort.value]);
+const identifyDisabled = computed(() => !selectedPort.value || !identifyAvailable.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value || isMonitoring.value);
+const serialPortSelectorDisabled = computed(() =>
+  isLoadingInfo.value ||
+  isFlashing.value ||
+  isGatewayLoading.value ||
+  isPairBusy.value ||
+  isWifiScanning.value ||
+  isWifiApplying.value ||
+  isFleetWifiSending.value ||
+  isIdentifying.value
+);
+const flashDisabled = computed(() =>
+  isFlashing.value ||
+  isLoadingInfo.value ||
+  !selectedPort.value ||
+  !selectedVersion.value
+);
 const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value);
 const activityFullscreen = computed(() =>
   (activeMode.value === 'serial' && isMonitoring.value) ||
@@ -477,6 +498,16 @@ async function refreshPorts() {
         delete portSeenSequence.value[known];
       }
     }
+    for (const known of Object.keys(deviceInfoByPort.value)) {
+      if (!currentNames.includes(known)) {
+        delete deviceInfoByPort.value[known];
+      }
+    }
+    for (const known of Object.keys(serialAdminSupportedPorts.value)) {
+      if (!currentNames.includes(known)) {
+        delete serialAdminSupportedPorts.value[known];
+      }
+    }
 
     if (currentNames.length === 0) {
       selectedPort.value = '';
@@ -494,6 +525,7 @@ async function refreshPorts() {
     }
 
     lastPortSnapshot.value = currentNames;
+    syncDeviceInfoForSelectedPort();
     // Artificial delay to ensure the spin is satisfyingly visible
     await new Promise(resolve => setTimeout(resolve, 300));
   } finally {
@@ -575,6 +607,26 @@ function copyActivePassword() {
     return;
   }
   copyToClipboard(password, 'factory password');
+}
+
+function syncDeviceInfoForSelectedPort() {
+  const port = selectedPort.value;
+  if (!port) {
+    deviceInfo.value = null;
+    deviceInfoPort.value = '';
+    return;
+  }
+  const cached = deviceInfoByPort.value[port];
+  if (cached) {
+    deviceInfo.value = cached;
+    deviceInfoPort.value = port;
+    if (activeMode.value === 'pair' && !pairAdminPassword.value.trim()) {
+      pairAdminPassword.value = cached.password || '';
+    }
+  } else if (deviceInfoPort.value !== port) {
+    deviceInfo.value = null;
+    deviceInfoPort.value = '';
+  }
 }
 
 function randomIndex(max: number): number {
@@ -1035,6 +1087,22 @@ async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string,
   });
 }
 
+async function probeSerialAdminSupport(port = selectedPort.value): Promise<boolean> {
+  if (!port) return false;
+  try {
+    await invoke<any>('serial_admin_command', {
+      port,
+      request: { cmd: 'hello' },
+      timeoutMs: 1200
+    });
+    serialAdminSupportedPorts.value[port] = true;
+    return true;
+  } catch {
+    delete serialAdminSupportedPorts.value[port];
+    return false;
+  }
+}
+
 function serialFeatureError(feature: string, err: unknown): string {
   const text = String(err || 'serial command failed');
   if (text.includes('unknown_cmd')) {
@@ -1106,6 +1174,7 @@ async function loadEasyPairGateway() {
     pairAdminPassword.value = deviceInfo.value.password || '';
     const hello = await sendEasyPairCommand<any>('hello', {}, 4000);
     if (selectedPort.value !== port) return;
+    serialAdminSupportedPorts.value[port] = true;
     gatewayLoadedPort.value = port;
     pushPairLog(`Gateway ready on ${selectedPort.value}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
   } catch (e) {
@@ -1431,8 +1500,7 @@ async function readDeviceInfo() {
   const seq = deviceInfoReadSeq.value + 1;
   deviceInfoReadSeq.value = seq;
   isLoadingInfo.value = true;
-  deviceInfo.value = null;
-  deviceInfoPort.value = '';
+  syncDeviceInfoForSelectedPort();
   pushSerialLog(`Reading device information from ${port}...`);
   try {
     const info = await invoke<DeviceInfo>('get_device_info', { port });
@@ -1440,9 +1508,13 @@ async function readDeviceInfo() {
       pushSerialLog(`Ignored stale device info from ${port}`);
       return false;
     }
+    deviceInfoByPort.value[port] = info;
     deviceInfo.value = info;
     deviceInfoPort.value = port;
     pushSerialLog('Device info read successfully');
+    if (activeMode.value === 'serial') {
+      await probeSerialAdminSupport(port);
+    }
     return true;
   } catch (e) {
     if (deviceInfoReadSeq.value !== seq || selectedPort.value !== port) {
@@ -1459,6 +1531,7 @@ async function readDeviceInfo() {
 }
 
 async function startFlash() {
+  if (flashDisabled.value) return;
   if (!selectedPort.value || !selectedVersion.value) return;
   const flashPort = selectedPort.value;
   
@@ -1512,6 +1585,26 @@ async function startSerialMonitor(port: string, readInfoFirst = true) {
   pushSerialLog(`Serial monitor started for ${monitorContextLabel.value}`);
 }
 
+async function stopSerialMonitorForModeChange() {
+  if (!isMonitoring.value) return;
+  const port = activeMonitorPort.value || selectedPort.value;
+  if (!port) return;
+  try {
+    await invoke('toggle_serial_monitor', {
+      port,
+      baud: 115200,
+      enable: false
+    });
+  } catch (e) {
+    pushSerialLog('Monitor stop error: ' + e);
+  } finally {
+    isMonitoring.value = false;
+    pushSerialLog(`Serial monitor stopped for ${monitorContextLabel.value}`);
+    activeMonitorPort.value = '';
+    activeMonitorSsid.value = '';
+  }
+}
+
 async function toggleMonitor() {
   const targetState = !isMonitoring.value;
   const port = targetState ? selectedPort.value : (activeMonitorPort.value || selectedPort.value);
@@ -1520,15 +1613,7 @@ async function toggleMonitor() {
     if (targetState) {
       await startSerialMonitor(port, true);
     } else {
-      await invoke('toggle_serial_monitor', {
-        port,
-        baud: 115200,
-        enable: false
-      });
-      isMonitoring.value = false;
-      pushSerialLog(`Serial monitor stopped for ${monitorContextLabel.value}`);
-      activeMonitorPort.value = '';
-      activeMonitorSsid.value = '';
+      await stopSerialMonitorForModeChange();
     }
   } catch (e) {
     pushSerialLog('Monitor error: ' + e);
@@ -1559,8 +1644,12 @@ watch(networkLogs, () => {
   }
 }, { deep: true });
 
-watch(activeMode, (mode) => {
+watch(activeMode, (mode, previousMode) => {
   nextTick(() => scrollToBottom());
+  if (previousMode === 'serial' && mode !== 'serial') {
+    stopSerialMonitorForModeChange();
+  }
+  syncDeviceInfoForSelectedPort();
   if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value) {
     readDeviceInfo();
   }
@@ -1569,13 +1658,12 @@ watch(activeMode, (mode) => {
 watch(selectedPort, (port) => {
   deviceInfoReadSeq.value += 1;
   isLoadingInfo.value = false;
-  deviceInfo.value = null;
-  deviceInfoPort.value = '';
   pairStatus.value = null;
   wifiNetworks.value = [];
   pairWifiSsid.value = '';
   gatewayLoadedPort.value = '';
-  pairAdminPassword.value = '';
+  pairAdminPassword.value = deviceInfoByPort.value[port]?.password || '';
+  syncDeviceInfoForSelectedPort();
   if (port && activeMode.value === 'serial') {
     readDeviceInfo();
   }
@@ -1583,6 +1671,18 @@ watch(selectedPort, (port) => {
 
 onMounted(async () => {
   generatePairFleetKey(false);
+  try {
+    const savedMonitor = localStorage.getItem(MONITOR_AFTER_FLASH_STORAGE_KEY);
+    if (savedMonitor === 'true' || savedMonitor === 'false') {
+      monitorAfterFlash.value = savedMonitor === 'true';
+    }
+    const savedErase = localStorage.getItem(ERASE_BEFORE_FLASH_STORAGE_KEY);
+    if (savedErase === 'true' || savedErase === 'false') {
+      eraseBeforeFlash.value = savedErase === 'true';
+    }
+  } catch (_) {
+    // Ignore storage failures; checkbox defaults still work.
+  }
   const rememberedRegion = (() => {
     try {
       const saved = localStorage.getItem(REGION_STORAGE_KEY);
@@ -1662,6 +1762,22 @@ watch(region, (next) => {
     localStorage.setItem(REGION_STORAGE_KEY, next);
   } catch (_) {
     // Ignore storage failures and continue with in-memory value.
+  }
+});
+
+watch(monitorAfterFlash, (next) => {
+  try {
+    localStorage.setItem(MONITOR_AFTER_FLASH_STORAGE_KEY, next ? 'true' : 'false');
+  } catch (_) {
+    // Ignore storage failures; current checkbox value still applies.
+  }
+});
+
+watch(eraseBeforeFlash, (next) => {
+  try {
+    localStorage.setItem(ERASE_BEFORE_FLASH_STORAGE_KEY, next ? 'true' : 'false');
+  } catch (_) {
+    // Ignore storage failures; current checkbox value still applies.
   }
 });
 
@@ -1936,7 +2052,7 @@ function countCrashEvents(entries: string[]): number {
             </div>
             <div class="flex items-center gap-2">
               <button
-                v-if="hasActiveDeviceInfo && !identifyDisabled"
+                v-if="identifyAvailable && !identifyDisabled"
                 @click="triggerIdentify"
                 :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all', { 'identify-led-active': isIdentifying }]"
                 title="Identify gateway"
@@ -1980,13 +2096,13 @@ function countCrashEvents(entries: string[]): number {
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">USB gateway</label>
               <div class="flex gap-2">
-                <select v-model="selectedPort" :disabled="isLoadingInfo" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+                <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
                   <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                     {{ port.port_name }}
                   </option>
                   <option v-if="ports.length === 0" disabled>Scanning...</option>
                 </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0">
+                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
                   <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-spin text-indigo-500': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
@@ -2162,7 +2278,7 @@ function countCrashEvents(entries: string[]): number {
               Device configuration
             </h2>
             <button
-              v-if="hasActiveDeviceInfo && !identifyDisabled"
+              v-if="identifyAvailable && !identifyDisabled"
               @click="triggerIdentify"
               :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all', { 'identify-led-active': isIdentifying }]"
               title="Identify USB device"
@@ -2188,13 +2304,13 @@ function countCrashEvents(entries: string[]): number {
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Serial port</label>
               <div class="flex gap-2">
-                <select v-model="selectedPort" :disabled="isLoadingInfo" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+                <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
                   <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                     {{ port.port_name }}
                   </option>
                   <option v-if="ports.length === 0" disabled>Scanning...</option>
                 </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0">
+                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
                   <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-spin text-indigo-500': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
@@ -2218,19 +2334,11 @@ function countCrashEvents(entries: string[]): number {
 
           <div class="grid grid-cols-2 gap-4 mt-2">
             <div class="flex flex-col gap-3">
-              <button @click="startFlash" :disabled="isFlashing || isLoadingInfo" class="primary-btn h-12 flex items-center justify-center gap-3 text-sm tracking-wider font-bold w-full active:scale-95 transition-all">
+              <button @click="startFlash" :disabled="flashDisabled" class="primary-btn h-12 flex items-center justify-center gap-3 text-sm tracking-wider font-bold w-full active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
                 <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
                 <span>{{ isFlashing ? 'Flashing...' : 'Flash firmware' }}</span>
               </button>
               <div class="flex flex-wrap items-center gap-4 px-1">
-                <label class="flex items-center gap-2 cursor-pointer group">
-                  <div class="relative flex items-center">
-                    <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
-                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-all"></div>
-                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  </div>
-                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
-                </label>
                 <label class="flex items-center gap-2 cursor-pointer group">
                   <div class="relative flex items-center">
                     <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
@@ -2238,6 +2346,14 @@ function countCrashEvents(entries: string[]): number {
                     <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
                   <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Erase flash before write</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <div class="relative flex items-center">
+                    <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-all"></div>
+                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
                 </label>
               </div>
             </div>

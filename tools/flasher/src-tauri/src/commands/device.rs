@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 use tauri_plugin_shell::ShellExt;
 use sha2::{Sha256, Digest};
 use chrono::prelude::*;
+use std::time::Duration;
+use crate::commands::monitor::{self, MonitorState};
+use crate::services::serial_port_coordinator::SerialPortCoordinator;
 
 const PRODUCT_SECRET: &str = "LRS-v1-rotate-this-secret";
 
@@ -18,7 +21,16 @@ pub struct DeviceInfo {
 }
 
 #[tauri::command]
-pub async fn get_device_info(app: AppHandle, port: String) -> Result<DeviceInfo, String> {
+pub async fn get_device_info(
+    app: AppHandle,
+    coordinator: State<'_, SerialPortCoordinator>,
+    monitor_state: State<'_, MonitorState>,
+    port: String,
+) -> Result<DeviceInfo, String> {
+    monitor::request_stop_for_port(&monitor_state, &port).await;
+    let _guard = coordinator
+        .acquire(&port, "reading device information", Duration::from_secs(8))
+        .await?;
     let shell = app.shell();
     
     // 1. Get Chip ID
@@ -36,22 +48,24 @@ pub async fn get_device_info(app: AppHandle, port: String) -> Result<DeviceInfo,
     let combined = format!("{}\n{}", stdout, stderr);
     
     let chip_id = parse_chip_id(&combined)?;
+    let mac = match parse_mac(&combined) {
+        Some(mac) => mac,
+        None => {
+            let sidecar_mac = shell.sidecar("esptool")
+                .map_err(|e| format!("Failed to find sidecar: {}", e))?;
 
-    // 2. Get MAC
-    let sidecar_mac = shell.sidecar("esptool")
-        .map_err(|e| format!("Failed to find sidecar: {}", e))?;
-    
-    let output_mac = sidecar_mac
-        .args(["--port", &port, "read_mac"])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute esptool: {}", e))?;
+            let output_mac = sidecar_mac
+                .args(["--port", &port, "read_mac"])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to execute esptool: {}", e))?;
 
-    let stdout_mac = String::from_utf8_lossy(&output_mac.stdout).to_string();
-    let stderr_mac = String::from_utf8_lossy(&output_mac.stderr).to_string();
-    let combined_mac = format!("{}\n{}", stdout_mac, stderr_mac);
-    
-    let mac = parse_mac(&combined_mac)?;
+            let stdout_mac = String::from_utf8_lossy(&output_mac.stdout).to_string();
+            let stderr_mac = String::from_utf8_lossy(&output_mac.stderr).to_string();
+            let combined_mac = format!("{}\n{}", stdout_mac, stderr_mac);
+            parse_mac(&combined_mac).ok_or_else(|| "Unable to parse MAC from esptool output".to_string())?
+        }
+    };
 
     // 3. Derive Info
     let (local_addr, remote_addr) = derive_addresses(&chip_id);
@@ -77,12 +91,12 @@ fn parse_chip_id(output: &str) -> Result<String, String> {
     }
 }
 
-fn parse_mac(output: &str) -> Result<String, String> {
+fn parse_mac(output: &str) -> Option<String> {
     let re = regex::Regex::new(r"MAC:\s*([0-9A-Fa-f:]{17})").unwrap();
     if let Some(caps) = re.captures(output) {
-        Ok(caps.get(1).unwrap().as_str().to_lowercase())
+        Some(caps.get(1).unwrap().as_str().to_lowercase())
     } else {
-        Err("Unable to parse MAC from esptool output".into())
+        None
     }
 }
 

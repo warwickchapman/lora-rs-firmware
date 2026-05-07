@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use crate::services::firmware;
+use crate::commands::monitor::{self, MonitorState};
+use crate::services::serial_port_coordinator::SerialPortCoordinator;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LogEvent {
@@ -12,11 +15,18 @@ pub struct LogEvent {
 #[tauri::command]
 pub async fn flash_firmware(
     app: AppHandle,
+    coordinator: State<'_, SerialPortCoordinator>,
+    monitor_state: State<'_, MonitorState>,
     port: String,
     firmware_path: String,
     region: Option<String>,
     erase_first: Option<bool>,
 ) -> Result<String, String> {
+    monitor::request_stop_for_port(&monitor_state, &port).await;
+    let _guard = coordinator
+        .acquire(&port, "flashing firmware", Duration::from_secs(8))
+        .await?;
+
     let app_clone = app.clone();
     let log = move |msg: String| {
         let _ = app_clone.emit("flash-log", LogEvent { message: msg });

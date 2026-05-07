@@ -4,76 +4,119 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::io::{BufRead, BufReader};
 use serde::{Deserialize, Serialize};
+use crate::services::serial_port_coordinator::SerialPortCoordinator;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MonitorEvent {
     pub line: String,
 }
 
+#[derive(Default)]
+pub struct MonitorStatus {
+    pub running: bool,
+    pub port: Option<String>,
+}
+
 pub struct MonitorState {
-    pub running: Arc<Mutex<bool>>,
+    pub status: Arc<Mutex<MonitorStatus>>,
+}
+
+pub async fn request_stop_for_port(state: &MonitorState, port: &str) {
+    let mut status = state.status.lock().await;
+    if status.running && status.port.as_deref() == Some(port) {
+        status.running = false;
+    }
 }
 
 #[tauri::command]
 pub async fn toggle_serial_monitor(
     app: AppHandle,
     state: State<'_, MonitorState>,
+    coordinator: State<'_, SerialPortCoordinator>,
     port: String,
     baud: u32,
     enable: bool,
 ) -> Result<(), String> {
-    let mut running = state.running.lock().await;
-    
     if enable {
-        if *running {
-            return Ok(());
+        {
+            let status = state.status.lock().await;
+            if status.running {
+                if status.port.as_deref() == Some(&port) {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "Serial monitor is already running on {}",
+                    status.port.as_deref().unwrap_or("another port")
+                ));
+            }
         }
-        *running = true;
-        
-        let running_clone = state.running.clone();
+
+        let guard = coordinator
+            .acquire(&port, "serial monitor", Duration::from_secs(3))
+            .await?;
+
+        {
+            let mut status = state.status.lock().await;
+            if status.running {
+                drop(guard);
+                if status.port.as_deref() == Some(&port) {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "Serial monitor is already running on {}",
+                    status.port.as_deref().unwrap_or("another port")
+                ));
+            }
+            status.running = true;
+            status.port = Some(port.clone());
+        }
+
+        let status_clone = state.status.clone();
         let app_handle = app.clone();
-        
-        // Use task::spawn_blocking for blocking serial I/O
+
         tokio::task::spawn_blocking(move || {
+            let _guard = guard;
             let builder = serialport::new(&port, baud)
                 .timeout(Duration::from_millis(100));
-            
+
             match builder.open() {
                 Ok(serial_port) => {
                     let mut reader = BufReader::new(serial_port);
-                    // We need a way to check if we should stop
-                    // Since we're in a blocking thread, we'll check the mutex periodically
                     loop {
-                        // Check if we should still be running
-                        // We use a small hack here: try_lock or similar if we were more advanced
-                        // but for now, we'll just check if the app is still alive or use a timeout-based loop
                         let mut line = String::new();
-                        if reader.read_line(&mut line).is_ok() {
-                            if !line.is_empty() {
-                                let _ = app_handle.emit("monitor-log", MonitorEvent { line: line.clone() });
-                            }
+                        if reader.read_line(&mut line).is_ok() && !line.is_empty() {
+                            let _ = app_handle.emit("monitor-log", MonitorEvent { line });
                         }
-                        
-                        // Check stop flag
-                        // In a blocking thread, we have to be careful not to block forever
-                        // The serialport timeout (100ms) handles the reader.read_line block
-                        if let Ok(run) = running_clone.try_lock() {
-                            if !*run { break; }
+
+                        if let Ok(status) = status_clone.try_lock() {
+                            if !status.running || status.port.as_deref() != Some(&port) {
+                                break;
+                            }
                         }
                     }
                 }
                 Err(e) => {
-                    let _ = app_handle.emit("monitor-log", MonitorEvent { 
-                        line: format!("Error opening port: {}", e) 
+                    let _ = app_handle.emit("monitor-log", MonitorEvent {
+                        line: format!("Error opening port: {}", e)
                     });
-                    if let Ok(mut run) = running_clone.try_lock() {
-                        *run = false;
-                    }
+                }
+            }
+
+            if let Ok(mut status) = status_clone.try_lock() {
+                if status.port.as_deref() == Some(&port) {
+                    status.running = false;
+                    status.port = None;
                 }
             }
         });
     } else {
-        *running = false;
+        let mut status = state.status.lock().await;
+        if !status.running {
+            return Ok(());
+        }
+        if status.port.as_deref() == Some(&port) || status.port.is_none() {
+            status.running = false;
+        }
     }
     
     Ok(())
