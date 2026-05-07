@@ -65,6 +65,8 @@ def release_asset_names(repo: str, tag: str) -> Set[str]:
 
 
 def dispatch_ci(tag: str, repo: str, workflow: str) -> None:
+    # Release publishing must run from the intended release tag ref.
+    # Running from main after post-bump can accidentally publish a *-dev release.
     for platform in ("windows", "linux"):
         run(
             [
@@ -75,14 +77,14 @@ def dispatch_ci(tag: str, repo: str, workflow: str) -> None:
                 "--repo",
                 repo,
                 "--ref",
-                "main",
+                tag,
                 "-f",
                 f"platform={platform}",
                 "-f",
                 "create_release=true",
             ]
         )
-    print("Dispatched release packaging for windows + linux only.")
+    print(f"Dispatched release packaging for windows + linux only (ref={tag}).")
 
 
 def upload_macos(tag: str, arm64: Path, x64: Path, repos: Iterable[str]) -> None:

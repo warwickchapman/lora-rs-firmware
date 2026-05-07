@@ -264,10 +264,11 @@ Release execution guardrails:
 - Standard release path is tag-driven CI plus local macOS builds.
 - CI release mode is Windows/Linux only; local macOS portable ZIPs are uploaded after CI.
 - `package_flasher.yml` now blocks `create_release=true` when `platform=all` or `platform=macos`.
+- `create_release=true` is allowed only on tag refs (`refs/tags/v*`); release dispatches from `main` are blocked.
 - Mandatory release order:
   1. Verify workflow matrix policy before tag push (tag-triggered path must exclude macOS CI).
   2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS app bundles locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
-  3. Push release tag and let CI publish Linux/Windows flasher artifacts, or dispatch explicitly:
+  3. Push release tag and let CI publish Linux/Windows flasher artifacts, or dispatch explicitly from the release tag ref:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
   4. Upload local macOS portable ZIPs to the same release:
      - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x64-portable.zip>`

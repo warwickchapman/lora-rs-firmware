@@ -70,6 +70,12 @@ jobs:
           VERSION_RAW=$(cat VERSION)
           TAG="${VERSION_RAW}"
           if [[ ! "$TAG" =~ ^v ]]; then TAG="v${VERSION_RAW}"; fi
+          # In release-creation mode, bind to the tag ref rather than VERSION from a branch.
+          if [[ "${{ github.event.inputs.create_release || 'false' }}" == "true" ]]; then
+            if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+              TAG="${{ github.ref_name }}"
+            fi
+          fi
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -92,6 +98,12 @@ jobs:
           if [[ "$CREATE_RELEASE_INPUT" == "true" && ( "$PLATFORM" == "all" || "$PLATFORM" == "macos" ) ]]; then
             echo "ERROR: create_release=true does not allow platform=$PLATFORM."
             echo "Use platform=windows and platform=linux in CI, then upload local macOS DMGs."
+            exit 1
+          fi
+          # Release guardrail: create_release=true must run from a tag ref.
+          if [[ "$CREATE_RELEASE_INPUT" == "true" && "${{ github.ref }}" != refs/tags/* ]]; then
+            echo "ERROR: create_release=true is only allowed when workflow ref is a tag (refs/tags/v*)."
+            echo "Dispatch with --ref vX.Y.Z-* (never main)."
             exit 1
           fi
           

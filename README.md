@@ -107,10 +107,11 @@ Release safety guardrails (mandatory):
 - Do not run `gh workflow run package_flasher.yml` with `platform=all` or `platform=macos` for releases.
 - In release mode, CI is Windows/Linux only; macOS portable ZIPs are local-only.
 - `package_flasher.yml` now hard-fails release dispatches that try `platform=all` or `platform=macos` with `create_release=true`.
+- `create_release=true` is tag-locked: dispatch must use `--ref v<release-version>`, never `main`.
 - Enforce this order:
   1. Confirm workflow policy is already correct before tagging (tag runs must not include macOS CI).
   2. Run `python3 tools/flasher/sync_version.py` and then build/verify macOS app bundles locally.
-  3. Push tag/release so CI builds Linux/Windows assets only, or dispatch only these two:
+  3. Push tag/release so CI builds Linux/Windows assets only, or dispatch only these two from the release tag ref:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
   4. Upload local macOS portable ZIP assets to the same release.
      - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x64-portable.zip>`
