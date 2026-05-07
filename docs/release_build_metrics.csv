@@ -1,1 +1,3 @@
 date_utc,tag,repo,commit,env,ram_used,ram_total,flash_used,flash_total,ram_delta_vs_prev,flash_delta_vs_prev,previous_tag
+2026-05-07T11:04:01+00:00,v0.8.0-beta,warwickchapman/lora-rs,7fa29399a5687d9b6adb84e761f1b9d33ac6853f,lrs_us,61824,81920,799416,1044464,,,v0.7.0-beta
+2026-05-07T11:04:01+00:00,v0.8.0-beta,warwickchapman/lora-rs,7fa29399a5687d9b6adb84e761f1b9d33ac6853f,lrs_za,61824,81920,799408,1044464,,,v0.7.0-beta
