@@ -27,6 +27,10 @@ private:
   void sendError(const char *cmd, const char *error, const char *id = nullptr);
   void sendOk(JsonDocument &doc);
   void buildProvisioningStatus(JsonDocument &doc);
+  void handleStatus(JsonDocument &doc);
+  void handleGetConfig(JsonDocument &doc);
+  void handleSetConfig(JsonDocument &doc);
+  void handleFactoryReset(JsonDocument &doc);
   void handleConfigureGateway(JsonDocument &doc);
   void handleWifiScan(JsonDocument &doc);
   void handleConfigureWifi(JsonDocument &doc);

@@ -121,8 +121,10 @@ Web UI lifecycle:
 USB serial admin protocol:
 - Flasher commands are line-delimited JSON prefixed with `LRS:` so responses can be separated from normal serial logs.
 - Replies use the same `LRS:` prefix and include `ok`, `cmd`, optional `id`, and command-specific fields.
-- Read-only commands: `hello`, `identity`, `provisioning_status`.
-- Password-gated commands: `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `enable_web`, `reboot`.
+- Read-only commands: `hello`, `identity`, `status`, `provisioning_status`.
+- Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `enable_web`, `reboot`.
+- `get_config` returns redacted secrets by default. `set_config` accepts a partial `config` object, validates the same safety bounds as the Web UI settings path, saves atomically, and applies runtime changes through the normal config reload hook.
+- `factory_reset` supports `keep_shared_fleet_key` and `keep_wifi_credentials`, then reboots after acknowledging the command.
 - `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
 - Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
 

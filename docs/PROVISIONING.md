@@ -15,6 +15,9 @@ API-first provisioning helper:
 
 Firmware USB serial admin protocol:
 - Flasher-facing commands are newline-delimited JSON prefixed with `LRS:`.
+- Flasher can inspect a USB-connected device without HTTP using `status`.
+- Flasher can load and save local device configuration with authenticated `get_config` and `set_config`. Secret fields are redacted by default; blank password fields in Flasher preserve existing stored passwords.
+- Flasher can trigger authenticated `factory_reset` with `keep_shared_fleet_key` and `keep_wifi_credentials` options, and can use authenticated `reboot` for local recovery/admin flows.
 - The selected USB-connected device can be configured as the TX/gateway with `configure_gateway`.
 - The gateway can then run LoRa discovery/provisioning through `start_discovery`, `provisioning_status`, `provision_all`, and `cancel_provisioning`.
 - `expected_remotes` is scan capacity only. `configure_gateway` must not leave speculative runtime targets behind.

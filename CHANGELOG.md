@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+### Added
+- Firmware USB serial admin now has Phase 1A local-maintenance parity commands: `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`, giving Flasher a non-HTTP path for inspecting health, editing core config, rebooting, and resetting a USB-connected device.
+- Flasher USB Cable mode now includes a Local admin panel for serial-admin status, basic device/WiFi/MQTT/sensor config editing, reboot, and guarded factory reset actions without opening the on-device Web UI.
+
 ### Fixed
 - Flasher release CI dispatch is now tag-locked to prevent accidental `*-dev` release creation from `main` after post-release version auto-bump; `tools/release_flasher_assets.py dispatch-ci` now uses the target release tag as `--ref`, and `package_flasher.yml` blocks `create_release=true` when not running on a tag ref.
 

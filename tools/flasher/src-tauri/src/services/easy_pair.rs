@@ -69,7 +69,7 @@ pub fn send_serial_admin_command(
                         line.clear();
                     } else {
                         line.push(*byte);
-                        if line.len() > 2048 {
+                        if line.len() > 8192 {
                             line.clear();
                         }
                     }

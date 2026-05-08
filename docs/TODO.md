@@ -7,6 +7,14 @@
 - Security review reference report captured at `docs/internal/security-review-2026-04-26.md`.
 - Flasher-first EasyPair commissioning foundation is implemented: USB serial admin protocol, selected USB gateway, LoRa remote discovery/provisioning, verified target finalization, WiFi credential provisioning, and local Identify LED action.
 - Web UI maintenance lifecycle is implemented: Web UI starts on boot, explicit user activity extends the 60-second window, background polling/SSE/captive probes do not extend it, and HTTP/SSE/captive DNS runtime work stops after inactivity. USB serial admin can re-enable it with `enable_web`.
+- Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher USB Cable mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
+
+## Web UI Removal Migration
+- Replace Flasher Network mode's current HTTP discovery/status/OTA/logging paths with MQTT admin/config workflows before removing the on-device REST API.
+- Add MQTT admin request/reply topics for online devices with broker ACL guidance and non-retained secret handling.
+- Add gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, and guarded factory reset.
+- Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
+- After serial, MQTT, and LoRa admin parity are verified on hardware, remove Web UI/REST/captive DNS/`ESP8266WebServer` from normal firmware and record RAM/flash deltas.
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).

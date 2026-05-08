@@ -119,6 +119,65 @@ interface WifiScanResponse {
   networks?: WifiNetwork[];
 }
 
+interface SerialAdminStatus {
+  ok: boolean;
+  cmd: string;
+  fw_version: string;
+  chip_id: string;
+  serial: string;
+  uptime_ms: number;
+  heap_free: number;
+  heap_frag_pct: number;
+  heap_max_block: number;
+  mode: string;
+  role: string;
+  role_tx: boolean;
+  local_address: number;
+  remote_address: number;
+  commissioned: boolean;
+  wifi?: {
+    admin_enabled: boolean;
+    sta_ssid: string;
+    sta_connected: boolean;
+    status: string;
+    ip: string;
+    rssi: number;
+    ap_active: boolean;
+  };
+  mqtt?: {
+    client_enabled: boolean;
+    control_enabled: boolean;
+    host: string;
+    topic_root: string;
+  };
+  link_state?: string;
+  relay_state?: number;
+  input_state?: number;
+  peer_count?: number;
+  local_temp_valid?: boolean;
+  local_temp_c?: number;
+}
+
+interface SerialAdminConfig {
+  mode: string;
+  role_tx: boolean;
+  local_address: number;
+  remote_address: number;
+  wifi_sta_ssid: string;
+  wifi_sta_password: string;
+  wifi_admin_enabled: boolean;
+  mqtt_client_enabled: boolean;
+  mqtt_control_enabled: boolean;
+  mqtt_host: string;
+  mqtt_port: number;
+  mqtt_user: string;
+  mqtt_password: string;
+  mqtt_topic_root: string;
+  sensor_temp_enabled: boolean;
+  sensor_temp_pin: number;
+  sensor_temp_interval_s: number;
+}
+
 type RegionCode = 'ZA' | 'EU' | 'US';
 
 const SAVED_NETWORK_PASSWORDS_KEY = 'lrs_flasher_network_passwords';
@@ -190,6 +249,15 @@ const isWifiApplying = ref(false);
 const isFleetWifiSending = ref(false);
 const isIdentifying = ref(false);
 const identifyTimer = ref<ReturnType<typeof window.setTimeout> | null>(null);
+const serialAdminStatus = ref<SerialAdminStatus | null>(null);
+const serialAdminConfig = ref<SerialAdminConfig | null>(null);
+const isSerialAdminLoading = ref(false);
+const isSerialAdminSaving = ref(false);
+const isSerialSystemAction = ref(false);
+const showSerialWifiPassword = ref(false);
+const showSerialMqttPassword = ref(false);
+const serialFactoryKeepFleet = ref(true);
+const serialFactoryKeepWifi = ref(true);
 
 const LOCAL_OPTION = '__local_browse__';
 const NETWORK_UDP_LOG_TTL_S = 1800;
@@ -292,7 +360,17 @@ const flashDisabled = computed(() =>
   !selectedPort.value ||
   !selectedVersion.value
 );
-const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value);
+const serialAdminAvailable = computed(() => hasActiveDeviceInfo.value && !!serialAdminSupportedPorts.value[selectedPort.value]);
+const serialAdminPassword = computed(() => deviceInfo.value?.password?.trim() || '');
+const serialAdminBusy = computed(() => isSerialAdminLoading.value || isSerialAdminSaving.value || isSerialSystemAction.value);
+const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
+const serialStatusSummary = computed(() => {
+  const st = serialAdminStatus.value;
+  if (!st) return 'Load local status to inspect firmware health.';
+  const wifi = st.wifi?.sta_connected ? `WiFi ${st.wifi.ip || 'connected'}` : `WiFi ${st.wifi?.status || 'offline'}`;
+  return `${st.role || 'unknown'} ${st.local_address}->${st.remote_address} · ${wifi} · heap ${formatBytes(st.heap_free)} free`;
+});
+const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
 const activityFullscreen = computed(() =>
   (activeMode.value === 'serial' && isMonitoring.value) ||
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
@@ -378,6 +456,12 @@ function formatUptime(ms: number | null): string {
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
   return `${days}d ${hours.toString().padStart(2, '0')}h`;
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  const n = Number(bytes || 0);
+  if (n < 1024) return `${n} B`;
+  return `${(n / 1024).toFixed(1)} KB`;
 }
 
 async function openLocalFileDialog() {
@@ -1158,6 +1242,167 @@ async function triggerIdentify() {
     const msg = serialFeatureError('Identify', e);
     log(msg);
     notify(msg);
+  }
+}
+
+async function refreshSerialAdminStatus() {
+  if (!selectedPort.value) {
+    notify('Select a USB device first');
+    return;
+  }
+  isSerialAdminLoading.value = true;
+  pushSerialLog('Refreshing local admin status...');
+  try {
+    if (!serialAdminSupportedPorts.value[selectedPort.value]) {
+      await probeSerialAdminSupport(selectedPort.value);
+    }
+    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    serialAdminStatus.value = out;
+    serialUptimeMs.value = Number(out.uptime_ms || 0);
+    pushSerialLog(`Status loaded: ${out.role || 'unknown'} ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
+  } catch (e) {
+    const msg = serialFeatureError('Status', e);
+    pushSerialLog(msg);
+    notify(msg);
+  } finally {
+    isSerialAdminLoading.value = false;
+  }
+}
+
+async function loadSerialAdminConfig() {
+  if (!selectedPort.value) {
+    notify('Select a USB device first');
+    return;
+  }
+  const password = serialAdminPassword.value;
+  if (!password) {
+    notify('Get device info first to use the factory password');
+    return;
+  }
+  isSerialAdminLoading.value = true;
+  pushSerialLog('Loading local device configuration...');
+  try {
+    if (!serialAdminSupportedPorts.value[selectedPort.value]) {
+      await probeSerialAdminSupport(selectedPort.value);
+    }
+    const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
+      admin_password: password
+    }, 8000);
+    serialAdminConfig.value = {
+      ...out.config,
+      wifi_sta_password: '',
+      mqtt_password: ''
+    };
+    pushSerialLog('Local configuration loaded. Password fields stay blank unless you enter new values.');
+  } catch (e) {
+    const msg = serialFeatureError('Config load', e);
+    pushSerialLog(msg);
+    notify(msg);
+  } finally {
+    isSerialAdminLoading.value = false;
+  }
+}
+
+function serialConfigPatch(): Record<string, any> {
+  const cfg = serialAdminConfig.value;
+  if (!cfg) return {};
+  const patch: Record<string, any> = {
+    mode: cfg.mode || 'paired',
+    role_tx: !!cfg.role_tx,
+    local_address: Number(cfg.local_address || 1),
+    remote_address: Number(cfg.remote_address || 254),
+    wifi_sta_ssid: cfg.wifi_sta_ssid || '',
+    wifi_admin_enabled: !!cfg.wifi_admin_enabled,
+    mqtt_client_enabled: !!cfg.mqtt_client_enabled,
+    mqtt_control_enabled: !!cfg.mqtt_control_enabled,
+    mqtt_host: cfg.mqtt_host || '',
+    mqtt_port: Number(cfg.mqtt_port || 1883),
+    mqtt_user: cfg.mqtt_user || '',
+    mqtt_topic_root: cfg.mqtt_topic_root || 'lora',
+    sensor_temp_enabled: !!cfg.sensor_temp_enabled,
+    sensor_temp_pin: Number(cfg.sensor_temp_pin || 0),
+    sensor_temp_interval_s: Number(cfg.sensor_temp_interval_s || 10)
+  };
+  if (cfg.wifi_sta_password) patch.wifi_sta_password = cfg.wifi_sta_password;
+  if (cfg.mqtt_password) patch.mqtt_password = cfg.mqtt_password;
+  return patch;
+}
+
+async function saveSerialAdminConfig() {
+  if (!serialAdminConfig.value) {
+    notify('Load config first');
+    return;
+  }
+  const password = serialAdminPassword.value;
+  if (!password) {
+    notify('Get device info first to use the factory password');
+    return;
+  }
+  isSerialAdminSaving.value = true;
+  pushSerialLog('Saving local device configuration...');
+  try {
+    const out = await sendEasyPairCommand<any>('set_config', {
+      admin_password: password,
+      config: serialConfigPatch()
+    }, 12000);
+    pushSerialLog(`Configuration saved${out.network_restarted ? '; networking restarted' : ''}.`);
+    await refreshSerialAdminStatus();
+  } catch (e) {
+    const msg = serialFeatureError('Config save', e);
+    pushSerialLog(msg);
+    notify(msg);
+  } finally {
+    isSerialAdminSaving.value = false;
+  }
+}
+
+async function rebootSerialDevice() {
+  const password = serialAdminPassword.value;
+  if (!password) {
+    notify('Get device info first to use the factory password');
+    return;
+  }
+  if (!confirm('Reboot the selected USB device now?')) return;
+  isSerialSystemAction.value = true;
+  pushSerialLog('Sending reboot command...');
+  try {
+    await sendEasyPairCommand('reboot', { admin_password: password }, 5000);
+    pushSerialLog('Reboot command accepted.');
+  } catch (e) {
+    const msg = serialFeatureError('Reboot', e);
+    pushSerialLog(msg);
+    notify(msg);
+  } finally {
+    isSerialSystemAction.value = false;
+  }
+}
+
+async function factoryResetSerialDevice() {
+  const password = serialAdminPassword.value;
+  if (!password) {
+    notify('Get device info first to use the factory password');
+    return;
+  }
+  const summary = [
+    serialFactoryKeepFleet.value ? 'keep fleet key' : 'clear fleet key',
+    serialFactoryKeepWifi.value ? 'keep WiFi' : 'clear WiFi'
+  ].join(', ');
+  if (!confirm(`Factory reset the selected USB device (${summary})?`)) return;
+  isSerialSystemAction.value = true;
+  pushSerialLog(`Sending factory reset command (${summary})...`);
+  try {
+    await sendEasyPairCommand('factory_reset', {
+      admin_password: password,
+      keep_shared_fleet_key: serialFactoryKeepFleet.value,
+      keep_wifi_credentials: serialFactoryKeepWifi.value
+    }, 6000);
+    pushSerialLog('Factory reset command accepted; device is rebooting.');
+  } catch (e) {
+    const msg = serialFeatureError('Factory reset', e);
+    pushSerialLog(msg);
+    notify(msg);
+  } finally {
+    isSerialSystemAction.value = false;
   }
 }
 
@@ -2362,6 +2607,155 @@ function countCrashEvents(entries: string[]): number {
               <span>{{ isLoadingInfo ? 'Reading...' : 'Get device info' }}</span>
             </button>
           </div>
+        </div>
+
+        <!-- Local Admin Panel -->
+        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-bold text-slate-300">Local admin</h2>
+              <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
+            </div>
+            <div class="flex gap-2">
+              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-white/10 text-xs font-bold disabled:opacity-60">
+                {{ isSerialAdminLoading ? 'Loading...' : 'Status' }}
+              </button>
+              <button @click="loadSerialAdminConfig" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-white/10 text-xs font-bold disabled:opacity-60">
+                Load config
+              </button>
+            </div>
+          </div>
+
+          <div v-if="serialAdminStatus" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+              <div class="text-slate-500">Firmware</div>
+              <div class="font-mono text-slate-200">{{ serialAdminStatus.fw_version || 'unknown' }}</div>
+            </div>
+            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+              <div class="text-slate-500">Uptime</div>
+              <div class="font-mono text-slate-200">{{ formatUptime(serialAdminStatus.uptime_ms || 0) }}</div>
+            </div>
+            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+              <div class="text-slate-500">Heap</div>
+              <div class="font-mono text-slate-200">{{ formatBytes(serialAdminStatus.heap_free) }}</div>
+            </div>
+            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+              <div class="text-slate-500">MQTT</div>
+              <div class="font-mono text-slate-200">{{ serialAdminStatus.mqtt?.client_enabled ? 'enabled' : 'disabled' }}</div>
+            </div>
+          </div>
+
+          <div v-if="serialAdminConfig" class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div class="flex flex-col gap-1.5">
+              <label class="font-medium text-slate-400">Role</label>
+              <select v-model="serialAdminConfig.role_tx" class="glass-input h-10 appearance-none">
+                <option :value="true">Gateway / transmitter</option>
+                <option :value="false">Remote / receiver</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex flex-col gap-1.5">
+                <label class="font-medium text-slate-400">Local addr</label>
+                <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-10" />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label class="font-medium text-slate-400">Remote addr</label>
+                <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-10" />
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-1.5">
+              <label class="font-medium text-slate-400">WiFi SSID</label>
+              <input v-model="serialAdminConfig.wifi_sta_ssid" class="glass-input h-10" placeholder="Leave blank for no WiFi" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="font-medium text-slate-400">New WiFi password</label>
+              <div class="flex gap-2">
+                <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" placeholder="Blank keeps existing password" />
+                <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-10 px-3 hover:bg-white/10">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
+              </div>
+            </div>
+
+            <label class="flex items-center gap-2 text-slate-300">
+              <input v-model="serialAdminConfig.wifi_admin_enabled" type="checkbox" />
+              WiFi admin enabled
+            </label>
+            <label class="flex items-center gap-2 text-slate-300">
+              <input v-model="serialAdminConfig.sensor_temp_enabled" type="checkbox" />
+              DS18B20 temperature sensor enabled
+            </label>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex flex-col gap-1.5">
+                <label class="font-medium text-slate-400">Sensor pin</label>
+                <input v-model.number="serialAdminConfig.sensor_temp_pin" type="number" min="0" max="16" class="glass-input h-10" />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label class="font-medium text-slate-400">Report seconds</label>
+                <input v-model.number="serialAdminConfig.sensor_temp_interval_s" type="number" min="5" max="3600" class="glass-input h-10" />
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-1.5">
+              <label class="font-medium text-slate-400">MQTT host</label>
+              <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-10" placeholder="venus.local" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex flex-col gap-1.5">
+                <label class="font-medium text-slate-400">MQTT port</label>
+                <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-10" />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label class="font-medium text-slate-400">Topic root</label>
+                <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-10" />
+              </div>
+            </div>
+
+            <label class="flex items-center gap-2 text-slate-300">
+              <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
+              MQTT client enabled
+            </label>
+            <label class="flex items-center gap-2 text-slate-300">
+              <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
+              MQTT control enabled
+            </label>
+
+            <div class="flex flex-col gap-1.5">
+              <label class="font-medium text-slate-400">MQTT user</label>
+              <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-10" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="font-medium text-slate-400">New MQTT password</label>
+              <div class="flex gap-2">
+                <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" placeholder="Blank keeps existing password" />
+                <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-10 px-3 hover:bg-white/10">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+              </div>
+            </div>
+
+            <div class="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
+              <button @click="saveSerialAdminConfig" :disabled="serialAdminDisabled || isSerialAdminSaving" class="primary-btn h-10 px-5 text-xs font-bold disabled:opacity-60">
+                {{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}
+              </button>
+              <button @click="rebootSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-10 px-4 hover:bg-white/10 text-xs font-bold disabled:opacity-60">
+                Reboot
+              </button>
+              <label class="flex items-center gap-2 text-slate-400">
+                <input v-model="serialFactoryKeepFleet" type="checkbox" />
+                Keep fleet key
+              </label>
+              <label class="flex items-center gap-2 text-slate-400">
+                <input v-model="serialFactoryKeepWifi" type="checkbox" />
+                Keep WiFi
+              </label>
+              <button @click="factoryResetSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-10 px-4 hover:bg-red-500/15 text-xs font-bold text-red-200 disabled:opacity-60">
+                Factory reset
+              </button>
+            </div>
+          </div>
+
+          <p v-if="hasActiveDeviceInfo && !serialAdminAvailable" class="text-xs text-amber-300">
+            This firmware does not answer the serial admin probe yet. Flash a Phase 1A build, then load status again.
+          </p>
         </div>
 
         <!-- Device Details Panel -->

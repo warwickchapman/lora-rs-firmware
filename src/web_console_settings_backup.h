@@ -58,6 +58,8 @@ struct SettingsBackup {
   String mqtt_password;
   String mqtt_topic_root;
   bool sensor_temp_enabled = false;
+  uint8_t sensor_temp_pin = 0;
+  uint16_t sensor_temp_interval_s = 10;
   bool commissioned = false;
   String audit_last_saved_by;
   uint32_t audit_last_saved_ms = 0;
@@ -121,6 +123,8 @@ inline void captureSettingsBackup(const Settings &src, SettingsBackup &dst) {
   dst.mqtt_password = src.mqtt_password;
   dst.mqtt_topic_root = src.mqtt_topic_root;
   dst.sensor_temp_enabled = src.sensor_temp_enabled;
+  dst.sensor_temp_pin = src.sensor_temp_pin;
+  dst.sensor_temp_interval_s = src.sensor_temp_interval_s;
   dst.commissioned = src.commissioned;
   dst.audit_last_saved_by = src.audit_last_saved_by;
   dst.audit_last_saved_ms = src.audit_last_saved_ms;
@@ -184,6 +188,8 @@ inline void restoreSettingsBackup(const SettingsBackup &src, Settings &dst) {
   dst.mqtt_password = src.mqtt_password;
   dst.mqtt_topic_root = src.mqtt_topic_root;
   dst.sensor_temp_enabled = src.sensor_temp_enabled;
+  dst.sensor_temp_pin = src.sensor_temp_pin;
+  dst.sensor_temp_interval_s = src.sensor_temp_interval_s;
   dst.commissioned = src.commissioned;
   dst.audit_last_saved_by = src.audit_last_saved_by;
   dst.audit_last_saved_ms = src.audit_last_saved_ms;
