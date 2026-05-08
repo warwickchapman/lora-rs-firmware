@@ -52,6 +52,8 @@ void App::begin() {
     LRS_LOGE(FS, "event=config_store_init_failed");
   }
   {
+    // Post-OTA resets are scheduled before reboot, then executed here once the
+    // new firmware has booted and the config store is available.
     bool keepFleetKey = false;
     bool keepWifiCredentials = false;
     if (config_.consumePostOtaFactoryReset(keepFleetKey, keepWifiCredentials)) {
@@ -79,6 +81,8 @@ void App::begin() {
   sensors_.begin(config_.settings());
 
   sm_.begin(config_.settings(), &radio_);
+  // Logs can be timestamped from LoRa-shared time even before this device has
+  // its own NTP fix.
   auto unixProvider = [this](uint32_t &unixTimeS) {
     if (!sm_.sharedUnixTimeValid())
       return false;
@@ -122,6 +126,8 @@ void App::tick() {
   const bool startupTrace =
       static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
   bool emitStartupBreadcrumb = false;
+  // Keep phase timing close to each subsystem call. This makes slow-loop logs
+  // actionable without changing the cooperative tick model.
   auto phaseSlowWarn = [&](const char *phase, uint32_t phaseStartMs) {
     const uint32_t endMs = millis();
     const uint32_t durMs = endMs - phaseStartMs;
@@ -216,6 +222,8 @@ void App::tick() {
   phaseSlowWarn("automations_tick", phaseStartMs);
 #endif
   {
+    // Remote LoRa admin commands are applied in App so persistent config,
+    // network restarts, and acknowledgement status stay in one place.
     if (sm_.hasPendingWifiControl()) {
       bool wifiEnabled = true;
       uint8_t ctrlSrc = 0;
@@ -238,6 +246,9 @@ void App::tick() {
     }
   }
   {
+    // Provisioning over LoRa intentionally reuses the normal WiFi restart path;
+    // the sender needs the device to retry immediately even if credentials are
+    // unchanged.
     if (sm_.hasPendingWifiProvision()) {
       String provSsid;
       String provPassword;
@@ -285,6 +296,8 @@ void App::tick() {
     }
   }
   {
+    // Fleet provisioning rewrites role/address/key together so receivers never
+    // keep stale controller ACLs after a successful apply.
     if (sm_.hasPendingFleetProvisionApply()) {
       uint16_t provSession = 0;
       uint8_t provAddr = 0;
@@ -332,6 +345,8 @@ void App::tick() {
   const bool startupDeferNonEssential =
       !WiFi.isConnected() && (millis() < kStartupNonEssentialDeferralMs);
   if (startupDeferNonEssential) {
+    // During early WiFi association, defer chatty/non-critical work so the STA
+    // connection path gets the cleanest possible heap and scheduler window.
     if (!startup_defer_logged_) {
       startup_defer_logged_ = true;
       LRS_LOGI(SYS,
@@ -370,6 +385,8 @@ void App::startNetworking() {
   refreshCachedStaHostname();
   auto &cfg = config_.settings();
   const bool wasDisabled = wifi_stack_disabled_;
+  // Reset the App-owned view of WiFi state before rebuilding STA/AP/NTP from
+  // the latest persisted settings.
   wifi_stack_disabled_ = false;
   sta_connect_consecutive_failures_ = 0;
   sta_stack_reset_count_ = 0;
@@ -422,6 +439,8 @@ void App::updateNetworking() {
   const wl_status_t st = WiFi.status();
 
   if (wifi_sta_scanning_) {
+    // STA connects are scan-first so channel/BSSID can be pinned to the best
+    // matching AP, avoiding slower roaming decisions in the ESP8266 stack.
     const int scanState = WiFi.scanComplete();
     if (scanState == WIFI_SCAN_RUNNING) {
       if (millis() - wifi_sta_scan_started_ms_ > kStaScanTimeoutMs) {
@@ -442,6 +461,8 @@ void App::updateNetworking() {
   }
 
   if (wifi_sta_connecting_) {
+    // Connection attempts are bounded; failures fall back to AP if policy allows
+    // it and then advance the reconnect backoff.
     if (st == WL_CONNECTED) {
       sta_connected_ = true;
       wifi_sta_connecting_ = false;
@@ -491,6 +512,8 @@ void App::updateNetworking() {
   }
 
   if (sta_connected_) {
+    // A drop after a known-good connection should quickly restore maintenance
+    // access, then let the Fibonacci retry path bring STA back.
     sta_connected_ = false;
     lrslog::event("sta_disconnected", 0, 0, 0);
     LRS_LOGW(WIFI, "event=sta_disconnected");
@@ -509,6 +532,8 @@ void App::updateNetworking() {
         (freeHeap < kStaReconnectCriticalMinFreeHeapBytes) ||
         (maxBlock < kStaReconnectCriticalMinMaxBlockBytes);
     if (criticalLowHeapForReconnect) {
+      // Reconnect churn is expensive on ESP8266. Under critically low heap or
+      // fragmentation, hold STA retries and keep AP maintenance available.
       const uint32_t nowMs = millis();
       if (sta_reconnect_heap_block_log_ms_ == 0U ||
           static_cast<int32_t>(nowMs - sta_reconnect_heap_block_log_ms_) >=
@@ -552,6 +577,8 @@ void App::resetStaReconnectFibonacci() {
 }
 
 void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
+  // Config changes are fanned out to all long-lived subsystems before any
+  // optional restart/reboot so their cached settings do not drift.
   refreshCachedStaHostname();
   radio_.applyConfig(config_.settings());
   sm_.applyConfig(config_.settings());
@@ -617,6 +644,8 @@ void App::tickTimeSync() {
   const uint32_t unixTimeS = static_cast<uint32_t>(nowUnix);
   bool shouldPushToStateMachine = !sm_.sharedUnixTimeValid();
   if (!shouldPushToStateMachine) {
+    // Avoid noisy LoRa time updates for tiny NTP drift; the shared clock only
+    // needs correction when it is meaningfully out of sync.
     const uint32_t shared = sm_.sharedUnixTime();
     const uint32_t delta =
         (shared > unixTimeS) ? (shared - unixTimeS) : (unixTimeS - shared);
@@ -643,6 +672,8 @@ void App::tickTimeSync() {
 void App::ensureApEnabled() {
   if (ap_enabled_)
     return;
+  // AP is a maintenance surface, not only first-run provisioning; keep runtime
+  // WiFi settings aligned whenever it is brought up.
   WiFi.mode(WIFI_AP_STA);
   applyWifiRuntimeSettings();
   const String apSsid = config_.apSsid();
@@ -671,6 +702,7 @@ void App::maybeDisableAp() {
 
 void App::refreshCaptiveDns() {
   if (!ap_enabled_ || !web_.isWebServing()) {
+    // Captive DNS is only useful while both AP and Web UI are actively serving.
     if (dns_running_) {
       dns_.stop();
       dns_running_ = false;
@@ -728,6 +760,8 @@ void App::finishStaScan(int scanCount) {
   auto &cfg = config_.settings();
   int bestIndex = -1;
   int bestRssi = -1000;
+  // If multiple APs share the SSID, prefer the strongest candidate that also
+  // matches an optional channel override.
   for (int i = 0; i < scanCount; ++i) {
     if (!WiFi.SSID(i).equals(cfg.wifi_sta_ssid)) continue;
     const int32_t channel = WiFi.channel(i);
@@ -773,6 +807,8 @@ void App::finishStaScan(int scanCount) {
 
 void App::failStaConnectAttempt(const char *reason, wl_status_t status) {
   auto &cfg = config_.settings();
+  // One failed scan/connect attempt returns to a known idle state; repeated
+  // failures escalate to SDK stack resets before disabling WiFi entirely.
   sta_connected_ = false;
   wifi_sta_connecting_ = false;
   wifi_sta_scanning_ = false;
@@ -835,6 +871,8 @@ void App::resetWifiStaAttempt() {
 
 void App::applyWifiRuntimeSettings() {
   const auto &cfg = config_.settings();
+  // Runtime radio knobs are re-applied before scans, connects, and AP changes
+  // because the ESP8266 SDK may reset parts of this state across mode changes.
   WiFi.mode((ap_enabled_ || shouldEnableSoftAp()) ? WIFI_AP_STA : WIFI_STA);
   WiFi.setPhyMode(configuredWifiPhyMode());
   WiFi.setOutputPower(cfg.wifi_tx_power_dbm);
@@ -909,6 +947,8 @@ void App::startOta() {
   ota_enabled_ = false;
   const uint32_t freeHeap = lrslog::heapFree();
   const uint32_t maxBlock = lrslog::heapMaxFreeBlock();
+  // OTA is optional at runtime; skip it when startup heap is already too tight
+  // rather than risking instability in the main control loop.
   if (freeHeap < kOtaStartupMinFreeHeapBytes ||
       maxBlock < kOtaStartupMinMaxBlockBytes) {
     lrslog::event("ota_disabled_heap", 0, 0, 0);
@@ -950,6 +990,8 @@ void App::refreshCachedStaHostname() {
 String App::normalizeHostname(const String &input) const {
   String out;
   out.reserve(input.length());
+  // Keep hostnames conservative for mDNS/DHCP clients: lowercase, hyphenated,
+  // non-empty, and short enough for the ESP8266 SDK.
   for (size_t i = 0; i < input.length(); i++) {
     char c = input[i];
     if (c >= 'A' && c <= 'Z')
