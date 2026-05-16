@@ -4,9 +4,9 @@ Desktop utility for LRS firmware updates, commissioning, and maintenance.
 
 ## Modes
 
-### Serial
+### Flash
 
-Serial mode is the original guided workflow:
+Flash mode is the USB firmware and local maintenance workflow:
 
 - auto-detect serial ports
 - select release firmware or choose a local `.bin`
@@ -21,7 +21,7 @@ Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 
 - loads a selected USB-connected LRS device as the LoRa gateway, including the factory-derived admin password needed for Fleet actions
 - scans the supported LRS remote range through the gateway with `start_lora_inventory`
-- refuses Fleet scans from factory-default gateways until Pair Devices has commissioned the gateway with a secure fleet key
+- refuses Fleet scans from factory-default gateways until Provision has commissioned the gateway with a secure fleet key
 - shows discovered remotes in a dense inventory table with LoRa address, chip ID, firmware version, role/mode, WiFi state/IP, MQTT state, link RSSI/freshness, and OTA eligibility
 - starts a temporary local firmware file server from the selected release/local `.bin`
 - calculates and displays the firmware SHA256 before devices are commanded to pull it
@@ -32,7 +32,7 @@ Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 
 Fleet mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. Inventory uses compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
 
-## EasyPair foundation
+## Provision foundation
 
 New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 
@@ -41,8 +41,8 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 - the selected USB device is configured as the TX/gateway
 - remotes are discovered and provisioned over LoRa by that selected gateway
 - final gateway target lists should be written with `set_gateway_targets`
-- Pair Devices and USB Cable include an Identify LED action, shown only after the selected port confirms LRS serial-admin support, that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
+- Provision and Flash include an Identify LED action, shown only after the selected port confirms LRS serial-admin support, that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
 
-Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and EasyPair. Switching away from USB Cable stops the serial monitor so Pair Devices can take the selected gateway port cleanly. USB Cable and Pair Devices use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Pair Devices WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
+Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and Provision. Switching away from Flash stops the serial monitor so Provision can take the selected gateway port cleanly. Flash and Provision use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Provision WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
-The app opens on Pair Devices. The existing Serial and Fleet tools remain available as USB Cable and Fleet maintenance modes for flashing, local admin, firmware serving, and log viewing.
+The app restores the last active tab on launch. The main tabs are ordered Flash, Provision, and Fleet.

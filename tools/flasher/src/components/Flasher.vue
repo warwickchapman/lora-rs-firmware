@@ -1020,10 +1020,10 @@ async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatu
 function fleetScanBlockedMessage(st: SerialAdminStatus | null): string | null {
   if (!st) return null;
   if (!st.commissioned) {
-    return 'Fleet scan needs a commissioned gateway. Use Pair Devices first to assign the fleet key, role, address, and WiFi.';
+    return 'Fleet scan needs a commissioned gateway. Use Provision first to assign the fleet key, role, address, and WiFi.';
   }
   if (st.fleet_passphrase_default) {
-    return 'Fleet scan needs a secure fleet key. Use Pair Devices first to replace the factory key.';
+    return 'Fleet scan needs a secure fleet key. Use Provision first to replace the factory key.';
   }
   return null;
 }
@@ -1031,10 +1031,10 @@ function fleetScanBlockedMessage(st: SerialAdminStatus | null): string | null {
 function fleetScanErrorMessage(err: unknown): string {
   const text = String(err || '');
   if (text.includes('not_commissioned')) {
-    return 'Fleet scan needs a commissioned gateway. Use Pair Devices first to assign the fleet key, role, address, and WiFi.';
+    return 'Fleet scan needs a commissioned gateway. Use Provision first to assign the fleet key, role, address, and WiFi.';
   }
   if (text.includes('factory_fleet_key')) {
-    return 'Fleet scan needs a secure fleet key. Use Pair Devices first to replace the factory key.';
+    return 'Fleet scan needs a secure fleet key. Use Provision first to replace the factory key.';
   }
   return serialFeatureError('LoRa inventory scan', err);
 }
@@ -1656,7 +1656,7 @@ async function saveEasyPairTargets() {
   pushPairLog(`Saving gateway target list: ${addresses.join(', ')}`);
   try {
     await sendEasyPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
-    pushPairLog('Pairing complete.');
+    pushPairLog('Provisioning complete.');
     await refreshGatewayStatusForPair();
     await refreshEasyPairStatus(false);
   } catch (e) {
@@ -2385,7 +2385,7 @@ function countCrashEvents(entries: string[]): number {
           <div class="flex items-start justify-between gap-4">
             <div>
               <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-                Pair Devices
+                Provision
               </h2>
               <p class="mt-1 text-xs text-slate-400">Selected USB device becomes the LoRa gateway.</p>
             </div>
@@ -2486,7 +2486,7 @@ function countCrashEvents(entries: string[]): number {
 
           <button @click="runEasyPair" :disabled="pairPrimaryDisabled" class="primary-btn h-12 flex items-center justify-center gap-3 text-sm font-bold">
             <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isPairBusy }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
-            <span>{{ isPairBusy ? 'Pairing...' : 'Pair Devices' }}</span>
+            <span>{{ isPairBusy ? 'Provisioning...' : 'Provision' }}</span>
           </button>
 
           <details class="rounded-md border border-slate-800 bg-slate-900/30 px-3 py-2">
@@ -2494,7 +2494,7 @@ function countCrashEvents(entries: string[]): number {
             <div class="mt-3 grid grid-cols-2 xl:grid-cols-5 gap-3">
               <button @click="configureEasyPairGateway" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Configure the USB device as gateway">Prepare</button>
               <button @click="startEasyPairDiscovery" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa">Scan</button>
-              <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Pair All</button>
+              <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Provision All</button>
               <button @click="saveEasyPairTargets" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Save discovered remote addresses on the gateway">Finish</button>
               <button @click="cancelEasyPair" :disabled="!gatewayReady" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Stop the current discovery or provisioning session">Stop</button>
             </div>
@@ -2741,7 +2741,7 @@ function countCrashEvents(entries: string[]): number {
           </div>
 
           <div v-if="serialAdminIsFactoryDefault" class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-            Factory default: this device is not commissioned yet. Use Pair Devices to assign its fleet key, role, address, and WiFi before treating it as an operational transmitter or receiver.
+            Factory default: this device is not commissioned yet. Use Provision to assign its fleet key, role, address, and WiFi before treating it as an operational transmitter or receiver.
           </div>
 
           <div v-if="serialAdminStatus" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">

@@ -22,9 +22,10 @@ type ActiveMode = 'pair' | 'serial' | 'network';
 function initialActiveMode(): ActiveMode {
   try {
     const saved = localStorage.getItem(MODE_STORAGE_KEY);
-    return saved === 'serial' || saved === 'network' ? saved : 'pair';
+    if (saved === 'pair' || saved === 'serial' || saved === 'network') return saved;
+    return 'serial';
   } catch {
-    return 'pair';
+    return 'serial';
   }
 }
 
@@ -180,16 +181,16 @@ watch(activeMode, (mode) => {
       </div>
       <div class="absolute left-1/2 -translate-x-1/2 top-6 w-full max-w-md rounded-md border border-slate-700 bg-slate-900/60 p-1">
         <button
-          @click="activeMode = 'pair'"
-          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'pair' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
-        >
-          Pair Devices
-        </button>
-        <button
           @click="activeMode = 'serial'"
           :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
-          USB Cable
+          Flash
+        </button>
+        <button
+          @click="activeMode = 'pair'"
+          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'pair' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+        >
+          Provision
         </button>
         <button
           @click="activeMode = 'network'"
