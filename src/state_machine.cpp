@@ -1568,6 +1568,11 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
     return false;
   }
   resetProvisioningStorage();
+  peer_count_ = 0;
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    peers_[i] = PeerRuntime{};
+  }
+  resetPollStorage();
   for (size_t i = 0; i < kMaxPeers; ++i) {
     provisioned_addrs_[i] = ProvisionedAddressEntry{};
   }
