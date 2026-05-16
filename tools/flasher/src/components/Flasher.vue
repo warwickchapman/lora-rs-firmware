@@ -343,7 +343,7 @@ const monitorMqttDraftTopicRoot = ref('lora');
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const isMonitorRefreshing = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
-const monitorAutoRefresh = ref(false);
+const monitorAutoRefresh = ref(true);
 const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const settingsTab = ref<SettingsTab>('general');
 const networkUdpTarget = ref('');
@@ -553,7 +553,8 @@ const serialAdminBusy = computed(() => isSerialAdminLoading.value || isSerialAdm
 const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isSelectedPortMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
 const serialStatusSummary = computed(() => {
   const st = serialAdminStatus.value;
-  if (!st) return 'Load local status to inspect firmware health.';
+  if (!st && serialAdminConfig.value) return 'Settings loaded. Refresh status to inspect live firmware health.';
+  if (!st) return 'Fetch settings to edit configuration, or refresh status for live health.';
   if (!st.commissioned || st.fleet_passphrase_default) {
     return `Factory default · awaiting commissioning · addr ${st.local_address}->${st.remote_address} · heap ${formatBytes(st.heap_free)} free`;
   }
@@ -563,6 +564,24 @@ const serialStatusSummary = computed(() => {
 const serialAdminIsFactoryDefault = computed(() => {
   const st = serialAdminStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
+});
+const settingsEmptyMessage = computed(() => {
+  if (!hasActiveDeviceInfo.value) {
+    return 'Select a USB device, then read identity or fetch settings.';
+  }
+  if (settingsTab.value === 'general') {
+    return 'Fetch settings to edit role, addresses, timing, and failsafe values. Refresh status for live firmware health.';
+  }
+  if (settingsTab.value === 'network') {
+    return 'Fetch settings to edit WiFi, hostname, Soft AP, and static IP values.';
+  }
+  if (settingsTab.value === 'mqtt') {
+    return 'Fetch settings to edit MQTT broker, topic, control, and controller values.';
+  }
+  if (settingsTab.value === 'sensors') {
+    return 'Fetch settings to edit DS18B20 sensor values.';
+  }
+  return 'Fetch settings before saving config, or use the guarded reboot and factory reset actions when needed.';
 });
 const fleetGatewayStatusLabel = computed(() => {
   if (serialAdminIsFactoryDefault.value) return 'gateway factory default';
@@ -598,6 +617,24 @@ const monitorHealthSummary = computed(() => {
   if (!st) return 'No gateway status loaded';
   const wifi = st.wifi?.sta_connected ? `${st.wifi.rssi ?? 0} dBm` : st.wifi?.status || 'offline';
   return `${st.role || 'gateway'} addr ${st.local_address} · heap ${formatBytes(st.heap_free)} · WiFi ${wifi}`;
+});
+const monitorRelayKnown = computed(() => {
+  const st = monitorGatewayStatus.value;
+  return st?.relay_feedback !== undefined || st?.relay_state !== undefined;
+});
+const monitorRelayOn = computed(() => {
+  const st = monitorGatewayStatus.value;
+  const relay = st?.relay_feedback ?? st?.relay_state;
+  return Number(relay) === 1;
+});
+const monitorRelayLabel = computed(() => {
+  if (!monitorRelayKnown.value) return 'UNKNOWN';
+  return monitorRelayOn.value ? 'ON' : 'OFF';
+});
+const monitorRelayBadgeClass = computed(() => {
+  if (!monitorRelayKnown.value) return 'border-slate-700 bg-slate-800/60 text-slate-500 shadow-inner';
+  if (monitorRelayOn.value) return 'border-emerald-300/40 bg-emerald-500/20 text-emerald-200 shadow-[0_0_34px_rgba(16,185,129,0.28),inset_0_0_18px_rgba(16,185,129,0.18)]';
+  return 'border-slate-700 bg-slate-900/80 text-slate-300 shadow-inner';
 });
 const monitorFleetLiveCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'live').length);
 const monitorFleetStaleCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'stale').length);
@@ -1758,6 +1795,19 @@ async function loadSerialAdminConfig() {
   }
 }
 
+async function fetchSerialDeviceSettings() {
+  if (!selectedPort.value) {
+    notify('Select a USB device first');
+    return;
+  }
+  if (!hasActiveDeviceInfo.value) {
+    const ok = await readDeviceInfo();
+    if (!ok) return;
+  }
+  await refreshSerialAdminStatus();
+  await loadSerialAdminConfig();
+}
+
 function serialConfigPatch(): Record<string, any> {
   const cfg = serialAdminConfig.value;
   if (!cfg) return {};
@@ -2763,9 +2813,9 @@ function countCrashEvents(entries: string[]): number {
 
 <template>
   <div class="relative h-full flex flex-col">
-    <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
+    <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
-      <div v-if="activeMode !== 'network'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
+      <div v-if="activeMode !== 'network' && activeMode !== 'monitor'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
         <div class="flex items-center justify-between border-b border-slate-700/80 pb-2">
           <div class="flex flex-col gap-1">
             <h2 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
@@ -3319,13 +3369,13 @@ function countCrashEvents(entries: string[]): number {
                 </svg>
               </button>
               <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                {{ isLoadingInfo ? 'Reading...' : 'Get device info' }}
+                {{ isLoadingInfo ? 'Reading...' : 'Read identity' }}
               </button>
               <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                {{ isSerialAdminLoading ? 'Loading...' : 'Status' }}
+                {{ isSerialAdminLoading ? 'Loading...' : 'Refresh status' }}
               </button>
-              <button @click="loadSerialAdminConfig" :disabled="serialAdminDisabled" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                Load config
+              <button @click="fetchSerialDeviceSettings" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy" class="primary-btn m-0 h-8 px-3 text-xs font-bold disabled:opacity-60">
+                {{ isSerialAdminLoading ? 'Fetching...' : 'Fetch settings' }}
               </button>
             </div>
           </div>
@@ -3562,8 +3612,8 @@ function countCrashEvents(entries: string[]): number {
               </div>
             </div>
 
-            <p v-if="hasActiveDeviceInfo && !serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading" class="mt-3 text-xs text-slate-500">
-              Load status or config to inspect this device over USB serial admin.
+            <p v-if="!serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading" class="mt-3 text-xs text-slate-500">
+              {{ settingsEmptyMessage }}
             </p>
           </div>
         </div>
@@ -3608,7 +3658,7 @@ function countCrashEvents(entries: string[]): number {
                 :disabled="isMonitorRefreshing || !selectedPort"
                 class="primary-btn m-0 h-8 px-3 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
-                {{ isMonitorRefreshing ? 'Refreshing...' : 'Refresh' }}
+                {{ isMonitorRefreshing ? 'Monitoring...' : 'Monitor' }}
               </button>
             </div>
           </div>
@@ -3646,26 +3696,71 @@ function countCrashEvents(entries: string[]): number {
           </div>
         </div>
 
-        <div class="glass-card grid grid-cols-1 gap-0 overflow-hidden text-left text-xs md:grid-cols-2 xl:grid-cols-4 shrink-0">
-          <div class="border-b border-slate-800 p-2 md:border-r xl:border-b-0">
-            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</span>
-            <span class="ml-2 font-mono font-bold text-slate-200">{{ monitorGatewayStatus?.chip_id || '-' }}</span>
-            <span class="ml-2 text-slate-400">{{ monitorGatewayStatus?.fw_version || '-' }} · {{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</span>
+        <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_22rem] shrink-0">
+          <div class="glass-card p-3 text-left">
+            <div class="grid grid-cols-1 gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</div>
+                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.chip_id || '-' }}</div>
+                <div class="mt-1 text-slate-400">{{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Firmware</div>
+                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.fw_version || '-' }}</div>
+                <div class="mt-1 text-slate-400">uptime {{ monitorGatewayStatus?.uptime_ms ? formatUptime(monitorGatewayStatus.uptime_ms) : '-' }}</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</div>
+                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</div>
+                <div class="mt-1 text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet</div>
+                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</div>
+                <div class="mt-1 text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">WiFi</div>
+                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.wifi?.sta_connected ? 'Connected' : (monitorGatewayStatus?.wifi?.status || '-') }}</div>
+                <div class="mt-1 font-mono text-slate-400">{{ monitorGatewayStatus?.wifi?.ip || '-' }} · {{ monitorGatewayStatus?.wifi?.rssi ?? '-' }} dBm</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">MQTT</div>
+                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.mqtt?.client_enabled ? 'Enabled' : '-' }}</div>
+                <div class="mt-1 text-slate-400">{{ monitorGatewayStatus?.mqtt?.host || '-' }}</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Link</div>
+                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.link_state || '-' }}</div>
+                <div class="mt-1 text-slate-400">peer {{ monitorGatewayStatus?.peer_count ?? '-' }}</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temperature</div>
+                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.local_temp_valid ? `${monitorGatewayStatus.local_temp_c} °C` : '-' }}</div>
+                <div class="mt-1 text-slate-400">local sensor</div>
+              </div>
+            </div>
           </div>
-          <div class="border-b border-slate-800 p-2 md:border-b-0 xl:border-r">
-            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</span>
-            <span class="ml-2 font-mono font-bold text-slate-200">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</span>
-            <span class="ml-2 text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</span>
-          </div>
-          <div class="border-b border-slate-800 p-2 md:border-r md:border-b-0 xl:border-r">
-            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</span>
-            <span class="ml-2 font-mono font-bold text-slate-200">cmd {{ monitorGatewayStatus?.relay_state ?? '-' }} · fb {{ monitorGatewayStatus?.relay_feedback ?? '-' }}</span>
-            <span class="ml-2 text-slate-400">input {{ monitorGatewayStatus?.input_state ?? '-' }} · link {{ monitorGatewayStatus?.link_state || '-' }}</span>
-          </div>
-          <div class="p-2">
-            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet</span>
-            <span class="ml-2 font-bold text-slate-200">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</span>
-            <span class="ml-2 text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</span>
+
+          <div class="glass-card flex flex-col items-center justify-center gap-3 p-5 text-center">
+            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway Relay</div>
+            <div :class="['flex h-36 w-36 items-center justify-center rounded-full border text-lg font-black tracking-widest transition-all', monitorRelayBadgeClass]">
+              {{ monitorRelayLabel }}
+            </div>
+            <div class="grid w-full grid-cols-3 gap-2 text-xs">
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Cmd</div>
+                <div class="mt-1 font-mono text-slate-200">{{ monitorGatewayStatus?.relay_state ?? '-' }}</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">FB</div>
+                <div class="mt-1 font-mono text-slate-200">{{ monitorGatewayStatus?.relay_feedback ?? '-' }}</div>
+              </div>
+              <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Input</div>
+                <div class="mt-1 font-mono text-slate-200">{{ monitorGatewayStatus?.input_state ?? '-' }}</div>
+              </div>
+            </div>
           </div>
         </div>
 
