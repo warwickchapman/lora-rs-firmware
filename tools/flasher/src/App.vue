@@ -17,12 +17,12 @@ const isTogglingWindowMode = ref(false);
 const WINDOW_MODE_KEY = 'flasher.windowMode';
 const MODE_STORAGE_KEY = 'thanda-flasher-active-mode';
 
-type ActiveMode = 'pair' | 'serial' | 'network';
+type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor';
 
 function initialActiveMode(): ActiveMode {
   try {
     const saved = localStorage.getItem(MODE_STORAGE_KEY);
-    if (saved === 'pair' || saved === 'serial' || saved === 'network') return saved;
+    if (saved === 'pair' || saved === 'serial' || saved === 'network' || saved === 'monitor') return saved;
     return 'serial';
   } catch {
     return 'serial';
@@ -182,21 +182,27 @@ watch(activeMode, (mode) => {
       <div class="absolute left-1/2 -translate-x-1/2 top-6 w-full max-w-md rounded-md border border-slate-700 bg-slate-900/60 p-1">
         <button
           @click="activeMode = 'serial'"
-          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
           Flash
         </button>
         <button
           @click="activeMode = 'pair'"
-          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'pair' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'pair' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
           Provision
         </button>
         <button
           @click="activeMode = 'network'"
-          :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
           Fleet
+        </button>
+        <button
+          @click="activeMode = 'monitor'"
+          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'monitor' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+        >
+          Monitor
         </button>
       </div>
       <div class="flex gap-4">

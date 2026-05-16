@@ -5,7 +5,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-type ActiveMode = 'pair' | 'serial' | 'network';
+type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 
@@ -87,7 +87,17 @@ interface LoraInventoryDevice {
   wifi_connected?: boolean;
   ip?: string;
   mqtt_known?: boolean;
+  mqtt_enabled?: boolean;
   mqtt_connected?: boolean;
+  maintenance_debug_known?: boolean;
+  heap_free?: number;
+  heap_max_block?: number;
+  heap_frag_pct?: number;
+  relay_state?: number;
+  relay_feedback?: number;
+  input_state?: number;
+  input_feedback?: number;
+  debug_uptime_ms?: number;
   rssi?: number;
   downlink_rssi_known?: boolean;
   downlink_rssi?: number;
@@ -159,10 +169,12 @@ interface SerialAdminStatus {
     client_enabled: boolean;
     control_enabled: boolean;
     host: string;
+    port?: number;
     topic_root: string;
   };
   link_state?: string;
   relay_state?: number;
+  relay_feedback?: number;
   input_state?: number;
   peer_count?: number;
   local_temp_valid?: boolean;
@@ -210,7 +222,29 @@ const NETWORK_FIRMWARE_PATH = '/firmware.bin';
 const LRS_REMOTE_SCAN_CAP = 12;
 
 const ports = ref<SerialPort[]>([]);
-const selectedPort = ref('');
+const flashSelectedPort = ref('');
+const provisionSelectedPort = ref('');
+const fleetSelectedPort = ref('');
+const monitorSelectedPort = ref('');
+const selectedPort = computed<string>({
+  get() {
+    if (activeMode.value === 'pair') return provisionSelectedPort.value;
+    if (activeMode.value === 'network') return fleetSelectedPort.value;
+    if (activeMode.value === 'monitor') return monitorSelectedPort.value;
+    return flashSelectedPort.value;
+  },
+  set(port) {
+    if (activeMode.value === 'pair') {
+      provisionSelectedPort.value = port;
+    } else if (activeMode.value === 'network') {
+      fleetSelectedPort.value = port;
+    } else if (activeMode.value === 'monitor') {
+      monitorSelectedPort.value = port;
+    } else {
+      flashSelectedPort.value = port;
+    }
+  }
+});
 const firmwareVersions = ref<string[]>(['__local_browse__']);
 const selectedVersion = ref('');
 const selectedLocalPath = ref('');
@@ -244,6 +278,19 @@ const stickLogToBottom = ref(true);
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
 const networkStatusMessage = ref('Ready to scan the fleet.');
+const monitorStatusMessage = ref('Select a USB gateway and refresh monitor data.');
+const monitorTransport = ref<'serial' | 'mqtt'>('serial');
+const monitorMqttHost = ref('');
+const monitorMqttPort = ref(1883);
+const monitorMqttUser = ref('');
+const monitorMqttPassword = ref('');
+const monitorMqttTopicRoot = ref('lora');
+const monitorMqttConnected = ref(false);
+const showMonitorMqttPassword = ref(false);
+const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
+const isMonitorRefreshing = ref(false);
+const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
+const monitorAutoRefresh = ref(false);
 const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
@@ -381,6 +428,7 @@ const orderedDeviceInfoEntries = computed((): Array<[keyof DeviceInfo, string | 
   return entries;
 });
 const activeLogs = computed(() => {
+  if (activeMode.value === 'monitor') return networkLogs.value;
   if (activeMode.value === 'network') return networkLogs.value;
   if (activeMode.value === 'pair') return pairLogs.value;
   return serialLogs.value;
@@ -482,6 +530,16 @@ const activityFullscreen = computed(() =>
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
 );
 const serialUptimeLabel = computed(() => formatUptime(serialUptimeMs.value));
+const monitorGatewayStatus = computed(() => serialAdminStatus.value);
+const monitorHealthSummary = computed(() => {
+  const st = monitorGatewayStatus.value;
+  if (!st) return 'No gateway status loaded';
+  const wifi = st.wifi?.sta_connected ? `${st.wifi.rssi ?? 0} dBm` : st.wifi?.status || 'offline';
+  return `${st.role || 'gateway'} addr ${st.local_address} · heap ${formatBytes(st.heap_free)} · WiFi ${wifi}`;
+});
+const monitorFleetLiveCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'live').length);
+const monitorFleetStaleCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'stale').length);
+const monitorFleetOfflineCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'offline').length);
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -670,7 +728,6 @@ async function refreshPorts() {
     const currentNames = sortedPorts.map(p => p.port_name);
     const previousSet = new Set(lastPortSnapshot.value);
     const newPorts = currentNames.filter(name => !previousSet.has(name));
-    const selectedExists = currentNames.includes(selectedPort.value);
     const hasActiveOperation = isFlashing.value || isLoadingInfo.value || isMonitoring.value || isGatewayLoading.value;
 
     // Track first-seen order so Windows can prefer most recently connected devices.
@@ -689,20 +746,7 @@ async function refreshPorts() {
       }
     }
 
-    if (currentNames.length === 0) {
-      selectedPort.value = '';
-    } else if (!selectedPort.value) {
-      selectedPort.value = chooseDefaultPort(currentNames);
-    } else if (newPorts.length > 0 && !hasActiveOperation) {
-      // Cross-platform policy: only auto-switch when a new device appears and no operation is active.
-      // Prefer the most recently connected device.
-      selectedPort.value = chooseMostRecentPort(newPorts) ?? chooseDefaultPort(currentNames);
-    } else if (!selectedExists) {
-      // Selected port vanished (device removed/reset); choose a valid fallback.
-      if (!hasActiveOperation) {
-        selectedPort.value = chooseDefaultPort(currentNames);
-      }
-    }
+    reconcileTabPortSelections(currentNames, newPorts, !hasActiveOperation);
 
     lastPortSnapshot.value = currentNames;
     syncDeviceInfoForSelectedPort();
@@ -711,6 +755,24 @@ async function refreshPorts() {
   } finally {
     isRefreshingPorts.value = false;
   }
+}
+
+function reconcileTabPortSelections(currentNames: string[], newPorts: string[], allowAutoSwitch: boolean) {
+  const defaultPort = currentNames.length > 0 ? chooseDefaultPort(currentNames) : '';
+  const preferredNewPort = newPorts.length > 0 ? (chooseMostRecentPort(newPorts) ?? defaultPort) : '';
+  const activeReplacement = allowAutoSwitch && preferredNewPort ? preferredNewPort : defaultPort;
+
+  const ensureSelection = (port: string, active: boolean): string => {
+    if (currentNames.length === 0) return '';
+    if (!port || !currentNames.includes(port)) return activeReplacement;
+    if (active && allowAutoSwitch && preferredNewPort) return preferredNewPort;
+    return port;
+  };
+
+  flashSelectedPort.value = ensureSelection(flashSelectedPort.value, activeMode.value === 'serial');
+  provisionSelectedPort.value = ensureSelection(provisionSelectedPort.value, activeMode.value === 'pair');
+  fleetSelectedPort.value = ensureSelection(fleetSelectedPort.value, activeMode.value === 'network');
+  monitorSelectedPort.value = ensureSelection(monitorSelectedPort.value, activeMode.value === 'monitor');
 }
 
 function chooseMostRecentPort(candidates: string[]): string | null {
@@ -1074,6 +1136,73 @@ function stopLoraInventoryPolling(markIdle = true) {
     networkInventoryPollTimer.value = null;
   }
   if (markIdle) isLoraInventoryScanning.value = false;
+}
+
+function monitorRowFreshness(row: LoraInventoryDevice): 'live' | 'stale' | 'offline' | 'unknown' {
+  const age = Number(row.age_ms || 0);
+  if (!row.age_ms && row.age_ms !== 0) return 'unknown';
+  if (age <= 15000) return 'live';
+  if (age <= 120000) return 'stale';
+  return 'offline';
+}
+
+function monitorFreshnessClass(row: LoraInventoryDevice): string {
+  const state = monitorRowFreshness(row);
+  if (state === 'live') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  if (state === 'stale') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  if (state === 'offline') return 'border-rose-500/30 bg-rose-500/10 text-rose-300';
+  return 'border-slate-700 bg-slate-800/50 text-slate-400';
+}
+
+function monitorFreshnessLabel(row: LoraInventoryDevice): string {
+  const state = monitorRowFreshness(row);
+  if (state === 'unknown') return 'Unknown';
+  return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
+function adoptMonitorMqttFromStatus(st: SerialAdminStatus | null) {
+  if (!st?.mqtt) return;
+  monitorMqttHost.value = st.mqtt.host || monitorMqttHost.value;
+  monitorMqttPort.value = Number(st.mqtt.port || monitorMqttPort.value || 1883);
+  monitorMqttTopicRoot.value = st.mqtt.topic_root || monitorMqttTopicRoot.value || 'lora';
+}
+
+async function refreshMonitorData() {
+  if (!selectedPort.value || isMonitorRefreshing.value) return;
+  isMonitorRefreshing.value = true;
+  try {
+    const status = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    applySerialAdminStatus(status);
+    adoptMonitorMqttFromStatus(status);
+    const inventory = await sendEasyPairCommand<LoraInventoryStatus>('lora_inventory_status', {}, 5000);
+    monitorFleetRows.value = (inventory.devices || []).slice().sort((a, b) => a.address - b.address);
+    monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
+  } catch (e) {
+    monitorStatusMessage.value = serialFeatureError('Monitor refresh', e);
+    notify(monitorStatusMessage.value);
+  } finally {
+    isMonitorRefreshing.value = false;
+  }
+}
+
+function startMonitorPolling() {
+  stopMonitorPolling();
+  monitorPollTimer.value = window.setInterval(() => {
+    refreshMonitorData();
+  }, 5000);
+}
+
+function stopMonitorPolling() {
+  if (!monitorPollTimer.value) return;
+  window.clearInterval(monitorPollTimer.value);
+  monitorPollTimer.value = null;
+}
+
+function toggleMonitorMqttConnection() {
+  monitorMqttConnected.value = !monitorMqttConnected.value;
+  monitorStatusMessage.value = monitorMqttConnected.value
+    ? 'MQTT monitor configuration saved locally. Subscription backend is not active yet.'
+    : 'MQTT monitor disconnected.';
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
@@ -2259,17 +2388,29 @@ watch(activeMode, (mode) => {
   if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value) {
     readDeviceInfo();
   }
+  if (mode !== 'monitor') {
+    stopMonitorPolling();
+  }
 });
 
 watch(selectedPort, (port) => {
   deviceInfoReadSeq.value += 1;
   isLoadingInfo.value = false;
-  pairStatus.value = null;
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
   if (port && activeMode.value === 'serial') {
     readDeviceInfo();
   }
+  if (activeMode.value === 'monitor') {
+    monitorFleetRows.value = [];
+    if (monitorAutoRefresh.value) {
+      refreshMonitorData();
+    }
+  }
+});
+
+watch(provisionSelectedPort, () => {
+  pairStatus.value = null;
 });
 
 onMounted(async () => {
@@ -2371,9 +2512,19 @@ watch(eraseBeforeFlash, (next) => {
   }
 });
 
+watch(monitorAutoRefresh, (enabled) => {
+  if (enabled) {
+    startMonitorPolling();
+    refreshMonitorData();
+  } else {
+    stopMonitorPolling();
+  }
+});
+
 onUnmounted(() => {
   stopEasyPairStatusPolling();
   stopLoraInventoryPolling();
+  stopMonitorPolling();
   Object.values(fleetOtaFollowupTimers.value).forEach(timer => window.clearTimeout(timer));
   fleetOtaFollowupTimers.value = {};
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
@@ -2579,9 +2730,10 @@ function countCrashEvents(entries: string[]): number {
             </div>
             <div class="flex items-center gap-2">
               <button
-                v-if="identifyAvailable && !identifyDisabled"
+                v-if="identifyAvailable"
                 @click="triggerIdentify"
-                :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all', { 'identify-led-active': isIdentifying }]"
+                :disabled="identifyDisabled"
+                :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
                 title="Identify gateway"
                 aria-label="Identify gateway"
               >
@@ -2825,9 +2977,10 @@ function countCrashEvents(entries: string[]): number {
               Device configuration
             </h2>
             <button
-              v-if="identifyAvailable && !identifyDisabled"
+              v-if="identifyAvailable"
               @click="triggerIdentify"
-              :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all', { 'identify-led-active': isIdentifying }]"
+              :disabled="identifyDisabled"
+              :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
               title="Identify USB device"
               aria-label="Identify USB device"
             >
@@ -3096,6 +3249,166 @@ function countCrashEvents(entries: string[]): number {
               <span class="animate-spin text-4xl">◌</span>
               Reading device descriptors...
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="activeMode === 'monitor'" class="flex flex-col h-full overflow-hidden gap-4">
+        <div class="glass-card flex flex-col text-left shrink-0 p-4 gap-4">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0">
+              <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                Monitor
+              </h2>
+              <p class="mt-1 text-xs text-slate-400 max-w-3xl">
+                {{ monitorHealthSummary }} · {{ monitorStatusMessage }}
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center justify-end gap-3">
+              <label class="flex items-center gap-2 text-xs text-slate-400">
+                <input v-model="monitorAutoRefresh" type="checkbox" />
+                Auto refresh
+              </label>
+              <button
+                @click="refreshMonitorData"
+                :disabled="isMonitorRefreshing || !selectedPort"
+                class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              >
+                {{ isMonitorRefreshing ? 'Refreshing...' : 'Refresh' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">USB gateway</label>
+              <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+                <option value="" disabled>Select USB gateway</option>
+                <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
+                  {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
+                </option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Transport</label>
+              <select v-model="monitorTransport" class="glass-input h-10 appearance-none">
+                <option value="serial">Serial</option>
+                <option value="mqtt">MQTT</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Broker host</label>
+              <input v-model="monitorMqttHost" class="glass-input h-10" placeholder="venus.local" />
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Broker port</label>
+              <input v-model.number="monitorMqttPort" class="glass-input h-10" type="number" min="1" max="65535" />
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Topic root</label>
+              <input v-model="monitorMqttTopicRoot" class="glass-input h-10" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">MQTT user</label>
+              <input v-model="monitorMqttUser" class="glass-input h-10" />
+            </div>
+            <div class="lg:col-span-2 flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">MQTT password</label>
+              <div class="flex gap-2">
+                <input v-model="monitorMqttPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" />
+                <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input h-10 px-3 hover:bg-white/10">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
+              </div>
+            </div>
+            <div class="flex items-end">
+              <button
+                @click="toggleMonitorMqttConnection"
+                :disabled="monitorTransport !== 'mqtt' || !monitorMqttHost"
+                class="glass-input m-0 h-10 px-4 hover:bg-white/10 text-xs font-bold disabled:opacity-50"
+              >
+                {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
+              </button>
+            </div>
+            <div class="flex items-end">
+              <span :class="['rounded border px-2 py-2 text-[10px] font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+                MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 shrink-0">
+          <div class="glass-card p-4 text-left">
+            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</div>
+            <div class="mt-2 text-lg font-bold text-slate-200">{{ monitorGatewayStatus?.chip_id || '-' }}</div>
+            <div class="mt-1 text-xs text-slate-400">{{ monitorGatewayStatus?.fw_version || '-' }} · {{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</div>
+          </div>
+          <div class="glass-card p-4 text-left">
+            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</div>
+            <div class="mt-2 text-lg font-bold text-slate-200">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</div>
+            <div class="mt-1 text-xs text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</div>
+          </div>
+          <div class="glass-card p-4 text-left">
+            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</div>
+            <div class="mt-2 text-lg font-bold text-slate-200">cmd {{ monitorGatewayStatus?.relay_state ?? '-' }} · fb {{ monitorGatewayStatus?.relay_feedback ?? '-' }}</div>
+            <div class="mt-1 text-xs text-slate-400">input {{ monitorGatewayStatus?.input_state ?? '-' }} · link {{ monitorGatewayStatus?.link_state || '-' }}</div>
+          </div>
+          <div class="glass-card p-4 text-left">
+            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet freshness</div>
+            <div class="mt-2 text-lg font-bold text-slate-200">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</div>
+            <div class="mt-1 text-xs text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</div>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-bold text-slate-300">Fleet Diagnostics</h2>
+              <div class="mt-1 text-xs text-slate-500">Serial-backed monitor data from the selected gateway.</div>
+            </div>
+          </div>
+          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
+            <table class="w-full min-w-[1180px] border-collapse text-xs">
+              <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
+                <tr class="border-b border-slate-800">
+                  <th class="px-3 py-2 text-left font-semibold">Addr</th>
+                  <th class="px-3 py-2 text-left font-semibold">Freshness</th>
+                  <th class="px-3 py-2 text-left font-semibold">Firmware</th>
+                  <th class="px-3 py-2 text-left font-semibold">IP</th>
+                  <th class="px-3 py-2 text-left font-semibold">Relay</th>
+                  <th class="px-3 py-2 text-left font-semibold">WiFi</th>
+                  <th class="px-3 py-2 text-left font-semibold">MQTT</th>
+                  <th class="px-3 py-2 text-left font-semibold">RSSI</th>
+                  <th class="px-3 py-2 text-left font-semibold">Heap</th>
+                  <th class="px-3 py-2 text-left font-semibold">Frag</th>
+                  <th class="px-3 py-2 text-left font-semibold">Uptime</th>
+                  <th class="px-3 py-2 text-left font-semibold">Poll</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="monitorFleetRows.length === 0">
+                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Refresh monitor data to load gateway and fleet diagnostics.</td>
+                </tr>
+                <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
+                  <td class="px-3 py-2 font-mono text-slate-200">{{ device.address }}</td>
+                  <td class="px-3 py-2">
+                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', monitorFreshnessClass(device)]">{{ monitorFreshnessLabel(device) }}</span>
+                  </td>
+                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.fw_version || '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-300">ack {{ device.relay_state ?? '-' }} · fb {{ device.relay_feedback ?? '-' }}</td>
+                  <td class="px-3 py-2 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-3 py-2 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${formatBytes(device.heap_free)} / ${formatBytes(device.heap_max_block)}` : '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${device.heap_frag_pct ?? '-'}%` : '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</td>
+                  <td class="px-3 py-2 text-slate-400">{{ device.poll_pending ? 'Pending' : 'Idle' }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
