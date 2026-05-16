@@ -10,6 +10,13 @@ type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'system';
+type SerialJobPriority = 'user' | 'background';
+
+interface SerialJobOptions {
+  label?: string;
+  priority?: SerialJobPriority;
+  dropIfBusy?: boolean;
+}
 
 interface SerialPort {
   port_name: string;
@@ -309,6 +316,8 @@ const pairLogs = ref<string[]>([]);
 const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
 const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
+const serialAdminPortBusy = ref<Record<string, string>>({});
+const serialAdminPortQueues = new Map<string, Promise<void>>();
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
@@ -342,6 +351,7 @@ const monitorMqttDraftPassword = ref('');
 const monitorMqttDraftTopicRoot = ref('lora');
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const isMonitorRefreshing = ref(false);
+const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const monitorAutoRefresh = ref(true);
 const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
@@ -1148,17 +1158,56 @@ function noteMonitorReleasedForPort(port: string, reason: string) {
   activeMonitorSsid.value = '';
 }
 
-async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
-  return sendEasyPairCommandOnPort<T>(selectedPort.value, cmd, payload, timeoutMs);
+async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
+  return sendEasyPairCommandOnPort<T>(selectedPort.value, cmd, payload, timeoutMs, options);
 }
 
-async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
+function serialAdminBusyForPort(port: string): boolean {
+  return !!serialAdminPortBusy.value[port] || serialAdminPortQueues.has(port);
+}
+
+async function runSerialAdminJob<T>(port: string, label: string, options: SerialJobOptions, job: () => Promise<T>): Promise<T> {
+  if (options.dropIfBusy && serialAdminBusyForPort(port)) {
+    throw new Error('serial_admin_background_skipped');
+  }
+
+  const previous = serialAdminPortQueues.get(port) || Promise.resolve();
+  let releaseQueue!: () => void;
+  const current = new Promise<void>(resolve => {
+    releaseQueue = resolve;
+  });
+  const queued = previous.then(() => current);
+  serialAdminPortQueues.set(port, queued);
+
+  try {
+    await previous;
+    serialAdminPortBusy.value = { ...serialAdminPortBusy.value, [port]: label };
+    return await job();
+  } finally {
+    const nextBusy = { ...serialAdminPortBusy.value };
+    if (nextBusy[port] === label) delete nextBusy[port];
+    serialAdminPortBusy.value = nextBusy;
+    releaseQueue();
+    if (serialAdminPortQueues.get(port) === queued) {
+      serialAdminPortQueues.delete(port);
+    }
+  }
+}
+
+function serialBackgroundSkipped(err: unknown): boolean {
+  return String(err || '').includes('serial_admin_background_skipped');
+}
+
+async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
   if (!port) throw new Error('Select the USB gateway first');
-  noteMonitorReleasedForPort(port, 'serial admin command needs this port');
-  return await invoke<T>('serial_admin_command', {
-    port,
-    request: { cmd, ...payload },
-    timeoutMs
+  const label = options.label || cmd.replace(/_/g, ' ');
+  return await runSerialAdminJob<T>(port, label, options, async () => {
+    noteMonitorReleasedForPort(port, 'serial admin command needs this port');
+    return await invoke<T>('serial_admin_command', {
+      port,
+      request: { cmd, ...payload },
+      timeoutMs
+    });
   });
 }
 
@@ -1253,13 +1302,20 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
 
 async function refreshLoraInventoryStatus() {
   try {
-    const out = await sendEasyPairCommandOnPort<LoraInventoryStatus>(fleetSelectedPort.value, 'lora_inventory_status', {}, 5000);
+    const out = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
+      fleetSelectedPort.value,
+      'lora_inventory_status',
+      {},
+      5000,
+      { label: 'Fleet inventory refresh', priority: 'background', dropIfBusy: true }
+    );
     loraInventoryScan.value = out.scan || null;
     mergeLoraInventoryRows(out.devices || []);
     isLoraInventoryScanning.value = !!out.scan?.active;
     networkStatusMessage.value = `${loraInventoryProgressLabel.value}; ${loraInventory.value.length} device${loraInventory.value.length === 1 ? '' : 's'} visible.`;
     if (!out.scan?.active) stopLoraInventoryPolling(false);
   } catch (e) {
+    if (serialBackgroundSkipped(e)) return;
     networkStatusMessage.value = serialFeatureError('LoRa inventory status', e);
     stopLoraInventoryPolling(false);
   }
@@ -1283,8 +1339,8 @@ function stopLoraInventoryPolling(markIdle = true) {
 function monitorRowFreshness(row: LoraInventoryDevice): 'live' | 'stale' | 'offline' | 'unknown' {
   const age = Number(row.age_ms || 0);
   if (!row.age_ms && row.age_ms !== 0) return 'unknown';
-  if (age <= 15000) return 'live';
-  if (age <= 120000) return 'stale';
+  if (age <= 60000) return 'live';
+  if (age <= 180000) return 'stale';
   return 'offline';
 }
 
@@ -1299,7 +1355,30 @@ function monitorFreshnessClass(row: LoraInventoryDevice): string {
 function monitorFreshnessLabel(row: LoraInventoryDevice): string {
   const state = monitorRowFreshness(row);
   if (state === 'unknown') return 'Unknown';
-  return state.charAt(0).toUpperCase() + state.slice(1);
+  const label = state.charAt(0).toUpperCase() + state.slice(1);
+  if (row.age_ms === undefined || row.age_ms === null) return label;
+  return `${label} · ${formatUptime(Number(row.age_ms || 0))}`;
+}
+
+function monitorDebugValue<T>(row: LoraInventoryDevice, value: T | undefined | null, formatter: (value: T) => string): string {
+  if (value !== undefined && value !== null) return formatter(value);
+  return row.maintenance_debug_known ? '0' : 'waiting';
+}
+
+function monitorHeapLabel(row: LoraInventoryDevice): string {
+  if (row.heap_free !== undefined || row.heap_max_block !== undefined) {
+    return `${formatBytes(row.heap_free)} / ${formatBytes(row.heap_max_block)}`;
+  }
+  return row.maintenance_debug_known ? '0 B / 0 B' : 'waiting';
+}
+
+function monitorFragLabel(row: LoraInventoryDevice): string {
+  return monitorDebugValue(row, row.heap_frag_pct, value => `${value}%`);
+}
+
+function monitorUptimeLabel(row: LoraInventoryDevice): string {
+  const uptime = row.uptime_ms || row.debug_uptime_ms;
+  return uptime ? formatUptime(uptime) : (row.maintenance_debug_known ? '0s' : 'waiting');
 }
 
 function adoptMonitorMqttFromStatus(st: SerialAdminStatus | null) {
@@ -1322,18 +1401,32 @@ function closeMonitorMqttSettings() {
   showMonitorMqttSettings.value = false;
 }
 
-async function refreshMonitorData() {
+async function refreshMonitorData(background = false) {
   const port = monitorSelectedPort.value;
   if (!port || isMonitorRefreshing.value) return;
+  if (background && activeMode.value !== 'monitor') return;
   isMonitorRefreshing.value = true;
   try {
-    const status = await sendEasyPairCommandOnPort<SerialAdminStatus>(port, 'status', {}, 5000);
+    const status = await sendEasyPairCommandOnPort<SerialAdminStatus>(
+      port,
+      'status',
+      {},
+      5000,
+      { label: 'Monitor status refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
+    );
     applySerialAdminStatus(status, port);
     adoptMonitorMqttFromStatus(status);
-    const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(port, 'lora_inventory_status', {}, 5000);
+    const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
+      port,
+      'lora_inventory_status',
+      {},
+      5000,
+      { label: 'Monitor fleet refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
+    );
     monitorFleetRows.value = (inventory.devices || []).slice().sort((a, b) => a.address - b.address);
     monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
   } catch (e) {
+    if (serialBackgroundSkipped(e)) return;
     monitorStatusMessage.value = serialFeatureError('Monitor refresh', e);
     notify(monitorStatusMessage.value);
   } finally {
@@ -1343,15 +1436,29 @@ async function refreshMonitorData() {
 
 function startMonitorPolling() {
   stopMonitorPolling();
+  isMonitorLoopRunning.value = true;
   monitorPollTimer.value = window.setInterval(() => {
-    refreshMonitorData();
+    refreshMonitorData(true);
   }, 5000);
 }
 
 function stopMonitorPolling() {
-  if (!monitorPollTimer.value) return;
-  window.clearInterval(monitorPollTimer.value);
-  monitorPollTimer.value = null;
+  isMonitorLoopRunning.value = false;
+  if (monitorPollTimer.value) {
+    window.clearInterval(monitorPollTimer.value);
+    monitorPollTimer.value = null;
+  }
+}
+
+function toggleMonitorLoop() {
+  if (isMonitorLoopRunning.value) {
+    monitorAutoRefresh.value = false;
+    stopMonitorPolling();
+    return;
+  }
+  monitorAutoRefresh.value = true;
+  startMonitorPolling();
+  refreshMonitorData(false);
 }
 
 function toggleMonitorMqttConnection() {
@@ -1723,7 +1830,7 @@ async function triggerIdentify() {
     const out = await sendEasyPairCommand<any>('identify', {
       admin_password: password,
       duration_ms: 6000
-    }, 5000);
+    }, 5000, { label: 'Identify device' });
     startIdentifyUiPattern(Number(out.duration_ms || 6000));
     log('Identify pattern started: 3 fast flashes, pause, 3 fast flashes.');
   } catch (e) {
@@ -1745,7 +1852,7 @@ async function refreshSerialAdminStatus() {
     if (!activeSerialDevice.value?.adminSupported) {
       await probeSerialAdminSupport(selectedPort.value);
     }
-    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000, { label: 'Refresh status' });
     applySerialAdminStatus(out);
     if (!out.commissioned || out.fleet_passphrase_default) {
       pushSerialLog(`Status loaded: factory default, awaiting commissioning, addr ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
@@ -1779,7 +1886,7 @@ async function loadSerialAdminConfig() {
     }
     const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
       admin_password: password
-    }, 8000);
+    }, 8000, { label: 'Fetch settings' });
     serialAdminConfig.value = {
       ...out.config,
       wifi_sta_password: '',
@@ -1882,7 +1989,7 @@ async function saveSerialAdminConfig() {
     const out = await sendEasyPairCommand<any>('set_config', {
       admin_password: password,
       config: serialConfigPatch()
-    }, 12000);
+    }, 12000, { label: 'Save settings' });
     pushSerialLog(`Configuration saved${out.network_restarted ? '; networking restarted' : ''}.`);
     await refreshSerialAdminStatus();
   } catch (e) {
@@ -1904,7 +2011,7 @@ async function rebootSerialDevice() {
   isSerialSystemAction.value = true;
   pushSerialLog('Sending reboot command...');
   try {
-    await sendEasyPairCommand('reboot', { admin_password: password }, 5000);
+    await sendEasyPairCommand('reboot', { admin_password: password }, 5000, { label: 'Reboot device' });
     pushSerialLog('Reboot command accepted.');
   } catch (e) {
     const msg = serialFeatureError('Reboot', e);
@@ -1933,7 +2040,7 @@ async function factoryResetSerialDevice() {
       admin_password: password,
       keep_shared_fleet_key: serialFactoryKeepFleet.value,
       keep_wifi_credentials: serialFactoryKeepWifi.value
-    }, 6000);
+    }, 6000, { label: 'Factory reset' });
     pushSerialLog('Factory reset command accepted; device is rebooting.');
   } catch (e) {
     const msg = serialFeatureError('Factory reset', e);
@@ -2613,6 +2720,9 @@ watch(activeMode, (mode) => {
   }
   if (mode !== 'monitor') {
     stopMonitorPolling();
+  } else if (monitorAutoRefresh.value && selectedPort.value) {
+    startMonitorPolling();
+    refreshMonitorData(true);
   }
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
@@ -2630,7 +2740,8 @@ watch(selectedPort, (port) => {
   if (activeMode.value === 'monitor') {
     monitorFleetRows.value = [];
     if (monitorAutoRefresh.value) {
-      refreshMonitorData();
+      startMonitorPolling();
+      refreshMonitorData(true);
     }
   }
 });
@@ -2741,7 +2852,7 @@ watch(eraseBeforeFlash, (next) => {
 watch(monitorAutoRefresh, (enabled) => {
   if (enabled) {
     startMonitorPolling();
-    refreshMonitorData();
+    refreshMonitorData(true);
   } else {
     stopMonitorPolling();
   }
@@ -3654,11 +3765,11 @@ function countCrashEvents(entries: string[]): number {
                 Auto refresh
               </label>
               <button
-                @click="refreshMonitorData"
-                :disabled="isMonitorRefreshing || !selectedPort"
+                @click="toggleMonitorLoop"
+                :disabled="!selectedPort"
                 class="primary-btn m-0 h-8 px-3 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
-                {{ isMonitorRefreshing ? 'Monitoring...' : 'Monitor' }}
+                {{ isMonitorLoopRunning ? 'Stop' : 'Monitor' }}
               </button>
             </div>
           </div>
@@ -3804,9 +3915,9 @@ function countCrashEvents(entries: string[]): number {
                   <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${formatBytes(device.heap_free)} / ${formatBytes(device.heap_max_block)}` : '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${device.heap_frag_pct ?? '-'}%` : '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorHeapLabel(device) }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorFragLabel(device) }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ monitorUptimeLabel(device) }}</td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.poll_pending ? 'Pending' : 'Idle' }}</td>
                 </tr>
               </tbody>
