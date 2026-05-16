@@ -520,11 +520,18 @@ const gatewayReady = computed(() =>
   !!activeSerialDevice.value?.adminSupported &&
   !!pairPassword()
 );
+function portGatewayReady(port: string): boolean {
+  const state = serialDeviceState(port);
+  return !!port && !!state?.deviceInfo && !!state.adminSupported && !!adminPasswordForPort(port);
+}
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
 const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
-const identifyAvailable = computed(() => hasActiveDeviceInfo.value && !!activeSerialDevice.value?.adminSupported);
+const activeSerialAdminPasswordValue = computed(() =>
+  activeMode.value === 'pair' ? pairPassword() : deviceInfo.value?.password?.trim() || ''
+);
+const identifyAvailable = computed(() => hasActiveDeviceInfo.value && !!activeSerialAdminPasswordValue.value);
 const isSelectedPortMonitoring = computed(() => isMonitoring.value && !!selectedPort.value && activeMonitorPort.value === selectedPort.value);
-const identifyDisabled = computed(() => !selectedPort.value || !identifyAvailable.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value || isSelectedPortMonitoring.value);
+const identifyDisabled = computed(() => !selectedPort.value || !identifyAvailable.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value);
 const serialPortSelectorDisabled = computed(() =>
   isLoadingInfo.value ||
   isFlashing.value ||
@@ -1119,21 +1126,21 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
 }
 
 async function loadNetworkGateway() {
-  if (!selectedPort.value || isNetworkGatewayLoading.value) return;
-  const port = selectedPort.value;
+  const port = fleetSelectedPort.value;
+  if (!port || isNetworkGatewayLoading.value) return;
   isNetworkGatewayLoading.value = true;
   try {
-    syncDeviceInfoForSelectedPort();
-    if (!deviceInfo.value?.password?.trim()) {
+    let state = serialDeviceState(port);
+    if (!state?.deviceInfo?.password?.trim()) {
       networkStatusMessage.value = `Reading gateway identity on ${port}...`;
-      const ok = await readDeviceInfo();
-      if (!ok || selectedPort.value !== port) throw new Error('Unable to read gateway factory details');
+      const info = await readDeviceInfoForPort(port, 'network');
+      if (!info) throw new Error('Unable to read gateway factory details');
+      state = serialDeviceState(port);
     }
     const hello = await waitForSerialAdminHello(port, 6000);
-    const state = serialDeviceState(port);
     if (state) {
       state.adminSupported = true;
-      state.adminPassword = state.adminPassword || pairAdminPassword.value || deviceInfo.value?.password || '';
+      state.adminPassword = state.adminPassword || pairAdminPassword.value || state.deviceInfo?.password || '';
     }
     await ensureFleetGatewayStatus(true);
     networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
@@ -1365,7 +1372,7 @@ async function startLoraInventoryScan() {
     notify('Select the USB gateway first');
     return;
   }
-  if (!gatewayReady.value) await loadNetworkGateway();
+  if (!portGatewayReady(port)) await loadNetworkGateway();
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Unable to read the gateway admin password from device details');
@@ -1526,7 +1533,7 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
   }
   try {
     remoteUdpBusyAddress.value = device.address;
-    if (!gatewayReady.value) await loadNetworkGateway();
+    if (!portGatewayReady(port)) await loadNetworkGateway();
     const hosts = await invoke<string[]>('local_udp_log_hosts');
     const host = hosts[0];
     if (!host) throw new Error('No reachable Flasher LAN address found');
@@ -1568,7 +1575,7 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
   }
   try {
     remoteOtaBusyAddress.value = device.address;
-    if (!gatewayReady.value) await loadNetworkGateway();
+    if (!portGatewayReady(port)) await loadNetworkGateway();
     const info = await ensureRemoteFlashFirmwareServer();
     const target = firmwareServerTarget(info);
     const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
@@ -2383,15 +2390,22 @@ async function openActiveDeviceConsole() {
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
   const port = selectedPort.value;
+  return await readDeviceInfoForPort(port, activeMode.value || 'serial');
+}
+
+async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'network'): Promise<boolean> {
   const seq = deviceInfoReadSeq.value + 1;
   deviceInfoReadSeq.value = seq;
   isLoadingInfo.value = true;
-  noteMonitorReleasedForPort(port, 'device info read needs this port');
-  syncDeviceInfoForSelectedPort();
+  if (isMonitoring.value && activeMonitorPort.value === port) {
+    pushSerialLog(`Skipped device info read for ${port}: serial monitor owns this port.`);
+    isLoadingInfo.value = false;
+    return false;
+  }
   pushSerialLog(`Reading device information from ${port}...`);
   try {
     const info = await invoke<DeviceInfo>('get_device_info', { port });
-    if (deviceInfoReadSeq.value !== seq || selectedPort.value !== port) {
+    if (deviceInfoReadSeq.value !== seq) {
       pushSerialLog(`Ignored stale device info from ${port}`);
       return false;
     }
@@ -2403,12 +2417,12 @@ async function readDeviceInfo() {
       }
     }
     pushSerialLog('Device info read successfully');
-    if (activeMode.value === 'serial') {
+    if (ownerMode === 'serial') {
       await probeSerialAdminSupport(port);
     }
     return true;
   } catch (e) {
-    if (deviceInfoReadSeq.value !== seq || selectedPort.value !== port) {
+    if (deviceInfoReadSeq.value !== seq) {
       pushSerialLog(`Ignored stale device info error from ${port}`);
       return false;
     }
@@ -2549,6 +2563,9 @@ watch(activeMode, (mode) => {
   }
   if (mode !== 'monitor') {
     stopMonitorPolling();
+  }
+  if (mode !== 'network') {
+    stopLoraInventoryPolling(false);
   }
 });
 
@@ -2798,6 +2815,26 @@ function countCrashEvents(entries: string[]): number {
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+            <button
+              v-if="activeMode === 'serial' && identifyAvailable"
+              @click="triggerIdentify"
+              :disabled="identifyDisabled"
+              :class="[
+                'p-1 rounded border transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                isIdentifying
+                  ? 'identify-led-active border-cyan-500 bg-cyan-500/20 text-cyan-300'
+                  : 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+              ]"
+              title="Identify USB device"
+              aria-label="Identify USB device"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
               </svg>
             </button>
             <button
@@ -3263,6 +3300,24 @@ function countCrashEvents(entries: string[]): number {
               <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
+              <button
+                v-if="identifyAvailable"
+                @click="triggerIdentify"
+                :disabled="identifyDisabled"
+                :class="[
+                  'glass-input m-0 h-8 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                  { 'identify-led-active text-cyan-300': isIdentifying }
+                ]"
+                title="Identify selected USB device"
+                aria-label="Identify selected USB device"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
+                </svg>
+              </button>
               <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 {{ isLoadingInfo ? 'Reading...' : 'Get device info' }}
               </button>
@@ -3526,6 +3581,24 @@ function countCrashEvents(entries: string[]): number {
               </p>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
+              <button
+                v-if="identifyAvailable"
+                @click="triggerIdentify"
+                :disabled="identifyDisabled"
+                :class="[
+                  'glass-input m-0 h-8 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                  { 'identify-led-active text-cyan-300': isIdentifying }
+                ]"
+                title="Identify selected USB device"
+                aria-label="Identify selected USB device"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
+                </svg>
+              </button>
               <label class="flex items-center gap-2 text-xs text-slate-400">
                 <input v-model="monitorAutoRefresh" type="checkbox" />
                 Auto refresh
