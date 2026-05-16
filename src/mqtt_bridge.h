@@ -13,6 +13,7 @@ class MqttBridge {
   bool begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm);
   void applyConfig(const Settings &cfg, const String &chipIdHex);
   void tick(bool wifiConnected);
+  bool connected();
 
  private:
   WiFiClient wifi_client_;

@@ -71,6 +71,16 @@ struct PeerStatusSnapshot {
   bool poll_pending = false;
   bool wifi_state_known = false;
   bool wifi_enabled = true;
+  bool wifi_connected_known = false;
+  bool wifi_connected = false;
+  uint8_t ip[4]{};
+  bool mqtt_state_known = false;
+  bool mqtt_enabled = false;
+  bool mqtt_connected = false;
+  uint32_t chip_id = 0;
+  uint8_t fw_major = 0;
+  uint8_t fw_minor = 0;
+  uint8_t fw_patch = 0;
   uint32_t wifi_last_confirm_ms = 0;
 };
 
@@ -145,6 +155,7 @@ class NodeStateMachine {
   bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);
   void tick();
+  void setMqttConnected(bool connected);
 
   LinkState linkState() const;
   uint8_t relayState() const;
@@ -326,6 +337,16 @@ class NodeStateMachine {
     PeerAckState ack_state = PeerAckState::Unknown;
     bool wifi_state_known = false;
     bool wifi_enabled = true;
+    bool wifi_connected_known = false;
+    bool wifi_connected = false;
+    uint8_t ip[4]{};
+    bool mqtt_state_known = false;
+    bool mqtt_enabled = false;
+    bool mqtt_connected = false;
+    uint32_t chip_id = 0;
+    uint8_t fw_major = 0;
+    uint8_t fw_minor = 0;
+    uint8_t fw_patch = 0;
     uint32_t wifi_last_confirm_ms = 0;
     bool wifi_pending = false;
     bool wifi_pending_enabled = true;
@@ -404,6 +425,7 @@ class NodeStateMachine {
   bool fleet_prov_apply_role_tx_ = false;
   uint8_t fleet_prov_apply_controller_address_ = 0;
   String fleet_prov_apply_key_;
+  bool mqtt_connected_ = false;
 
   struct ProvisioningDevice {
     bool in_use = false;
@@ -504,6 +526,9 @@ class NodeStateMachine {
   void tickPeerPolling(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
+  bool sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
+  bool sendMaintenanceStatus(uint8_t dstAddress);
+  bool handleMaintenanceStatus(const ProtocolMessage &msg);
   PeerRuntime *findOrCreatePeer(uint8_t address);
   PollRuntime *pollStateForIndex(size_t index);
   const PollRuntime *pollStateForIndex(size_t index) const;

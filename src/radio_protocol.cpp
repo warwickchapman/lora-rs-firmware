@@ -243,6 +243,7 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
   msg.sensor_analog0 = static_cast<uint16_t>(plain[6]) | (static_cast<uint16_t>(plain[7]) << 8);
   msg.unix_time_s = static_cast<uint32_t>(plain[8]) | (static_cast<uint32_t>(plain[9]) << 8) |
                     (static_cast<uint32_t>(plain[10]) << 16) | (static_cast<uint32_t>(plain[11]) << 24);
+  memcpy(msg.raw_payload, plain, sizeof(msg.raw_payload));
   msg.counter = p.counter;
   msg.boot_nonce = p.boot_nonce;
   msg.src = p.src;

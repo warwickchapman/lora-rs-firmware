@@ -392,6 +392,7 @@ void App::tick() {
     startup_defer_logged_ = false;
     phaseStartMs = millis();
     mqtt_.tick(WiFi.isConnected());
+    sm_.setMqttConnected(mqtt_.connected());
     phaseSlowWarn("mqtt_tick", phaseStartMs);
   }
   phaseStartMs = millis();

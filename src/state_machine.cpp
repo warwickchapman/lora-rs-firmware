@@ -558,6 +558,7 @@ int NodeStateMachine::lastPacketRssi() const { return last_packet_rssi_; }
 uint32_t NodeStateMachine::lastPacketMs() const { return last_packet_ms_; }
 uint32_t NodeStateMachine::lastTxMs() const { return last_tx_ms_; }
 void NodeStateMachine::setLocalTemperature(bool valid, float celsius) { local_temp_code_ = encodeTempCode(valid, celsius); }
+void NodeStateMachine::setMqttConnected(bool connected) { mqtt_connected_ = connected; }
 bool NodeStateMachine::localTemperatureValid() const { return local_temp_code_ != 0xFF; }
 float NodeStateMachine::localTemperatureC() const { return static_cast<float>(static_cast<int8_t>(local_temp_code_)); }
 bool NodeStateMachine::remoteTemperatureValid() const { return remote_temp_valid_; }
@@ -586,6 +587,16 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.ack_state = node.ack_state;
   out.wifi_state_known = node.wifi_state_known;
   out.wifi_enabled = node.wifi_enabled;
+  out.wifi_connected_known = node.wifi_connected_known;
+  out.wifi_connected = node.wifi_connected;
+  memcpy(out.ip, node.ip, sizeof(out.ip));
+  out.mqtt_state_known = node.mqtt_state_known;
+  out.mqtt_enabled = node.mqtt_enabled;
+  out.mqtt_connected = node.mqtt_connected;
+  out.chip_id = node.chip_id;
+  out.fw_major = node.fw_major;
+  out.fw_minor = node.fw_minor;
+  out.fw_patch = node.fw_patch;
   out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
   out.poll_interval_ms = node.poll_interval_ms;
   const PollRuntime *poll = pollStateForIndex(index);
@@ -1995,6 +2006,83 @@ bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter
   return true;
 }
 
+bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  uint8_t payload[12]{};
+  payload[0] = 1;  // request version
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::MaintenanceRequest, last_counter_,
+                       runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  if (sentCounter != nullptr) *sentCounter = last_counter_;
+  lrslog::event("maint_request_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 || settings_ == nullptr) return false;
+  uint8_t major = 0;
+  uint8_t minor = 0;
+  uint8_t patch = 0;
+  parseFwVersionPacked(major, minor, patch);
+  const IPAddress ip = WiFi.localIP();
+  uint8_t flags = 0;
+  if (settings_->wifi_admin_enabled) flags |= 0x01;
+  if (WiFi.isConnected()) flags |= 0x02;
+  if (settings_->mqtt_client_enabled) flags |= 0x04;
+  if (mqtt_connected_) flags |= 0x08;
+  if (runtime_.role_tx) flags |= 0x10;
+  uint8_t payload[12]{};
+  encodeU32LE(payload, ESP.getChipId());
+  payload[4] = major;
+  payload[5] = minor;
+  payload[6] = patch;
+  payload[7] = flags;
+  payload[8] = ip[0];
+  payload[9] = ip[1];
+  payload[10] = ip[2];
+  payload[11] = ip[3];
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
+                       runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("maint_status_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
+  if (!runtime_.role_tx) return false;
+  PeerRuntime *node = findOrCreatePeer(msg.src);
+  if (node == nullptr) return false;
+  const uint8_t *p = msg.raw_payload;
+  node->chip_id = decodeU32LE(p);
+  node->fw_major = p[4];
+  node->fw_minor = p[5];
+  node->fw_patch = p[6];
+  const uint8_t flags = p[7];
+  node->wifi_state_known = true;
+  node->wifi_enabled = (flags & 0x01U) != 0U;
+  node->wifi_connected_known = true;
+  node->wifi_connected = (flags & 0x02U) != 0U;
+  node->mqtt_state_known = true;
+  node->mqtt_enabled = (flags & 0x04U) != 0U;
+  node->mqtt_connected = (flags & 0x08U) != 0U;
+  memcpy(node->ip, p + 8, sizeof(node->ip));
+  node->uplink_rssi = msg.rssi;
+  node->last_seen_ms = millis();
+  node->last_cmd_counter = msg.counter;
+  lrslog::event("maint_status_rx", msg.rssi, msg.counter, msg.src);
+  return true;
+}
+
 void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
   if (!runtime_.role_tx) return;
   for (size_t i = 0; i < peer_count_; ++i) {
@@ -2096,7 +2184,7 @@ void NodeStateMachine::tickFleetScan(uint32_t now) {
   }
 
   uint32_t sentCounter = 0;
-  if (!sendPollRequest(fleet_scan_next_address_, &sentCounter)) {
+  if (!sendMaintenanceRequest(fleet_scan_next_address_, &sentCounter)) {
     fleet_scan_next_ms_ = now + 250U;
     return;
   }
@@ -2246,12 +2334,15 @@ void NodeStateMachine::tickReceive() {
   const bool isUdpLogControl = (msg.type == MessageType::UdpLogControl);
   const bool isOtaPullControl = (msg.type == MessageType::OtaPullControl);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
+  const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
+                              msg.type == MessageType::MaintenanceStatus);
   const bool isProvisioning = (msg.type == MessageType::Provisioning);
   if (isProvisioning) {
     handleProvisioningFrame(msg);
     return;
   }
-  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl && msg.dst != runtime_.local_address) {
+  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl &&
+      !isMaintenance && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -2273,7 +2364,7 @@ void NodeStateMachine::tickReceive() {
     const bool mqttStatus = (msg.type == MessageType::MqttStatus);
     const bool pollResponse = (msg.type == MessageType::PollResponse);
     const bool wifiStatus = (msg.type == MessageType::WifiControl && msg.relay_state == kWifiControlOpStatus);
-    if (!mqttStatus && !pollResponse && !wifiStatus && !fromPaired) {
+    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !fromPaired) {
       lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
@@ -2293,6 +2384,8 @@ void NodeStateMachine::tickReceive() {
       }
     } else if (msg.type == MessageType::PollRequest) {
       // Allow fleet scans from any same-key TX even when this RX is paired to a different remote source.
+    } else if (msg.type == MessageType::MaintenanceRequest) {
+      // Allow bounded same-key maintenance inventory without exposing secrets.
     } else if (msg.type == MessageType::WifiControl) {
       // Same-key broadcast/targeted WiFi control is accepted so a TX can recover
       // or disable managed remotes even when pairing is being reworked.
@@ -2308,7 +2401,8 @@ void NodeStateMachine::tickReceive() {
     }
   }
 
-  const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl || isOtaPullControl || isFactoryReset);
+  const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
+                                                                  isOtaPullControl || isFactoryReset || isMaintenance);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -2332,6 +2426,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isFactoryReset) {
     handleFactoryResetFrame(msg);
+    return;
+  }
+  if (msg.type == MessageType::MaintenanceStatus) {
+    handleMaintenanceStatus(msg);
     return;
   }
   captureRemoteTemp(msg.temp_code);
@@ -2464,6 +2562,10 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("rx_poll_response_tx", msg.rssi, last_counter_, relay_state_);
       }
     }
+    return;
+  }
+  if (msg.type == MessageType::MaintenanceRequest) {
+    sendMaintenanceStatus(msg.src);
     return;
   }
 

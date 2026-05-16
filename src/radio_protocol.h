@@ -12,6 +12,8 @@ enum class MessageType : uint8_t {
   MqttStatus = 'S',
   PollRequest = 'P',
   PollResponse = 'R',
+  MaintenanceRequest = 'Q',
+  MaintenanceStatus = 'T',
   WifiProvision = 'W',
   WifiControl = 'Y',
   UdpLogControl = 'U',
@@ -30,6 +32,7 @@ struct ProtocolMessage {
   uint8_t sensor_digital0;
   uint16_t sensor_analog0;
   uint32_t unix_time_s;
+  uint8_t raw_payload[12]{};
   uint32_t counter;
   uint32_t boot_nonce = 0;
   uint8_t src;
