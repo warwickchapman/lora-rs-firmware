@@ -1079,8 +1079,12 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     row["last_seen_ms"] = p.last_seen_ms;
     row["age_ms"] = p.last_seen_ms == 0 ? 0 : now - p.last_seen_ms;
     row["poll_pending"] = p.poll_pending;
-    row["ota_eligible"] = false;
-    row["ota_reason"] = "wifi_status_unknown";
+    const bool otaEligible = p.wifi_connected_known && p.wifi_connected &&
+                             p.ip[0] != 0;
+    row["ota_eligible"] = otaEligible;
+    row["ota_reason"] = otaEligible ? "ready" :
+        (!p.wifi_connected_known ? "wifi_status_unknown" :
+         (!p.wifi_connected ? "wifi_offline" : "ip_missing"));
   }
   sendOk(out);
 }

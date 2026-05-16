@@ -97,7 +97,7 @@ interface LoraInventoryDevice {
   ota_eligible?: boolean;
   ota_reason?: string;
   selected?: boolean;
-  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'unexpected_reboot';
+  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot';
   row_state_until_ms?: number;
 }
 
@@ -250,6 +250,7 @@ const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const isLoraInventoryScanning = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
+const fleetOtaFollowupTimers = ref<Record<number, ReturnType<typeof window.setTimeout>>>({});
 const fleetRowHistory = ref<Record<number, { uptimeMs?: number; fwVersion?: string; otaExpectedUntilMs?: number; rowState?: LoraInventoryDevice['row_state']; rowStateUntilMs?: number }>>({});
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
@@ -419,7 +420,8 @@ const gatewayReady = computed(() =>
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
 const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
 const identifyAvailable = computed(() => hasActiveDeviceInfo.value && !!activeSerialDevice.value?.adminSupported);
-const identifyDisabled = computed(() => !selectedPort.value || !identifyAvailable.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value || isMonitoring.value);
+const isSelectedPortMonitoring = computed(() => isMonitoring.value && !!selectedPort.value && activeMonitorPort.value === selectedPort.value);
+const identifyDisabled = computed(() => !selectedPort.value || !identifyAvailable.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value || isSelectedPortMonitoring.value);
 const serialPortSelectorDisabled = computed(() =>
   isLoadingInfo.value ||
   isFlashing.value ||
@@ -438,7 +440,7 @@ const flashDisabled = computed(() =>
 );
 const serialAdminPassword = computed(() => deviceInfo.value?.password?.trim() || '');
 const serialAdminBusy = computed(() => isSerialAdminLoading.value || isSerialAdminSaving.value || isSerialSystemAction.value);
-const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
+const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isSelectedPortMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
 const serialStatusSummary = computed(() => {
   const st = serialAdminStatus.value;
   if (!st) return 'Load local status to inspect firmware health.';
@@ -938,8 +940,17 @@ function pairPassword(): string {
     (hasActiveDeviceInfo.value ? deviceInfo.value?.password?.trim() || '' : '');
 }
 
+function noteMonitorReleasedForPort(port: string, reason: string) {
+  if (!isMonitoring.value || activeMonitorPort.value !== port) return;
+  isMonitoring.value = false;
+  pushSerialLog(`Serial monitor released for ${port}: ${reason}.`);
+  activeMonitorPort.value = '';
+  activeMonitorSsid.value = '';
+}
+
 async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
   if (!selectedPort.value) throw new Error('Select the USB gateway first');
+  noteMonitorReleasedForPort(selectedPort.value, 'serial admin command needs this port');
   return await invoke<T>('serial_admin_command', {
     port: selectedPort.value,
     request: { cmd, ...payload },
@@ -994,6 +1005,10 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     rowState = otaExpected ? 'ota_pending' : undefined;
     rowStateUntilMs = otaExpected ? history.otaExpectedUntilMs : undefined;
   }
+  if (history.otaExpectedUntilMs && history.otaExpectedUntilMs <= now && rowState === 'ota_pending') {
+    rowState = 'ota_no_reboot';
+    rowStateUntilMs = now + 60000;
+  }
 
   fleetRowHistory.value[row.address] = {
     ...history,
@@ -1009,6 +1024,7 @@ function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'unexpected_reboot') return 'bg-rose-950/50 ring-1 ring-rose-500/50';
   if (device.row_state === 'ota_updated') return 'bg-emerald-950/40 ring-1 ring-emerald-500/40';
   if (device.row_state === 'ota_rebooted') return 'bg-sky-950/40 ring-1 ring-sky-500/40';
+  if (device.row_state === 'ota_no_reboot') return 'bg-amber-950/40 ring-1 ring-amber-500/40';
   if (device.row_state === 'ota_pending') return 'bg-indigo-950/30';
   return 'bg-slate-950/20';
 }
@@ -1017,7 +1033,8 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   if (device.row_state === 'unexpected_reboot') return 'Unexpected reboot';
   if (device.row_state === 'ota_updated') return 'Updated';
   if (device.row_state === 'ota_rebooted') return 'Rebooted';
-  if (device.row_state === 'ota_pending') return 'Flash sent';
+  if (device.row_state === 'ota_no_reboot') return 'No reboot seen';
+  if (device.row_state === 'ota_pending') return 'Waiting for reboot';
   return '';
 }
 
@@ -1158,6 +1175,17 @@ function fleetLogsAvailable(device: LoraInventoryDevice): boolean {
   return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
 }
 
+function fleetFlashAvailable(device: LoraInventoryDevice): boolean {
+  return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
+}
+
+function fleetFlashUnavailableReason(device: LoraInventoryDevice): string {
+  if (!device.wifi_connected_known) return 'Needs confirmed WiFi status from Fleet scan';
+  if (!device.wifi_connected) return 'Device WiFi is offline';
+  if (!device.ip) return 'Device has no IP address in Fleet status';
+  return 'Ready to trigger OTA pull';
+}
+
 function markFleetOtaPending(device: LoraInventoryDevice) {
   const now = Date.now();
   fleetRowHistory.value[device.address] = {
@@ -1173,6 +1201,62 @@ function markFleetOtaPending(device: LoraInventoryDevice) {
       ? { ...row, row_state: 'ota_pending', row_state_until_ms: now + 180000 }
       : row
   );
+}
+
+async function refreshFleetOtaFollowup(address: number) {
+  const history = fleetRowHistory.value[address];
+  if (!history?.otaExpectedUntilMs) return;
+  const now = Date.now();
+  if (history.rowState === 'ota_rebooted' || history.rowState === 'ota_updated') {
+    delete fleetOtaFollowupTimers.value[address];
+    return;
+  }
+  if (now >= history.otaExpectedUntilMs) {
+    fleetRowHistory.value[address] = {
+      ...history,
+      rowState: 'ota_no_reboot',
+      rowStateUntilMs: now + 60000
+    };
+    loraInventory.value = loraInventory.value.map(row =>
+      row.address === address
+        ? { ...row, row_state: 'ota_no_reboot', row_state_until_ms: now + 60000 }
+        : row
+    );
+    delete fleetOtaFollowupTimers.value[address];
+    return;
+  }
+  try {
+    const password = pairPassword();
+    if (!password) throw new Error('missing gateway password');
+    await sendEasyPairCommand('start_lora_inventory', {
+      admin_password: password,
+      start_address: address,
+      end_address: address,
+      interval_ms: 250
+    }, 8000);
+    await new Promise(resolve => setTimeout(resolve, 900));
+    await refreshLoraInventoryStatus();
+  } catch (e) {
+    pushNetworkLog(serialFeatureError(`Flash follow-up ${address}`, e));
+  } finally {
+    const nextHistory = fleetRowHistory.value[address];
+    if (nextHistory?.otaExpectedUntilMs && Date.now() < nextHistory.otaExpectedUntilMs &&
+        nextHistory.rowState !== 'ota_rebooted' && nextHistory.rowState !== 'ota_updated') {
+      fleetOtaFollowupTimers.value[address] = window.setTimeout(() => {
+        refreshFleetOtaFollowup(address);
+      }, 4000);
+    } else {
+      delete fleetOtaFollowupTimers.value[address];
+    }
+  }
+}
+
+function startFleetOtaFollowup(device: LoraInventoryDevice) {
+  const existing = fleetOtaFollowupTimers.value[device.address];
+  if (existing) window.clearTimeout(existing);
+  fleetOtaFollowupTimers.value[device.address] = window.setTimeout(() => {
+    refreshFleetOtaFollowup(device.address);
+  }, 2500);
 }
 
 async function startFleetUdpLogs(device: LoraInventoryDevice) {
@@ -1223,6 +1307,10 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
     notify('Enter the gateway admin password');
     return;
   }
+  if (!fleetFlashAvailable(device)) {
+    notify(fleetFlashUnavailableReason(device));
+    return;
+  }
   try {
     remoteOtaBusyAddress.value = device.address;
     if (!gatewayReady.value) await loadNetworkGateway();
@@ -1235,6 +1323,7 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
       port: target.port
     }, 8000);
     markFleetOtaPending(device);
+    startFleetOtaFollowup(device);
     networkStatusMessage.value = `Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`;
     pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH})`);
     notify(`Flash triggered for LoRa ${device.address}`);
@@ -2009,6 +2098,7 @@ async function readDeviceInfo() {
   const seq = deviceInfoReadSeq.value + 1;
   deviceInfoReadSeq.value = seq;
   isLoadingInfo.value = true;
+  noteMonitorReleasedForPort(port, 'device info read needs this port');
   syncDeviceInfoForSelectedPort();
   pushSerialLog(`Reading device information from ${port}...`);
   try {
@@ -2049,6 +2139,7 @@ async function startFlash() {
   const flashPort = selectedPort.value;
   
   isFlashing.value = true;
+  noteMonitorReleasedForPort(flashPort, 'firmware flash needs this port');
   pushSerialLog('--- Preparing Firmware ---');
   
   try {
@@ -2162,11 +2253,8 @@ watch([pairWifiSsid, pairWifiPassword], ([nextSsid, nextPassword], [prevSsid, pr
   cancelGatewayWifiConnect('WiFi credentials changed');
 });
 
-watch(activeMode, (mode, previousMode) => {
+watch(activeMode, (mode) => {
   nextTick(() => scrollToBottom());
-  if (previousMode === 'serial' && mode !== 'serial') {
-    stopSerialMonitorForModeChange();
-  }
   syncDeviceInfoForSelectedPort();
   if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value) {
     readDeviceInfo();
@@ -2286,6 +2374,8 @@ watch(eraseBeforeFlash, (next) => {
 onUnmounted(() => {
   stopEasyPairStatusPolling();
   stopLoraInventoryPolling();
+  Object.values(fleetOtaFollowupTimers.value).forEach(timer => window.clearTimeout(timer));
+  fleetOtaFollowupTimers.value = {};
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
   if (unlistenFlash) unlistenFlash();
   if (unlistenMonitor) unlistenMonitor();
@@ -3144,8 +3234,9 @@ function countCrashEvents(entries: string[]): number {
                     <div class="flex items-center gap-2">
                     <button
                       @click="flashLoraRemote(device)"
-                      :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting"
+                      :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting || !fleetFlashAvailable(device)"
                       class="glass-input m-0 h-7 px-3 hover:bg-white/10 text-[10px] font-bold disabled:opacity-50"
+                      :title="fleetFlashUnavailableReason(device)"
                     >
                       {{ remoteOtaBusyAddress === device.address ? 'Flashing...' : 'Flash' }}
                     </button>
