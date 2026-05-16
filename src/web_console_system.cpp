@@ -300,6 +300,7 @@ void WebConsole::handleOtaUploadChunk() {
   if (!requireAuth(true)) return;
   HTTPUpload &upload = server_.upload();
   if (upload.status == UPLOAD_FILE_START) {
+    markUserActivity();
     ota_upload_ok_ = false;
     ota_upload_error_ = "";
     const uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
@@ -308,6 +309,7 @@ void WebConsole::handleOtaUploadChunk() {
       return;
     }
   } else if (upload.status == UPLOAD_FILE_WRITE) {
+    markUserActivity();
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       ota_upload_error_ = "Write failed";
       return;

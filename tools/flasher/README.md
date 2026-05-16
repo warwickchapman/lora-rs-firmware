@@ -43,6 +43,8 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 - final gateway target lists should be written with `set_gateway_targets`
 - Pair Devices and USB Cable include an Identify LED action, shown only after the selected port confirms LRS serial-admin support, that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
 
-Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and EasyPair. Switching away from USB Cable stops the serial monitor so Pair Devices can take the selected gateway port cleanly. USB Cable and Pair Devices share the same selected USB port and cache the last device details per port until that port is unplugged.
+Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and EasyPair. Switching away from USB Cable stops the serial monitor so Pair Devices can take the selected gateway port cleanly. USB Cable and Pair Devices use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Pair Devices WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
 The app opens on Pair Devices. The existing Serial and Network tools remain available as USB Cable and Network maintenance modes for flashing, OTA, log viewing, password checks, and Web UI access.
+
+Network mode supports one-device OTA and sequential bulk OTA for discovered devices with known admin passwords. Bulk OTA only uploads firmware; it does not start UDP logging after each update, so operators should rescan after the batch to confirm devices returned.

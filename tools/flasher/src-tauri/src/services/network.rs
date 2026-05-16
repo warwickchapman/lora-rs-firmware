@@ -364,7 +364,12 @@ pub async fn upload_ota(ip: &str, password: &str, firmware: PathBuf) -> Result<S
         .body(body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            format!(
+                "OTA upload response was lost after sending request to {}: {}",
+                ip, e
+            )
+        })?;
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();

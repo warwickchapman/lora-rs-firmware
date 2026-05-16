@@ -185,7 +185,11 @@ void WebConsole::routes() {
   server_.on("/api/settings/import", HTTP_POST,
              [this]() { handleImportSettings(); });
   server_.on(
-      "/api/ota", HTTP_POST, [this]() { handleOtaUpload(); },
+      "/api/ota", HTTP_POST, [this]() {
+        beginRequestLog("/api/ota", true, false, true);
+        handleOtaUpload();
+        finishRequestLog();
+      },
       [this]() { handleOtaUploadChunk(); });
   server_.on("/api/logs.csv", HTTP_GET, [this]() { handleLogsCsv(); });
   server_.on("/api/logs.txt", HTTP_GET, [this]() { handleLogsText(); });

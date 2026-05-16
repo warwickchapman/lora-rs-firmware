@@ -11,6 +11,13 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher USB Cable mode now includes a Local admin panel for serial-admin status, basic device/WiFi/MQTT/sensor config editing, reboot, and guarded factory reset actions without opening the on-device Web UI.
 
 ### Fixed
+- Flasher now keeps one per-port serial device state shared by USB Cable and Pair Devices, so device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks stay consistent when switching tabs on the same selected USB port.
+- Flasher Pair WiFi now adopts the gateway's serial-admin WiFi status when available, so a gateway that is already connected shows as connected without forcing another WiFi scan or `Connect Gateway` action.
+- Flasher Pair WiFi provisioning now requires the USB gateway to confirm it is connected to the selected WiFi network before exposing `Send to Remotes`, avoiding a dead-end remote-send action when the gateway has not joined WiFi yet.
+- Flasher USB Cable local admin now avoids the stale Phase 1A firmware warning once status/config can load, and the USB Cable pane scrolls so expanded config controls remain reachable.
+- Flasher Network OTA no longer traps the operator while waiting for a device to return after an accepted upload; the wait can be stopped, scanning can be retried, and timeout messaging points to rescan or USB recovery instead of leaving the workflow stuck.
+- Flasher Network mode now supports sequential bulk firmware updates for discovered devices with known admin passwords; bulk updates upload only and intentionally do not start UDP logging.
+- Firmware HTTP OTA requests now participate in Web UI activity tracking during upload, reducing the chance that the maintenance-window runtime disables HTTP while a Flasher OTA upload is in progress.
 - Flasher release CI dispatch is now tag-locked to prevent accidental `*-dev` release creation from `main` after post-release version auto-bump; `tools/release_flasher_assets.py dispatch-ci` now uses the target release tag as `--ref`, and `package_flasher.yml` blocks `create_release=true` when not running on a tag ref.
 
 ## [0.8.0-beta] - 2026-05-07

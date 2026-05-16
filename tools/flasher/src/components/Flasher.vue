@@ -178,6 +178,19 @@ interface SerialAdminConfig {
   sensor_temp_interval_s: number;
 }
 
+interface SerialDeviceState {
+  deviceInfo: DeviceInfo | null;
+  adminSupported: boolean;
+  status: SerialAdminStatus | null;
+  config: SerialAdminConfig | null;
+  adminPassword: string;
+  wifiNetworks: WifiNetwork[];
+  wifiScanned: boolean;
+  wifiSsid: string;
+  gatewayWifiReadySsid: string;
+  gatewayWifiReadyIp: string;
+}
+
 type RegionCode = 'ZA' | 'EU' | 'US';
 
 const SAVED_NETWORK_PASSWORDS_KEY = 'lrs_flasher_network_passwords';
@@ -194,15 +207,18 @@ const isFlashing = ref(false);
 const isMonitoring = ref(false);
 const isNetworkDiscovering = ref(false);
 const isNetworkOta = ref(false);
+const isNetworkOtaWaitingForReturn = ref(false);
+const networkOtaCancelRequested = ref(false);
+const isNetworkBulkOta = ref(false);
+const networkBulkOtaIndex = ref(0);
+const networkBulkOtaTotal = ref(0);
 const isNetworkUdpMonitoring = ref(false);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
 const pairLogs = ref<string[]>([]);
 const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
-const deviceInfo = ref<DeviceInfo | null>(null);
-const deviceInfoPort = ref('');
-const deviceInfoByPort = ref<Record<string, DeviceInfo>>({});
+const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
@@ -231,17 +247,12 @@ const networkPasswordCheckSeq = ref<Record<string, number>>({});
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
 const pairFleetKey = ref('');
-const pairAdminPassword = ref('');
 const showPairFleetKey = ref(false);
 const showPairAdminPassword = ref(false);
 const pairStatus = ref<EasyPairStatus | null>(null);
 const isPairBusy = ref(false);
 const isGatewayLoading = ref(false);
-const gatewayLoadedPort = ref('');
-const serialAdminSupportedPorts = ref<Record<string, boolean>>({});
 const pairStatusPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
-const wifiNetworks = ref<WifiNetwork[]>([]);
-const pairWifiSsid = ref('');
 const pairWifiPassword = ref('');
 const showPairWifiPassword = ref(false);
 const isWifiScanning = ref(false);
@@ -249,8 +260,6 @@ const isWifiApplying = ref(false);
 const isFleetWifiSending = ref(false);
 const isIdentifying = ref(false);
 const identifyTimer = ref<ReturnType<typeof window.setTimeout> | null>(null);
-const serialAdminStatus = ref<SerialAdminStatus | null>(null);
-const serialAdminConfig = ref<SerialAdminConfig | null>(null);
 const isSerialAdminLoading = ref(false);
 const isSerialAdminSaving = ref(false);
 const isSerialSystemAction = ref(false);
@@ -285,8 +294,75 @@ const ERASE_BEFORE_FLASH_STORAGE_KEY = 'lrs_flasher_erase_before_flash';
 const REGION_CONFIDENT_MIN_SCORE = 5;
 const REGION_CONFIDENT_MIN_GAP = 2;
 
+function newSerialDeviceState(): SerialDeviceState {
+  return {
+    deviceInfo: null,
+    adminSupported: false,
+    status: null,
+    config: null,
+    adminPassword: '',
+    wifiNetworks: [],
+    wifiScanned: false,
+    wifiSsid: '',
+    gatewayWifiReadySsid: '',
+    gatewayWifiReadyIp: ''
+  };
+}
+
+function serialDeviceState(port = selectedPort.value): SerialDeviceState | null {
+  if (!port) return null;
+  if (!serialDevicesByPort.value[port]) {
+    serialDevicesByPort.value[port] = newSerialDeviceState();
+  }
+  return serialDevicesByPort.value[port];
+}
+
+const activeSerialDevice = computed(() => serialDeviceState());
+const deviceInfo = computed<DeviceInfo | null>({
+  get: () => activeSerialDevice.value?.deviceInfo || null,
+  set: (info) => {
+    const state = serialDeviceState();
+    if (state) state.deviceInfo = info;
+  }
+});
+const pairAdminPassword = computed<string>({
+  get: () => activeSerialDevice.value?.adminPassword || activeSerialDevice.value?.deviceInfo?.password?.trim() || '',
+  set: (password) => {
+    const state = serialDeviceState();
+    if (state) state.adminPassword = password;
+  }
+});
+const wifiNetworks = computed<WifiNetwork[]>({
+  get: () => activeSerialDevice.value?.wifiNetworks || [],
+  set: (networks) => {
+    const state = serialDeviceState();
+    if (state) state.wifiNetworks = networks;
+  }
+});
+const pairWifiSsid = computed<string>({
+  get: () => activeSerialDevice.value?.wifiSsid || '',
+  set: (ssid) => {
+    const state = serialDeviceState();
+    if (state) state.wifiSsid = ssid;
+  }
+});
+const serialAdminStatus = computed<SerialAdminStatus | null>({
+  get: () => activeSerialDevice.value?.status || null,
+  set: (status) => {
+    const state = serialDeviceState();
+    if (state) state.status = status;
+  }
+});
+const serialAdminConfig = computed<SerialAdminConfig | null>({
+  get: () => activeSerialDevice.value?.config || null,
+  set: (config) => {
+    const state = serialDeviceState();
+    if (state) state.config = config;
+  }
+});
+
 const hasActiveDeviceInfo = computed(() =>
-  !!deviceInfo.value && deviceInfoPort.value === selectedPort.value
+  !!activeSerialDevice.value?.deviceInfo
 );
 const orderedDeviceInfoEntries = computed((): Array<[keyof DeviceInfo, string | number]> => {
   if (!deviceInfo.value) return [];
@@ -339,10 +415,18 @@ const networkSubnetLabel = computed(() => {
     .join(', ');
 });
 const networkLogActive = computed(() => activeMode.value === 'network' && isNetworkUdpMonitoring.value);
-const gatewayReady = computed(() => !!selectedPort.value && gatewayLoadedPort.value === selectedPort.value && !!pairAdminPassword.value.trim());
+const networkBulkCandidates = computed(() =>
+  networkDevices.value.filter(device => !!passwordForNetworkDevice(device).trim())
+);
+const gatewayReady = computed(() =>
+  !!selectedPort.value &&
+  hasActiveDeviceInfo.value &&
+  !!activeSerialDevice.value?.adminSupported &&
+  !!pairPassword()
+);
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
 const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
-const identifyAvailable = computed(() => hasActiveDeviceInfo.value && !!serialAdminSupportedPorts.value[selectedPort.value]);
+const identifyAvailable = computed(() => hasActiveDeviceInfo.value && !!activeSerialDevice.value?.adminSupported);
 const identifyDisabled = computed(() => !selectedPort.value || !identifyAvailable.value || isFlashing.value || isLoadingInfo.value || isGatewayLoading.value || isPairBusy.value || isMonitoring.value);
 const serialPortSelectorDisabled = computed(() =>
   isLoadingInfo.value ||
@@ -360,7 +444,6 @@ const flashDisabled = computed(() =>
   !selectedPort.value ||
   !selectedVersion.value
 );
-const serialAdminAvailable = computed(() => hasActiveDeviceInfo.value && !!serialAdminSupportedPorts.value[selectedPort.value]);
 const serialAdminPassword = computed(() => deviceInfo.value?.password?.trim() || '');
 const serialAdminBusy = computed(() => isSerialAdminLoading.value || isSerialAdminSaving.value || isSerialSystemAction.value);
 const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
@@ -370,7 +453,20 @@ const serialStatusSummary = computed(() => {
   const wifi = st.wifi?.sta_connected ? `WiFi ${st.wifi.ip || 'connected'}` : `WiFi ${st.wifi?.status || 'offline'}`;
   return `${st.role || 'unknown'} ${st.local_address}->${st.remote_address} · ${wifi} · heap ${formatBytes(st.heap_free)} free`;
 });
-const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
+const gatewayWifiReady = computed(() =>
+  !!selectedPort.value &&
+  activeSerialDevice.value?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
+  !!activeSerialDevice.value?.gatewayWifiReadyIp
+);
+const pairWifiSsidInScan = computed(() =>
+  !!pairWifiSsid.value.trim() &&
+  wifiNetworks.value.some(n => n.ssid === pairWifiSsid.value.trim())
+);
+const gatewayWifiStatusText = computed(() => {
+  if (gatewayWifiReady.value) return `Gateway connected at ${activeSerialDevice.value?.gatewayWifiReadyIp}`;
+  return 'Connect the gateway before sending credentials to remotes.';
+});
+const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkBulkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
 const activityFullscreen = computed(() =>
   (activeMode.value === 'serial' && isMonitoring.value) ||
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
@@ -582,14 +678,9 @@ async function refreshPorts() {
         delete portSeenSequence.value[known];
       }
     }
-    for (const known of Object.keys(deviceInfoByPort.value)) {
+    for (const known of Object.keys(serialDevicesByPort.value)) {
       if (!currentNames.includes(known)) {
-        delete deviceInfoByPort.value[known];
-      }
-    }
-    for (const known of Object.keys(serialAdminSupportedPorts.value)) {
-      if (!currentNames.includes(known)) {
-        delete serialAdminSupportedPorts.value[known];
+        delete serialDevicesByPort.value[known];
       }
     }
 
@@ -694,23 +785,7 @@ function copyActivePassword() {
 }
 
 function syncDeviceInfoForSelectedPort() {
-  const port = selectedPort.value;
-  if (!port) {
-    deviceInfo.value = null;
-    deviceInfoPort.value = '';
-    return;
-  }
-  const cached = deviceInfoByPort.value[port];
-  if (cached) {
-    deviceInfo.value = cached;
-    deviceInfoPort.value = port;
-    if (activeMode.value === 'pair' && !pairAdminPassword.value.trim()) {
-      pairAdminPassword.value = cached.password || '';
-    }
-  } else if (deviceInfoPort.value !== port) {
-    deviceInfo.value = null;
-    deviceInfoPort.value = '';
-  }
+  serialDeviceState();
 }
 
 function randomIndex(max: number): number {
@@ -1111,33 +1186,119 @@ async function startNetworkOtaForDevice(device: NetworkDevice | null) {
     notify('Enter an admin password for this device');
     return;
   }
-  const isLocal = selectedVersion.value.startsWith('Local: ');
-  const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
-  if (isLocal && !firmwarePath) {
-    notify('Local file path missing');
-    return;
-  }
+  const firmwareOptions = networkOtaFirmwareOptions();
+  if (!firmwareOptions) return;
 
   isNetworkOta.value = true;
+  isNetworkOtaWaitingForReturn.value = false;
+  networkOtaCancelRequested.value = false;
   pushNetworkLog(`--- Network OTA ${device.identity || device.ip} (${device.ip}) ---`);
+  let uploadAccepted = false;
   try {
     const result = await invoke<string>('ota_network_device', {
       ip: device.ip,
       options: {
         password,
-        firmware_path: firmwarePath,
-        region: isLocal ? null : region.value
+        ...firmwareOptions
       }
     });
+    uploadAccepted = true;
     pushNetworkLog(result);
-    pushNetworkLog('OTA upload complete. Waiting for reboot and WiFi reconnect before UDP logging...');
+    pushNetworkLog('OTA upload complete. Waiting for reboot and WiFi reconnect. You can stop waiting and rescan if the device changes IP or does not return.');
+    isNetworkOtaWaitingForReturn.value = true;
     await waitForNetworkDevice(device.ip, password, 90000);
+    isNetworkOtaWaitingForReturn.value = false;
     await startNetworkUdpMonitor(device);
   } catch (e) {
-    pushNetworkLog('Network OTA failed: ' + e);
-    notify('Network OTA failed: ' + e);
+    const message = String(e || 'unknown error');
+    if (uploadAccepted && message.includes('Device did not return')) {
+      pushNetworkLog(message);
+      notify('OTA upload was accepted, but the device did not return. Rescan or use USB recovery if needed.');
+    } else if (message.includes('Stopped waiting')) {
+      pushNetworkLog(message);
+      notify('Stopped waiting for device return. Rescan when ready.');
+    } else if (message.includes('OTA upload response was lost')) {
+      pushNetworkLog(message);
+      pushNetworkLog('The device may already be applying the update and rebooting. Rescan after it returns.');
+      notify('OTA response was lost. The device may be rebooting; rescan shortly.');
+    } else {
+      pushNetworkLog('Network OTA failed: ' + e);
+      notify('Network OTA failed: ' + e);
+    }
   } finally {
     isNetworkOta.value = false;
+    isNetworkOtaWaitingForReturn.value = false;
+    networkOtaCancelRequested.value = false;
+  }
+}
+
+function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCode | null } | null {
+  const isLocal = selectedVersion.value.startsWith('Local: ');
+  const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
+  if (!firmwarePath || (isLocal && !selectedLocalPath.value)) {
+    notify('Local file path missing');
+    return null;
+  }
+  return {
+    firmware_path: firmwarePath,
+    region: isLocal ? null : region.value
+  };
+}
+
+async function startNetworkBulkOta() {
+  if (isNetworkBulkOta.value || isNetworkOta.value || isNetworkDiscovering.value) return;
+  const firmwareOptions = networkOtaFirmwareOptions();
+  if (!firmwareOptions) return;
+  const targets = networkBulkCandidates.value;
+  if (targets.length === 0) {
+    notify('No discovered devices have an admin password for bulk update');
+    return;
+  }
+  if (!confirm(`Bulk update ${targets.length} discovered device${targets.length === 1 ? '' : 's'} sequentially? UDP logging will not be started.`)) {
+    return;
+  }
+
+  isNetworkBulkOta.value = true;
+  networkBulkOtaIndex.value = 0;
+  networkBulkOtaTotal.value = targets.length;
+  pushNetworkLog(`--- Bulk Network OTA: ${targets.length} device${targets.length === 1 ? '' : 's'} ---`);
+  pushNetworkLog('Bulk OTA uploads sequentially and does not start UDP logging.');
+  try {
+    for (let i = 0; i < targets.length; i += 1) {
+      const device = targets[i];
+      networkBulkOtaIndex.value = i + 1;
+      selectedNetworkIp.value = device.ip;
+      const password = passwordForNetworkDevice(device).trim();
+      if (!password) {
+        pushNetworkLog(`Bulk OTA skipped ${device.identity || device.ip}: missing admin password`);
+        continue;
+      }
+      pushNetworkLog(`Bulk OTA ${i + 1}/${targets.length}: ${device.identity || device.ip} (${device.ip})`);
+      try {
+        const result = await invoke<string>('ota_network_device', {
+          ip: device.ip,
+          options: {
+            password,
+            ...firmwareOptions
+          }
+        });
+        pushNetworkLog(result);
+      } catch (e) {
+        const message = String(e || 'unknown error');
+        if (message.includes('OTA upload response was lost')) {
+          pushNetworkLog(`Bulk OTA uncertain for ${device.identity || device.ip}: ${message}. The device may already be rebooting; rescan after the batch.`);
+        } else {
+          pushNetworkLog(`Bulk OTA failed for ${device.identity || device.ip}: ${message}`);
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    pushNetworkLog('Bulk OTA uploads finished. Rescan after devices have rebooted.');
+    notify('Bulk OTA uploads finished. Rescan after reboot.');
+  } finally {
+    isNetworkBulkOta.value = false;
+    networkBulkOtaIndex.value = 0;
+    networkBulkOtaTotal.value = 0;
   }
 }
 
@@ -1145,6 +1306,9 @@ async function waitForNetworkDevice(ip: string, password: string, timeoutMs: num
   const started = Date.now();
   await new Promise(resolve => setTimeout(resolve, 7000));
   while (Date.now() - started < timeoutMs) {
+    if (networkOtaCancelRequested.value) {
+      throw new Error(`Stopped waiting for ${ip} to return. Rescan Network when the device is ready.`);
+    }
     try {
       const updated = await invoke<NetworkDevice>('authenticate_network_device', { ip, password });
       mergeNetworkDevice(updated);
@@ -1156,6 +1320,12 @@ async function waitForNetworkDevice(ip: string, password: string, timeoutMs: num
     }
   }
   throw new Error('Device did not return before the 90s wait expired');
+}
+
+function stopWaitingForNetworkOtaReturn() {
+  if (!isNetworkOtaWaitingForReturn.value) return;
+  networkOtaCancelRequested.value = true;
+  pushNetworkLog('Stopping wait for OTA reboot return...');
 }
 
 function pairPassword(): string {
@@ -1173,18 +1343,42 @@ async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string,
 
 async function probeSerialAdminSupport(port = selectedPort.value): Promise<boolean> {
   if (!port) return false;
+  const state = serialDeviceState(port);
   try {
     await invoke<any>('serial_admin_command', {
       port,
       request: { cmd: 'hello' },
       timeoutMs: 1200
     });
-    serialAdminSupportedPorts.value[port] = true;
+    if (state) state.adminSupported = true;
     return true;
   } catch {
-    delete serialAdminSupportedPorts.value[port];
+    if (state) state.adminSupported = false;
     return false;
   }
+}
+
+async function waitForSerialAdminHello(port: string, timeoutMs = 18000): Promise<any> {
+  const started = Date.now();
+  let lastError: unknown = null;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const hello = await invoke<any>('serial_admin_command', {
+        port,
+        request: { cmd: 'hello' },
+        timeoutMs: 1800
+      });
+      const state = serialDeviceState(port);
+      if (state) state.adminSupported = true;
+      return hello;
+    } catch (e) {
+      lastError = e;
+      await new Promise(resolve => setTimeout(resolve, 900));
+    }
+  }
+  const state = serialDeviceState(port);
+  if (state) state.adminSupported = false;
+  throw lastError || new Error('timed out waiting for hello response');
 }
 
 function serialFeatureError(feature: string, err: unknown): string {
@@ -1253,12 +1447,11 @@ async function refreshSerialAdminStatus() {
   isSerialAdminLoading.value = true;
   pushSerialLog('Refreshing local admin status...');
   try {
-    if (!serialAdminSupportedPorts.value[selectedPort.value]) {
+    if (!activeSerialDevice.value?.adminSupported) {
       await probeSerialAdminSupport(selectedPort.value);
     }
     const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
-    serialAdminStatus.value = out;
-    serialUptimeMs.value = Number(out.uptime_ms || 0);
+    applySerialAdminStatus(out);
     pushSerialLog(`Status loaded: ${out.role || 'unknown'} ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
   } catch (e) {
     const msg = serialFeatureError('Status', e);
@@ -1282,7 +1475,7 @@ async function loadSerialAdminConfig() {
   isSerialAdminLoading.value = true;
   pushSerialLog('Loading local device configuration...');
   try {
-    if (!serialAdminSupportedPorts.value[selectedPort.value]) {
+    if (!activeSerialDevice.value?.adminSupported) {
       await probeSerialAdminSupport(selectedPort.value);
     }
     const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
@@ -1409,23 +1602,26 @@ async function factoryResetSerialDevice() {
 async function loadEasyPairGateway() {
   if (!selectedPort.value) return;
   const port = selectedPort.value;
+  syncDeviceInfoForSelectedPort();
+  if (gatewayReady.value) {
+    pushPairLog(`Gateway already ready on ${port}.`);
+    return;
+  }
   isGatewayLoading.value = true;
-  gatewayLoadedPort.value = '';
   pushPairLog('Reading USB gateway identity...');
   try {
     const ok = await readDeviceInfo();
     if (!ok || !deviceInfo.value) throw new Error('Unable to read gateway factory details');
     if (selectedPort.value !== port) return;
     pairAdminPassword.value = deviceInfo.value.password || '';
-    const hello = await sendEasyPairCommand<any>('hello', {}, 4000);
+    pushPairLog('Waiting for serial admin to become ready...');
+    const hello = await waitForSerialAdminHello(port);
     if (selectedPort.value !== port) return;
-    serialAdminSupportedPorts.value[port] = true;
-    gatewayLoadedPort.value = port;
     pushPairLog(`Gateway ready on ${selectedPort.value}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
+    await refreshGatewayStatusForPair();
   } catch (e) {
     if (selectedPort.value === port) {
       pairAdminPassword.value = '';
-      gatewayLoadedPort.value = '';
     }
     pushPairLog('Gateway check failed: ' + e);
     notify('Gateway check failed: ' + e);
@@ -1635,6 +1831,12 @@ function wifiSignalLabel(rssi: number): string {
 }
 
 async function scanGatewayWifi() {
+  if (!gatewayReady.value) {
+    await loadEasyPairGateway();
+    if (gatewayWifiReady.value) {
+      return;
+    }
+  }
   const password = pairPassword();
   if (!password) {
     notify('Load gateway first to use the factory password');
@@ -1650,9 +1852,14 @@ async function scanGatewayWifi() {
       .filter(n => n && n.ssid)
       .sort((a, b) => Number(b.rssi || -999) - Number(a.rssi || -999));
     wifiNetworks.value = networks;
+    if (!networks.some(n => n.ssid === pairWifiSsid.value)) {
+      clearGatewayWifiReady();
+    }
     if (!pairWifiSsid.value && networks.length > 0) {
       pairWifiSsid.value = networks[0].ssid;
     }
+    const state = serialDeviceState();
+    if (state) state.wifiScanned = true;
     pushPairLog(`Found ${networks.length} WiFi network${networks.length === 1 ? '' : 's'}.`);
   } catch (e) {
     const msg = serialFeatureError('WiFi scan', e);
@@ -1663,6 +1870,102 @@ async function scanGatewayWifi() {
   }
 }
 
+async function openPairWifiTab() {
+  pairPanelTab.value = 'wifi';
+  if (!selectedPort.value || isGatewayLoading.value || isWifiScanning.value) {
+    return;
+  }
+  if (gatewayWifiReady.value) {
+    return;
+  }
+  if (activeSerialDevice.value?.wifiScanned && wifiNetworks.value.length > 0) {
+    return;
+  }
+  if (gatewayReady.value && await refreshGatewayStatusForPair()) {
+    return;
+  }
+  await scanGatewayWifi();
+}
+
+function clearGatewayWifiReady() {
+  const state = serialDeviceState();
+  if (!state) return;
+  state.gatewayWifiReadySsid = '';
+  state.gatewayWifiReadyIp = '';
+}
+
+function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.value) {
+  const state = serialDeviceState(port);
+  if (!state) return;
+  state.status = out;
+  serialUptimeMs.value = Number(out.uptime_ms || 0);
+  state.adminSupported = true;
+  adoptGatewayWifiFromStatus(out, port);
+}
+
+function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.value): boolean {
+  if (!port || port !== selectedPort.value) return false;
+  const wifi = out.wifi;
+  const ssid = wifi?.sta_ssid?.trim() || '';
+  const ip = wifi?.ip?.trim() || '';
+  const status = wifi?.status?.trim().toLowerCase() || '';
+  const connected = (!!wifi?.sta_connected || status === 'connected') && !!ssid && !!ip && ip !== '0.0.0.0';
+  if (!connected) {
+    const state = serialDeviceState(port);
+    if (state) {
+      state.gatewayWifiReadySsid = '';
+      state.gatewayWifiReadyIp = '';
+    }
+    return false;
+  }
+
+  pairWifiSsid.value = ssid;
+  const state = serialDeviceState(port);
+  if (!state) return false;
+  state.gatewayWifiReadySsid = ssid;
+  state.gatewayWifiReadyIp = ip;
+  return true;
+}
+
+async function refreshGatewayStatusForPair(): Promise<boolean> {
+  if (!selectedPort.value) return false;
+  const port = selectedPort.value;
+  try {
+    const status = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    if (selectedPort.value !== port) return false;
+    applySerialAdminStatus(status, port);
+    if (gatewayWifiReady.value) {
+      pushPairLog(`Gateway already connected to ${activeSerialDevice.value?.gatewayWifiReadySsid} at ${activeSerialDevice.value?.gatewayWifiReadyIp}.`);
+      return true;
+    }
+  } catch (statusErr) {
+    pushPairLog('Gateway status check skipped: ' + statusErr);
+  }
+  return false;
+}
+
+async function waitForGatewayWifiConnection(ssid: string, timeoutMs = 45000): Promise<SerialAdminStatus> {
+  const started = Date.now();
+  let lastStatus: SerialAdminStatus | null = null;
+  while (Date.now() - started < timeoutMs) {
+    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    lastStatus = out;
+    const wifi = out.wifi;
+    const wifiStatus = wifi?.status?.trim().toLowerCase() || '';
+    const wifiIp = wifi?.ip?.trim() || '';
+    const wifiSsid = wifi?.sta_ssid?.trim() || '';
+    if ((wifi?.sta_connected || wifiStatus === 'connected') && wifiSsid === ssid && wifiIp && wifiIp !== '0.0.0.0') {
+      applySerialAdminStatus(out);
+      return out;
+    }
+    const label = wifi?.status || 'connecting';
+    pushPairLog(`Waiting for gateway WiFi (${label})...`);
+    await new Promise(resolve => setTimeout(resolve, 2500));
+  }
+  const detail = lastStatus?.wifi?.status ? `last status: ${lastStatus.wifi.status}` : 'no status received';
+  throw new Error(`gateway did not confirm WiFi connection (${detail})`);
+}
+
 async function connectGatewayWifi() {
   const password = pairPassword();
   const ssid = pairWifiSsid.value.trim();
@@ -1671,6 +1974,7 @@ async function connectGatewayWifi() {
     return;
   }
   isWifiApplying.value = true;
+  clearGatewayWifiReady();
   pushPairLog(`Saving WiFi credentials on gateway for ${ssid}...`);
   try {
     await sendEasyPairCommand('configure_wifi', {
@@ -1678,7 +1982,14 @@ async function connectGatewayWifi() {
       wifi_sta_ssid: ssid,
       wifi_sta_password: pairWifiPassword.value
     }, 10000);
-    pushPairLog('Gateway WiFi saved. It will connect as normal firmware networking runs.');
+    pushPairLog('Gateway WiFi saved. Waiting for connection confirmation...');
+    const status = await waitForGatewayWifiConnection(ssid);
+    const state = serialDeviceState();
+    if (state) {
+      state.gatewayWifiReadySsid = ssid;
+      state.gatewayWifiReadyIp = status.wifi?.ip || '';
+    }
+    pushPairLog(`Gateway connected to ${ssid} at ${activeSerialDevice.value?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
   } catch (e) {
     const msg = serialFeatureError('WiFi save', e);
     pushPairLog(msg);
@@ -1693,6 +2004,10 @@ async function sendWifiToRemotes() {
   const ssid = pairWifiSsid.value.trim();
   if (!password || !ssid) {
     notify('Select a WiFi network and load the gateway password first');
+    return;
+  }
+  if (!gatewayWifiReady.value) {
+    notify('Connect the gateway to WiFi first');
     return;
   }
   isFleetWifiSending.value = true;
@@ -1753,9 +2068,13 @@ async function readDeviceInfo() {
       pushSerialLog(`Ignored stale device info from ${port}`);
       return false;
     }
-    deviceInfoByPort.value[port] = info;
-    deviceInfo.value = info;
-    deviceInfoPort.value = port;
+    const state = serialDeviceState(port);
+    if (state) {
+      state.deviceInfo = info;
+      if (!state.adminPassword.trim()) {
+        state.adminPassword = info.password || '';
+      }
+    }
     pushSerialLog('Device info read successfully');
     if (activeMode.value === 'serial') {
       await probeSerialAdminSupport(port);
@@ -1904,11 +2223,8 @@ watch(selectedPort, (port) => {
   deviceInfoReadSeq.value += 1;
   isLoadingInfo.value = false;
   pairStatus.value = null;
-  wifiNetworks.value = [];
-  pairWifiSsid.value = '';
-  gatewayLoadedPort.value = '';
-  pairAdminPassword.value = deviceInfoByPort.value[port]?.password || '';
   syncDeviceInfoForSelectedPort();
+  serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
   if (port && activeMode.value === 'serial') {
     readDeviceInfo();
   }
@@ -2329,7 +2645,7 @@ function countCrashEvents(entries: string[]): number {
               Pair
             </button>
             <button
-              @click="pairPanelTab = 'wifi'"
+              @click="openPairWifiTab"
               :class="['m-0 h-9 rounded px-3 transition-all', pairPanelTab === 'wifi' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
             >
               WiFi
@@ -2411,24 +2727,29 @@ function countCrashEvents(entries: string[]): number {
           <div class="flex items-start justify-between gap-4">
             <div>
               <h2 class="text-xl font-bold text-slate-300">WiFi</h2>
-              <p class="mt-1 text-xs text-slate-400">Scan from the USB gateway, connect it, then send the same credentials to remotes.</p>
+              <p class="mt-1 text-xs text-slate-400">
+                {{ gatewayWifiReady ? 'Gateway WiFi is already connected. Enter the WiFi password if you need to send it to remotes.' : 'Read gateway status, scan if needed, then send the same credentials to remotes.' }}
+              </p>
             </div>
             <button
               @click="scanGatewayWifi"
-              :disabled="isWifiScanning || !gatewayReady"
+              :disabled="isWifiScanning || isGatewayLoading || !selectedPort"
               class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isWifiScanning }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
-              <span>{{ isWifiScanning ? 'Scanning...' : 'Scan WiFi' }}</span>
+              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isWifiScanning || isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+              <span>{{ isGatewayLoading ? 'Loading...' : isWifiScanning ? 'Scanning...' : gatewayReady ? 'Scan WiFi' : 'Load & Scan' }}</span>
             </button>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">WiFi network</label>
-              <select v-model="pairWifiSsid" class="glass-input h-10 appearance-none">
+              <select v-model="pairWifiSsid" @change="clearGatewayWifiReady" class="glass-input h-10 appearance-none">
                 <option v-for="network in wifiNetworks" :key="`${network.ssid}-${network.bssid}`" :value="network.ssid">
                   {{ network.ssid }} · {{ wifiSignalLabel(network.rssi) }} · ch {{ network.channel }}
+                </option>
+                <option v-if="pairWifiSsid && !pairWifiSsidInScan" :value="pairWifiSsid">
+                  {{ pairWifiSsid }} · {{ gatewayWifiReady ? 'already connected' : 'selected' }}
                 </option>
                 <option v-if="wifiNetworks.length === 0" disabled>Scan to choose a network</option>
               </select>
@@ -2445,9 +2766,24 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button @click="connectGatewayWifi" :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid" class="glass-input h-11 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold">Connect Gateway</button>
-            <button @click="sendWifiToRemotes" :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid" class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold">Send to Remotes</button>
+          <div class="flex flex-col gap-2">
+            <p :class="['text-xs', gatewayWifiReady ? 'text-emerald-300' : 'text-slate-400']">{{ gatewayWifiStatusText }}</p>
+            <button
+              v-if="!gatewayWifiReady"
+              @click="connectGatewayWifi"
+              :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid"
+              class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+            >
+              {{ isWifiApplying ? 'Connecting Gateway...' : 'Connect Gateway' }}
+            </button>
+            <button
+              v-else
+              @click="sendWifiToRemotes"
+              :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid"
+              class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+            >
+              {{ isFleetWifiSending ? 'Sending...' : 'Send to Remotes' }}
+            </button>
           </div>
           </div>
         </div>
@@ -2515,7 +2851,7 @@ function countCrashEvents(entries: string[]): number {
       </div>
 
       <!-- Right Panel (Controls + Details) - Hidden in Monitor Mode -->
-      <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-6 h-full overflow-hidden transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
+      <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-6 h-full min-h-0 overflow-auto custom-scrollbar pr-1 transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
         <!-- Device Configuration Panel -->
         <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
           <div class="flex items-start justify-between gap-4">
@@ -2753,13 +3089,13 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <p v-if="hasActiveDeviceInfo && !serialAdminAvailable" class="text-xs text-amber-300">
-            This firmware does not answer the serial admin probe yet. Flash a Phase 1A build, then load status again.
+          <p v-if="hasActiveDeviceInfo && !serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading" class="text-xs text-slate-500">
+            Load status or config to inspect this device over USB serial admin.
           </p>
         </div>
 
         <!-- Device Details Panel -->
-        <div class="glass-card p-5 flex flex-col gap-4 text-left flex-1 min-h-0 overflow-hidden">
+        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
           <div class="flex items-center justify-between">
             <h2 class="text-xl font-bold text-slate-300">
               Device details
@@ -2801,11 +3137,25 @@ function countCrashEvents(entries: string[]): number {
             </div>
             <button
               @click="discoverNetworkDevices"
-              :disabled="isNetworkDiscovering || isNetworkOta"
+              :disabled="isNetworkDiscovering || isNetworkBulkOta || (isNetworkOta && !isNetworkOtaWaitingForReturn)"
               class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
             >
               <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isNetworkDiscovering }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
               <span>{{ isNetworkDiscovering ? 'Scanning...' : 'Scan' }}</span>
+            </button>
+            <button
+              @click="startNetworkBulkOta"
+              :disabled="isNetworkBulkOta || isNetworkOta || isNetworkDiscovering || networkBulkCandidates.length === 0"
+              class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+            >
+              {{ isNetworkBulkOta ? `Bulk ${networkBulkOtaIndex}/${networkBulkOtaTotal}` : 'Bulk update' }}
+            </button>
+            <button
+              v-if="isNetworkOtaWaitingForReturn"
+              @click="stopWaitingForNetworkOtaReturn"
+              class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold text-amber-200"
+            >
+              Stop waiting
             </button>
           </div>
 
@@ -2831,7 +3181,9 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="text-xs text-slate-400">{{ networkStatusMessage }}</div>
+          <div class="text-xs text-slate-400">
+            {{ isNetworkBulkOta ? `Bulk OTA in progress: ${networkBulkOtaIndex}/${networkBulkOtaTotal}. Uploads are sequential and UDP logging is not started.` : isNetworkOtaWaitingForReturn ? 'OTA upload accepted. Waiting for device return; you can stop waiting and rescan if it does not come back on the same IP.' : networkStatusMessage }}
+          </div>
           <div v-if="networkScanProgress" class="h-2 overflow-hidden rounded bg-slate-800">
             <div
               class="h-full bg-indigo-500 transition-all"
@@ -2956,10 +3308,10 @@ function countCrashEvents(entries: string[]): number {
                     </button>
                     <button
                       @click.stop="isNetworkUdpMonitoring && networkUdpTarget === device.ip ? stopNetworkUdpMonitor() : startNetworkUdpMonitor(device)"
-                      :disabled="isNetworkOta"
+                      :disabled="isNetworkBulkOta || (isNetworkOta && !isNetworkOtaWaitingForReturn)"
                       :class="[
                         'm-0 p-1.5 rounded-md border transition-all',
-                        !isNetworkOta
+                        !(isNetworkBulkOta || (isNetworkOta && !isNetworkOtaWaitingForReturn))
                           ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
                           : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
                       ]"
@@ -2980,17 +3332,17 @@ function countCrashEvents(entries: string[]): number {
                     </button>
                     <button
                       @click.stop="startNetworkOtaForDevice(device)"
-                      :disabled="isNetworkOta || isNetworkDiscovering"
+                      :disabled="isNetworkBulkOta || isNetworkOta || isNetworkDiscovering"
                       :class="[
                         'm-0 p-1.5 rounded-md border transition-all',
-                        !(isNetworkOta || isNetworkDiscovering)
+                        !(isNetworkBulkOta || isNetworkOta || isNetworkDiscovering)
                           ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300 hover:text-indigo-100 hover:border-indigo-400'
                           : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
                       ]"
                       title="Update firmware over OTA"
                       aria-label="Update firmware over OTA"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isNetworkOta && selectedNetworkIp === device.ip }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': (isNetworkOta || isNetworkBulkOta) && selectedNetworkIp === device.ip }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 16.899A7 7 0 1 1 15.71 10h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
                         <path d="M12 19V8"></path>
                         <path d="m8 12 4-4 4 4"></path>
