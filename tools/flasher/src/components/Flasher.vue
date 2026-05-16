@@ -3279,7 +3279,7 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">USB gateway</label>
               <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
@@ -3310,54 +3310,54 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] gap-3 items-end">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">MQTT user</label>
               <input v-model="monitorMqttUser" class="glass-input h-10" />
             </div>
-            <div class="lg:col-span-2 flex flex-col gap-1.5 text-xs">
+            <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">MQTT password</label>
               <div class="flex gap-2">
-                <input v-model="monitorMqttPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" />
-                <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input h-10 px-3 hover:bg-white/10">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
+                <input v-model="monitorMqttPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-10 min-w-0 flex-1" />
+                <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input m-0 h-10 w-16 shrink-0 hover:bg-white/10 text-xs font-bold">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
               </div>
             </div>
-            <div class="flex items-end">
+            <div class="flex">
               <button
                 @click="toggleMonitorMqttConnection"
                 :disabled="monitorTransport !== 'mqtt' || !monitorMqttHost"
-                class="glass-input m-0 h-10 px-4 hover:bg-white/10 text-xs font-bold disabled:opacity-50"
+                class="glass-input m-0 h-10 min-w-28 px-4 hover:bg-white/10 text-xs font-bold disabled:opacity-50"
               >
                 {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
               </button>
             </div>
-            <div class="flex items-end">
-              <span :class="['rounded border px-2 py-2 text-[10px] font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+            <div class="flex">
+              <span :class="['inline-flex h-10 min-w-32 items-center justify-center rounded border px-3 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
                 MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
               </span>
             </div>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 shrink-0">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 shrink-0">
           <div class="glass-card p-4 text-left">
             <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</div>
-            <div class="mt-2 text-lg font-bold text-slate-200">{{ monitorGatewayStatus?.chip_id || '-' }}</div>
+            <div class="mt-2 text-base font-bold text-slate-200 truncate">{{ monitorGatewayStatus?.chip_id || '-' }}</div>
             <div class="mt-1 text-xs text-slate-400">{{ monitorGatewayStatus?.fw_version || '-' }} · {{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</div>
           </div>
           <div class="glass-card p-4 text-left">
             <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</div>
-            <div class="mt-2 text-lg font-bold text-slate-200">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</div>
+            <div class="mt-2 text-base font-bold text-slate-200 whitespace-nowrap">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</div>
             <div class="mt-1 text-xs text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</div>
           </div>
           <div class="glass-card p-4 text-left">
             <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</div>
-            <div class="mt-2 text-lg font-bold text-slate-200">cmd {{ monitorGatewayStatus?.relay_state ?? '-' }} · fb {{ monitorGatewayStatus?.relay_feedback ?? '-' }}</div>
+            <div class="mt-2 text-base font-bold text-slate-200 whitespace-nowrap">cmd {{ monitorGatewayStatus?.relay_state ?? '-' }} · fb {{ monitorGatewayStatus?.relay_feedback ?? '-' }}</div>
             <div class="mt-1 text-xs text-slate-400">input {{ monitorGatewayStatus?.input_state ?? '-' }} · link {{ monitorGatewayStatus?.link_state || '-' }}</div>
           </div>
           <div class="glass-card p-4 text-left">
             <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet freshness</div>
-            <div class="mt-2 text-lg font-bold text-slate-200">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</div>
+            <div class="mt-2 text-base font-bold text-slate-200 whitespace-nowrap">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</div>
             <div class="mt-1 text-xs text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</div>
           </div>
         </div>
