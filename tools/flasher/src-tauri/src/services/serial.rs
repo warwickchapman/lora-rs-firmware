@@ -77,6 +77,18 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
                 }
             }
 
+            // Some headset/audio devices expose plain tty ports on macOS without
+            // the word Bluetooth in the device name. Keep them visible for manual
+            // troubleshooting, but make sure they never win default selection.
+            if name.contains("soundcore")
+                || name.contains("headphone")
+                || name.contains("headset")
+                || name.contains("airpods")
+                || name.contains("bose")
+            {
+                score -= 1000;
+            }
+
             Some(SerialPortInfo {
                 port_name: p.port_name,
                 description: match (product.clone(), manufacturer.clone()) {
