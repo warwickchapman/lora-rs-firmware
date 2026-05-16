@@ -203,8 +203,8 @@ type RegionCode = 'ZA' | 'EU' | 'US';
 
 const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
-const NETWORK_DEFAULT_FIRMWARE = '/Users/warwick/Code/LoRa/lora_rs/.pio/build/lrs_za/firmware.bin';
 const NETWORK_FIRMWARE_PATH = '/firmware.bin';
+const LRS_REMOTE_SCAN_CAP = 12;
 
 const ports = ref<SerialPort[]>([]);
 const selectedPort = ref('');
@@ -217,6 +217,7 @@ const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
 const isFirmwareServerStarting = ref(false);
 const remoteOtaBusyAddress = ref<number | null>(null);
+const remoteUdpBusyAddress = ref<number | null>(null);
 const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
@@ -239,12 +240,11 @@ const portSeenCounter = ref(0);
 const stickLogToBottom = ref(true);
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
-const networkStatusMessage = ref('Ready to host firmware or listen for admin-enabled UDP logs.');
+const networkStatusMessage = ref('Ready to scan the fleet.');
 const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const isLoraInventoryScanning = ref(false);
-const loraInventoryFullscreen = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const pairExpectedCount = ref(12);
@@ -397,14 +397,13 @@ const monitorContextLabel = computed(() => {
   }
   return parts.join(' on ');
 });
-const networkLogActive = computed(() => activeMode.value === 'network' && isNetworkUdpMonitoring.value);
 const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
 const loraInventoryProgressLabel = computed(() => {
   const scan = loraInventoryScan.value;
   if (!scan) return 'Idle';
   if (!scan.active) return `Complete, ${scan.sent || 0} probes sent`;
   const next = scan.next_address || scan.start_address || 1;
-  return `Scanning ${next}-${scan.end_address || 254}, ${scan.sent || 0} probes sent`;
+  return `Scanning ${next}-${scan.end_address || LRS_REMOTE_SCAN_CAP}, ${scan.sent || 0} probes sent`;
 });
 const gatewayReady = computed(() =>
   !!selectedPort.value &&
@@ -448,6 +447,15 @@ const serialAdminIsFactoryDefault = computed(() => {
   const st = serialAdminStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
 });
+const fleetGatewayStatusLabel = computed(() => {
+  if (serialAdminIsFactoryDefault.value) return 'gateway factory default';
+  if (gatewayReady.value) return 'gateway ready';
+  return 'gateway not loaded';
+});
+const fleetScanDisabled = computed(() =>
+  isNetworkGatewayLoading.value ||
+  !selectedPort.value
+);
 const gatewayWifiReady = computed(() =>
   !!selectedPort.value &&
   activeSerialDevice.value?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
@@ -467,7 +475,6 @@ const activityFullscreen = computed(() =>
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
 );
 const serialUptimeLabel = computed(() => formatUptime(serialUptimeMs.value));
-const networkUptimeLabel = computed(() => formatUptime(networkUptimeMs.value));
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -901,10 +908,9 @@ async function startFirmwareServerWithOptions(firmwareOptions: { firmware_path: 
 
 async function ensureRemoteFlashFirmwareServer(): Promise<FirmwareServerInfo> {
   if (firmwareServerInfo.value) return firmwareServerInfo.value;
-  await startFirmwareServerWithOptions({
-    firmware_path: NETWORK_DEFAULT_FIRMWARE,
-    region: null
-  });
+  const firmwareOptions = networkOtaFirmwareOptions();
+  if (!firmwareOptions) throw new Error('Choose a firmware file or release first');
+  await startFirmwareServerWithOptions(firmwareOptions);
   if (!firmwareServerInfo.value) throw new Error('Firmware server did not start');
   return firmwareServerInfo.value;
 }
@@ -922,7 +928,9 @@ async function stopFirmwareServer() {
 }
 
 function pairPassword(): string {
-  return pairAdminPassword.value.trim() || (hasActiveDeviceInfo.value ? deviceInfo.value?.password?.trim() || '' : '');
+  return pairAdminPassword.value.trim() ||
+    activeSerialDevice.value?.adminPassword?.trim() ||
+    (hasActiveDeviceInfo.value ? deviceInfo.value?.password?.trim() || '' : '');
 }
 
 async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
@@ -936,15 +944,23 @@ async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string,
 
 async function loadNetworkGateway() {
   if (!selectedPort.value || isNetworkGatewayLoading.value) return;
+  const port = selectedPort.value;
   isNetworkGatewayLoading.value = true;
   try {
-    const hello = await waitForSerialAdminHello(selectedPort.value, 6000);
-    const state = serialDeviceState(selectedPort.value);
+    syncDeviceInfoForSelectedPort();
+    if (!deviceInfo.value?.password?.trim()) {
+      networkStatusMessage.value = `Reading gateway identity on ${port}...`;
+      const ok = await readDeviceInfo();
+      if (!ok || selectedPort.value !== port) throw new Error('Unable to read gateway factory details');
+    }
+    const hello = await waitForSerialAdminHello(port, 6000);
+    const state = serialDeviceState(port);
     if (state) {
       state.adminSupported = true;
       state.adminPassword = state.adminPassword || pairAdminPassword.value || deviceInfo.value?.password || '';
     }
-    networkStatusMessage.value = `Gateway loaded on ${selectedPort.value}; firmware ${hello.fw_version || 'unknown'}.`;
+    await ensureFleetGatewayStatus(true);
+    networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
   } catch (e) {
     networkStatusMessage.value = serialFeatureError('Gateway load', e);
     notify(networkStatusMessage.value);
@@ -990,24 +1006,64 @@ function stopLoraInventoryPolling(markIdle = true) {
   if (markIdle) isLoraInventoryScanning.value = false;
 }
 
+async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
+  if (!force && serialAdminStatus.value) return serialAdminStatus.value;
+  try {
+    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    applySerialAdminStatus(out);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function fleetScanBlockedMessage(st: SerialAdminStatus | null): string | null {
+  if (!st) return null;
+  if (!st.commissioned) {
+    return 'Fleet scan needs a commissioned gateway. Use Pair Devices first to assign the fleet key, role, address, and WiFi.';
+  }
+  if (st.fleet_passphrase_default) {
+    return 'Fleet scan needs a secure fleet key. Use Pair Devices first to replace the factory key.';
+  }
+  return null;
+}
+
+function fleetScanErrorMessage(err: unknown): string {
+  const text = String(err || '');
+  if (text.includes('not_commissioned')) {
+    return 'Fleet scan needs a commissioned gateway. Use Pair Devices first to assign the fleet key, role, address, and WiFi.';
+  }
+  if (text.includes('factory_fleet_key')) {
+    return 'Fleet scan needs a secure fleet key. Use Pair Devices first to replace the factory key.';
+  }
+  return serialFeatureError('LoRa inventory scan', err);
+}
+
 async function startLoraInventoryScan() {
   if (!selectedPort.value) {
     notify('Select the USB gateway first');
     return;
   }
+  if (!gatewayReady.value) await loadNetworkGateway();
   const password = pairPassword();
   if (!password) {
-    notify('Enter the gateway admin password');
+    notify('Unable to read the gateway admin password from device details');
     return;
   }
-  if (!gatewayReady.value) await loadNetworkGateway();
+  const gatewayStatus = await ensureFleetGatewayStatus(true);
+  const blockedMessage = fleetScanBlockedMessage(gatewayStatus);
+  if (blockedMessage) {
+    isLoraInventoryScanning.value = false;
+    networkStatusMessage.value = blockedMessage;
+    notify(blockedMessage);
+    return;
+  }
   try {
     isLoraInventoryScanning.value = true;
-    loraInventoryFullscreen.value = true;
     await sendEasyPairCommand('start_lora_inventory', {
       admin_password: password,
       start_address: 1,
-      end_address: 254,
+      end_address: LRS_REMOTE_SCAN_CAP,
       interval_ms: 250
     }, 8000);
     networkStatusMessage.value = 'LoRa inventory scan started.';
@@ -1015,7 +1071,7 @@ async function startLoraInventoryScan() {
     startLoraInventoryPolling();
   } catch (e) {
     isLoraInventoryScanning.value = false;
-    networkStatusMessage.value = serialFeatureError('LoRa inventory scan', e);
+    networkStatusMessage.value = fleetScanErrorMessage(e);
     notify(networkStatusMessage.value);
   }
 }
@@ -1043,6 +1099,51 @@ function firmwareServerTarget(info: FirmwareServerInfo): { host: string; port: n
     host: parsed.hostname,
     port: Number(parsed.port || info.port)
   };
+}
+
+function fleetLogsAvailable(device: LoraInventoryDevice): boolean {
+  return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
+}
+
+async function startFleetUdpLogs(device: LoraInventoryDevice) {
+  if (remoteUdpBusyAddress.value != null) return;
+  const password = pairPassword();
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  if (!fleetLogsAvailable(device)) {
+    notify('UDP logs need confirmed WiFi connection and IP from fleet status');
+    return;
+  }
+  try {
+    remoteUdpBusyAddress.value = device.address;
+    if (!gatewayReady.value) await loadNetworkGateway();
+    const hosts = await invoke<string[]>('local_udp_log_hosts');
+    const host = hosts[0];
+    if (!host) throw new Error('No reachable Flasher LAN address found');
+    if (!isNetworkUdpMonitoring.value) {
+      await startNetworkUdpListener();
+    }
+    await sendEasyPairCommand('remote_udp_log_control', {
+      admin_password: password,
+      address: device.address,
+      enabled: true,
+      host,
+      port: 5514,
+      ttl_s: 300
+    }, 8000);
+    networkUdpTarget.value = `LoRa ${device.address}`;
+    networkStatusMessage.value = `UDP logging enabled for LoRa ${device.address} to ${host}:5514.`;
+    notify(`UDP logs enabled for LoRa ${device.address}`);
+  } catch (e) {
+    const msg = serialFeatureError(`UDP logs ${device.address}`, e);
+    networkStatusMessage.value = msg;
+    pushNetworkLog(msg);
+    notify(msg);
+  } finally {
+    remoteUdpBusyAddress.value = null;
+  }
 }
 
 async function flashLoraRemote(device: LoraInventoryDevice) {
@@ -1389,6 +1490,7 @@ async function configureEasyPairGateway() {
       expected_remotes: pairExpectedCount.value
     }, 10000);
     pushPairLog(`Gateway configured for up to ${pairExpectedCount.value} remote device${pairExpectedCount.value === 1 ? '' : 's'}.`);
+    await refreshGatewayStatusForPair();
   } catch (e) {
     pushPairLog('Gateway configuration failed: ' + e);
     notify('Gateway configuration failed: ' + e);
@@ -1555,6 +1657,7 @@ async function saveEasyPairTargets() {
   try {
     await sendEasyPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
     pushPairLog('Pairing complete.');
+    await refreshGatewayStatusForPair();
     await refreshEasyPairStatus(false);
   } catch (e) {
     pushPairLog('Saving target list failed: ' + e);
@@ -2145,9 +2248,9 @@ function countCrashEvents(entries: string[]): number {
 
 <template>
   <div class="relative h-full flex flex-col">
-    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', activityFullscreen || loraInventoryFullscreen ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
+    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
-      <div v-if="!loraInventoryFullscreen" :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
+      <div v-if="activeMode !== 'network'" :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
         <div class="flex items-center justify-between border-b border-white/5 pb-4">
           <div class="flex flex-col gap-1">
             <h2 class="text-lg font-semibold text-slate-300 flex items-center gap-2">
@@ -2166,20 +2269,6 @@ function countCrashEvents(entries: string[]): number {
                 <span class="text-slate-600">·</span>
                 <span>Uptime</span>
                 <span class="font-mono text-slate-400">{{ serialUptimeLabel }}</span>
-              </template>
-            </div>
-            <div
-              v-if="networkLogActive"
-              class="flex items-center gap-1 pl-4 text-xs text-slate-500"
-            >
-              <span>UDP logs</span>
-              <span class="font-mono text-slate-300">{{ networkUdpTarget }}</span>
-              <span class="text-slate-500">on</span>
-              <span class="font-mono text-slate-400">5514</span>
-              <template v-if="networkUptimeLabel">
-                <span class="text-slate-600">·</span>
-                <span>Uptime</span>
-                <span class="font-mono text-slate-400">{{ networkUptimeLabel }}</span>
               </template>
             </div>
           </div>
@@ -2275,17 +2364,6 @@ function countCrashEvents(entries: string[]): number {
                 <path d="M8 13h4"></path>
                 <path d="M8 17h3"></path>
                 <path d="m14 14 4 2.5-4 2.5z"></path>
-              </svg>
-            </button>
-            <button
-              v-if="activeMode === 'network' && isNetworkUdpMonitoring"
-              @click="stopNetworkUdpMonitor"
-              class="p-1.5 rounded-md border transition-all border-indigo-500 bg-indigo-500/20 text-indigo-400 hover:text-indigo-200"
-              title="Stop monitor"
-              aria-label="Stop monitor"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
               </svg>
             </button>
             <button @click="clearActivityLog" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
@@ -2834,55 +2912,39 @@ function countCrashEvents(entries: string[]): number {
         </div>
       </div>
 
-      <div v-if="activeMode === 'network' && !isNetworkUdpMonitoring" :class="['flex flex-col h-full overflow-hidden', loraInventoryFullscreen ? 'gap-4' : 'gap-6']">
-        <div :class="['glass-card flex flex-col text-left shrink-0', loraInventoryFullscreen ? 'p-4 gap-3' : 'p-5 gap-4']">
+      <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-4">
+        <div class="glass-card flex flex-col text-left shrink-0 p-4 gap-3">
           <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div>
+            <div class="min-w-0">
               <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-                Network Inventory
+                Fleet
               </h2>
-              <p class="mt-1 text-xs text-slate-400">
-                Use a USB-connected LoRa gateway to scan remotes and build the maintenance table.
+              <p class="mt-1 text-xs text-slate-400 max-w-3xl">
+                {{ fleetGatewayStatusLabel }} · {{ selectedPort || 'no USB gateway selected' }} · {{ loraInventoryProgressLabel }}
               </p>
             </div>
-            <div class="flex flex-wrap gap-3">
-              <button
-                @click="loadNetworkGateway"
-                :disabled="isNetworkGatewayLoading || !selectedPort"
-                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-              >
-                {{ isNetworkGatewayLoading ? 'Loading...' : 'Load gateway' }}
-              </button>
+            <div class="flex flex-wrap items-center justify-end gap-3">
+              <span :class="['rounded border px-2 py-1 text-[10px] font-bold', firmwareServerInfo ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+                Firmware server {{ firmwareServerInfo ? 'on' : 'off' }}
+              </span>
               <button
                 @click="isLoraInventoryScanning ? cancelLoraInventoryScan() : startLoraInventoryScan()"
-                :disabled="isNetworkGatewayLoading || !selectedPort"
+                :disabled="fleetScanDisabled"
                 class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
-                {{ isLoraInventoryScanning ? 'Stop scan' : 'Scan LoRa' }}
-              </button>
-              <button
-                @click="loraInventoryFullscreen = !loraInventoryFullscreen"
-                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
-              >
-                {{ loraInventoryFullscreen ? 'Exit full screen' : 'Expand devices' }}
+                {{ isLoraInventoryScanning ? 'Stop scan' : 'Scan Fleet' }}
               </button>
               <button
                 @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
                 :disabled="isFirmwareServerStarting"
                 class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
-                {{ firmwareServerInfo ? 'Stop firmware server' : (isFirmwareServerStarting ? 'Starting...' : 'Start firmware server') }}
-              </button>
-              <button
-                @click="startNetworkUdpListener"
-                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
-              >
-                Listen for UDP logs
+                {{ firmwareServerInfo ? 'Stop server' : (isFirmwareServerStarting ? 'Starting...' : 'Start server') }}
               </button>
             </div>
           </div>
 
-          <div v-if="!loraInventoryFullscreen" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">USB gateway</label>
               <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
@@ -2917,28 +2979,20 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="text-xs text-slate-400">
-            {{ networkStatusMessage }} <span class="text-slate-500">{{ loraInventoryProgressLabel }}</span>
+          <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+            <span>{{ networkStatusMessage }}</span>
+            <span v-if="firmwareServerInfo" class="font-mono text-slate-500 truncate">{{ firmwareServerInfo.filename }} · {{ firmwareServerInfo.urls[0] }}</span>
           </div>
         </div>
 
-        <div :class="['glass-card p-4 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden', loraInventoryFullscreen ? 'min-h-[70vh]' : '']">
+        <div class="glass-card p-4 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h2 class="text-lg font-bold text-slate-300">LoRa devices</h2>
-              <div v-if="loraInventoryFullscreen" class="mt-1 text-xs text-slate-500">
-                {{ networkStatusMessage }} <span class="text-slate-600">{{ loraInventoryProgressLabel }}</span>
-              </div>
+              <h2 class="text-lg font-bold text-slate-300">Devices</h2>
+              <div class="mt-1 text-xs text-slate-500">Fleet rows are expanded by default; actions are per device.</div>
             </div>
             <div class="flex items-center gap-3">
               <div class="text-xs text-slate-500">{{ loraInventory.length }} found · {{ selectedLoraInventoryCount }} selected</div>
-              <button
-                v-if="loraInventoryFullscreen"
-                @click="loraInventoryFullscreen = false"
-                class="glass-input m-0 h-9 px-3 hover:bg-white/10 text-xs font-bold"
-              >
-                Exit full screen
-              </button>
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
@@ -2955,12 +3009,12 @@ function countCrashEvents(entries: string[]): number {
                   <th class="px-3 py-2 text-left font-semibold">MQTT</th>
                   <th class="px-3 py-2 text-left font-semibold">RSSI</th>
                   <th class="px-3 py-2 text-left font-semibold">Age</th>
-                  <th class="px-3 py-2 text-left font-semibold">OTA</th>
+                  <th class="px-3 py-2 text-left font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="11" class="px-3 py-8 text-center text-slate-600">Load a USB gateway and scan LoRa to discover remotes.</td>
+                  <td colspan="11" class="px-3 py-8 text-center text-slate-600">Select a USB gateway and scan the fleet to discover remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -2982,6 +3036,7 @@ function countCrashEvents(entries: string[]): number {
                   <td class="px-3 py-2 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
                   <td class="px-3 py-2 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
                   <td class="px-3 py-2">
+                    <div class="flex items-center gap-2">
                     <button
                       @click="flashLoraRemote(device)"
                       :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting"
@@ -2989,49 +3044,34 @@ function countCrashEvents(entries: string[]): number {
                     >
                       {{ remoteOtaBusyAddress === device.address ? 'Flashing...' : 'Flash' }}
                     </button>
+                    <button
+                      @click="startFleetUdpLogs(device)"
+                      :disabled="remoteUdpBusyAddress !== null || !fleetLogsAvailable(device)"
+                      class="glass-input m-0 h-7 px-3 hover:bg-white/10 text-[10px] font-bold disabled:opacity-50"
+                      :title="fleetLogsAvailable(device) ? 'Enable and show UDP logs' : 'Needs confirmed WiFi connection and IP from fleet status'"
+                    >
+                      {{ remoteUdpBusyAddress === device.address ? 'Starting...' : 'Logs' }}
+                    </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+          <div v-if="isNetworkUdpMonitoring" class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div class="text-xs font-bold text-slate-300">UDP logs · {{ networkUdpTarget || 'Fleet' }}</div>
+              <button @click="stopNetworkUdpMonitor" class="glass-input m-0 h-8 px-3 hover:bg-white/10 text-xs font-bold">Stop logs</button>
+            </div>
+            <div class="max-h-44 overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400">
+              <div v-for="(log, i) in networkLogs.slice(-200)" :key="i">{{ log }}</div>
+              <div v-if="networkLogs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
+            </div>
+          </div>
         </div>
 
-        <div v-if="!loraInventoryFullscreen" class="glass-card p-5 flex flex-col gap-4 text-left shrink-0 max-h-[38vh] overflow-auto custom-scrollbar">
-          <div class="flex items-center justify-between gap-3">
-            <h2 class="text-xl font-bold text-slate-300">Firmware pull server</h2>
-            <span :class="['rounded border px-2 py-1 text-[10px] font-bold', firmwareServerInfo ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-              {{ firmwareServerInfo ? 'Running' : 'Stopped' }}
-            </span>
-          </div>
-
-          <div v-if="!firmwareServerInfo" class="rounded-md border border-slate-800 bg-slate-900/30 p-4 text-sm text-slate-400">
-            Use a row's <span class="font-mono text-slate-300">Flash</span> action to start the firmware server and trigger a remote pull. The firmware binary is served over WiFi; LoRa only carries the small trigger.
-          </div>
-
-          <div v-else class="grid grid-cols-1 gap-3 text-xs">
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">File</div>
-              <div class="font-mono text-slate-200 break-all">{{ firmwareServerInfo.filename }}</div>
-            </div>
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">URL</div>
-              <div v-for="url in firmwareServerInfo.urls" :key="url" class="font-mono text-slate-200 break-all">{{ url }}</div>
-            </div>
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">SHA256</div>
-              <div class="font-mono text-slate-200 break-all">{{ firmwareServerInfo.sha256 }}</div>
-            </div>
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">Size</div>
-              <div class="font-mono text-slate-200">{{ formatBytes(firmwareServerInfo.size_bytes) }}</div>
-            </div>
-          </div>
-
-          <div class="rounded-md border border-indigo-500/20 bg-indigo-500/10 p-4 text-xs text-slate-300">
-            MQTT local OTA payload: <span class="font-mono">{"url":"http://.../firmware.bin","sha256":"..."}</span> to <span class="font-mono">&lt;topic_root&gt;/lrs-&lt;chipid&gt;/ota_pull</span>.
-          </div>
-        </div>
-      </div>    </div>
+      </div>
+    </div>
 
     <!-- Premium Toast Notification -->
     <Transition name="toast">

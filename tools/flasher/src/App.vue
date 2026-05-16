@@ -195,7 +195,7 @@ watch(activeMode, (mode) => {
           @click="activeMode = 'network'"
           :class="['m-0 w-1/3 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
         >
-          Network
+          Fleet
         </button>
       </div>
       <div class="flex gap-4">

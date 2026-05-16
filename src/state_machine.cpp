@@ -71,7 +71,7 @@ constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
 constexpr size_t kProvChunkBitmapMax = 31;
 constexpr uint8_t kProvAddressMin = 1;
-constexpr uint8_t kProvAddressMax = 32;
+constexpr uint8_t kProvAddressMax = Settings::kAddressListCap;
 constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
 constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
@@ -1568,6 +1568,9 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
     return false;
   }
   resetProvisioningStorage();
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    provisioned_addrs_[i] = ProvisionedAddressEntry{};
+  }
 
   lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
   return true;
@@ -1807,9 +1810,6 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     ProvisioningDevice &d = prov_devices_[i];
     if (!d.in_use) continue;
     uint8_t preferred = preferredProvisionedAddressForChip(d.chip_id);
-    if (preferred == 0 && !d.address_conflict && d.current_address >= kProvAddressMin && d.current_address <= kProvAddressMax) {
-      preferred = d.current_address;
-    }
     if (preferred >= kProvAddressMin && preferred <= kProvAddressMax && !used[preferred]) {
       d.assigned_address = preferred;
       used[d.assigned_address] = true;

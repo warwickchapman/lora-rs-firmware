@@ -15,12 +15,13 @@ Serial mode is the original guided workflow:
 - remember the last monitor-after-flash and erase-before-flash checkbox states
 - read and copy device identity/factory-password details
 
-### Network
+### Fleet
 
-Network mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
+Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 
-- loads a selected USB-connected LRS device as the LoRa gateway
-- scans remotes through the gateway with `start_lora_inventory`
+- loads a selected USB-connected LRS device as the LoRa gateway, including the factory-derived admin password needed for Fleet actions
+- scans the supported LRS remote range through the gateway with `start_lora_inventory`
+- refuses Fleet scans from factory-default gateways until Pair Devices has commissioned the gateway with a secure fleet key
 - shows discovered remotes in a dense inventory table with LoRa address, role/mode, WiFi state, link RSSI/freshness, and OTA eligibility
 - starts a temporary local firmware file server from the selected release/local `.bin`
 - calculates and displays the firmware SHA256 before devices are commanded to pull it
@@ -29,7 +30,7 @@ Network mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 - shows the MQTT `ota_pull` payload shape for online devices
 - listens for UDP logs on fixed port `5514`
 
-Network mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. The current inventory table uses the compact encrypted LoRa poll response, so firmware version, chip ID, IP address, and MQTT state remain `unsupported`/`unknown` until the bounded maintenance-status response is added. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `remote_ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
+Fleet mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. The current inventory table uses the compact encrypted LoRa poll response, so firmware version, chip ID, IP address, and MQTT state remain `unsupported`/`unknown` until the bounded maintenance-status response is added. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
 
 ## EasyPair foundation
 
@@ -44,4 +45,4 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 
 Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and EasyPair. Switching away from USB Cable stops the serial monitor so Pair Devices can take the selected gateway port cleanly. USB Cable and Pair Devices use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Pair Devices WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
-The app opens on Pair Devices. The existing Serial and Network tools remain available as USB Cable and Network maintenance modes for flashing, local admin, firmware serving, and log viewing.
+The app opens on Pair Devices. The existing Serial and Fleet tools remain available as USB Cable and Fleet maintenance modes for flashing, local admin, firmware serving, and log viewing.

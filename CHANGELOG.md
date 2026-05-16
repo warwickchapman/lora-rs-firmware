@@ -14,10 +14,15 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Firmware serial admin now exposes gateway-driven LoRa inventory commands (`start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`) using bounded encrypted poll probes instead of HTTP discovery.
 - Flasher Network mode now has a dense LoRa inventory table driven by a selected USB gateway, with compact rows for address, role/mode, WiFi state, link RSSI/freshness, and OTA eligibility.
 - Flasher Network mode now starts a temporary local firmware file server and shows operator-ready OTA pull details, including reachable URLs, SHA256, size, and the MQTT `ota_pull` payload to send to online devices.
+- Flasher Fleet mode replaces the old Network tab with a Winbox-style fleet header and expanded device table; firmware serving and UDP logging are now status/per-device actions instead of separate primary panes.
 
 ### Fixed
 - Firmware now disables Soft AP as soon as STA WiFi connects and only brings Soft AP back after STA disconnect/failure when disconnected fallback is enabled.
 - Flasher now keeps one per-port serial device state shared by USB Cable and Pair Devices, so device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks stay consistent when switching tabs on the same selected USB port.
+- Flasher/Firmware Fleet scan now refuses uncommissioned or factory-key gateways with a clear commissioning message instead of showing an active scan stuck at `0 probes sent`.
+- Flasher Fleet scan now loads the selected gateway identity itself and forces a fresh gateway status after pairing, so operators no longer need to visit USB Cable first or fight stale factory-default state after commissioning.
+- Flasher Fleet scan now limits the default LRS gateway inventory sweep to the supported 12 remote addresses instead of wasting airtime probing the full `1..254` LoRa address range.
+- Firmware EasyPair address allocation now assigns remotes from the supported `1..12` range without preserving stale/current remote addresses, so a fresh one-remote pairing starts at LoRa address `1`.
 - Flasher Pair WiFi now adopts the gateway's serial-admin WiFi status when available, so a gateway that is already connected shows as connected without forcing another WiFi scan or `Connect Gateway` action.
 - Flasher Pair WiFi provisioning now requires the USB gateway to confirm it is connected to the selected WiFi network before exposing `Send to Remotes`, avoiding a dead-end remote-send action when the gateway has not joined WiFi yet.
 - Flasher USB Cable local admin now avoids the stale Phase 1A firmware warning once status/config can load, and the USB Cable pane scrolls so expanded config controls remain reachable.

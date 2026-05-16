@@ -983,6 +983,19 @@ void SerialAdmin::handleStartLoraInventory(JsonDocument &doc) {
     sendError("start_lora_inventory", "runtime_unavailable", id);
     return;
   }
+  if (config_ == nullptr) {
+    sendError("start_lora_inventory", "config_unavailable", id);
+    return;
+  }
+  const auto &cfg = config_->settings();
+  if (!cfg.commissioned) {
+    sendError("start_lora_inventory", "not_commissioned", id);
+    return;
+  }
+  if (isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+    sendError("start_lora_inventory", "factory_fleet_key", id);
+    return;
+  }
   int start = doc["start_address"] | 1;
   int end = doc["end_address"] | Settings::kAddressListCap;
   uint16_t intervalMs = static_cast<uint16_t>(doc["interval_ms"] | 250);

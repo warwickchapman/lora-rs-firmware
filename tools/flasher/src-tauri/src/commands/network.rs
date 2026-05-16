@@ -39,6 +39,14 @@ pub struct FirmwareServerInfo {
 }
 
 #[tauri::command]
+pub async fn local_udp_log_hosts() -> Result<Vec<String>, String> {
+    Ok(network::local_lan_subnets()?
+        .into_iter()
+        .map(|s| s.address)
+        .collect())
+}
+
+#[tauri::command]
 pub async fn start_firmware_file_server(
     app: AppHandle,
     state: State<'_, FirmwareServerState>,
