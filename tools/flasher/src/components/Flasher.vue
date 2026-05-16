@@ -260,6 +260,7 @@ const pairWifiPassword = ref('');
 const showPairWifiPassword = ref(false);
 const isWifiScanning = ref(false);
 const isWifiApplying = ref(false);
+const wifiApplyAttemptId = ref(0);
 const isFleetWifiSending = ref(false);
 const isIdentifying = ref(false);
 const identifyTimer = ref<ReturnType<typeof window.setTimeout> | null>(null);
@@ -1800,11 +1801,26 @@ async function refreshGatewayStatusForPair(): Promise<boolean> {
   return false;
 }
 
-async function waitForGatewayWifiConnection(ssid: string, timeoutMs = 45000): Promise<SerialAdminStatus> {
+function cancelGatewayWifiConnect(reason = 'credentials changed') {
+  if (!isWifiApplying.value) return;
+  wifiApplyAttemptId.value += 1;
+  isWifiApplying.value = false;
+  pushPairLog(`Gateway WiFi connection cancelled: ${reason}.`);
+}
+
+function assertGatewayWifiAttemptActive(attemptId: number) {
+  if (attemptId !== wifiApplyAttemptId.value || !isWifiApplying.value) {
+    throw new Error('gateway_wifi_cancelled');
+  }
+}
+
+async function waitForGatewayWifiConnection(ssid: string, attemptId: number, timeoutMs = 15000): Promise<SerialAdminStatus> {
   const started = Date.now();
   let lastStatus: SerialAdminStatus | null = null;
   while (Date.now() - started < timeoutMs) {
+    assertGatewayWifiAttemptActive(attemptId);
     const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    assertGatewayWifiAttemptActive(attemptId);
     lastStatus = out;
     const wifi = out.wifi;
     const wifiStatus = wifi?.status?.trim().toLowerCase() || '';
@@ -1816,7 +1832,7 @@ async function waitForGatewayWifiConnection(ssid: string, timeoutMs = 45000): Pr
     }
     const label = wifi?.status || 'connecting';
     pushPairLog(`Waiting for gateway WiFi (${label})...`);
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
   const detail = lastStatus?.wifi?.status ? `last status: ${lastStatus.wifi.status}` : 'no status received';
   throw new Error(`gateway did not confirm WiFi connection (${detail})`);
@@ -1829,6 +1845,8 @@ async function connectGatewayWifi() {
     notify('Select a WiFi network and load the gateway password first');
     return;
   }
+  const attemptId = wifiApplyAttemptId.value + 1;
+  wifiApplyAttemptId.value = attemptId;
   isWifiApplying.value = true;
   clearGatewayWifiReady();
   pushPairLog(`Saving WiFi credentials on gateway for ${ssid}...`);
@@ -1838,8 +1856,10 @@ async function connectGatewayWifi() {
       wifi_sta_ssid: ssid,
       wifi_sta_password: pairWifiPassword.value
     }, 10000);
+    assertGatewayWifiAttemptActive(attemptId);
     pushPairLog('Gateway WiFi saved. Waiting for connection confirmation...');
-    const status = await waitForGatewayWifiConnection(ssid);
+    const status = await waitForGatewayWifiConnection(ssid, attemptId);
+    assertGatewayWifiAttemptActive(attemptId);
     const state = serialDeviceState();
     if (state) {
       state.gatewayWifiReadySsid = ssid;
@@ -1847,11 +1867,14 @@ async function connectGatewayWifi() {
     }
     pushPairLog(`Gateway connected to ${ssid} at ${activeSerialDevice.value?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
   } catch (e) {
+    if (String(e).includes('gateway_wifi_cancelled')) return;
     const msg = serialFeatureError('WiFi save', e);
     pushPairLog(msg);
     notify(msg);
   } finally {
-    isWifiApplying.value = false;
+    if (attemptId === wifiApplyAttemptId.value) {
+      isWifiApplying.value = false;
+    }
   }
 }
 
@@ -2063,6 +2086,11 @@ watch(networkLogs, () => {
     nextTick(() => scrollToBottom());
   }
 }, { deep: true });
+
+watch([pairWifiSsid, pairWifiPassword], ([nextSsid, nextPassword], [prevSsid, prevPassword]) => {
+  if (nextSsid === prevSsid && nextPassword === prevPassword) return;
+  cancelGatewayWifiConnect('WiFi credentials changed');
+});
 
 watch(activeMode, (mode, previousMode) => {
   nextTick(() => scrollToBottom());

@@ -1791,6 +1791,16 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   bool used[256]{};
   used[0] = true;
   used[255] = true;
+  auto addressBelongsToCurrentProvisioningDevice = [this](uint8_t address) {
+    if (address < kProvAddressMin || address > kProvAddressMax) return false;
+    for (size_t i = 0; i < prov_device_count_; ++i) {
+      const ProvisioningDevice &d = prov_devices_[i];
+      if (!d.in_use) continue;
+      if (d.current_address == address) return true;
+      if (d.assigned_address == address) return true;
+    }
+    return false;
+  };
   if (runtime_.local_address >= kProvAddressMin && runtime_.local_address <= kProvAddressMax) {
     used[runtime_.local_address] = true;
   }
@@ -1798,6 +1808,7 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     const PeerRuntime &peer = peers_[i];
     if (!peer.in_use) continue;
     if (peer.address >= kProvAddressMin && peer.address <= kProvAddressMax) {
+      if (addressBelongsToCurrentProvisioningDevice(peer.address)) continue;
       used[peer.address] = true;
     }
   }
