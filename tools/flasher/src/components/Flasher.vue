@@ -5,9 +5,11 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor';
+type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
+
+type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'system';
 
 interface SerialPort {
   port_name: string;
@@ -220,17 +222,26 @@ const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
 const NETWORK_FIRMWARE_PATH = '/firmware.bin';
 const LRS_REMOTE_SCAN_CAP = 12;
+const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
+  { key: 'general', label: 'General' },
+  { key: 'network', label: 'Network' },
+  { key: 'mqtt', label: 'MQTT' },
+  { key: 'sensors', label: 'Sensors' },
+  { key: 'system', label: 'System' },
+];
 
 const ports = ref<SerialPort[]>([]);
 const flashSelectedPort = ref('');
 const provisionSelectedPort = ref('');
 const fleetSelectedPort = ref('');
 const monitorSelectedPort = ref('');
+const settingsSelectedPort = ref('');
 const selectedPort = computed<string>({
   get() {
     if (activeMode.value === 'pair') return provisionSelectedPort.value;
     if (activeMode.value === 'network') return fleetSelectedPort.value;
     if (activeMode.value === 'monitor') return monitorSelectedPort.value;
+    if (activeMode.value === 'settings') return settingsSelectedPort.value;
     return flashSelectedPort.value;
   },
   set(port) {
@@ -240,6 +251,8 @@ const selectedPort = computed<string>({
       fleetSelectedPort.value = port;
     } else if (activeMode.value === 'monitor') {
       monitorSelectedPort.value = port;
+    } else if (activeMode.value === 'settings') {
+      settingsSelectedPort.value = port;
     } else {
       flashSelectedPort.value = port;
     }
@@ -280,17 +293,25 @@ const activeMonitorSsid = ref('');
 const networkStatusMessage = ref('Ready to scan the fleet.');
 const monitorStatusMessage = ref('Select a USB gateway and refresh monitor data.');
 const monitorTransport = ref<'serial' | 'mqtt'>('serial');
-const monitorMqttHost = ref('');
+const monitorMqttHost = ref('venus.local');
 const monitorMqttPort = ref(1883);
 const monitorMqttUser = ref('');
 const monitorMqttPassword = ref('');
 const monitorMqttTopicRoot = ref('lora');
 const monitorMqttConnected = ref(false);
 const showMonitorMqttPassword = ref(false);
+const showMonitorMqttSettings = ref(false);
+const monitorMqttDraftHost = ref('venus.local');
+const monitorMqttDraftPort = ref(1883);
+const monitorMqttDraftUser = ref('');
+const monitorMqttDraftPassword = ref('');
+const monitorMqttDraftTopicRoot = ref('lora');
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const isMonitorRefreshing = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const monitorAutoRefresh = ref(false);
+const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
+const settingsTab = ref<SettingsTab>('general');
 const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
@@ -632,7 +653,7 @@ async function openLocalFileDialog() {
         extensions: ['bin']
       }]
     });
-    
+
     if (selected && typeof selected === 'string') {
       selectedLocalPath.value = selected;
       const filename = selected.split(/[\\/]/).pop();
@@ -773,6 +794,7 @@ function reconcileTabPortSelections(currentNames: string[], newPorts: string[], 
   provisionSelectedPort.value = ensureSelection(provisionSelectedPort.value, activeMode.value === 'pair');
   fleetSelectedPort.value = ensureSelection(fleetSelectedPort.value, activeMode.value === 'network');
   monitorSelectedPort.value = ensureSelection(monitorSelectedPort.value, activeMode.value === 'monitor');
+  settingsSelectedPort.value = ensureSelection(settingsSelectedPort.value, activeMode.value === 'settings');
 }
 
 function portLooksLikeLrsAdapter(port: SerialPort | undefined): boolean {
@@ -825,7 +847,7 @@ async function fetchFirmware() {
     // Maintain local selection if it exists
     const localEntry = firmwareVersions.value.find(v => v.startsWith('Local: '));
     firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : []), ...remoteVersions];
-    
+
     if (!selectedVersion.value && firmwareVersions.value.length > 1) {
       selectedVersion.value = firmwareVersions.value[1];
     }
@@ -1198,6 +1220,19 @@ function adoptMonitorMqttFromStatus(st: SerialAdminStatus | null) {
   monitorMqttTopicRoot.value = st.mqtt.topic_root || monitorMqttTopicRoot.value || 'lora';
 }
 
+function openMonitorMqttSettings() {
+  monitorMqttDraftHost.value = monitorMqttHost.value || 'venus.local';
+  monitorMqttDraftPort.value = Number(monitorMqttPort.value || 1883);
+  monitorMqttDraftUser.value = monitorMqttUser.value;
+  monitorMqttDraftPassword.value = monitorMqttPassword.value;
+  monitorMqttDraftTopicRoot.value = monitorMqttTopicRoot.value || 'lora';
+  showMonitorMqttSettings.value = true;
+}
+
+function closeMonitorMqttSettings() {
+  showMonitorMqttSettings.value = false;
+}
+
 async function refreshMonitorData() {
   if (!selectedPort.value || isMonitorRefreshing.value) return;
   isMonitorRefreshing.value = true;
@@ -1230,10 +1265,17 @@ function stopMonitorPolling() {
 }
 
 function toggleMonitorMqttConnection() {
+  monitorMqttHost.value = monitorMqttDraftHost.value.trim() || 'venus.local';
+  monitorMqttPort.value = Number(monitorMqttDraftPort.value || 1883);
+  monitorMqttUser.value = monitorMqttDraftUser.value;
+  monitorMqttPassword.value = monitorMqttDraftPassword.value;
+  monitorMqttTopicRoot.value = monitorMqttDraftTopicRoot.value.trim() || 'lora';
+  monitorTransport.value = 'mqtt';
   monitorMqttConnected.value = !monitorMqttConnected.value;
   monitorStatusMessage.value = monitorMqttConnected.value
     ? 'MQTT monitor configuration saved locally. Subscription backend is not active yet.'
     : 'MQTT monitor disconnected.';
+  showMonitorMqttSettings.value = false;
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
@@ -2297,11 +2339,11 @@ async function startFlash() {
   if (flashDisabled.value) return;
   if (!selectedPort.value || !selectedVersion.value) return;
   const flashPort = selectedPort.value;
-  
+
   isFlashing.value = true;
   noteMonitorReleasedForPort(flashPort, 'firmware flash needs this port');
   pushSerialLog('--- Preparing Firmware ---');
-  
+
   try {
     if (!hasActiveDeviceInfo.value) {
       pushSerialLog('Loading device information before flash...');
@@ -2311,17 +2353,17 @@ async function startFlash() {
 
     const isLocal = selectedVersion.value.startsWith('Local: ');
     const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
-    
+
     if (isLocal && !firmwarePath) throw new Error('Local file path missing');
 
-    const result = await invoke('flash_firmware', { 
+    const result = await invoke('flash_firmware', {
       port: flashPort,
       firmwarePath,
       region: isLocal ? null : region.value,
       eraseFirst: eraseBeforeFlash.value
     });
     pushSerialLog(result as string);
-    
+
     if (monitorAfterFlash.value) {
       await startSerialMonitor(flashPort, false);
     }
@@ -2482,10 +2524,10 @@ onMounted(async () => {
 
   refreshPorts();
   fetchFirmware();
-  
+
   unlistenFlash = await listen<LogEvent>('flash-log', (event) => {
     const rawMsg = event.payload.message;
-    // Split on both newlines and carriage returns to ensure progress updates 
+    // Split on both newlines and carriage returns to ensure progress updates
     // from esptool appear as fresh lines in our Activity Log.
     const lines = rawMsg.split(/[\r\n]+/);
     lines.forEach(line => {
@@ -2493,7 +2535,7 @@ onMounted(async () => {
       if (trimmed) pushSerialLog(trimmed);
     });
   });
-  
+
   unlistenMonitor = await listen<MonitorEvent>('monitor-log', (event) => {
     const rawLine = event.payload.line;
     const lines = rawLine.split(/[\r\n]+/);
@@ -2739,7 +2781,7 @@ function countCrashEvents(entries: string[]): number {
             <button @click="clearActivityLog" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
           </div>
         </div>
-        
+
         <div ref="logContainer" @scroll="handleLogScroll" class="flex-1 overflow-auto font-mono text-[9px] sm:text-[10px] pr-2 custom-scrollbar space-y-0.5 leading-tight tracking-tight whitespace-pre">
           <div v-for="(log, i) in activeLogs" :key="i" class="text-slate-400 border-l border-slate-700/50 pl-2 opacity-90">
             {{ log }}
@@ -3023,7 +3065,7 @@ function countCrashEvents(entries: string[]): number {
               </svg>
             </button>
           </div>
-          
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Region</label>
@@ -3095,163 +3137,6 @@ function countCrashEvents(entries: string[]): number {
           </div>
         </div>
 
-        <!-- Local Admin Panel -->
-        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h2 class="text-base font-bold text-slate-300">Local admin</h2>
-              <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
-            </div>
-            <div class="flex gap-2">
-              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                {{ isSerialAdminLoading ? 'Loading...' : 'Status' }}
-              </button>
-              <button @click="loadSerialAdminConfig" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                Load config
-              </button>
-            </div>
-          </div>
-
-          <div v-if="serialAdminIsFactoryDefault" class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-            Factory default: this device is not commissioned yet. Use Provision to assign its fleet key, role, address, and WiFi before treating it as an operational transmitter or receiver.
-          </div>
-
-          <div v-if="serialAdminStatus" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div class="rounded border border-white/10 bg-black/15 p-3">
-              <div class="text-slate-500">Firmware</div>
-              <div class="font-mono text-slate-200">{{ serialAdminStatus.fw_version || 'unknown' }}</div>
-            </div>
-            <div class="rounded border border-white/10 bg-black/15 p-3">
-              <div class="text-slate-500">Uptime</div>
-              <div class="font-mono text-slate-200">{{ formatUptime(serialAdminStatus.uptime_ms || 0) }}</div>
-            </div>
-            <div class="rounded border border-white/10 bg-black/15 p-3">
-              <div class="text-slate-500">Heap</div>
-              <div class="font-mono text-slate-200">{{ formatBytes(serialAdminStatus.heap_free) }}</div>
-            </div>
-            <div class="rounded border border-white/10 bg-black/15 p-3">
-              <div class="text-slate-500">MQTT</div>
-              <div class="font-mono text-slate-200">{{ serialAdminStatus.mqtt?.client_enabled ? 'enabled' : 'disabled' }}</div>
-            </div>
-            <div class="rounded border border-white/10 bg-black/15 p-3">
-              <div class="text-slate-500">State</div>
-              <div class="font-mono text-slate-200">{{ serialAdminIsFactoryDefault ? 'factory' : 'commissioned' }}</div>
-            </div>
-          </div>
-
-          <div v-if="serialAdminConfig" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div class="flex flex-col gap-1.5">
-              <label class="font-medium text-slate-400">Role</label>
-              <select v-model="serialAdminConfig.role_tx" class="glass-input h-10 appearance-none">
-                <option :value="true">Gateway / transmitter</option>
-                <option :value="false">Remote / receiver</option>
-              </select>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div class="flex flex-col gap-1.5">
-                <label class="font-medium text-slate-400">Local addr</label>
-                <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-10" />
-              </div>
-              <div class="flex flex-col gap-1.5">
-                <label class="font-medium text-slate-400">Remote addr</label>
-                <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-10" />
-              </div>
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <label class="font-medium text-slate-400">WiFi SSID</label>
-              <input v-model="serialAdminConfig.wifi_sta_ssid" class="glass-input h-10" placeholder="Leave blank for no WiFi" />
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="font-medium text-slate-400">New WiFi password</label>
-              <div class="flex gap-2">
-                <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" placeholder="Blank keeps existing password" />
-                <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-10 px-3 hover:bg-slate-700/70">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
-              </div>
-            </div>
-
-            <label class="flex items-center gap-2 text-slate-300">
-              <input v-model="serialAdminConfig.wifi_admin_enabled" type="checkbox" />
-              WiFi admin enabled
-            </label>
-            <label class="flex items-center gap-2 text-slate-300">
-              <input v-model="serialAdminConfig.sensor_temp_enabled" type="checkbox" />
-              DS18B20 temperature sensor enabled
-            </label>
-
-            <div class="grid grid-cols-2 gap-2">
-              <div class="flex flex-col gap-1.5">
-                <label class="font-medium text-slate-400">Sensor pin</label>
-                <input v-model.number="serialAdminConfig.sensor_temp_pin" type="number" min="0" max="16" class="glass-input h-10" />
-              </div>
-              <div class="flex flex-col gap-1.5">
-                <label class="font-medium text-slate-400">Report seconds</label>
-                <input v-model.number="serialAdminConfig.sensor_temp_interval_s" type="number" min="5" max="3600" class="glass-input h-10" />
-              </div>
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <label class="font-medium text-slate-400">MQTT host</label>
-              <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-10" placeholder="venus.local" />
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div class="flex flex-col gap-1.5">
-                <label class="font-medium text-slate-400">MQTT port</label>
-                <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-10" />
-              </div>
-              <div class="flex flex-col gap-1.5">
-                <label class="font-medium text-slate-400">Topic root</label>
-                <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-10" />
-              </div>
-            </div>
-
-            <label class="flex items-center gap-2 text-slate-300">
-              <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
-              MQTT client enabled
-            </label>
-            <label class="flex items-center gap-2 text-slate-300">
-              <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
-              MQTT control enabled
-            </label>
-
-            <div class="flex flex-col gap-1.5">
-              <label class="font-medium text-slate-400">MQTT user</label>
-              <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-10" />
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="font-medium text-slate-400">New MQTT password</label>
-              <div class="flex gap-2">
-                <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" placeholder="Blank keeps existing password" />
-                <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-10 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
-              </div>
-            </div>
-
-            <div class="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
-              <button @click="saveSerialAdminConfig" :disabled="serialAdminDisabled || isSerialAdminSaving" class="primary-btn h-10 px-5 text-xs font-bold disabled:opacity-60">
-                {{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}
-              </button>
-              <button @click="rebootSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                Reboot
-              </button>
-              <label class="flex items-center gap-2 text-slate-400">
-                <input v-model="serialFactoryKeepFleet" type="checkbox" />
-                Keep fleet key
-              </label>
-              <label class="flex items-center gap-2 text-slate-400">
-                <input v-model="serialFactoryKeepWifi" type="checkbox" />
-                Keep WiFi
-              </label>
-              <button @click="factoryResetSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-10 px-4 hover:bg-red-500/15 text-xs font-bold text-red-200 disabled:opacity-60">
-                Factory reset
-              </button>
-            </div>
-          </div>
-
-          <p v-if="hasActiveDeviceInfo && !serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading" class="text-xs text-slate-500">
-            Load status or config to inspect this device over USB serial admin.
-          </p>
-        </div>
-
         <!-- Device Details Panel -->
         <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
           <div class="flex items-center justify-between">
@@ -3262,7 +3147,7 @@ function countCrashEvents(entries: string[]): number {
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>
-          
+
           <div class="space-y-1">
             <div v-for="[key, val] in orderedDeviceInfoEntries" :key="key" class="group flex items-center justify-between text-xs border-b border-white/5 py-1.5 hover:bg-white/5 px-2 -mx-2 rounded transition-colors">
               <span class="text-slate-500">{{ formatLabel(key) }}</span>
@@ -3280,6 +3165,208 @@ function countCrashEvents(entries: string[]): number {
               <span class="animate-spin text-2xl">◌</span>
               Reading device descriptors...
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="activeMode === 'settings'" class="flex flex-col h-full min-h-0 overflow-hidden gap-3 text-left">
+        <div class="glass-card flex flex-col gap-3 p-3 shrink-0">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0">
+              <h2 class="text-base font-bold text-cyan-300">Settings</h2>
+              <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+                {{ isLoadingInfo ? 'Reading...' : 'Get device info' }}
+              </button>
+              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+                {{ isSerialAdminLoading ? 'Loading...' : 'Status' }}
+              </button>
+              <button @click="loadSerialAdminConfig" :disabled="serialAdminDisabled" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+                Load config
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_10rem_10rem]">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Device</label>
+              <div class="flex gap-2">
+                <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
+                  <option value="" disabled>Select USB device</option>
+                  <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
+                    {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
+                  </option>
+                  <option v-if="ports.length === 0" disabled>Scanning...</option>
+                </select>
+                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-9 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Transport</label>
+              <select v-model="settingsTransport" class="glass-input h-9 appearance-none">
+                <option value="serial">Serial</option>
+                <option value="mqtt" disabled>MQTT later</option>
+                <option value="lora" disabled>LoRa gateway later</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Admin path</label>
+              <div class="glass-input h-9 flex items-center text-slate-400">
+                {{ settingsTransport === 'serial' ? 'USB serial admin' : 'Not available yet' }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="flex shrink-0 overflow-x-auto border-b border-slate-800 bg-slate-900/50 text-xs font-bold">
+            <button
+              v-for="tab in SETTINGS_TABS"
+              :key="tab.key"
+              @click="settingsTab = tab.key"
+              :class="['m-0 h-9 rounded-none border-r border-slate-800 px-4 transition-colors', settingsTab === tab.key ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+
+          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar p-3">
+            <div v-if="serialAdminIsFactoryDefault" class="mb-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-100">
+              Factory default: this device is not commissioned yet. Use Provision before treating it as an operational transmitter or receiver.
+            </div>
+
+            <div v-if="!hasActiveDeviceInfo" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
+              Select a USB device and read device info before loading or saving settings.
+            </div>
+
+            <div v-if="settingsTab === 'general'" class="flex flex-col gap-3">
+              <div v-if="serialAdminStatus" class="grid grid-cols-2 gap-2 text-xs xl:grid-cols-5">
+                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+                  <div class="text-slate-500">Firmware</div>
+                  <div class="font-mono text-slate-200">{{ serialAdminStatus.fw_version || 'unknown' }}</div>
+                </div>
+                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+                  <div class="text-slate-500">Uptime</div>
+                  <div class="font-mono text-slate-200">{{ formatUptime(serialAdminStatus.uptime_ms || 0) }}</div>
+                </div>
+                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+                  <div class="text-slate-500">Heap</div>
+                  <div class="font-mono text-slate-200">{{ formatBytes(serialAdminStatus.heap_free) }}</div>
+                </div>
+                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+                  <div class="text-slate-500">Mode</div>
+                  <div class="font-mono text-slate-200">{{ serialAdminStatus.mode || '-' }}</div>
+                </div>
+                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+                  <div class="text-slate-500">State</div>
+                  <div class="font-mono text-slate-200">{{ serialAdminIsFactoryDefault ? 'factory' : 'commissioned' }}</div>
+                </div>
+              </div>
+
+              <div v-if="serialAdminConfig" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+                <label class="self-center text-right font-semibold text-slate-300">Role</label>
+                <select v-model="serialAdminConfig.role_tx" class="glass-input h-9 appearance-none">
+                  <option :value="true">Gateway / transmitter</option>
+                  <option :value="false">Remote / receiver</option>
+                </select>
+                <label class="self-center text-right font-semibold text-slate-300">Local addr</label>
+                <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Remote addr</label>
+                <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-9" />
+              </div>
+            </div>
+
+            <div v-if="settingsTab === 'network'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+              <template v-if="serialAdminConfig">
+                <label class="self-center text-right font-semibold text-slate-300">WiFi SSID</label>
+                <input v-model="serialAdminConfig.wifi_sta_ssid" class="glass-input h-9" placeholder="Leave blank for no WiFi" />
+                <label class="self-center text-right font-semibold text-slate-300">New WiFi password</label>
+                <div class="flex gap-2">
+                  <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
+                  <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
+                </div>
+                <label class="self-center text-right font-semibold text-slate-300">WiFi admin</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.wifi_admin_enabled" type="checkbox" />
+                  Enabled
+                </label>
+              </template>
+            </div>
+
+            <div v-if="settingsTab === 'mqtt'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+              <template v-if="serialAdminConfig">
+                <label class="self-center text-right font-semibold text-slate-300">MQTT host</label>
+                <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-9" placeholder="venus.local" />
+                <label class="self-center text-right font-semibold text-slate-300">MQTT port</label>
+                <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
+                <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
+                  Enabled
+                </label>
+                <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
+                  Enabled
+                </label>
+                <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
+                <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
+                <div class="flex gap-2">
+                  <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
+                  <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                </div>
+              </template>
+            </div>
+
+            <div v-if="settingsTab === 'sensors'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+              <template v-if="serialAdminConfig">
+                <label class="self-center text-right font-semibold text-slate-300">DS18B20</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.sensor_temp_enabled" type="checkbox" />
+                  Temperature sensor enabled
+                </label>
+                <label class="self-center text-right font-semibold text-slate-300">Sensor pin</label>
+                <input v-model.number="serialAdminConfig.sensor_temp_pin" type="number" min="0" max="16" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Report seconds</label>
+                <input v-model.number="serialAdminConfig.sensor_temp_interval_s" type="number" min="5" max="3600" class="glass-input h-9" />
+              </template>
+            </div>
+
+            <div v-if="settingsTab === 'system'" class="flex flex-col gap-3 text-xs">
+              <div class="rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
+                Save applies the loaded settings over the selected transport. Reboot and factory reset use the same authenticated serial-admin path for now.
+              </div>
+              <div class="flex flex-wrap items-center gap-3">
+                <button @click="saveSerialAdminConfig" :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig" class="primary-btn h-9 px-4 text-xs font-bold disabled:opacity-60">
+                  {{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}
+                </button>
+                <button @click="rebootSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-9 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+                  Reboot
+                </button>
+                <label class="flex items-center gap-2 text-slate-400">
+                  <input v-model="serialFactoryKeepFleet" type="checkbox" />
+                  Keep fleet key
+                </label>
+                <label class="flex items-center gap-2 text-slate-400">
+                  <input v-model="serialFactoryKeepWifi" type="checkbox" />
+                  Keep WiFi
+                </label>
+                <button @click="factoryResetSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-9 px-4 hover:bg-red-500/15 text-xs font-bold text-red-200 disabled:opacity-60">
+                  Factory reset
+                </button>
+              </div>
+            </div>
+
+            <p v-if="hasActiveDeviceInfo && !serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading" class="mt-3 text-xs text-slate-500">
+              Load status or config to inspect this device over USB serial admin.
+            </p>
           </div>
         </div>
       </div>
@@ -3310,10 +3397,10 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2">
+          <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1.5fr)_12rem_auto_auto]">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">USB gateway</label>
-              <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+              <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
                 <option value="" disabled>Select USB gateway</option>
                 <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                   {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
@@ -3322,48 +3409,21 @@ function countCrashEvents(entries: string[]): number {
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Transport</label>
-              <select v-model="monitorTransport" class="glass-input h-10 appearance-none">
+              <select v-model="monitorTransport" class="glass-input h-9 appearance-none">
                 <option value="serial">Serial</option>
                 <option value="mqtt">MQTT</option>
               </select>
             </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Broker host</label>
-              <input v-model="monitorMqttHost" class="glass-input h-10" placeholder="venus.local" />
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Broker port</label>
-              <input v-model.number="monitorMqttPort" class="glass-input h-10" type="number" min="1" max="65535" />
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Topic root</label>
-              <input v-model="monitorMqttTopicRoot" class="glass-input h-10" />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] gap-2 items-end">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">MQTT user</label>
-              <input v-model="monitorMqttUser" class="glass-input h-10" />
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">MQTT password</label>
-              <div class="flex gap-2">
-                <input v-model="monitorMqttPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-10 min-w-0 flex-1" />
-                <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input m-0 h-10 w-14 shrink-0 hover:bg-slate-700/70 text-xs font-bold">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
-              </div>
-            </div>
-            <div class="flex">
+            <div class="flex flex-col justify-end">
               <button
-                @click="toggleMonitorMqttConnection"
-                :disabled="monitorTransport !== 'mqtt' || !monitorMqttHost"
-                class="glass-input m-0 h-10 min-w-24 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
+                @click="openMonitorMqttSettings"
+                class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold"
               >
-                {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
+                MQTT settings
               </button>
             </div>
-            <div class="flex">
-              <span :class="['inline-flex h-10 min-w-28 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+            <div class="flex flex-col justify-end">
+              <span :class="['inline-flex h-9 min-w-28 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
                 MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
               </span>
             </div>
@@ -3440,6 +3500,65 @@ function countCrashEvents(entries: string[]): number {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="showMonitorMqttSettings"
+        class="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4"
+        @click.self="closeMonitorMqttSettings"
+      >
+        <div class="glass-card w-full max-w-2xl overflow-hidden text-left">
+          <div class="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-3 py-2">
+            <div>
+              <h2 class="text-sm font-bold text-cyan-300">Monitor MQTT Settings</h2>
+              <p class="mt-0.5 text-xs text-slate-500">Used when Monitor transport is set to MQTT.</p>
+            </div>
+            <button
+              @click="closeMonitorMqttSettings"
+              class="glass-input h-8 w-8 p-0 hover:bg-slate-700/70"
+              title="Close MQTT settings"
+              aria-label="Close MQTT settings"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-2 p-3 text-xs">
+            <label class="self-center text-right font-semibold text-slate-300">Broker host</label>
+            <input v-model="monitorMqttDraftHost" class="glass-input h-9" placeholder="venus.local" />
+
+            <label class="self-center text-right font-semibold text-slate-300">Broker port</label>
+            <input v-model.number="monitorMqttDraftPort" class="glass-input h-9" type="number" min="1" max="65535" />
+
+            <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
+            <input v-model="monitorMqttDraftTopicRoot" class="glass-input h-9" />
+
+            <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
+            <input v-model="monitorMqttDraftUser" class="glass-input h-9" />
+
+            <label class="self-center text-right font-semibold text-slate-300">MQTT password</label>
+            <div class="flex gap-2">
+              <input v-model="monitorMqttDraftPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-9 min-w-0 flex-1" />
+              <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input h-9 w-14 hover:bg-slate-700/70 text-xs font-bold">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between border-t border-slate-800 bg-slate-950/30 px-3 py-2">
+            <span :class="['inline-flex h-8 items-center rounded border px-2 text-[10px] font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+              MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
+            </span>
+            <div class="flex gap-2">
+              <button @click="closeMonitorMqttSettings" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+              <button
+                @click="toggleMonitorMqttConnection"
+                :disabled="!monitorMqttDraftHost"
+                class="primary-btn h-8 px-3 text-xs font-bold disabled:opacity-50"
+              >
+                {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>

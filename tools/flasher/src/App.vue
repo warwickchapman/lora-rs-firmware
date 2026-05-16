@@ -17,12 +17,12 @@ const isTogglingWindowMode = ref(false);
 const WINDOW_MODE_KEY = 'flasher.windowMode';
 const MODE_STORAGE_KEY = 'thanda-flasher-active-mode';
 
-type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor';
+type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 function initialActiveMode(): ActiveMode {
   try {
     const saved = localStorage.getItem(MODE_STORAGE_KEY);
-    if (saved === 'pair' || saved === 'serial' || saved === 'network' || saved === 'monitor') return saved;
+    if (saved === 'pair' || saved === 'serial' || saved === 'network' || saved === 'monitor' || saved === 'settings') return saved;
     return 'serial';
   } catch {
     return 'serial';
@@ -179,30 +179,36 @@ watch(activeMode, (mode) => {
         </h1>
         <p class="text-slate-400 text-xs leading-none">{{ appVersion }}</p>
       </div>
-      <div class="flex min-w-[28rem] max-w-xl flex-1 overflow-hidden rounded border border-slate-700 bg-slate-900/70">
+      <div class="flex min-w-[34rem] max-w-2xl flex-1 overflow-hidden rounded border border-slate-700 bg-slate-900/70">
         <button
           @click="activeMode = 'serial'"
-          :class="['m-0 h-8 w-1/4 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'serial' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'serial' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Flash
         </button>
         <button
           @click="activeMode = 'pair'"
-          :class="['m-0 h-8 w-1/4 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'pair' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'pair' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Provision
         </button>
         <button
           @click="activeMode = 'network'"
-          :class="['m-0 h-8 w-1/4 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'network' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'network' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Fleet
         </button>
         <button
           @click="activeMode = 'monitor'"
-          :class="['m-0 h-8 w-1/4 rounded-none px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'monitor' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'monitor' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Monitor
+        </button>
+        <button
+          @click="activeMode = 'settings'"
+          :class="['m-0 h-8 w-1/5 rounded-none px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'settings' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+        >
+          Settings
         </button>
       </div>
       <div class="flex gap-2">
