@@ -597,6 +597,7 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.fw_major = node.fw_major;
   out.fw_minor = node.fw_minor;
   out.fw_patch = node.fw_patch;
+  out.uptime_ms = node.uptime_ms;
   out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
   out.poll_interval_ms = node.poll_interval_ms;
   const PollRuntime *poll = pollStateForIndex(index);
@@ -2049,11 +2050,17 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   if (mqtt_connected_) flags |= 0x08;
   if (runtime_.role_tx) flags |= 0x10;
   uint8_t payload[12]{};
-  encodeU32LE(payload, ESP.getChipId());
-  payload[4] = major;
-  payload[5] = minor;
-  payload[6] = patch;
-  payload[7] = flags;
+  const uint32_t chipId = ESP.getChipId() & 0xFFFFFFUL;
+  payload[0] = static_cast<uint8_t>(chipId & 0xFFU);
+  payload[1] = static_cast<uint8_t>((chipId >> 8) & 0xFFU);
+  payload[2] = static_cast<uint8_t>((chipId >> 16) & 0xFFU);
+  payload[3] = static_cast<uint8_t>(((major & 0x0FU) << 4) | (minor & 0x0FU));
+  payload[4] = patch;
+  payload[5] = flags;
+  uint32_t uptimeMinutes = millis() / 60000UL;
+  if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
+  payload[6] = static_cast<uint8_t>(uptimeMinutes & 0xFFU);
+  payload[7] = static_cast<uint8_t>((uptimeMinutes >> 8) & 0xFFU);
   payload[8] = ip[0];
   payload[9] = ip[1];
   payload[10] = ip[2];
@@ -2074,11 +2081,14 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   PeerRuntime *node = findOrCreatePeer(msg.src);
   if (node == nullptr) return false;
   const uint8_t *p = msg.raw_payload;
-  node->chip_id = decodeU32LE(p);
-  node->fw_major = p[4];
-  node->fw_minor = p[5];
-  node->fw_patch = p[6];
-  const uint8_t flags = p[7];
+  node->chip_id = static_cast<uint32_t>(p[0]) |
+                  (static_cast<uint32_t>(p[1]) << 8) |
+                  (static_cast<uint32_t>(p[2]) << 16);
+  node->fw_major = static_cast<uint8_t>((p[3] >> 4) & 0x0FU);
+  node->fw_minor = static_cast<uint8_t>(p[3] & 0x0FU);
+  node->fw_patch = p[4];
+  const uint8_t flags = p[5];
+  node->uptime_ms = (static_cast<uint32_t>(p[6]) | (static_cast<uint32_t>(p[7]) << 8)) * 60000UL;
   node->wifi_state_known = true;
   node->wifi_enabled = (flags & 0x01U) != 0U;
   node->wifi_connected_known = true;

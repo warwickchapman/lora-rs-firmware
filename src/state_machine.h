@@ -81,6 +81,7 @@ struct PeerStatusSnapshot {
   uint8_t fw_major = 0;
   uint8_t fw_minor = 0;
   uint8_t fw_patch = 0;
+  uint32_t uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
 };
 
@@ -347,6 +348,7 @@ class NodeStateMachine {
     uint8_t fw_major = 0;
     uint8_t fw_minor = 0;
     uint8_t fw_patch = 0;
+    uint32_t uptime_ms = 0;
     uint32_t wifi_last_confirm_ms = 0;
     bool wifi_pending = false;
     bool wifi_pending_enabled = true;

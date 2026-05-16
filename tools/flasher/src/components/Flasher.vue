@@ -91,11 +91,14 @@ interface LoraInventoryDevice {
   rssi?: number;
   downlink_rssi_known?: boolean;
   downlink_rssi?: number;
+  uptime_ms?: number;
   age_ms?: number;
   poll_pending?: boolean;
   ota_eligible?: boolean;
   ota_reason?: string;
   selected?: boolean;
+  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'unexpected_reboot';
+  row_state_until_ms?: number;
 }
 
 interface LoraInventoryStatus {
@@ -247,6 +250,7 @@ const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const isLoraInventoryScanning = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
+const fleetRowHistory = ref<Record<number, { uptimeMs?: number; fwVersion?: string; otaExpectedUntilMs?: number; rowState?: LoraInventoryDevice['row_state']; rowStateUntilMs?: number }>>({});
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
 const pairFleetKey = ref('');
@@ -970,12 +974,60 @@ async function loadNetworkGateway() {
   }
 }
 
+function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInventoryDevice {
+  const history = fleetRowHistory.value[row.address] || {};
+  let rowState = history.rowState;
+  let rowStateUntilMs = history.rowStateUntilMs;
+  const uptime = Number(row.uptime_ms || 0);
+  const previousUptime = Number(history.uptimeMs || 0);
+  const otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
+
+  if (previousUptime > 0 && uptime > 0 && uptime + 30000 < previousUptime) {
+    rowState = otaExpected ? 'ota_rebooted' : 'unexpected_reboot';
+    rowStateUntilMs = now + (otaExpected ? 20000 : 60000);
+  }
+  if (otaExpected && history.fwVersion && row.fw_version && history.fwVersion !== row.fw_version) {
+    rowState = 'ota_updated';
+    rowStateUntilMs = now + 30000;
+  }
+  if (rowStateUntilMs && rowStateUntilMs <= now) {
+    rowState = otaExpected ? 'ota_pending' : undefined;
+    rowStateUntilMs = otaExpected ? history.otaExpectedUntilMs : undefined;
+  }
+
+  fleetRowHistory.value[row.address] = {
+    ...history,
+    uptimeMs: uptime || history.uptimeMs,
+    fwVersion: row.fw_version || history.fwVersion,
+    rowState,
+    rowStateUntilMs
+  };
+  return { ...row, row_state: rowState, row_state_until_ms: rowStateUntilMs };
+}
+
+function fleetRowClass(device: LoraInventoryDevice): string {
+  if (device.row_state === 'unexpected_reboot') return 'bg-rose-950/50 ring-1 ring-rose-500/50';
+  if (device.row_state === 'ota_updated') return 'bg-emerald-950/40 ring-1 ring-emerald-500/40';
+  if (device.row_state === 'ota_rebooted') return 'bg-sky-950/40 ring-1 ring-sky-500/40';
+  if (device.row_state === 'ota_pending') return 'bg-indigo-950/30';
+  return 'bg-slate-950/20';
+}
+
+function fleetRowStatusLabel(device: LoraInventoryDevice): string {
+  if (device.row_state === 'unexpected_reboot') return 'Unexpected reboot';
+  if (device.row_state === 'ota_updated') return 'Updated';
+  if (device.row_state === 'ota_rebooted') return 'Rebooted';
+  if (device.row_state === 'ota_pending') return 'Flash sent';
+  return '';
+}
+
 function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   const selected = new Set(loraInventory.value.filter(d => d.selected).map(d => d.address));
+  const now = Date.now();
   loraInventory.value = rows
     .slice()
     .sort((a, b) => a.address - b.address)
-    .map(row => ({ ...row, selected: selected.has(row.address) }));
+    .map(row => classifyFleetRow({ ...row, selected: selected.has(row.address) }, now));
 }
 
 async function refreshLoraInventoryStatus() {
@@ -1106,6 +1158,23 @@ function fleetLogsAvailable(device: LoraInventoryDevice): boolean {
   return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
 }
 
+function markFleetOtaPending(device: LoraInventoryDevice) {
+  const now = Date.now();
+  fleetRowHistory.value[device.address] = {
+    ...(fleetRowHistory.value[device.address] || {}),
+    uptimeMs: device.uptime_ms || fleetRowHistory.value[device.address]?.uptimeMs,
+    fwVersion: device.fw_version || fleetRowHistory.value[device.address]?.fwVersion,
+    otaExpectedUntilMs: now + 180000,
+    rowState: 'ota_pending',
+    rowStateUntilMs: now + 180000
+  };
+  loraInventory.value = loraInventory.value.map(row =>
+    row.address === device.address
+      ? { ...row, row_state: 'ota_pending', row_state_until_ms: now + 180000 }
+      : row
+  );
+}
+
 async function startFleetUdpLogs(device: LoraInventoryDevice) {
   if (remoteUdpBusyAddress.value != null) return;
   const password = pairPassword();
@@ -1165,6 +1234,7 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
       host: target.host,
       port: target.port
     }, 8000);
+    markFleetOtaPending(device);
     networkStatusMessage.value = `Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`;
     pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH})`);
     notify(`Flash triggered for LoRa ${device.address}`);
@@ -3035,6 +3105,7 @@ function countCrashEvents(entries: string[]): number {
                   <th class="px-3 py-2 text-left font-semibold">WiFi</th>
                   <th class="px-3 py-2 text-left font-semibold">IP</th>
                   <th class="px-3 py-2 text-left font-semibold">MQTT</th>
+                  <th class="px-3 py-2 text-left font-semibold">Uptime</th>
                   <th class="px-3 py-2 text-left font-semibold">RSSI</th>
                   <th class="px-3 py-2 text-left font-semibold">Age</th>
                   <th class="px-3 py-2 text-left font-semibold">Actions</th>
@@ -3042,12 +3113,12 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="11" class="px-3 py-8 text-center text-slate-600">Select a USB gateway and scan the fleet to discover remotes.</td>
+                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway and scan the fleet to discover remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
                   :key="device.address"
-                  class="border-b border-slate-900/80 bg-slate-950/20 hover:bg-white/5"
+                  :class="['border-b border-slate-900/80 hover:bg-white/5 transition-colors', fleetRowClass(device)]"
                 >
                   <td class="px-3 py-2"><input v-model="device.selected" type="checkbox" /></td>
                   <td class="px-3 py-2 font-mono text-slate-200">{{ device.address }}</td>
@@ -3061,6 +3132,12 @@ function countCrashEvents(entries: string[]): number {
                   </td>
                   <td class="px-3 py-2 font-mono text-slate-400">{{ device.ip || '-' }}</td>
                   <td class="px-3 py-2 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-3 py-2 font-mono">
+                    <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
+                    <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']">
+                      {{ fleetRowStatusLabel(device) }}
+                    </div>
+                  </td>
                   <td class="px-3 py-2 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
                   <td class="px-3 py-2 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
                   <td class="px-3 py-2">

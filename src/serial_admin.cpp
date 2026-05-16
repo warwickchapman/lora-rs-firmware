@@ -1072,6 +1072,7 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     char fwBuf[16];
     snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
     row["fw_version"] = p.chip_id == 0 ? "" : fwBuf;
+    row["uptime_ms"] = p.uptime_ms;
     row["rssi"] = p.uplink_rssi;
     row["downlink_rssi_known"] = p.downlink_rssi_valid;
     row["downlink_rssi"] = p.downlink_rssi;

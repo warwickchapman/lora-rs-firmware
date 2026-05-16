@@ -13,6 +13,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Flash mode now includes a Local admin panel for serial-admin status, basic device/WiFi/MQTT/sensor config editing, reboot, and guarded factory reset actions without opening the on-device Web UI.
 - Firmware serial admin now exposes gateway-driven LoRa inventory commands (`start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`) using bounded encrypted poll probes instead of HTTP discovery.
 - Firmware LoRa inventory now uses a compact maintenance-status response so Fleet rows can show remote chip ID, firmware version, WiFi connected/IP, and MQTT state without HTTP/REST.
+- Firmware LoRa inventory now includes remote uptime in the compact maintenance-status response so Flasher can distinguish expected OTA reboots from unexpected restarts.
 - Flasher Fleet mode now has a dense LoRa inventory table driven by a selected USB gateway, with compact rows for address, role/mode, WiFi state, link RSSI/freshness, and OTA eligibility.
 - Flasher Fleet mode now starts a temporary local firmware file server and shows operator-ready OTA pull details, including reachable URLs, SHA256, size, and the MQTT `ota_pull` payload to send to online devices.
 - Flasher Fleet mode replaces the old Network tab with a Winbox-style fleet header and expanded device table; firmware serving and UDP logging are now status/per-device actions instead of separate primary panes.
@@ -29,6 +30,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Provision WiFi now adopts the gateway's serial-admin WiFi status when available, so a gateway that is already connected shows as connected without forcing another WiFi scan or `Connect Gateway` action.
 - Flasher Provision WiFi now requires the USB gateway to confirm it is connected to the selected WiFi network before exposing `Send to Remotes`, avoiding a dead-end remote-send action when the gateway has not joined WiFi yet.
 - Flasher Provision WiFi now times out failed gateway WiFi joins sooner, and changing the SSID/password cancels the current connection wait so the operator can immediately retry corrected credentials.
+- Flasher Fleet rows now show uptime and highlight reboot events: expected reboots after a row Flash action are marked as progress, while unexpected uptime drops are treated as an alarm state.
 - Flasher Flash local admin now avoids the stale Phase 1A firmware warning once status/config can load, and the Flash pane scrolls so expanded config controls remain reachable.
 - Flasher Fleet mode no longer depends on device-side HTTP discovery, Web UI login, REST OTA upload, Web UI opening, or REST UDP-log enablement. The old LAN scan/update table was removed rather than kept as a compatibility shim.
 - Flasher release CI dispatch is now tag-locked to prevent accidental `*-dev` release creation from `main` after post-release version auto-bump; `tools/release_flasher_assets.py dispatch-ci` now uses the target release tag as `--ref`, and `package_flasher.yml` blocks `create_release=true` when not running on a tag ref.
