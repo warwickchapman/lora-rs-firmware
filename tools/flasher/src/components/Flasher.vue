@@ -1309,7 +1309,7 @@ async function refreshLoraInventoryStatus(background = true) {
   try {
     const out = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
       fleetSelectedPort.value,
-      'fleet_status',
+      'lora_inventory_status',
       {},
       5000,
       { label: 'Fleet peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
@@ -1423,7 +1423,7 @@ async function refreshMonitorData(background = false) {
     adoptMonitorMqttFromStatus(status);
     const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
       port,
-      'fleet_status',
+      'lora_inventory_status',
       {},
       5000,
       { label: 'Monitor peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }

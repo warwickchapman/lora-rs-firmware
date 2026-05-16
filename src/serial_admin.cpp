@@ -1362,11 +1362,6 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
     return;
   }
 
-  if (strcmp(cmd, "fleet_status") == 0) {
-    handleLoraInventoryStatus(doc);
-    return;
-  }
-
   if (strcmp(cmd, "cancel_lora_inventory") == 0) {
     handleCancelLoraInventory(doc);
     return;
