@@ -106,6 +106,8 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
   doc["tx_mqtt_remote_default_poll_interval_ms"] =
       cfg.tx_mqtt_remote_default_poll_interval_ms;
+  doc["maintenance_debug_telemetry_enabled"] =
+      cfg.maintenance_debug_telemetry_enabled;
   doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["input_control_paired_lora_enabled"] =
@@ -233,6 +235,9 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.tx_mqtt_remote_default_poll_interval_ms =
       doc["tx_mqtt_remote_default_poll_interval_ms"] |
       cfg.tx_mqtt_remote_default_poll_interval_ms;
+  cfg.maintenance_debug_telemetry_enabled = parseBoolField(
+      doc["maintenance_debug_telemetry_enabled"],
+      cfg.maintenance_debug_telemetry_enabled);
   cfg.rx_push_on_change_enabled =
       parseBoolField(doc["rx_push_on_change_enabled"],
                      cfg.rx_push_on_change_enabled);
@@ -624,6 +629,7 @@ void SerialAdmin::handleStatus(JsonDocument &doc) {
   if (sm_ != nullptr) {
     out["link_state"] = linkStateText(sm_->linkState());
     out["relay_state"] = sm_->relayState();
+    out["relay_feedback"] = sm_->relayFeedbackState();
     out["input_state"] = sm_->inputState();
     out["last_packet_rssi"] = sm_->lastPacketRssi();
     out["last_packet_ms"] = sm_->lastPacketMs();
@@ -1073,6 +1079,15 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
     row["fw_version"] = p.chip_id == 0 ? "" : fwBuf;
     row["uptime_ms"] = p.uptime_ms;
+    row["maintenance_debug_known"] = p.maintenance_debug_known;
+    if (p.maintenance_debug_known) {
+      row["heap_free"] = p.heap_free;
+      row["heap_max_block"] = p.heap_max_block;
+      row["heap_frag_pct"] = p.heap_frag_pct;
+      row["relay_feedback"] = p.relay_feedback;
+      row["input_feedback"] = p.input_feedback;
+      row["debug_uptime_ms"] = p.debug_uptime_ms;
+    }
     row["rssi"] = p.uplink_rssi;
     row["downlink_rssi_known"] = p.downlink_rssi_valid;
     row["downlink_rssi"] = p.downlink_rssi;

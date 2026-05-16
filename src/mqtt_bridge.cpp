@@ -679,6 +679,7 @@ void MqttBridge::publishStatus() {
     if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "dry_contact")) publishRetained(topic, localInput ? "1" : "0");
     publishRetained(relay_topic_, sm_->relayState() ? "1" : "0");
+    if (buildLocalTopic(topic, sizeof(topic), "relay_feedback")) publishRetained(topic, sm_->relayFeedbackState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
 
     char addrHex[3];
@@ -705,6 +706,14 @@ void MqttBridge::publishStatus() {
     char updatedMs[16];
     snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));
     if (buildLocalTopic(topic, sizeof(topic), "last_updated")) publishRetained(topic, updatedMs);
+
+    char numBuf[24];
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(lrslog::heapFree()));
+    if (buildLocalTopic(topic, sizeof(topic), "heap_free")) publishRetained(topic, numBuf);
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+    if (buildLocalTopic(topic, sizeof(topic), "heap_max_block")) publishRetained(topic, numBuf);
+    snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(lrslog::heapFragPercent()));
+    if (buildLocalTopic(topic, sizeof(topic), "heap_frag_pct")) publishRetained(topic, numBuf);
     status_publish_locals_done_ = true;
     if (runtime_.role_tx) {
       return;
@@ -784,6 +793,16 @@ void MqttBridge::publishStatus() {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, numBuf);
         } else {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
+        }
+        if (node.maintenance_debug_known) {
+          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_free));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, numBuf);
+          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_max_block));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, numBuf);
+          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.heap_frag_pct));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, numBuf);
+          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.relay_feedback));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay_feedback")) publishRetainedTopic(topic, numBuf);
         }
       };
 

@@ -40,6 +40,9 @@ constexpr uint8_t kWifiControlBroadcastAddress = 255;
 constexpr uint8_t kWifiControlOpSet = 1;
 constexpr uint8_t kWifiControlOpStatus = 2;
 constexpr uint8_t kUdpLogControlOpSet = 1;
+constexpr uint8_t kMaintenancePayloadVersion = 1;
+constexpr uint8_t kMaintenancePageIdentity = 0;
+constexpr uint8_t kMaintenancePageDebug = 1;
 constexpr uint8_t kOtaPullControlOpStart = 1;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
@@ -434,6 +437,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
   runtime_.tx_mqtt_remote_default_poll_interval_ms = cfg.tx_mqtt_remote_default_poll_interval_ms;
+  runtime_.maintenance_debug_telemetry_enabled = cfg.maintenance_debug_telemetry_enabled;
   runtime_.rx_push_on_change_enabled = cfg.rx_push_on_change_enabled;
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
@@ -538,6 +542,7 @@ void NodeStateMachine::tick() {
 
   resetRadioTxBudgetForTick();
   tickReceive();
+  tickPendingMaintenanceDebug();
 
   if (runtime_.role_tx) {
     tickTransmitter();
@@ -552,6 +557,7 @@ void NodeStateMachine::tick() {
 
 LinkState NodeStateMachine::linkState() const { return link_state_; }
 uint8_t NodeStateMachine::relayState() const { return relay_state_; }
+uint8_t NodeStateMachine::relayFeedbackState() const { return digitalRead(kRelayPin) ? 1 : 0; }
 uint8_t NodeStateMachine::inputState() const { return input_state_; }
 uint8_t NodeStateMachine::localDryContactState() const { return digitalRead(kInputPin) ? 1 : 0; }
 int NodeStateMachine::lastPacketRssi() const { return last_packet_rssi_; }
@@ -598,6 +604,13 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.fw_minor = node.fw_minor;
   out.fw_patch = node.fw_patch;
   out.uptime_ms = node.uptime_ms;
+  out.maintenance_debug_known = node.maintenance_debug_known;
+  out.heap_free = node.heap_free;
+  out.heap_max_block = node.heap_max_block;
+  out.heap_frag_pct = node.heap_frag_pct;
+  out.relay_feedback = node.relay_feedback;
+  out.input_feedback = node.input_feedback;
+  out.debug_uptime_ms = node.debug_uptime_ms;
   out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
   out.poll_interval_ms = node.poll_interval_ms;
   const PollRuntime *poll = pollStateForIndex(index);
@@ -2051,16 +2064,14 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   if (runtime_.role_tx) flags |= 0x10;
   uint8_t payload[12]{};
   const uint32_t chipId = ESP.getChipId() & 0xFFFFFFUL;
-  payload[0] = static_cast<uint8_t>(chipId & 0xFFU);
-  payload[1] = static_cast<uint8_t>((chipId >> 8) & 0xFFU);
-  payload[2] = static_cast<uint8_t>((chipId >> 16) & 0xFFU);
-  payload[3] = static_cast<uint8_t>(((major & 0x0FU) << 4) | (minor & 0x0FU));
-  payload[4] = patch;
-  payload[5] = flags;
-  uint32_t uptimeMinutes = millis() / 60000UL;
-  if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
-  payload[6] = static_cast<uint8_t>(uptimeMinutes & 0xFFU);
-  payload[7] = static_cast<uint8_t>((uptimeMinutes >> 8) & 0xFFU);
+  payload[0] = kMaintenancePayloadVersion;
+  payload[1] = kMaintenancePageIdentity;
+  payload[2] = flags;
+  payload[3] = static_cast<uint8_t>(chipId & 0xFFU);
+  payload[4] = static_cast<uint8_t>((chipId >> 8) & 0xFFU);
+  payload[5] = static_cast<uint8_t>((chipId >> 16) & 0xFFU);
+  payload[6] = static_cast<uint8_t>(((major & 0x0FU) << 4) | (minor & 0x0FU));
+  payload[7] = patch;
   payload[8] = ip[0];
   payload[9] = ip[1];
   payload[10] = ip[2];
@@ -2072,8 +2083,59 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
+  if (runtime_.maintenance_debug_telemetry_enabled) {
+    maintenance_debug_pending_ = true;
+    maintenance_debug_dst_ = dstAddress;
+  }
   lrslog::event("maint_status_tx", 0, last_counter_, dstAddress);
   return true;
+}
+
+bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  uint8_t payload[12]{};
+  payload[0] = kMaintenancePayloadVersion;
+  payload[1] = kMaintenancePageDebug;
+  uint32_t heapFree = lrslog::heapFree();
+  uint32_t heapMaxBlock = lrslog::heapMaxFreeBlock();
+  if (heapFree > 0xFFFFUL) heapFree = 0xFFFFUL;
+  if (heapMaxBlock > 0xFFFFUL) heapMaxBlock = 0xFFFFUL;
+  payload[2] = static_cast<uint8_t>(heapFree & 0xFFU);
+  payload[3] = static_cast<uint8_t>((heapFree >> 8) & 0xFFU);
+  payload[4] = static_cast<uint8_t>(heapMaxBlock & 0xFFU);
+  payload[5] = static_cast<uint8_t>((heapMaxBlock >> 8) & 0xFFU);
+  payload[6] = lrslog::heapFragPercent();
+  payload[7] = relayFeedbackState();
+  payload[8] = localDryContactState();
+  uint32_t uptimeMinutes = millis() / 60000UL;
+  if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
+  payload[9] = static_cast<uint8_t>(uptimeMinutes & 0xFFU);
+  payload[10] = static_cast<uint8_t>((uptimeMinutes >> 8) & 0xFFU);
+  payload[11] = 0;
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
+                       runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("maint_debug_status_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
+void NodeStateMachine::tickPendingMaintenanceDebug() {
+  if (!maintenance_debug_pending_) return;
+  if (!runtime_.maintenance_debug_telemetry_enabled) {
+    maintenance_debug_pending_ = false;
+    maintenance_debug_dst_ = 0;
+    return;
+  }
+  if (sendMaintenanceDebugStatus(maintenance_debug_dst_)) {
+    maintenance_debug_pending_ = false;
+    maintenance_debug_dst_ = 0;
+  }
 }
 
 bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
@@ -2081,22 +2143,42 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   PeerRuntime *node = findOrCreatePeer(msg.src);
   if (node == nullptr) return false;
   const uint8_t *p = msg.raw_payload;
-  node->chip_id = static_cast<uint32_t>(p[0]) |
-                  (static_cast<uint32_t>(p[1]) << 8) |
-                  (static_cast<uint32_t>(p[2]) << 16);
-  node->fw_major = static_cast<uint8_t>((p[3] >> 4) & 0x0FU);
-  node->fw_minor = static_cast<uint8_t>(p[3] & 0x0FU);
-  node->fw_patch = p[4];
-  const uint8_t flags = p[5];
-  node->uptime_ms = (static_cast<uint32_t>(p[6]) | (static_cast<uint32_t>(p[7]) << 8)) * 60000UL;
-  node->wifi_state_known = true;
-  node->wifi_enabled = (flags & 0x01U) != 0U;
-  node->wifi_connected_known = true;
-  node->wifi_connected = (flags & 0x02U) != 0U;
-  node->mqtt_state_known = true;
-  node->mqtt_enabled = (flags & 0x04U) != 0U;
-  node->mqtt_connected = (flags & 0x08U) != 0U;
-  memcpy(node->ip, p + 8, sizeof(node->ip));
+  if (p[0] != kMaintenancePayloadVersion) {
+    lrslog::event("maint_status_unsupported", msg.rssi, msg.counter, p[0]);
+    return false;
+  }
+  if (p[1] == kMaintenancePageIdentity) {
+    const uint8_t flags = p[2];
+    node->chip_id = static_cast<uint32_t>(p[3]) |
+                    (static_cast<uint32_t>(p[4]) << 8) |
+                    (static_cast<uint32_t>(p[5]) << 16);
+    node->fw_major = static_cast<uint8_t>((p[6] >> 4) & 0x0FU);
+    node->fw_minor = static_cast<uint8_t>(p[6] & 0x0FU);
+    node->fw_patch = p[7];
+    node->wifi_state_known = true;
+    node->wifi_enabled = (flags & 0x01U) != 0U;
+    node->wifi_connected_known = true;
+    node->wifi_connected = (flags & 0x02U) != 0U;
+    node->mqtt_state_known = true;
+    node->mqtt_enabled = (flags & 0x04U) != 0U;
+    node->mqtt_connected = (flags & 0x08U) != 0U;
+    memcpy(node->ip, p + 8, sizeof(node->ip));
+  } else if (p[1] == kMaintenancePageDebug) {
+    node->maintenance_debug_known = true;
+    node->heap_free = static_cast<uint32_t>(p[2]) |
+                      (static_cast<uint32_t>(p[3]) << 8);
+    node->heap_max_block = static_cast<uint32_t>(p[4]) |
+                           (static_cast<uint32_t>(p[5]) << 8);
+    node->heap_frag_pct = p[6];
+    node->relay_feedback = p[7] ? 1 : 0;
+    node->input_feedback = p[8] ? 1 : 0;
+    node->debug_uptime_ms = (static_cast<uint32_t>(p[9]) |
+                             (static_cast<uint32_t>(p[10]) << 8)) * 60000UL;
+    node->uptime_ms = node->debug_uptime_ms;
+  } else {
+    lrslog::event("maint_page_unsupported", msg.rssi, msg.counter, p[1]);
+    return false;
+  }
   node->uplink_rssi = msg.rssi;
   node->last_seen_ms = millis();
   node->last_cmd_counter = msg.counter;

@@ -15,6 +15,7 @@
 - Extend Fleet inventory actions on top of the bounded maintenance-status packet, including identify, selected-device OTA, and WiFi/log actions that use the reported IP/connectivity state.
 - Add selected-device `ota_pull` from Fleet inventory rows once WiFi/IP reachability is reported by the bounded maintenance-status response; add bulk OTA only after one-device flow is reliable.
 - Add MQTT admin request/reply topics for online device status/config actions with broker ACL guidance and non-retained secret handling.
+- Default versioned maintenance debug telemetry to disabled once an explicit device debug mode exists; for pre-release diagnostics it is currently enabled by default so Flasher/Fleet can collect heap, fragmentation, relay feedback, and uptime from remotes.
 - Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
 - Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
 - After serial, MQTT, and LoRa admin parity are verified on hardware, remove Web UI/REST/captive DNS/`ESP8266WebServer` from normal firmware and record RAM/flash deltas.

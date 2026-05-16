@@ -82,6 +82,13 @@ struct PeerStatusSnapshot {
   uint8_t fw_minor = 0;
   uint8_t fw_patch = 0;
   uint32_t uptime_ms = 0;
+  bool maintenance_debug_known = false;
+  uint32_t heap_free = 0;
+  uint32_t heap_max_block = 0;
+  uint8_t heap_frag_pct = 0;
+  uint8_t relay_feedback = 0;
+  uint8_t input_feedback = 0;
+  uint32_t debug_uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
 };
 
@@ -160,6 +167,7 @@ class NodeStateMachine {
 
   LinkState linkState() const;
   uint8_t relayState() const;
+  uint8_t relayFeedbackState() const;
   uint8_t inputState() const;
   uint8_t localDryContactState() const;
   int lastPacketRssi() const;
@@ -231,6 +239,7 @@ class NodeStateMachine {
     uint32_t mqtt_remote_retry_timeout_ms = 5000;
     bool tx_mqtt_remote_polling_enabled = false;
     uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
+    bool maintenance_debug_telemetry_enabled = true;
     bool rx_push_on_change_enabled = false;
     uint32_t rx_push_min_interval_ms = 60000;
     bool input_control_paired_lora_enabled = false;
@@ -322,6 +331,8 @@ class NodeStateMachine {
   bool rx_push_pending_ = false;
   uint32_t rx_last_push_ms_ = 0;
   uint32_t last_rx_control_ms_ = 0;
+  bool maintenance_debug_pending_ = false;
+  uint8_t maintenance_debug_dst_ = 0;
 
   struct PeerRuntime {
     bool in_use = false;
@@ -349,6 +360,13 @@ class NodeStateMachine {
     uint8_t fw_minor = 0;
     uint8_t fw_patch = 0;
     uint32_t uptime_ms = 0;
+    bool maintenance_debug_known = false;
+    uint32_t heap_free = 0;
+    uint32_t heap_max_block = 0;
+    uint8_t heap_frag_pct = 0;
+    uint8_t relay_feedback = 0;
+    uint8_t input_feedback = 0;
+    uint32_t debug_uptime_ms = 0;
     uint32_t wifi_last_confirm_ms = 0;
     bool wifi_pending = false;
     bool wifi_pending_enabled = true;
@@ -530,7 +548,9 @@ class NodeStateMachine {
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceStatus(uint8_t dstAddress);
+  bool sendMaintenanceDebugStatus(uint8_t dstAddress);
   bool handleMaintenanceStatus(const ProtocolMessage &msg);
+  void tickPendingMaintenanceDebug();
   PeerRuntime *findOrCreatePeer(uint8_t address);
   PollRuntime *pollStateForIndex(size_t index);
   const PollRuntime *pollStateForIndex(size_t index) const;

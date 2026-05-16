@@ -26,6 +26,8 @@ Packed fields:
 - `WifiProvision` (`'W'`)
 - `FactoryReset` (`'X'`)
 - `Provisioning` (`'V'`)
+- `MaintenanceRequest` (`'Q'`)
+- `MaintenanceStatus` (`'T'`)
 
 ## Encrypted Payload Layout (12 bytes)
 - `b0`: `relay_state`
@@ -80,6 +82,12 @@ Otherwise packet is dropped and logged.
 - RX sends `MqttStatus` for `Mqtt` with applied relay/input/temp state.
 - TX may send `PollRequest` to RX.
 - RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
+- TX may send `MaintenanceRequest` to RX.
+- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages. Page `0`
+  carries identity/connectivity (`version`, `page`, flags, chip ID, firmware
+  version, IP). When debug telemetry is enabled, page `1` follows in a later
+  radio tick with heap free, max heap block, heap fragmentation, relay feedback,
+  input feedback, and uptime.
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.
