@@ -185,22 +185,56 @@ interface SerialAdminStatus {
 
 interface SerialAdminConfig {
   mode: string;
+  commissioned?: boolean;
   role_tx: boolean;
   local_address: number;
   remote_address: number;
+  paired_target_addresses?: number[];
+  allowed_controller_addresses?: number[];
+  known_peer_addresses?: number[];
+  lora_tx_power?: number;
+  lora_spreading_factor?: number;
+  lora_bandwidth_hz?: number;
+  lora_coding_rate?: number;
+  heartbeat_ms?: number;
+  ack_timeout_ms?: number;
+  mqtt_remote_retry_timeout_ms?: number;
+  tx_mqtt_remote_polling_enabled?: boolean;
+  tx_mqtt_remote_default_poll_interval_ms?: number;
+  maintenance_debug_telemetry_enabled?: boolean;
+  rx_push_on_change_enabled?: boolean;
+  rx_push_min_interval_ms?: number;
+  input_control_paired_lora_enabled?: boolean;
+  tx_command_retry_timeout_ms?: number;
+  rx_failsafe_mode?: string;
+  rx_failsafe_timeout_ms?: number;
   wifi_sta_ssid: string;
   wifi_sta_password: string;
+  lan_hostname?: string;
+  ap_always_on?: boolean;
+  wifi_phy_mode?: string;
+  wifi_tx_power_dbm?: number;
+  wifi_sleep_enabled?: boolean;
+  wifi_static_ip_enabled?: boolean;
+  wifi_static_ip?: string;
+  wifi_static_gateway?: string;
+  wifi_static_subnet?: string;
+  wifi_channel_override?: number;
+  wifi_ap_fallback_policy?: string;
   wifi_admin_enabled: boolean;
   mqtt_client_enabled: boolean;
   mqtt_control_enabled: boolean;
+  mqtt_controller_addresses?: string;
   mqtt_host: string;
   mqtt_port: number;
   mqtt_user: string;
   mqtt_password: string;
   mqtt_topic_root: string;
+  fleet_passphrase?: string;
   sensor_temp_enabled: boolean;
   sensor_temp_pin: number;
   sensor_temp_interval_s: number;
+  admin_password?: string;
 }
 
 interface SerialDeviceState {
@@ -1055,6 +1089,13 @@ function pairPassword(): string {
     (hasActiveDeviceInfo.value ? deviceInfo.value?.password?.trim() || '' : '');
 }
 
+function adminPasswordForPort(port: string): string {
+  const state = serialDeviceState(port);
+  return state?.adminPassword?.trim() ||
+    state?.deviceInfo?.password?.trim() ||
+    pairAdminPassword.value.trim();
+}
+
 function noteMonitorReleasedForPort(port: string, reason: string) {
   if (!isMonitoring.value || activeMonitorPort.value !== port) return;
   isMonitoring.value = false;
@@ -1064,10 +1105,14 @@ function noteMonitorReleasedForPort(port: string, reason: string) {
 }
 
 async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
-  if (!selectedPort.value) throw new Error('Select the USB gateway first');
-  noteMonitorReleasedForPort(selectedPort.value, 'serial admin command needs this port');
+  return sendEasyPairCommandOnPort<T>(selectedPort.value, cmd, payload, timeoutMs);
+}
+
+async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
+  if (!port) throw new Error('Select the USB gateway first');
+  noteMonitorReleasedForPort(port, 'serial admin command needs this port');
   return await invoke<T>('serial_admin_command', {
-    port: selectedPort.value,
+    port,
     request: { cmd, ...payload },
     timeoutMs
   });
@@ -1164,7 +1209,7 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
 
 async function refreshLoraInventoryStatus() {
   try {
-    const out = await sendEasyPairCommand<LoraInventoryStatus>('lora_inventory_status', {}, 5000);
+    const out = await sendEasyPairCommandOnPort<LoraInventoryStatus>(fleetSelectedPort.value, 'lora_inventory_status', {}, 5000);
     loraInventoryScan.value = out.scan || null;
     mergeLoraInventoryRows(out.devices || []);
     isLoraInventoryScanning.value = !!out.scan?.active;
@@ -1234,13 +1279,14 @@ function closeMonitorMqttSettings() {
 }
 
 async function refreshMonitorData() {
-  if (!selectedPort.value || isMonitorRefreshing.value) return;
+  const port = monitorSelectedPort.value;
+  if (!port || isMonitorRefreshing.value) return;
   isMonitorRefreshing.value = true;
   try {
-    const status = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
-    applySerialAdminStatus(status);
+    const status = await sendEasyPairCommandOnPort<SerialAdminStatus>(port, 'status', {}, 5000);
+    applySerialAdminStatus(status, port);
     adoptMonitorMqttFromStatus(status);
-    const inventory = await sendEasyPairCommand<LoraInventoryStatus>('lora_inventory_status', {}, 5000);
+    const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(port, 'lora_inventory_status', {}, 5000);
     monitorFleetRows.value = (inventory.devices || []).slice().sort((a, b) => a.address - b.address);
     monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
   } catch (e) {
@@ -1279,10 +1325,12 @@ function toggleMonitorMqttConnection() {
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
-  if (!force && serialAdminStatus.value) return serialAdminStatus.value;
+  const port = fleetSelectedPort.value;
+  const state = serialDeviceState(port);
+  if (!force && state?.status) return state.status;
   try {
-    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
-    applySerialAdminStatus(out);
+    const out = await sendEasyPairCommandOnPort<SerialAdminStatus>(port, 'status', {}, 5000);
+    applySerialAdminStatus(out, port);
     return out;
   } catch {
     return null;
@@ -1312,12 +1360,13 @@ function fleetScanErrorMessage(err: unknown): string {
 }
 
 async function startLoraInventoryScan() {
-  if (!selectedPort.value) {
+  const port = fleetSelectedPort.value;
+  if (!port) {
     notify('Select the USB gateway first');
     return;
   }
   if (!gatewayReady.value) await loadNetworkGateway();
-  const password = pairPassword();
+  const password = adminPasswordForPort(port);
   if (!password) {
     notify('Unable to read the gateway admin password from device details');
     return;
@@ -1332,7 +1381,7 @@ async function startLoraInventoryScan() {
   }
   try {
     isLoraInventoryScanning.value = true;
-    await sendEasyPairCommand('start_lora_inventory', {
+    await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
       admin_password: password,
       start_address: 1,
       end_address: LRS_REMOTE_SCAN_CAP,
@@ -1349,13 +1398,14 @@ async function startLoraInventoryScan() {
 }
 
 async function cancelLoraInventoryScan() {
-  const password = pairPassword();
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
     return;
   }
   try {
-    await sendEasyPairCommand('cancel_lora_inventory', { admin_password: password }, 5000);
+    await sendEasyPairCommandOnPort(port, 'cancel_lora_inventory', { admin_password: password }, 5000);
     stopLoraInventoryPolling();
     await refreshLoraInventoryStatus();
   } catch (e) {
@@ -1428,9 +1478,10 @@ async function refreshFleetOtaFollowup(address: number) {
     return;
   }
   try {
-    const password = pairPassword();
+    const port = fleetSelectedPort.value;
+    const password = adminPasswordForPort(port);
     if (!password) throw new Error('missing gateway password');
-    await sendEasyPairCommand('start_lora_inventory', {
+    await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
       admin_password: password,
       start_address: address,
       end_address: address,
@@ -1463,7 +1514,8 @@ function startFleetOtaFollowup(device: LoraInventoryDevice) {
 
 async function startFleetUdpLogs(device: LoraInventoryDevice) {
   if (remoteUdpBusyAddress.value != null) return;
-  const password = pairPassword();
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -1481,7 +1533,7 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
     if (!isNetworkUdpMonitoring.value) {
       await startNetworkUdpListener();
     }
-    await sendEasyPairCommand('remote_udp_log_control', {
+    await sendEasyPairCommandOnPort(port, 'remote_udp_log_control', {
       admin_password: password,
       address: device.address,
       enabled: true,
@@ -1504,7 +1556,8 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
 
 async function flashLoraRemote(device: LoraInventoryDevice) {
   if (remoteOtaBusyAddress.value != null) return;
-  const password = pairPassword();
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -1518,7 +1571,7 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
     if (!gatewayReady.value) await loadNetworkGateway();
     const info = await ensureRemoteFlashFirmwareServer();
     const target = firmwareServerTarget(info);
-    const out = await sendEasyPairCommand<any>('remote_ota_pull', {
+    const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
       admin_password: password,
       address: device.address,
       host: target.host,
@@ -1706,10 +1759,41 @@ function serialConfigPatch(): Record<string, any> {
     role_tx: !!cfg.role_tx,
     local_address: Number(cfg.local_address || 1),
     remote_address: Number(cfg.remote_address || 254),
+    paired_target_addresses: cfg.paired_target_addresses || [Number(cfg.remote_address || 254)],
+    allowed_controller_addresses: cfg.allowed_controller_addresses || [Number(cfg.remote_address || 254)],
+    known_peer_addresses: cfg.known_peer_addresses || [],
+    lora_tx_power: Number(cfg.lora_tx_power || 17),
+    lora_spreading_factor: Number(cfg.lora_spreading_factor || 12),
+    lora_bandwidth_hz: Number(cfg.lora_bandwidth_hz || 125000),
+    lora_coding_rate: Number(cfg.lora_coding_rate || 5),
+    heartbeat_ms: Number(cfg.heartbeat_ms || 60000),
+    ack_timeout_ms: Number(cfg.ack_timeout_ms || 3000),
+    mqtt_remote_retry_timeout_ms: Number(cfg.mqtt_remote_retry_timeout_ms || 180000),
+    tx_mqtt_remote_polling_enabled: !!cfg.tx_mqtt_remote_polling_enabled,
+    tx_mqtt_remote_default_poll_interval_ms: Number(cfg.tx_mqtt_remote_default_poll_interval_ms || 300000),
+    maintenance_debug_telemetry_enabled: !!cfg.maintenance_debug_telemetry_enabled,
+    rx_push_on_change_enabled: !!cfg.rx_push_on_change_enabled,
+    rx_push_min_interval_ms: Number(cfg.rx_push_min_interval_ms || 60000),
+    input_control_paired_lora_enabled: !!cfg.input_control_paired_lora_enabled,
+    tx_command_retry_timeout_ms: Number(cfg.tx_command_retry_timeout_ms || 180000),
+    rx_failsafe_mode: cfg.rx_failsafe_mode || 'hold_last',
+    rx_failsafe_timeout_ms: Number(cfg.rx_failsafe_timeout_ms || 180000),
     wifi_sta_ssid: cfg.wifi_sta_ssid || '',
+    lan_hostname: cfg.lan_hostname || '',
+    ap_always_on: !!cfg.ap_always_on,
+    wifi_phy_mode: cfg.wifi_phy_mode || '11b',
+    wifi_tx_power_dbm: Number(cfg.wifi_tx_power_dbm ?? 20.5),
+    wifi_sleep_enabled: !!cfg.wifi_sleep_enabled,
+    wifi_static_ip_enabled: !!cfg.wifi_static_ip_enabled,
+    wifi_static_ip: cfg.wifi_static_ip || '',
+    wifi_static_gateway: cfg.wifi_static_gateway || '',
+    wifi_static_subnet: cfg.wifi_static_subnet || '',
+    wifi_channel_override: Number(cfg.wifi_channel_override || 0),
+    wifi_ap_fallback_policy: cfg.wifi_ap_fallback_policy || 'fallback_on_disconnect',
     wifi_admin_enabled: !!cfg.wifi_admin_enabled,
     mqtt_client_enabled: !!cfg.mqtt_client_enabled,
     mqtt_control_enabled: !!cfg.mqtt_control_enabled,
+    mqtt_controller_addresses: cfg.mqtt_controller_addresses || '',
     mqtt_host: cfg.mqtt_host || '',
     mqtt_port: Number(cfg.mqtt_port || 1883),
     mqtt_user: cfg.mqtt_user || '',
@@ -1720,6 +1804,8 @@ function serialConfigPatch(): Record<string, any> {
   };
   if (cfg.wifi_sta_password) patch.wifi_sta_password = cfg.wifi_sta_password;
   if (cfg.mqtt_password) patch.mqtt_password = cfg.mqtt_password;
+  if (cfg.fleet_passphrase) patch.fleet_passphrase = cfg.fleet_passphrase;
+  if (cfg.admin_password) patch.admin_password = cfg.admin_password;
   return patch;
 }
 
@@ -3277,6 +3363,23 @@ function countCrashEvents(entries: string[]): number {
                 <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">Remote addr</label>
                 <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Heartbeat sec</label>
+                <input :value="Math.round((serialAdminConfig.heartbeat_ms || 60000) / 1000)" @input="serialAdminConfig.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Retry sec</label>
+                <input :value="Math.round((serialAdminConfig.tx_command_retry_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.tx_command_retry_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">RX failsafe</label>
+                <select v-model="serialAdminConfig.rx_failsafe_mode" class="glass-input h-9 appearance-none">
+                  <option value="hold_last">Hold last</option>
+                  <option value="force_off">Force off</option>
+                  <option value="force_on">Force on</option>
+                </select>
+                <label class="self-center text-right font-semibold text-slate-300">Failsafe sec</label>
+                <input :value="Math.round((serialAdminConfig.rx_failsafe_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.rx_failsafe_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Debug telemetry</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.maintenance_debug_telemetry_enabled" type="checkbox" />
+                  Enabled
+                </label>
               </div>
             </div>
 
@@ -3294,6 +3397,44 @@ function countCrashEvents(entries: string[]): number {
                   <input v-model="serialAdminConfig.wifi_admin_enabled" type="checkbox" />
                   Enabled
                 </label>
+                <label class="self-center text-right font-semibold text-slate-300">Hostname</label>
+                <input v-model="serialAdminConfig.lan_hostname" class="glass-input h-9" placeholder="Blank uses lrs-chipid" />
+                <label class="self-center text-right font-semibold text-slate-300">Fallback AP</label>
+                <select v-model="serialAdminConfig.wifi_ap_fallback_policy" class="glass-input h-9 appearance-none">
+                  <option value="fallback_on_disconnect">Enable when disconnected</option>
+                  <option value="secure_sta_only">Keep disabled</option>
+                </select>
+                <label class="self-center text-right font-semibold text-slate-300">Soft AP</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.ap_always_on" type="checkbox" />
+                  Always on while disconnected
+                </label>
+                <label class="self-center text-right font-semibold text-slate-300">PHY mode</label>
+                <select v-model="serialAdminConfig.wifi_phy_mode" class="glass-input h-9 appearance-none">
+                  <option value="11b">11b range</option>
+                  <option value="11g">11g</option>
+                  <option value="11n">11n</option>
+                </select>
+                <label class="self-center text-right font-semibold text-slate-300">TX power</label>
+                <input v-model.number="serialAdminConfig.wifi_tx_power_dbm" type="number" min="0" max="20.5" step="0.25" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Channel</label>
+                <input v-model.number="serialAdminConfig.wifi_channel_override" type="number" min="0" max="13" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">WiFi sleep</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.wifi_sleep_enabled" type="checkbox" />
+                  Allow sleep
+                </label>
+                <label class="self-center text-right font-semibold text-slate-300">Static IP</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.wifi_static_ip_enabled" type="checkbox" />
+                  Enabled
+                </label>
+                <label class="self-center text-right font-semibold text-slate-300">IP address</label>
+                <input v-model="serialAdminConfig.wifi_static_ip" class="glass-input h-9" placeholder="192.168.1.50" />
+                <label class="self-center text-right font-semibold text-slate-300">Gateway</label>
+                <input v-model="serialAdminConfig.wifi_static_gateway" class="glass-input h-9" placeholder="192.168.1.1" />
+                <label class="self-center text-right font-semibold text-slate-300">Subnet</label>
+                <input v-model="serialAdminConfig.wifi_static_subnet" class="glass-input h-9" placeholder="255.255.255.0" />
               </template>
             </div>
 
@@ -3322,6 +3463,8 @@ function countCrashEvents(entries: string[]): number {
                   <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
                   <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
                 </div>
+                <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
+                <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
               </template>
             </div>
 

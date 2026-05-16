@@ -15,6 +15,16 @@ Flash mode is the USB firmware and local maintenance workflow:
 - remember the last monitor-after-flash and erase-before-flash checkbox states
 - read and copy device identity/factory-password details
 
+### Settings
+
+Settings is the local USB maintenance surface for a selected device. It uses the
+`LRS:` serial-admin protocol rather than the on-device Web UI:
+
+- load status and redacted configuration from a USB-connected LRS device
+- edit local role/address, LoRa timing/failsafe/debug settings, WiFi STA/AP/static-IP settings, MQTT client/control settings, and DS18B20 settings
+- leave secret fields blank to preserve existing WiFi, MQTT, fleet, or admin secrets
+- identify, reboot, or guarded factory-reset the selected device
+
 ### Fleet
 
 Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
@@ -45,4 +55,4 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 
 Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and Provision. Switching away from Flash stops the serial monitor so Provision can take the selected gateway port cleanly. Flash and Provision use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Provision WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
-The app restores the last active tab on launch. The main tabs are ordered Flash, Provision, and Fleet.
+The app restores the last active tab on launch. The main tabs are ordered Flash, Provision, Fleet, Monitor, and Settings.
