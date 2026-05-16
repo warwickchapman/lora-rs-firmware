@@ -758,8 +758,8 @@ async function refreshPorts() {
 }
 
 function reconcileTabPortSelections(currentNames: string[], newPorts: string[], allowAutoSwitch: boolean) {
-  const defaultPort = currentNames.length > 0 ? chooseDefaultPort(currentNames) : '';
-  const preferredNewPort = newPorts.length > 0 ? (chooseMostRecentPort(newPorts) ?? defaultPort) : '';
+  const defaultPort = chooseDefaultPort(currentNames);
+  const preferredNewPort = chooseMostRecentPort(newPorts) ?? defaultPort;
   const activeReplacement = allowAutoSwitch && preferredNewPort ? preferredNewPort : defaultPort;
 
   const ensureSelection = (port: string, active: boolean): string => {
@@ -775,16 +775,47 @@ function reconcileTabPortSelections(currentNames: string[], newPorts: string[], 
   monitorSelectedPort.value = ensureSelection(monitorSelectedPort.value, activeMode.value === 'monitor');
 }
 
+function portLooksLikeLrsAdapter(port: SerialPort | undefined): boolean {
+  if (!port) return false;
+  const combined = `${port.port_name} ${port.description || ''}`.toLowerCase();
+  if (combined.includes('bluetooth') ||
+      combined.includes('soundcore') ||
+      combined.includes('headphone') ||
+      combined.includes('headset') ||
+      combined.includes('airpods') ||
+      combined.includes('bose')) {
+    return false;
+  }
+  return port.score > 0 ||
+    combined.includes('usbserial') ||
+    combined.includes('usbmodem') ||
+    combined.includes('ttyusb') ||
+    combined.includes('ttyacm') ||
+    combined.includes('cp210') ||
+    combined.includes('ch34') ||
+    combined.includes('silicon labs') ||
+    combined.includes('qinheng') ||
+    combined.includes('espressif');
+}
+
+function isLrsAdapterPort(port: SerialPort | undefined): port is SerialPort {
+  return portLooksLikeLrsAdapter(port);
+}
+
 function chooseMostRecentPort(candidates: string[]): string | null {
   const ranked = candidates
-    .map(name => ({ name, seq: portSeenSequence.value[name] ?? -1 }))
+    .map(name => ({ name, seq: portSeenSequence.value[name] ?? -1, port: ports.value.find(p => p.port_name === name) }))
+    .filter((candidate): candidate is { name: string; seq: number; port: SerialPort } => isLrsAdapterPort(candidate.port))
     .sort((a, b) => b.seq - a.seq);
   return ranked.length > 0 ? ranked[0].name : null;
 }
 
 function chooseDefaultPort(portNames: string[]): string {
-  // Backend already returns score-sorted ports; default to top-ranked candidate.
-  return portNames[0];
+  const ranked = portNames
+    .map(name => ports.value.find(p => p.port_name === name))
+    .filter(isLrsAdapterPort)
+    .sort((a, b) => b.score - a.score);
+  return ranked[0]?.port_name || '';
 }
 
 async function fetchFirmware() {
@@ -1087,7 +1118,7 @@ function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_updated') return 'bg-emerald-950/40 ring-1 ring-emerald-500/40';
   if (device.row_state === 'ota_rebooted') return 'bg-sky-950/40 ring-1 ring-sky-500/40';
   if (device.row_state === 'ota_no_reboot') return 'bg-amber-950/40 ring-1 ring-amber-500/40';
-  if (device.row_state === 'ota_pending') return 'bg-indigo-950/30';
+  if (device.row_state === 'ota_pending') return 'bg-cyan-950/30';
   return 'bg-slate-950/20';
 }
 
@@ -2587,13 +2618,13 @@ function countCrashEvents(entries: string[]): number {
 
 <template>
   <div class="relative h-full flex flex-col">
-    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
+    <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
-      <div v-if="activeMode !== 'network'" :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
-        <div class="flex items-center justify-between border-b border-white/5 pb-4">
+      <div v-if="activeMode !== 'network'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
+        <div class="flex items-center justify-between border-b border-slate-700/80 pb-2">
           <div class="flex flex-col gap-1">
-            <h2 class="text-lg font-semibold text-slate-300 flex items-center gap-2">
-              <span :class="['w-2 h-2 rounded-full', activityBusy ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600']"></span>
+            <h2 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+              <span :class="['w-2 h-2 rounded-full', activityBusy ? 'bg-cyan-600 animate-pulse' : 'bg-slate-600']"></span>
               Activity log
             </h2>
             <div
@@ -2611,10 +2642,10 @@ function countCrashEvents(entries: string[]): number {
               </template>
             </div>
           </div>
-          <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
             <div
               v-if="crashCount > 0"
-              class="flex h-10 items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 text-xs font-semibold text-amber-300"
+              class="flex h-7 items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 text-xs font-semibold text-amber-300"
               title="Crash signatures detected in the current log"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2628,7 +2659,7 @@ function countCrashEvents(entries: string[]): number {
               @click="copyActivityLog"
               :disabled="activeLogs.length === 0"
               :class="[
-                'p-1.5 rounded-md border transition-all',
+                'p-1 rounded border transition-all',
                 activeLogs.length > 0
                   ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
                   : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
@@ -2646,7 +2677,7 @@ function countCrashEvents(entries: string[]): number {
               @click="copyActivePassword"
               :disabled="!hasActiveDeviceInfo"
               :class="[
-                'p-1.5 rounded-md border transition-all',
+                'p-1 rounded border transition-all',
                 hasActiveDeviceInfo
                   ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
                   : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
@@ -2666,7 +2697,7 @@ function countCrashEvents(entries: string[]): number {
               @click="openActiveDeviceConsole"
               :disabled="!hasActiveDeviceInfo"
               :class="[
-                'p-1.5 rounded-md border transition-all',
+                'p-1 rounded border transition-all',
                 hasActiveDeviceInfo
                   ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
                   : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
@@ -2685,10 +2716,10 @@ function countCrashEvents(entries: string[]): number {
               v-if="activeMode === 'serial'"
               @click="toggleMonitor"
               :class="[
-                'rounded-md border transition-all',
+                'rounded border transition-all',
                 isMonitoring
-                  ? 'p-1.5 border-indigo-500 bg-indigo-500/20 text-indigo-400 hover:text-indigo-200'
-                  : 'p-1.5 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                  ? 'p-1 border-cyan-500 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100'
+                  : 'p-1 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
               ]"
               :title="isMonitoring ? 'Stop monitor' : 'Start monitor'"
               :aria-label="isMonitoring ? 'Stop monitor' : 'Start monitor'"
@@ -2719,11 +2750,11 @@ function countCrashEvents(entries: string[]): number {
         </div>
       </div>
 
-      <div v-if="activeMode === 'pair'" class="flex flex-col gap-6 h-full overflow-hidden">
-        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
-          <div class="flex items-start justify-between gap-4">
+      <div v-if="activeMode === 'pair'" class="flex flex-col gap-3 h-full overflow-hidden">
+        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+          <div class="flex items-start justify-between gap-3">
             <div>
-              <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              <h2 class="text-base font-bold text-cyan-300">
                 Provision
               </h2>
               <p class="mt-1 text-xs text-slate-400">Selected USB device becomes the LoRa gateway.</p>
@@ -2733,7 +2764,7 @@ function countCrashEvents(entries: string[]): number {
                 v-if="identifyAvailable"
                 @click="triggerIdentify"
                 :disabled="identifyDisabled"
-                :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
+                :class="['glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
                 title="Identify gateway"
                 aria-label="Identify gateway"
               >
@@ -2747,31 +2778,31 @@ function countCrashEvents(entries: string[]): number {
               <button
                 @click="loadEasyPairGateway"
                 :disabled="isGatewayLoading || isPairBusy || !selectedPort"
-                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-cyan-300': isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
                 <span>{{ isGatewayLoading ? 'Loading...' : 'Load Gateway' }}</span>
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 rounded-md border border-slate-800 bg-slate-950/30 p-1 text-xs font-bold">
+          <div class="grid grid-cols-2 rounded border border-slate-800 bg-slate-950/30 text-xs font-bold">
             <button
               @click="pairPanelTab = 'pair'"
-              :class="['m-0 h-9 rounded px-3 transition-all', pairPanelTab === 'pair' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
+              :class="['m-0 h-8 rounded-none px-3 transition-all', pairPanelTab === 'pair' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
             >
               Pair
             </button>
             <button
               @click="openPairWifiTab"
-              :class="['m-0 h-9 rounded px-3 transition-all', pairPanelTab === 'wifi' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
+              :class="['m-0 h-8 rounded-none px-3 transition-all', pairPanelTab === 'wifi' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
             >
               WiFi
             </button>
           </div>
 
-          <div v-if="pairPanelTab === 'pair'" class="flex flex-col gap-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div v-if="pairPanelTab === 'pair'" class="flex flex-col gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">USB gateway</label>
               <div class="flex gap-2">
@@ -2781,8 +2812,8 @@ function countCrashEvents(entries: string[]): number {
                   </option>
                   <option v-if="ports.length === 0" disabled>Scanning...</option>
                 </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-spin text-indigo-500': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
             </div>
@@ -2792,19 +2823,19 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Fleet key</label>
               <div class="grid grid-cols-[3rem_minmax(0,1fr)_3rem_3rem] gap-2">
-                <button @click="generatePairFleetKey(true)" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" title="Generate fleet key" aria-label="Generate fleet key">
+                <button @click="generatePairFleetKey(true)" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" title="Generate fleet key" aria-label="Generate fleet key">
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
                 </button>
                 <input v-model="pairFleetKey" class="glass-input h-10 flex-1 font-mono" :type="showPairFleetKey ? 'text' : 'password'" autocomplete="new-password" />
-                <button @click="showPairFleetKey = !showPairFleetKey" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" :title="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'" :aria-label="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'">
+                <button @click="showPairFleetKey = !showPairFleetKey" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'" :aria-label="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'">
                   <svg v-if="!showPairFleetKey" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
                 </button>
-                <button @click="copyPairFleetKey" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" title="Copy fleet key" aria-label="Copy fleet key">
+                <button @click="copyPairFleetKey" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" title="Copy fleet key" aria-label="Copy fleet key">
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 </button>
               </div>
@@ -2813,38 +2844,38 @@ function countCrashEvents(entries: string[]): number {
               <label class="font-medium text-slate-400">Gateway admin password</label>
               <div class="grid grid-cols-[minmax(0,1fr)_3rem_3rem] gap-2">
                 <input v-model="pairAdminPassword" class="glass-input h-10 min-w-0 font-mono" :type="showPairAdminPassword ? 'text' : 'password'" autocomplete="current-password" />
-                <button @click="showPairAdminPassword = !showPairAdminPassword" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" :title="showPairAdminPassword ? 'Hide password' : 'Show password'" :aria-label="showPairAdminPassword ? 'Hide password' : 'Show password'">
+                <button @click="showPairAdminPassword = !showPairAdminPassword" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairAdminPassword ? 'Hide password' : 'Show password'" :aria-label="showPairAdminPassword ? 'Hide password' : 'Show password'">
                   <svg v-if="!showPairAdminPassword" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
                 </button>
-                <button @click="copyPairAdminPassword" :disabled="!pairAdminPassword" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center disabled:opacity-50" title="Copy gateway password" aria-label="Copy gateway password">
+                <button @click="copyPairAdminPassword" :disabled="!pairAdminPassword" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50" title="Copy gateway password" aria-label="Copy gateway password">
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 </button>
               </div>
             </div>
           </div>
 
-          <button @click="runEasyPair" :disabled="pairPrimaryDisabled" class="primary-btn h-12 flex items-center justify-center gap-3 text-sm font-bold">
+          <button @click="runEasyPair" :disabled="pairPrimaryDisabled" class="primary-btn h-9 flex items-center justify-center gap-3 text-sm font-bold">
             <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isPairBusy }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
             <span>{{ isPairBusy ? 'Provisioning...' : 'Provision' }}</span>
           </button>
 
-          <details class="rounded-md border border-slate-800 bg-slate-900/30 px-3 py-2">
+          <details class="rounded-md border border-slate-800 bg-slate-900/30 px-2 py-1.5">
             <summary class="cursor-pointer select-none text-xs font-semibold text-slate-500 hover:text-slate-300">Advanced steps</summary>
             <div class="mt-3 grid grid-cols-2 xl:grid-cols-5 gap-3">
-              <button @click="configureEasyPairGateway" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Configure the USB device as gateway">Prepare</button>
-              <button @click="startEasyPairDiscovery" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa">Scan</button>
-              <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Provision All</button>
-              <button @click="saveEasyPairTargets" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Save discovered remote addresses on the gateway">Finish</button>
-              <button @click="cancelEasyPair" :disabled="!gatewayReady" class="glass-input h-10 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold" title="Stop the current discovery or provisioning session">Stop</button>
+              <button @click="configureEasyPairGateway" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Configure the USB device as gateway">Prepare</button>
+              <button @click="startEasyPairDiscovery" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa">Scan</button>
+              <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Provision All</button>
+              <button @click="saveEasyPairTargets" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Save discovered remote addresses on the gateway">Finish</button>
+              <button @click="cancelEasyPair" :disabled="!gatewayReady" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Stop the current discovery or provisioning session">Stop</button>
             </div>
           </details>
           </div>
 
-          <div v-else class="flex flex-col gap-4">
-          <div class="flex items-start justify-between gap-4">
+          <div v-else class="flex flex-col gap-3">
+          <div class="flex items-start justify-between gap-3">
             <div>
-              <h2 class="text-xl font-bold text-slate-300">WiFi</h2>
+              <h2 class="text-base font-bold text-slate-300">WiFi</h2>
               <p class="mt-1 text-xs text-slate-400">
                 {{ gatewayWifiReady ? 'Gateway WiFi is already connected. Enter the WiFi password if you need to send it to remotes.' : 'Read gateway status, scan if needed, then send the same credentials to remotes.' }}
               </p>
@@ -2852,14 +2883,14 @@ function countCrashEvents(entries: string[]): number {
             <button
               @click="scanGatewayWifi"
               :disabled="isWifiScanning || isGatewayLoading || !selectedPort"
-              class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+              class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isWifiScanning || isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-cyan-300': isWifiScanning || isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
               <span>{{ isGatewayLoading ? 'Loading...' : isWifiScanning ? 'Scanning...' : gatewayReady ? 'Scan WiFi' : 'Load & Scan' }}</span>
             </button>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">WiFi network</label>
               <select v-model="pairWifiSsid" @change="clearGatewayWifiReady" class="glass-input h-10 appearance-none">
@@ -2876,7 +2907,7 @@ function countCrashEvents(entries: string[]): number {
               <label class="font-medium text-slate-400">WiFi password</label>
               <div class="flex gap-2">
                 <input v-model="pairWifiPassword" class="glass-input h-10 flex-1" :type="showPairWifiPassword ? 'text' : 'password'" autocomplete="new-password" />
-                <button @click="showPairWifiPassword = !showPairWifiPassword" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center" :title="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'" :aria-label="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'">
+                <button @click="showPairWifiPassword = !showPairWifiPassword" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'" :aria-label="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'">
                   <svg v-if="!showPairWifiPassword" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
                 </button>
@@ -2890,7 +2921,7 @@ function countCrashEvents(entries: string[]): number {
               v-if="!gatewayWifiReady"
               @click="connectGatewayWifi"
               :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid"
-              class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
             >
               {{ isWifiApplying ? 'Connecting Gateway...' : 'Connect Gateway' }}
             </button>
@@ -2898,7 +2929,7 @@ function countCrashEvents(entries: string[]): number {
               v-else
               @click="sendWifiToRemotes"
               :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid"
-              class="primary-btn h-11 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
             >
               {{ isFleetWifiSending ? 'Sending...' : 'Send to Remotes' }}
             </button>
@@ -2906,10 +2937,10 @@ function countCrashEvents(entries: string[]): number {
           </div>
         </div>
 
-        <div class="glass-card p-5 flex flex-col gap-4 text-left flex-1 min-h-0 overflow-hidden">
+        <div class="glass-card p-3 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
           <div class="flex items-center justify-between">
-            <h2 class="text-xl font-bold text-slate-300">Discovered devices</h2>
-            <button @click="refreshEasyPairStatus(true)" :disabled="isPairBusy || !gatewayReady" class="text-xs text-slate-500 hover:text-indigo-400">Refresh</button>
+            <h2 class="text-base font-bold text-slate-300">Discovered devices</h2>
+            <button @click="refreshEasyPairStatus(true)" :disabled="isPairBusy || !gatewayReady" class="text-xs text-slate-500 hover:text-cyan-300">Refresh</button>
           </div>
           <div v-if="pairStatus?.session" class="grid grid-cols-4 gap-3 text-xs">
             <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
@@ -2971,16 +3002,16 @@ function countCrashEvents(entries: string[]): number {
       <!-- Right Panel (Controls + Details) - Hidden in Monitor Mode -->
       <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-6 h-full min-h-0 overflow-auto custom-scrollbar pr-1 transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
         <!-- Device Configuration Panel -->
-        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
-          <div class="flex items-start justify-between gap-4">
-            <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+          <div class="flex items-start justify-between gap-3">
+            <h2 class="text-base font-bold text-cyan-300">
               Device configuration
             </h2>
             <button
               v-if="identifyAvailable"
               @click="triggerIdentify"
               :disabled="identifyDisabled"
-              :class="['glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
+              :class="['glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
               title="Identify USB device"
               aria-label="Identify USB device"
             >
@@ -2993,7 +3024,7 @@ function countCrashEvents(entries: string[]): number {
             </button>
           </div>
           
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Region</label>
               <select v-model="region" class="glass-input h-10 appearance-none">
@@ -3010,8 +3041,8 @@ function countCrashEvents(entries: string[]): number {
                   </option>
                   <option v-if="ports.length === 0" disabled>Scanning...</option>
                 </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-spin text-indigo-500': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
             </div>
@@ -3026,19 +3057,19 @@ function countCrashEvents(entries: string[]): number {
                 </option>
                 <option v-if="firmwareVersions.length === 0" disabled>Loading...</option>
               </select>
-              <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input h-10 w-12 hover:bg-white/10 flex items-center justify-center transition-all group/btn shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-bounce text-indigo-500': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
+              <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-4 mt-2">
+          <div class="grid grid-cols-2 gap-3 mt-2">
             <div class="flex flex-col gap-3">
-              <button @click="startFlash" :disabled="flashDisabled" class="primary-btn h-12 flex items-center justify-center gap-3 text-sm tracking-wider font-bold w-full active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+              <button @click="startFlash" :disabled="flashDisabled" class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold w-full active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
                 <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
                 <span>{{ isFlashing ? 'Flashing...' : 'Flash firmware' }}</span>
               </button>
-              <div class="flex flex-wrap items-center gap-4 px-1">
+              <div class="flex flex-wrap items-center gap-3 px-1">
                 <label class="flex items-center gap-2 cursor-pointer group">
                   <div class="relative flex items-center">
                     <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
@@ -3050,32 +3081,32 @@ function countCrashEvents(entries: string[]): number {
                 <label class="flex items-center gap-2 cursor-pointer group">
                   <div class="relative flex items-center">
                     <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
-                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-all"></div>
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
                     <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
                   <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
                 </label>
               </div>
             </div>
-            <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input h-12 hover:bg-white/10 flex items-center justify-center gap-3 text-sm tracking-wider transition-all active:scale-95">
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400', { 'animate-spin text-indigo-400': isLoadingInfo }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+            <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input h-9 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs transition-all active:scale-95">
+              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400', { 'animate-spin text-cyan-300': isLoadingInfo }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
               <span>{{ isLoadingInfo ? 'Reading...' : 'Get device info' }}</span>
             </button>
           </div>
         </div>
 
         <!-- Local Admin Panel -->
-        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
-          <div class="flex items-start justify-between gap-4">
+        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+          <div class="flex items-start justify-between gap-3">
             <div>
-              <h2 class="text-xl font-bold text-slate-300">Local admin</h2>
+              <h2 class="text-base font-bold text-slate-300">Local admin</h2>
               <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
             </div>
             <div class="flex gap-2">
-              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-white/10 text-xs font-bold disabled:opacity-60">
+              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 {{ isSerialAdminLoading ? 'Loading...' : 'Status' }}
               </button>
-              <button @click="loadSerialAdminConfig" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-white/10 text-xs font-bold disabled:opacity-60">
+              <button @click="loadSerialAdminConfig" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 Load config
               </button>
             </div>
@@ -3086,29 +3117,29 @@ function countCrashEvents(entries: string[]): number {
           </div>
 
           <div v-if="serialAdminStatus" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+            <div class="rounded border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">Firmware</div>
               <div class="font-mono text-slate-200">{{ serialAdminStatus.fw_version || 'unknown' }}</div>
             </div>
-            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+            <div class="rounded border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">Uptime</div>
               <div class="font-mono text-slate-200">{{ formatUptime(serialAdminStatus.uptime_ms || 0) }}</div>
             </div>
-            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+            <div class="rounded border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">Heap</div>
               <div class="font-mono text-slate-200">{{ formatBytes(serialAdminStatus.heap_free) }}</div>
             </div>
-            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+            <div class="rounded border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">MQTT</div>
               <div class="font-mono text-slate-200">{{ serialAdminStatus.mqtt?.client_enabled ? 'enabled' : 'disabled' }}</div>
             </div>
-            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+            <div class="rounded border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">State</div>
               <div class="font-mono text-slate-200">{{ serialAdminIsFactoryDefault ? 'factory' : 'commissioned' }}</div>
             </div>
           </div>
 
-          <div v-if="serialAdminConfig" class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div v-if="serialAdminConfig" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div class="flex flex-col gap-1.5">
               <label class="font-medium text-slate-400">Role</label>
               <select v-model="serialAdminConfig.role_tx" class="glass-input h-10 appearance-none">
@@ -3135,7 +3166,7 @@ function countCrashEvents(entries: string[]): number {
               <label class="font-medium text-slate-400">New WiFi password</label>
               <div class="flex gap-2">
                 <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" placeholder="Blank keeps existing password" />
-                <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-10 px-3 hover:bg-white/10">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
+                <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-10 px-3 hover:bg-slate-700/70">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
               </div>
             </div>
 
@@ -3191,7 +3222,7 @@ function countCrashEvents(entries: string[]): number {
               <label class="font-medium text-slate-400">New MQTT password</label>
               <div class="flex gap-2">
                 <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-10 flex-1" placeholder="Blank keeps existing password" />
-                <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-10 px-3 hover:bg-white/10">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-10 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
               </div>
             </div>
 
@@ -3199,7 +3230,7 @@ function countCrashEvents(entries: string[]): number {
               <button @click="saveSerialAdminConfig" :disabled="serialAdminDisabled || isSerialAdminSaving" class="primary-btn h-10 px-5 text-xs font-bold disabled:opacity-60">
                 {{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}
               </button>
-              <button @click="rebootSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-10 px-4 hover:bg-white/10 text-xs font-bold disabled:opacity-60">
+              <button @click="rebootSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 Reboot
               </button>
               <label class="flex items-center gap-2 text-slate-400">
@@ -3222,12 +3253,12 @@ function countCrashEvents(entries: string[]): number {
         </div>
 
         <!-- Device Details Panel -->
-        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
+        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
           <div class="flex items-center justify-between">
-            <h2 class="text-xl font-bold text-slate-300">
+            <h2 class="text-base font-bold text-slate-300">
               Device details
             </h2>
-            <button v-if="deviceInfo" @click="copyAllDeviceInfo" class="text-slate-500 hover:text-indigo-400 transition-colors" title="Copy all">
+            <button v-if="deviceInfo" @click="copyAllDeviceInfo" class="text-slate-500 hover:text-cyan-300 transition-colors" title="Copy all">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>
@@ -3237,7 +3268,7 @@ function countCrashEvents(entries: string[]): number {
               <span class="text-slate-500">{{ formatLabel(key) }}</span>
               <div class="flex items-center gap-3">
                 <span class="font-mono text-slate-300">{{ val }}</span>
-                <button @click="copyToClipboard(val.toString(), formatLabel(key).toLowerCase())" class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-indigo-400 transition-all">
+                <button @click="copyToClipboard(val.toString(), formatLabel(key).toLowerCase())" class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-cyan-300 transition-all">
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 </button>
               </div>
@@ -3245,26 +3276,26 @@ function countCrashEvents(entries: string[]): number {
             <div v-if="!deviceInfo && !isLoadingInfo" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
               Connect a device and click <br/> "Get device info"
             </div>
-            <div v-if="isLoadingInfo" class="h-32 flex flex-col items-center justify-center text-purple-400 italic text-sm gap-2">
-              <span class="animate-spin text-4xl">◌</span>
+            <div v-if="isLoadingInfo" class="h-32 flex flex-col items-center justify-center text-cyan-300 italic text-sm gap-2">
+              <span class="animate-spin text-2xl">◌</span>
               Reading device descriptors...
             </div>
           </div>
         </div>
       </div>
 
-      <div v-if="activeMode === 'monitor'" class="flex flex-col h-full overflow-hidden gap-4">
-        <div class="glass-card flex flex-col text-left shrink-0 p-4 gap-4">
-          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <div v-if="activeMode === 'monitor'" class="flex flex-col h-full overflow-hidden gap-3">
+        <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
-              <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              <h2 class="text-base font-bold text-cyan-300">
                 Monitor
               </h2>
               <p class="mt-1 text-xs text-slate-400 max-w-3xl">
                 {{ monitorHealthSummary }} · {{ monitorStatusMessage }}
               </p>
             </div>
-            <div class="flex flex-wrap items-center justify-end gap-3">
+            <div class="flex flex-wrap items-center justify-end gap-2">
               <label class="flex items-center gap-2 text-xs text-slate-400">
                 <input v-model="monitorAutoRefresh" type="checkbox" />
                 Auto refresh
@@ -3272,14 +3303,14 @@ function countCrashEvents(entries: string[]): number {
               <button
                 @click="refreshMonitorData"
                 :disabled="isMonitorRefreshing || !selectedPort"
-                class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+                class="primary-btn m-0 h-8 px-3 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
                 {{ isMonitorRefreshing ? 'Refreshing...' : 'Refresh' }}
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">USB gateway</label>
               <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
@@ -3310,7 +3341,7 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] gap-3 items-end">
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] gap-2 items-end">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">MQTT user</label>
               <input v-model="monitorMqttUser" class="glass-input h-10" />
@@ -3319,72 +3350,72 @@ function countCrashEvents(entries: string[]): number {
               <label class="font-medium text-slate-400">MQTT password</label>
               <div class="flex gap-2">
                 <input v-model="monitorMqttPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-10 min-w-0 flex-1" />
-                <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input m-0 h-10 w-16 shrink-0 hover:bg-white/10 text-xs font-bold">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
+                <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input m-0 h-10 w-14 shrink-0 hover:bg-slate-700/70 text-xs font-bold">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
               </div>
             </div>
             <div class="flex">
               <button
                 @click="toggleMonitorMqttConnection"
                 :disabled="monitorTransport !== 'mqtt' || !monitorMqttHost"
-                class="glass-input m-0 h-10 min-w-28 px-4 hover:bg-white/10 text-xs font-bold disabled:opacity-50"
+                class="glass-input m-0 h-10 min-w-24 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
               >
                 {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
               </button>
             </div>
             <div class="flex">
-              <span :class="['inline-flex h-10 min-w-32 items-center justify-center rounded border px-3 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+              <span :class="['inline-flex h-10 min-w-28 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
                 MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
               </span>
             </div>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 shrink-0">
-          <div class="glass-card p-4 text-left">
-            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</div>
-            <div class="mt-2 text-base font-bold text-slate-200 truncate">{{ monitorGatewayStatus?.chip_id || '-' }}</div>
-            <div class="mt-1 text-xs text-slate-400">{{ monitorGatewayStatus?.fw_version || '-' }} · {{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</div>
+        <div class="glass-card grid grid-cols-1 gap-0 overflow-hidden text-left text-xs md:grid-cols-2 xl:grid-cols-4 shrink-0">
+          <div class="border-b border-slate-800 p-2 md:border-r xl:border-b-0">
+            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</span>
+            <span class="ml-2 font-mono font-bold text-slate-200">{{ monitorGatewayStatus?.chip_id || '-' }}</span>
+            <span class="ml-2 text-slate-400">{{ monitorGatewayStatus?.fw_version || '-' }} · {{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</span>
           </div>
-          <div class="glass-card p-4 text-left">
-            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</div>
-            <div class="mt-2 text-base font-bold text-slate-200 whitespace-nowrap">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</div>
-            <div class="mt-1 text-xs text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</div>
+          <div class="border-b border-slate-800 p-2 md:border-b-0 xl:border-r">
+            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</span>
+            <span class="ml-2 font-mono font-bold text-slate-200">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</span>
+            <span class="ml-2 text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</span>
           </div>
-          <div class="glass-card p-4 text-left">
-            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</div>
-            <div class="mt-2 text-base font-bold text-slate-200 whitespace-nowrap">cmd {{ monitorGatewayStatus?.relay_state ?? '-' }} · fb {{ monitorGatewayStatus?.relay_feedback ?? '-' }}</div>
-            <div class="mt-1 text-xs text-slate-400">input {{ monitorGatewayStatus?.input_state ?? '-' }} · link {{ monitorGatewayStatus?.link_state || '-' }}</div>
+          <div class="border-b border-slate-800 p-2 md:border-r md:border-b-0 xl:border-r">
+            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</span>
+            <span class="ml-2 font-mono font-bold text-slate-200">cmd {{ monitorGatewayStatus?.relay_state ?? '-' }} · fb {{ monitorGatewayStatus?.relay_feedback ?? '-' }}</span>
+            <span class="ml-2 text-slate-400">input {{ monitorGatewayStatus?.input_state ?? '-' }} · link {{ monitorGatewayStatus?.link_state || '-' }}</span>
           </div>
-          <div class="glass-card p-4 text-left">
-            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet freshness</div>
-            <div class="mt-2 text-base font-bold text-slate-200 whitespace-nowrap">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</div>
-            <div class="mt-1 text-xs text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</div>
+          <div class="p-2">
+            <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet</span>
+            <span class="ml-2 font-bold text-slate-200">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</span>
+            <span class="ml-2 text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</span>
           </div>
         </div>
 
-        <div class="glass-card p-4 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
+        <div class="glass-card p-3 flex flex-col gap-2 text-left flex-1 min-h-0 overflow-hidden">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h2 class="text-lg font-bold text-slate-300">Fleet Diagnostics</h2>
+              <h2 class="text-sm font-bold text-slate-300">Fleet Diagnostics</h2>
               <div class="mt-1 text-xs text-slate-500">Serial-backed monitor data from the selected gateway.</div>
             </div>
           </div>
-          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
+          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
             <table class="w-full min-w-[1180px] border-collapse text-xs">
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
-                  <th class="px-3 py-2 text-left font-semibold">Addr</th>
-                  <th class="px-3 py-2 text-left font-semibold">Freshness</th>
-                  <th class="px-3 py-2 text-left font-semibold">Firmware</th>
-                  <th class="px-3 py-2 text-left font-semibold">IP</th>
-                  <th class="px-3 py-2 text-left font-semibold">Relay</th>
-                  <th class="px-3 py-2 text-left font-semibold">WiFi</th>
-                  <th class="px-3 py-2 text-left font-semibold">MQTT</th>
-                  <th class="px-3 py-2 text-left font-semibold">RSSI</th>
-                  <th class="px-3 py-2 text-left font-semibold">Heap</th>
-                  <th class="px-3 py-2 text-left font-semibold">Frag</th>
-                  <th class="px-3 py-2 text-left font-semibold">Uptime</th>
-                  <th class="px-3 py-2 text-left font-semibold">Poll</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Freshness</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">IP</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">MQTT</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Heap</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Frag</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Poll</th>
                 </tr>
               </thead>
               <tbody>
@@ -3392,20 +3423,20 @@ function countCrashEvents(entries: string[]): number {
                   <td colspan="12" class="px-3 py-8 text-center text-slate-600">Refresh monitor data to load gateway and fleet diagnostics.</td>
                 </tr>
                 <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
-                  <td class="px-3 py-2 font-mono text-slate-200">{{ device.address }}</td>
-                  <td class="px-3 py-2">
+                  <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
+                  <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', monitorFreshnessClass(device)]">{{ monitorFreshnessLabel(device) }}</span>
                   </td>
-                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.fw_version || '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-300">ack {{ device.relay_state ?? '-' }} · fb {{ device.relay_feedback ?? '-' }}</td>
-                  <td class="px-3 py-2 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-3 py-2 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${formatBytes(device.heap_free)} / ${formatBytes(device.heap_max_block)}` : '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${device.heap_frag_pct ?? '-'}%` : '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</td>
-                  <td class="px-3 py-2 text-slate-400">{{ device.poll_pending ? 'Pending' : 'Idle' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version || '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">ack {{ device.relay_state ?? '-' }} · fb {{ device.relay_feedback ?? '-' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${formatBytes(device.heap_free)} / ${formatBytes(device.heap_max_block)}` : '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.maintenance_debug_known ? `${device.heap_frag_pct ?? '-'}%` : '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.poll_pending ? 'Pending' : 'Idle' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -3413,11 +3444,11 @@ function countCrashEvents(entries: string[]): number {
         </div>
       </div>
 
-      <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-4">
-        <div class="glass-card flex flex-col text-left shrink-0 p-4 gap-3">
-          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-3">
+        <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
-              <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              <h2 class="text-base font-bold text-cyan-300">
                 Fleet
               </h2>
               <p class="mt-1 text-xs text-slate-400 max-w-3xl">
@@ -3438,7 +3469,7 @@ function countCrashEvents(entries: string[]): number {
               <button
                 @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
                 :disabled="isFirmwareServerStarting"
-                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
                 {{ firmwareServerInfo ? 'Stop server' : (isFirmwareServerStarting ? 'Starting...' : 'Start server') }}
               </button>
@@ -3473,8 +3504,8 @@ function countCrashEvents(entries: string[]): number {
                     {{ v === LOCAL_OPTION ? 'Choose a file' : v }}
                   </option>
                 </select>
-                <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input m-0 h-10 w-12 hover:bg-white/10 flex items-center justify-center group/btn shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-indigo-400 transition-colors', { 'animate-bounce text-indigo-500': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
+                <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center group/btn shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
                 </button>
               </div>
             </div>
@@ -3486,7 +3517,7 @@ function countCrashEvents(entries: string[]): number {
           </div>
         </div>
 
-        <div class="glass-card p-4 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
+        <div class="glass-card p-3 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="text-lg font-bold text-slate-300">Devices</h2>
@@ -3500,18 +3531,18 @@ function countCrashEvents(entries: string[]): number {
             <table class="w-full min-w-[980px] border-collapse text-xs">
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
-                  <th class="w-10 px-3 py-2 text-left"></th>
-                  <th class="px-3 py-2 text-left font-semibold">LoRa</th>
-                  <th class="px-3 py-2 text-left font-semibold">Chip / Host</th>
-                  <th class="px-3 py-2 text-left font-semibold">Firmware</th>
-                  <th class="px-3 py-2 text-left font-semibold">Role</th>
-                  <th class="px-3 py-2 text-left font-semibold">WiFi</th>
-                  <th class="px-3 py-2 text-left font-semibold">IP</th>
-                  <th class="px-3 py-2 text-left font-semibold">MQTT</th>
-                  <th class="px-3 py-2 text-left font-semibold">Uptime</th>
-                  <th class="px-3 py-2 text-left font-semibold">RSSI</th>
-                  <th class="px-3 py-2 text-left font-semibold">Age</th>
-                  <th class="px-3 py-2 text-left font-semibold">Actions</th>
+                  <th class="w-10 px-2 py-1.5 text-left"></th>
+                  <th class="px-2 py-1.5 text-left font-semibold">LoRa</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Chip / Host</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Role</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">IP</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">MQTT</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Age</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -3523,32 +3554,32 @@ function countCrashEvents(entries: string[]): number {
                   :key="device.address"
                   :class="['border-b border-slate-900/80 hover:bg-white/5 transition-colors', fleetRowClass(device)]"
                 >
-                  <td class="px-3 py-2"><input v-model="device.selected" type="checkbox" /></td>
-                  <td class="px-3 py-2 font-mono text-slate-200">{{ device.address }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.chip_id || '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.fw_version || 'unsupported' }}</td>
-                  <td class="px-3 py-2 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
-                  <td class="px-3 py-2">
+                  <td class="px-2 py-1.5"><input v-model="device.selected" type="checkbox" /></td>
+                  <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id || '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version || 'unsupported' }}</td>
+                  <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
+                  <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_enabled_known ? (device.wifi_enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300') : 'border-slate-700 bg-slate-800/50 text-slate-400']">
                       {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : 'Unknown' }}
                     </span>
                   </td>
-                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-3 py-2 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-3 py-2 font-mono">
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5 font-mono">
                     <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
                     <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']">
                       {{ fleetRowStatusLabel(device) }}
                     </div>
                   </td>
-                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
-                  <td class="px-3 py-2">
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
+                  <td class="px-2 py-1.5">
                     <div class="flex items-center gap-2">
                     <button
                       @click="flashLoraRemote(device)"
                       :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting || !fleetFlashAvailable(device)"
-                      class="glass-input m-0 h-7 px-3 hover:bg-white/10 text-[10px] font-bold disabled:opacity-50"
+                      class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold disabled:opacity-50"
                       :title="fleetFlashUnavailableReason(device)"
                     >
                       {{ remoteOtaBusyAddress === device.address ? 'Flashing...' : 'Flash' }}
@@ -3556,7 +3587,7 @@ function countCrashEvents(entries: string[]): number {
                     <button
                       @click="startFleetUdpLogs(device)"
                       :disabled="remoteUdpBusyAddress !== null || !fleetLogsAvailable(device)"
-                      class="glass-input m-0 h-7 px-3 hover:bg-white/10 text-[10px] font-bold disabled:opacity-50"
+                      class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold disabled:opacity-50"
                       :title="fleetLogsAvailable(device) ? 'Enable and show UDP logs' : 'Needs confirmed WiFi connection and IP from fleet status'"
                     >
                       {{ remoteUdpBusyAddress === device.address ? 'Starting...' : 'Logs' }}
@@ -3570,7 +3601,7 @@ function countCrashEvents(entries: string[]): number {
           <div v-if="isNetworkUdpMonitoring" class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
             <div class="mb-2 flex items-center justify-between gap-3">
               <div class="text-xs font-bold text-slate-300">UDP logs · {{ networkUdpTarget || 'Fleet' }}</div>
-              <button @click="stopNetworkUdpMonitor" class="glass-input m-0 h-8 px-3 hover:bg-white/10 text-xs font-bold">Stop logs</button>
+              <button @click="stopNetworkUdpMonitor" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Stop logs</button>
             </div>
             <div class="max-h-44 overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400">
               <div v-for="(log, i) in networkLogs.slice(-200)" :key="i">{{ log }}</div>
@@ -3582,10 +3613,10 @@ function countCrashEvents(entries: string[]): number {
       </div>
     </div>
 
-    <!-- Premium Toast Notification -->
+    <!-- Toast Notification -->
     <Transition name="toast">
-      <div v-if="showToast" class="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 glass-card px-6 py-3 border border-indigo-500/50 shadow-lg shadow-indigo-500/20 text-sm font-medium text-slate-200 flex items-center gap-3">
-        <span class="w-2 h-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]"></span>
+      <div v-if="showToast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 glass-card px-3 py-2 border border-cyan-500/50 text-xs font-medium text-slate-200 flex items-center gap-3">
+        <span class="w-2 h-2 rounded-full bg-cyan-500"></span>
         {{ toastMessage }}
       </div>
     </Transition>
@@ -3609,7 +3640,7 @@ function countCrashEvents(entries: string[]): number {
 }
 
 .toast-enter-active, .toast-leave-active {
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
@@ -3631,8 +3662,8 @@ function countCrashEvents(entries: string[]): number {
   49%, 54.9%,
   61%, 66.9%,
   73%, 78.9% {
-    color: rgb(129 140 248);
-    filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.9));
+    color: rgb(34 211 238);
+    filter: none;
     opacity: 1;
   }
   6%, 11.9%,

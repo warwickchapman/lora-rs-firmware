@@ -170,51 +170,51 @@ watch(activeMode, (mode) => {
 </script>
 
 <template>
-  <div class="h-full text-slate-200 p-6 flex flex-col overflow-hidden">
-    <header class="max-w-7xl w-full mx-auto mb-6 flex items-center justify-between shrink-0">
-      <div>
-        <h1 class="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
-          <img src="./assets/logo.png" alt="Thanda" class="w-8 h-8 object-contain" />
-          Thanda LoRa <span class="text-indigo-500">Flasher</span>
+  <div class="h-full text-slate-200 p-3 flex flex-col overflow-hidden">
+    <header class="w-full mb-3 flex items-center justify-between gap-4 shrink-0 border-b border-slate-700/80 pb-2">
+      <div class="min-w-0">
+        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2 whitespace-nowrap">
+          <img src="./assets/logo.png" alt="Thanda" class="w-5 h-5 object-contain" />
+          Thanda LoRa <span class="text-cyan-400">Flasher</span>
         </h1>
-        <p class="text-slate-400 text-sm mt-1">{{ appVersion }}</p>
+        <p class="text-slate-400 text-xs leading-none">{{ appVersion }}</p>
       </div>
-      <div class="absolute left-1/2 -translate-x-1/2 top-6 w-full max-w-md rounded-md border border-slate-700 bg-slate-900/60 p-1">
+      <div class="flex min-w-[28rem] max-w-xl flex-1 overflow-hidden rounded border border-slate-700 bg-slate-900/70">
         <button
           @click="activeMode = 'serial'"
-          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'serial' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/4 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'serial' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Flash
         </button>
         <button
           @click="activeMode = 'pair'"
-          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'pair' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/4 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'pair' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Provision
         </button>
         <button
           @click="activeMode = 'network'"
-          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'network' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/4 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'network' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Fleet
         </button>
         <button
           @click="activeMode = 'monitor'"
-          :class="['m-0 w-1/4 rounded px-4 py-2 text-sm font-semibold transition-all shadow-none', activeMode === 'monitor' ? 'bg-indigo-500 text-white' : 'bg-transparent text-slate-400 hover:text-slate-100']"
+          :class="['m-0 h-8 w-1/4 rounded-none px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'monitor' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
         >
           Monitor
         </button>
       </div>
-      <div class="flex gap-4">
-        <div :class="['glass-card px-3 py-2 flex items-center gap-2 text-sm transition-all', 
-                     status.ready ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-red-500/10 border-red-500/20']"
+      <div class="flex gap-2">
+        <div :class="['glass-card h-8 px-2 flex items-center gap-2 text-sm transition-all',
+                     status.ready ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-red-500/10 border-red-500/20']"
              :title="status.message">
-          <span :class="['w-2 h-2 rounded-full', status.ready ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 animate-pulse']"></span>
+          <span :class="['w-2 h-2 rounded-full', status.ready ? 'bg-emerald-500' : 'bg-red-500 animate-pulse']"></span>
         </div>
         <button
           @click="toggleWindowMode"
           :disabled="isTogglingWindowMode"
-          class="glass-card p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center justify-center disabled:opacity-60"
+          class="glass-card h-8 w-8 p-0 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center justify-center disabled:opacity-60"
           :title="isFullscreen ? 'Switch to normal windowed mode' : 'Switch to full screen mode'"
           :aria-label="isFullscreen ? 'Switch to normal windowed mode' : 'Switch to full screen mode'"
         >
@@ -231,7 +231,7 @@ watch(activeMode, (mode) => {
         </button>
         <button
           @click="exit()"
-          class="glass-card p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center justify-center"
+          class="glass-card h-8 w-8 p-0 text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all flex items-center justify-center"
           title="Close"
           aria-label="Close"
         >
@@ -243,7 +243,7 @@ watch(activeMode, (mode) => {
       </div>
     </header>
 
-    <main class="max-w-7xl w-full mx-auto flex-1 min-h-0">
+    <main class="w-full flex-1 min-h-0">
       <Flasher v-model:active-mode="activeMode" />
     </main>
   </div>
@@ -252,6 +252,6 @@ watch(activeMode, (mode) => {
 <style>
 body {
   margin: 0;
-  background-color: #0f172a;
+  background-color: #15212a;
 }
 </style>

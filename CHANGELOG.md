@@ -7,6 +7,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ## [Unreleased]
 
 ### Added
+- Flasher now uses a compact operator-console visual style with flatter panels, tighter spacing, smaller controls, and denser Fleet/Monitor tables so the desktop app remains usable on lower-resolution Windows laptops.
 - Firmware USB serial admin now has Phase 1A local-maintenance parity commands: `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`, giving Flasher a non-HTTP path for inspecting health, editing core config, rebooting, and resetting a USB-connected device.
 - Firmware now accepts authenticated USB serial admin `udp_log_control`, `remote_udp_log_control`, and `ota_pull` commands so local maintenance can enable temporary UDP log mirroring, ask a gateway to enable UDP logs on a WiFi-connected LoRa remote, and make a WiFi-connected device pull firmware from a Flasher-hosted URL without using the legacy REST OTA endpoint.
 - MQTT admin now accepts local `udp_log_control` and `ota_pull` commands plus gateway-mediated `peer/<addr>/udp_log_control` commands for remote UDP log enable/disable on remotes that already have WiFi, moving network maintenance control onto the MQTT/LoRa admin path instead of the on-device Web UI.
@@ -35,6 +36,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher serial monitoring now stays active across tab changes and only yields when another operation needs the same USB port, so a remote serial monitor can keep running while Fleet uses a separate gateway port.
 - Flasher now keeps separate selected USB ports for Flash, Provision, and Fleet while continuing to share per-port device details, so changing the gateway port no longer steals the remote port being monitored or flashed.
 - Flasher Identify LED actions now stay visible when the selected LRS supports serial admin and disable only while the selected port is busy, instead of disappearing during temporary port ownership conflicts.
+- Flasher serial port auto-selection now prefers LRS-plausible USB serial adapters and avoids defaulting to headset/audio serial ports such as Soundcore Bluetooth devices.
 - Flasher Flash local admin now avoids the stale Phase 1A firmware warning once status/config can load, and the Flash pane scrolls so expanded config controls remain reachable.
 - Flasher Fleet mode no longer depends on device-side HTTP discovery, Web UI login, REST OTA upload, Web UI opening, or REST UDP-log enablement. The old LAN scan/update table was removed rather than kept as a compatibility shim.
 - Flasher release CI dispatch is now tag-locked to prevent accidental `*-dev` release creation from `main` after post-release version auto-bump; `tools/release_flasher_assets.py dispatch-ci` now uses the target release tag as `--ref`, and `package_flasher.yml` blocks `create_release=true` when not running on a tag ref.
