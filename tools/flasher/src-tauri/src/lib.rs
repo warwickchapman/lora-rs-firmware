@@ -125,6 +125,7 @@ pub fn run() {
         })
         .manage(crate::services::serial_port_coordinator::SerialPortCoordinator::default())
         .manage(crate::commands::network::UdpMonitorState::default())
+        .manage(crate::commands::network::FirmwareServerState::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             maybe_offer_move_to_applications(&app.handle().clone());
@@ -143,12 +144,10 @@ pub fn run() {
             crate::commands::status::get_app_version,
             crate::commands::device::get_device_info,
             crate::commands::monitor::toggle_serial_monitor,
-            crate::commands::network::discover_network_devices,
-            crate::commands::network::authenticate_network_device,
-            crate::commands::network::ota_network_device,
+            crate::commands::network::start_firmware_file_server,
+            crate::commands::network::stop_firmware_file_server,
             crate::commands::network::start_network_udp_monitor,
             crate::commands::network::stop_network_udp_monitor,
-            crate::commands::network::enable_network_udp_logging,
             crate::commands::easy_pair::serial_admin_command,
         ])
         .run(tauri::generate_context!())

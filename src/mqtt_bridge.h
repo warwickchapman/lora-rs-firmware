@@ -35,6 +35,8 @@ class MqttBridge {
   char topic_base_[128]{};
   char relay_topic_[160]{};
   char control_topic_[160]{};
+  char udp_log_control_topic_[160]{};
+  char ota_pull_topic_[160]{};
   char remote_prefix_[160]{};
   char discovery_topic_[192]{};
 

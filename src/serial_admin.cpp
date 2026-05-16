@@ -6,6 +6,7 @@
 
 #include "build_info.h"
 #include "logger.h"
+#include "ota_pull.h"
 #include "web_console_internal.h"
 #include "web_console_settings_backup.h"
 
@@ -971,6 +972,216 @@ void SerialAdmin::handleIdentify(JsonDocument &doc) {
            static_cast<unsigned long>(durationMs));
 }
 
+void SerialAdmin::handleStartLoraInventory(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("start_lora_inventory", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("start_lora_inventory", "runtime_unavailable", id);
+    return;
+  }
+  int start = doc["start_address"] | 1;
+  int end = doc["end_address"] | Settings::kAddressListCap;
+  uint16_t intervalMs = static_cast<uint16_t>(doc["interval_ms"] | 250);
+  if (start < 1)
+    start = 1;
+  if (end > 254)
+    end = 254;
+  if (end < start || !sm_->fleetScanStart(static_cast<uint8_t>(start),
+                                          static_cast<uint8_t>(end),
+                                          intervalMs)) {
+    sendError("start_lora_inventory", "start_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "start_lora_inventory";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["start_address"] = start;
+  out["end_address"] = end;
+  out["interval_ms"] = intervalMs;
+  sendOk(out);
+}
+
+void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (sm_ == nullptr) {
+    sendError("lora_inventory_status", "runtime_unavailable", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "lora_inventory_status";
+  if (id[0] != '\0')
+    out["id"] = id;
+  const uint32_t now = millis();
+
+  FleetScanSnapshot scan{};
+  sm_->fleetScanSnapshot(scan);
+  JsonObject s = out["scan"].to<JsonObject>();
+  s["active"] = scan.active;
+  s["start_address"] = scan.start_address;
+  s["end_address"] = scan.end_address;
+  s["next_address"] = scan.next_address;
+  s["interval_ms"] = scan.interval_ms;
+  s["started_ms"] = scan.started_ms;
+  s["last_tx_ms"] = scan.last_tx_ms;
+  s["sent"] = scan.sent;
+  s["now_ms"] = now;
+
+  JsonArray devices = out["devices"].to<JsonArray>();
+  const size_t count = sm_->peerCount();
+  for (size_t i = 0; i < count; ++i) {
+    PeerStatusSnapshot p{};
+    if (!sm_->peerByIndex(i, p))
+      continue;
+    JsonObject row = devices.add<JsonObject>();
+    row["address"] = p.address;
+    row["role"] = "remote";
+    row["mode"] = "paired";
+    row["wifi_enabled_known"] = p.wifi_state_known;
+    row["wifi_enabled"] = p.wifi_enabled;
+    row["wifi_connected_known"] = false;
+    row["ip"] = "";
+    row["mqtt_known"] = false;
+    row["chip_id"] = "";
+    row["fw_version"] = "";
+    row["rssi"] = p.uplink_rssi;
+    row["downlink_rssi_known"] = p.downlink_rssi_valid;
+    row["downlink_rssi"] = p.downlink_rssi;
+    row["last_seen_ms"] = p.last_seen_ms;
+    row["age_ms"] = p.last_seen_ms == 0 ? 0 : now - p.last_seen_ms;
+    row["poll_pending"] = p.poll_pending;
+    row["ota_eligible"] = false;
+    row["ota_reason"] = "wifi_status_unknown";
+  }
+  sendOk(out);
+}
+
+void SerialAdmin::handleCancelLoraInventory(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("cancel_lora_inventory", "auth_failed", id);
+    return;
+  }
+  if (sm_ != nullptr)
+    sm_->fleetScanCancel();
+  JsonDocument out;
+  out["cmd"] = "cancel_lora_inventory";
+  if (id[0] != '\0')
+    out["id"] = id;
+  sendOk(out);
+}
+
+void SerialAdmin::handleUdpLogControl(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("udp_log_control", "auth_failed", id);
+    return;
+  }
+  const bool enabled = parseBoolField(doc["enabled"], true);
+  uint32_t ttlS = doc["ttl_s"] | 300UL;
+  if (ttlS > 3600UL)
+    ttlS = 3600UL;
+
+  IPAddress host;
+  const uint16_t port = static_cast<uint16_t>(doc["port"] | 5514);
+  const char *hostStr = doc["host"] | "";
+  if (enabled && (port == 0 || !host.fromString(hostStr))) {
+    sendError("udp_log_control", "invalid_target", id);
+    return;
+  }
+
+  if (enabled) {
+    lrslog::setUdpMirror(host, port, ttlS * 1000UL);
+  } else {
+    lrslog::disableUdpMirror();
+  }
+
+  JsonDocument out;
+  out["cmd"] = "udp_log_control";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["enabled"] = enabled;
+  out["host"] = enabled ? host.toString() : "";
+  out["port"] = enabled ? port : 0;
+  out["ttl_s"] = enabled ? ttlS : 0;
+  sendOk(out);
+}
+
+void SerialAdmin::handleRemoteUdpLogControl(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_udp_log_control", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_udp_log_control", "runtime_unavailable", id);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_udp_log_control", "invalid_address", id);
+    return;
+  }
+  const bool enabled = parseBoolField(doc["enabled"], true);
+  uint32_t ttlS = doc["ttl_s"] | 300UL;
+  if (ttlS > 3600UL)
+    ttlS = 3600UL;
+
+  IPAddress host;
+  const uint16_t port = static_cast<uint16_t>(doc["port"] | 5514);
+  const char *hostStr = doc["host"] | "";
+  if (enabled && (port == 0 || !host.fromString(hostStr))) {
+    sendError("remote_udp_log_control", "invalid_target", id);
+    return;
+  }
+
+  if (!sm_->mqttSetPeerUdpLogControl(static_cast<uint8_t>(rawAddr), enabled, host, port, ttlS)) {
+    sendError("remote_udp_log_control", "send_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_udp_log_control";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["addr"] = rawAddr;
+  out["enabled"] = enabled;
+  out["host"] = enabled ? host.toString() : "";
+  out["port"] = enabled ? port : 0;
+  out["ttl_s"] = enabled ? ttlS : 0;
+  out["requires_remote_wifi"] = enabled;
+  sendOk(out);
+}
+
+void SerialAdmin::handleOtaPull(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("ota_pull", "auth_failed", id);
+    return;
+  }
+  const char *url = doc["url"] | "";
+  const char *sha256 = doc["sha256"] | "";
+  String error;
+  if (!otaPullFromUrl(url, sha256, error)) {
+    sendError("ota_pull", error.c_str(), id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "ota_pull";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["rebooting"] = true;
+  sendOk(out);
+  delay(150);
+  ESP.restart();
+}
+
 void SerialAdmin::handleCommand(JsonDocument &doc) {
   const char *cmd = cmdName(doc);
   const char *id = requestId(doc);
@@ -1057,6 +1268,36 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
 
   if (strcmp(cmd, "identify") == 0) {
     handleIdentify(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "start_lora_inventory") == 0) {
+    handleStartLoraInventory(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "lora_inventory_status") == 0) {
+    handleLoraInventoryStatus(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "cancel_lora_inventory") == 0) {
+    handleCancelLoraInventory(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "udp_log_control") == 0) {
+    handleUdpLogControl(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_udp_log_control") == 0) {
+    handleRemoteUdpLogControl(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "ota_pull") == 0) {
+    handleOtaPull(doc);
     return;
   }
 

@@ -37,42 +37,12 @@ interface DeviceInfo {
   ssid: string;
 }
 
-interface LanSubnet {
-  interface_name: string;
-  address: string;
-  netmask: string;
-  cidr: number;
-  network: string;
-  broadcast: string;
-  host_count: number;
-}
-
-interface NetworkDevice {
-  ip: string;
-  identity: string;
-  chip_id: string;
-  derived_password: string;
-  auth_status: string;
-  fw_version: string;
-  fw_display: string;
-  role: string;
-  mode: string;
-  lan_hostname: string;
-  message: string;
-}
-
-interface NetworkDiscoveryResult {
-  subnets: LanSubnet[];
-  devices: NetworkDevice[];
-  scanned_hosts: number;
-  duration_ms: number;
-}
-
-interface NetworkScanProgressEvent {
-  scanned_hosts: number;
-  total_hosts: number;
-  found_devices: number;
-  subnet_label: string;
+interface FirmwareServerInfo {
+  filename: string;
+  sha256: string;
+  size_bytes: number;
+  port: number;
+  urls: string[];
 }
 
 interface EasyPairDevice {
@@ -103,6 +73,43 @@ interface EasyPairStatus {
     conflict_count: number;
   };
   devices?: EasyPairDevice[];
+}
+
+interface LoraInventoryDevice {
+  address: number;
+  chip_id?: string;
+  fw_version?: string;
+  role?: string;
+  mode?: string;
+  wifi_enabled_known?: boolean;
+  wifi_enabled?: boolean;
+  wifi_connected_known?: boolean;
+  wifi_connected?: boolean;
+  ip?: string;
+  mqtt_known?: boolean;
+  mqtt_connected?: boolean;
+  rssi?: number;
+  downlink_rssi_known?: boolean;
+  downlink_rssi?: number;
+  age_ms?: number;
+  poll_pending?: boolean;
+  ota_eligible?: boolean;
+  ota_reason?: string;
+  selected?: boolean;
+}
+
+interface LoraInventoryStatus {
+  ok: boolean;
+  cmd: string;
+  scan?: {
+    active: boolean;
+    start_address: number;
+    end_address: number;
+    next_address: number;
+    sent: number;
+    now_ms: number;
+  };
+  devices?: LoraInventoryDevice[];
 }
 
 interface WifiNetwork {
@@ -193,7 +200,6 @@ interface SerialDeviceState {
 
 type RegionCode = 'ZA' | 'EU' | 'US';
 
-const SAVED_NETWORK_PASSWORDS_KEY = 'lrs_flasher_network_passwords';
 const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
 
@@ -205,14 +211,9 @@ const selectedLocalPath = ref('');
 const region = ref<RegionCode>('ZA');
 const isFlashing = ref(false);
 const isMonitoring = ref(false);
-const isNetworkDiscovering = ref(false);
-const isNetworkOta = ref(false);
-const isNetworkOtaWaitingForReturn = ref(false);
-const networkOtaCancelRequested = ref(false);
-const isNetworkBulkOta = ref(false);
-const networkBulkOtaIndex = ref(0);
-const networkBulkOtaTotal = ref(0);
 const isNetworkUdpMonitoring = ref(false);
+const isFirmwareServerStarting = ref(false);
+const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
 const pairLogs = ref<string[]>([]);
@@ -234,16 +235,14 @@ const portSeenCounter = ref(0);
 const stickLogToBottom = ref(true);
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
-const networkDevices = ref<NetworkDevice[]>([]);
-const networkSubnets = ref<LanSubnet[]>([]);
-const scannedNetworkHosts = ref(0);
-const selectedNetworkIp = ref('');
-const networkPasswords = ref<Record<string, string>>({});
-const savedNetworkPasswords = ref<Record<string, string>>(loadSavedNetworkPasswords());
-const networkStatusMessage = ref('Ready to scan the current LAN.');
+const networkStatusMessage = ref('Ready to host firmware or listen for admin-enabled UDP logs.');
 const networkUdpTarget = ref('');
-const networkScanProgress = ref<NetworkScanProgressEvent | null>(null);
-const networkPasswordCheckSeq = ref<Record<string, number>>({});
+const loraInventory = ref<LoraInventoryDevice[]>([]);
+const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
+const isLoraInventoryScanning = ref(false);
+const loraInventoryFullscreen = ref(false);
+const isNetworkGatewayLoading = ref(false);
+const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
 const pairFleetKey = ref('');
@@ -269,8 +268,6 @@ const serialFactoryKeepFleet = ref(true);
 const serialFactoryKeepWifi = ref(true);
 
 const LOCAL_OPTION = '__local_browse__';
-const NETWORK_UDP_LOG_TTL_S = 1800;
-const NETWORK_UDP_LOG_RENEW_MS = 5 * 60 * 1000;
 const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'ssid',
   'password',
@@ -396,28 +393,15 @@ const monitorContextLabel = computed(() => {
   }
   return parts.join(' on ');
 });
-const selectedNetworkDevice = computed(() =>
-  networkDevices.value.find(d => d.ip === selectedNetworkIp.value) || null
-);
-const activeNetworkDevice = computed(() => {
-  if (networkUdpTarget.value) {
-    return networkDevices.value.find(d => d.ip === networkUdpTarget.value) || selectedNetworkDevice.value;
-  }
-  return selectedNetworkDevice.value;
-});
-const activeNetworkPassword = computed(() =>
-  activeNetworkDevice.value ? passwordForNetworkDevice(activeNetworkDevice.value) : ''
-);
-const networkSubnetLabel = computed(() => {
-  if (networkSubnets.value.length === 0) return 'No LAN subnet detected yet';
-  return networkSubnets.value
-    .map(s => `${s.interface_name} ${s.network}/${s.cidr}`)
-    .join(', ');
-});
 const networkLogActive = computed(() => activeMode.value === 'network' && isNetworkUdpMonitoring.value);
-const networkBulkCandidates = computed(() =>
-  networkDevices.value.filter(device => !!passwordForNetworkDevice(device).trim())
-);
+const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
+const loraInventoryProgressLabel = computed(() => {
+  const scan = loraInventoryScan.value;
+  if (!scan) return 'Idle';
+  if (!scan.active) return `Complete, ${scan.sent || 0} probes sent`;
+  const next = scan.next_address || scan.start_address || 1;
+  return `Scanning ${next}-${scan.end_address || 254}, ${scan.sent || 0} probes sent`;
+});
 const gatewayReady = computed(() =>
   !!selectedPort.value &&
   hasActiveDeviceInfo.value &&
@@ -466,7 +450,7 @@ const gatewayWifiStatusText = computed(() => {
   if (gatewayWifiReady.value) return `Gateway connected at ${activeSerialDevice.value?.gatewayWifiReadyIp}`;
   return 'Connect the gateway before sending credentials to remotes.';
 });
-const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkDiscovering.value || isNetworkOta.value || isNetworkBulkOta.value || isNetworkUdpMonitoring.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
+const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkUdpMonitoring.value || isFirmwareServerStarting.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
 const activityFullscreen = computed(() =>
   (activeMode.value === 'serial' && isMonitoring.value) ||
   (activeMode.value === 'network' && isNetworkUdpMonitoring.value)
@@ -478,10 +462,6 @@ let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
 let unlistenPortsChanged: UnlistenFn | null = null;
 let unlistenNetworkMonitor: UnlistenFn | null = null;
-let unlistenNetworkScanProgress: UnlistenFn | null = null;
-let unlistenNetworkDeviceFound: UnlistenFn | null = null;
-let networkUdpRenewalTimer: ReturnType<typeof window.setInterval> | null = null;
-const networkPasswordCheckTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
 function pushSerialLog(line: string) {
   if (!line) return;
@@ -844,393 +824,6 @@ function copyPairAdminPassword() {
   copyToClipboard(password, 'gateway password');
 }
 
-function passwordForNetworkDevice(device: NetworkDevice): string {
-  const stored = networkPasswords.value[device.ip];
-  return stored !== undefined ? stored : device.derived_password;
-}
-
-function networkDeviceUsesDerivedPassword(device: NetworkDevice): boolean {
-  const current = passwordForNetworkDevice(device).trim();
-  return !!device.derived_password && current === device.derived_password;
-}
-
-function copyNetworkPassword(device: NetworkDevice | null) {
-  if (!device) {
-    notify('Select a network device first');
-    return;
-  }
-  const password = passwordForNetworkDevice(device).trim();
-  if (!password) {
-    notify('Enter an admin password first');
-    return;
-  }
-  copyToClipboard(password, 'network password');
-}
-
-function copyNetworkIdentity(device: NetworkDevice) {
-  copyToClipboard(device.identity || device.ip, 'device name');
-}
-
-function loadSavedNetworkPasswords(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(SAVED_NETWORK_PASSWORDS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveNetworkPasswordStore() {
-  try {
-    localStorage.setItem(SAVED_NETWORK_PASSWORDS_KEY, JSON.stringify(savedNetworkPasswords.value));
-  } catch {
-    // Ignore storage failures; the current row password still works in memory.
-  }
-}
-
-function networkPasswordKeys(device: NetworkDevice): string[] {
-  const keys = new Set<string>();
-  const identity = (device.identity || '').trim().toLowerCase();
-  const chipId = (device.chip_id || '').trim().toLowerCase();
-  if (identity && identity !== 'lrs device') keys.add(identity);
-  if (chipId) keys.add(chipId.startsWith('lrs-') ? chipId : `lrs-${chipId.padStart(8, '0')}`);
-  return [...keys];
-}
-
-function savedPasswordForNetworkDevice(device: NetworkDevice): string {
-  for (const key of networkPasswordKeys(device)) {
-    const saved = savedNetworkPasswords.value[key];
-    if (saved) return saved;
-  }
-  return '';
-}
-
-function rememberNetworkPassword(device: NetworkDevice, password: string) {
-  const trimmed = password.trim();
-  if (!trimmed || (device.derived_password && trimmed === device.derived_password)) {
-    return;
-  }
-  const keys = networkPasswordKeys(device);
-  if (keys.length === 0) return;
-  const next = { ...savedNetworkPasswords.value };
-  for (const key of keys) {
-    next[key] = trimmed;
-  }
-  savedNetworkPasswords.value = next;
-  saveNetworkPasswordStore();
-}
-
-function setNetworkPassword(ip: string, value: string, verify = true) {
-  networkPasswords.value = { ...networkPasswords.value, [ip]: value };
-  if (verify) {
-    scheduleNetworkPasswordCheck(ip, value);
-  }
-}
-
-function updateNetworkDevice(ip: string, patch: Partial<NetworkDevice>) {
-  const idx = networkDevices.value.findIndex(d => d.ip === ip);
-  if (idx < 0) return;
-  const next = [...networkDevices.value];
-  next[idx] = { ...next[idx], ...patch };
-  networkDevices.value = next;
-}
-
-function scheduleNetworkPasswordCheck(ip: string, value: string) {
-  if (networkPasswordCheckTimers[ip]) {
-    clearTimeout(networkPasswordCheckTimers[ip]);
-    delete networkPasswordCheckTimers[ip];
-  }
-
-  const password = value.trim();
-  const seq = (networkPasswordCheckSeq.value[ip] || 0) + 1;
-  networkPasswordCheckSeq.value = { ...networkPasswordCheckSeq.value, [ip]: seq };
-
-  if (!password) {
-    updateNetworkDevice(ip, {
-      auth_status: 'auth_needed',
-      message: 'Enter admin password for version and OTA.',
-    });
-    return;
-  }
-
-  updateNetworkDevice(ip, {
-    auth_status: 'auth_testing',
-    message: 'Testing password...',
-  });
-
-  networkPasswordCheckTimers[ip] = setTimeout(() => {
-    verifyNetworkPassword(ip, password, seq);
-  }, 2500);
-}
-
-function clearNetworkPasswordChecks() {
-  for (const timer of Object.values(networkPasswordCheckTimers)) {
-    clearTimeout(timer);
-  }
-  for (const ip of Object.keys(networkPasswordCheckTimers)) {
-    delete networkPasswordCheckTimers[ip];
-  }
-  networkPasswordCheckSeq.value = {};
-}
-
-async function verifyNetworkPassword(ip: string, password: string, seq: number) {
-  try {
-    const updated = await invoke<NetworkDevice>('authenticate_network_device', { ip, password });
-    if (networkPasswordCheckSeq.value[ip] !== seq || (networkPasswords.value[ip] || '').trim() !== password) {
-      return;
-    }
-    rememberNetworkPassword(updated, password);
-    mergeNetworkDevice(updated);
-  } catch (e) {
-    if (networkPasswordCheckSeq.value[ip] !== seq) {
-      return;
-    }
-    updateNetworkDevice(ip, {
-      auth_status: 'auth_error',
-      message: String(e),
-    });
-  } finally {
-    if (networkPasswordCheckSeq.value[ip] === seq) {
-      delete networkPasswordCheckTimers[ip];
-    }
-  }
-}
-
-function mergeNetworkDevice(updated: NetworkDevice) {
-  const idx = networkDevices.value.findIndex(d => d.ip === updated.ip);
-  if (idx >= 0) {
-    const next = [...networkDevices.value];
-    next[idx] = { ...next[idx], ...updated };
-    networkDevices.value = next;
-  } else {
-    networkDevices.value = [...networkDevices.value, updated].sort((a, b) => ipSortKey(a.ip) - ipSortKey(b.ip));
-  }
-  if (!networkPasswords.value[updated.ip]) {
-    const saved = savedPasswordForNetworkDevice(updated);
-    const preferred = saved || updated.derived_password || '';
-    setNetworkPassword(updated.ip, preferred, false);
-    if (saved && saved !== updated.derived_password) {
-      scheduleNetworkPasswordCheck(updated.ip, saved);
-    }
-  }
-  if (!selectedNetworkIp.value) {
-    selectedNetworkIp.value = updated.ip;
-  }
-}
-
-function ipSortKey(ip: string): number {
-  return ip.split('.').reduce((acc, part) => (acc * 256) + Number(part || 0), 0);
-}
-
-function networkAuthLabel(status: string): string {
-  if (status === 'derived_ok') return 'Password OK';
-  if (status === 'custom_ok') return 'Password OK';
-  if (status === 'auth_testing') return 'Test';
-  if (status === 'auth_error') return 'Auth error';
-  return 'Password needed';
-}
-
-function networkAuthClass(status: string): string {
-  if (status === 'derived_ok' || status === 'custom_ok') return 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10';
-  if (status === 'auth_testing') return 'text-indigo-300 border-indigo-500/30 bg-indigo-500/10';
-  if (status === 'auth_error') return 'text-amber-300 border-amber-500/30 bg-amber-500/10';
-  return 'text-slate-300 border-slate-700 bg-slate-800/50';
-}
-
-function networkVersionTag(device: NetworkDevice): string {
-  return device.fw_version || (device.fw_display.match(/^[^\s(]+/)?.[0] ?? '');
-}
-
-function networkVersionMeta(device: NetworkDevice): string {
-  const display = device.fw_display || '';
-  const match = display.match(/\(([^)]+)\)/);
-  return match?.[1] || '';
-}
-
-function networkDeviceModeLabel(device: NetworkDevice): string {
-  return [device.mode, device.role].filter(Boolean).join(' ') || '-';
-}
-
-async function discoverNetworkDevices() {
-  if (isNetworkDiscovering.value) return;
-  activeMode.value = 'network';
-  isNetworkDiscovering.value = true;
-  networkScanProgress.value = null;
-  clearNetworkPasswordChecks();
-  networkDevices.value = [];
-  selectedNetworkIp.value = '';
-  networkStatusMessage.value = 'Scanning current LAN adapters...';
-  pushNetworkLog('--- Network discovery ---');
-  try {
-    const result = await invoke<NetworkDiscoveryResult>('discover_network_devices');
-    networkSubnets.value = result.subnets || [];
-    scannedNetworkHosts.value = result.scanned_hosts || 0;
-    networkDevices.value = (result.devices || []).sort((a, b) => ipSortKey(a.ip) - ipSortKey(b.ip));
-    const nextPasswords: Record<string, string> = { ...networkPasswords.value };
-    for (const device of networkDevices.value) {
-      const saved = savedPasswordForNetworkDevice(device);
-      const preferred = saved || device.derived_password || '';
-      if (!nextPasswords[device.ip]) nextPasswords[device.ip] = preferred;
-      if (saved && saved !== device.derived_password) {
-        scheduleNetworkPasswordCheck(device.ip, saved);
-      }
-    }
-    networkPasswords.value = nextPasswords;
-    if (!selectedNetworkIp.value && networkDevices.value.length > 0) {
-      selectedNetworkIp.value = networkDevices.value[0].ip;
-    }
-    const seconds = (Number(result.duration_ms || 0) / 1000).toFixed(1);
-    networkStatusMessage.value = `Found ${networkDevices.value.length} device${networkDevices.value.length === 1 ? '' : 's'} across ${scannedNetworkHosts.value} hosts in ${seconds}s.`;
-    pushNetworkLog(`${networkStatusMessage.value} ${networkSubnetLabel.value}`);
-  } catch (e) {
-    networkStatusMessage.value = 'Network discovery failed: ' + e;
-    pushNetworkLog(networkStatusMessage.value);
-    notify(networkStatusMessage.value);
-  } finally {
-    isNetworkDiscovering.value = false;
-  }
-}
-
-async function openNetworkDeviceConsole(device: NetworkDevice | null) {
-  if (!device) return;
-  selectedNetworkIp.value = device.ip;
-  const url = `http://${device.ip}`;
-  try {
-    await openUrl(url);
-    pushNetworkLog(`Opened ${url}`);
-  } catch (e) {
-    notify('Failed to open device URL: ' + e);
-  }
-}
-
-async function startNetworkUdpMonitor(device: NetworkDevice | null) {
-  if (!device) return;
-  clearNetworkUdpRenewal();
-  selectedNetworkIp.value = device.ip;
-  const password = passwordForNetworkDevice(device).trim();
-  if (!password) {
-    notify('Enter an admin password for this device');
-    return;
-  }
-  try {
-    const started = await invoke<string>('start_network_udp_monitor');
-    pushNetworkLog(started);
-    const enabled = await enableNetworkUdpLoggingLease(device.ip, password);
-    isNetworkUdpMonitoring.value = true;
-    networkUdpTarget.value = device.ip;
-    pushNetworkLog(enabled);
-    pushNetworkLog(`Flasher will renew UDP logging every ${Math.round(NETWORK_UDP_LOG_RENEW_MS / 60000)} minutes while monitoring.`);
-    startNetworkUdpRenewal();
-  } catch (e) {
-    pushNetworkLog('UDP monitor error: ' + e);
-    notify('UDP monitor error: ' + e);
-    clearNetworkUdpRenewal();
-  }
-}
-
-async function stopNetworkUdpMonitor() {
-  clearNetworkUdpRenewal();
-  try {
-    const stopped = await invoke<string>('stop_network_udp_monitor');
-    pushNetworkLog(stopped);
-  } catch (e) {
-    pushNetworkLog('UDP monitor stop error: ' + e);
-  } finally {
-    isNetworkUdpMonitoring.value = false;
-    networkUdpTarget.value = '';
-  }
-}
-
-async function enableNetworkUdpLoggingLease(ip: string, password: string): Promise<string> {
-  return await invoke<string>('enable_network_udp_logging', {
-    ip,
-    options: { password, ttl_s: NETWORK_UDP_LOG_TTL_S }
-  });
-}
-
-function startNetworkUdpRenewal() {
-  clearNetworkUdpRenewal();
-  networkUdpRenewalTimer = window.setInterval(async () => {
-    if (!isNetworkUdpMonitoring.value || !networkUdpTarget.value) {
-      clearNetworkUdpRenewal();
-      return;
-    }
-    const device = networkDevices.value.find(d => d.ip === networkUdpTarget.value) || activeNetworkDevice.value;
-    const password = device ? passwordForNetworkDevice(device).trim() : '';
-    if (!password) {
-      pushNetworkLog('UDP logging renewal skipped: missing admin password');
-      return;
-    }
-    try {
-      await enableNetworkUdpLoggingLease(networkUdpTarget.value, password);
-    } catch (e) {
-      pushNetworkLog('UDP logging renewal failed: ' + e);
-    }
-  }, NETWORK_UDP_LOG_RENEW_MS);
-}
-
-function clearNetworkUdpRenewal() {
-  if (networkUdpRenewalTimer) {
-    window.clearInterval(networkUdpRenewalTimer);
-    networkUdpRenewalTimer = null;
-  }
-}
-
-async function startNetworkOtaForDevice(device: NetworkDevice | null) {
-  if (!device || !selectedVersion.value) return;
-  selectedNetworkIp.value = device.ip;
-  const password = passwordForNetworkDevice(device).trim();
-  if (!password) {
-    notify('Enter an admin password for this device');
-    return;
-  }
-  const firmwareOptions = networkOtaFirmwareOptions();
-  if (!firmwareOptions) return;
-
-  isNetworkOta.value = true;
-  isNetworkOtaWaitingForReturn.value = false;
-  networkOtaCancelRequested.value = false;
-  pushNetworkLog(`--- Network OTA ${device.identity || device.ip} (${device.ip}) ---`);
-  let uploadAccepted = false;
-  try {
-    const result = await invoke<string>('ota_network_device', {
-      ip: device.ip,
-      options: {
-        password,
-        ...firmwareOptions
-      }
-    });
-    uploadAccepted = true;
-    pushNetworkLog(result);
-    pushNetworkLog('OTA upload complete. Waiting for reboot and WiFi reconnect. You can stop waiting and rescan if the device changes IP or does not return.');
-    isNetworkOtaWaitingForReturn.value = true;
-    await waitForNetworkDevice(device.ip, password, 90000);
-    isNetworkOtaWaitingForReturn.value = false;
-    await startNetworkUdpMonitor(device);
-  } catch (e) {
-    const message = String(e || 'unknown error');
-    if (uploadAccepted && message.includes('Device did not return')) {
-      pushNetworkLog(message);
-      notify('OTA upload was accepted, but the device did not return. Rescan or use USB recovery if needed.');
-    } else if (message.includes('Stopped waiting')) {
-      pushNetworkLog(message);
-      notify('Stopped waiting for device return. Rescan when ready.');
-    } else if (message.includes('OTA upload response was lost')) {
-      pushNetworkLog(message);
-      pushNetworkLog('The device may already be applying the update and rebooting. Rescan after it returns.');
-      notify('OTA response was lost. The device may be rebooting; rescan shortly.');
-    } else {
-      pushNetworkLog('Network OTA failed: ' + e);
-      notify('Network OTA failed: ' + e);
-    }
-  } finally {
-    isNetworkOta.value = false;
-    isNetworkOtaWaitingForReturn.value = false;
-    networkOtaCancelRequested.value = false;
-  }
-}
 
 function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCode | null } | null {
   const isLocal = selectedVersion.value.startsWith('Local: ');
@@ -1245,87 +838,62 @@ function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCod
   };
 }
 
-async function startNetworkBulkOta() {
-  if (isNetworkBulkOta.value || isNetworkOta.value || isNetworkDiscovering.value) return;
+async function startNetworkUdpListener() {
+  try {
+    const started = await invoke<string>('start_network_udp_monitor');
+    isNetworkUdpMonitoring.value = true;
+    networkUdpTarget.value = 'admin-enabled devices';
+    pushNetworkLog(started);
+    pushNetworkLog('Enable UDP logging over USB serial, MQTT, or gateway-mediated LoRa admin.');
+  } catch (e) {
+    pushNetworkLog('UDP monitor error: ' + e);
+    notify('UDP monitor error: ' + e);
+  }
+}
+
+async function stopNetworkUdpMonitor() {
+  try {
+    const stopped = await invoke<string>('stop_network_udp_monitor');
+    pushNetworkLog(stopped);
+  } catch (e) {
+    pushNetworkLog('UDP monitor stop error: ' + e);
+  } finally {
+    isNetworkUdpMonitoring.value = false;
+    networkUdpTarget.value = '';
+  }
+}
+
+async function startFirmwareServer() {
   const firmwareOptions = networkOtaFirmwareOptions();
   if (!firmwareOptions) return;
-  const targets = networkBulkCandidates.value;
-  if (targets.length === 0) {
-    notify('No discovered devices have an admin password for bulk update');
-    return;
-  }
-  if (!confirm(`Bulk update ${targets.length} discovered device${targets.length === 1 ? '' : 's'} sequentially? UDP logging will not be started.`)) {
-    return;
-  }
-
-  isNetworkBulkOta.value = true;
-  networkBulkOtaIndex.value = 0;
-  networkBulkOtaTotal.value = targets.length;
-  pushNetworkLog(`--- Bulk Network OTA: ${targets.length} device${targets.length === 1 ? '' : 's'} ---`);
-  pushNetworkLog('Bulk OTA uploads sequentially and does not start UDP logging.');
+  isFirmwareServerStarting.value = true;
+  activeMode.value = 'network';
+  pushNetworkLog('--- Firmware file server ---');
   try {
-    for (let i = 0; i < targets.length; i += 1) {
-      const device = targets[i];
-      networkBulkOtaIndex.value = i + 1;
-      selectedNetworkIp.value = device.ip;
-      const password = passwordForNetworkDevice(device).trim();
-      if (!password) {
-        pushNetworkLog(`Bulk OTA skipped ${device.identity || device.ip}: missing admin password`);
-        continue;
-      }
-      pushNetworkLog(`Bulk OTA ${i + 1}/${targets.length}: ${device.identity || device.ip} (${device.ip})`);
-      try {
-        const result = await invoke<string>('ota_network_device', {
-          ip: device.ip,
-          options: {
-            password,
-            ...firmwareOptions
-          }
-        });
-        pushNetworkLog(result);
-      } catch (e) {
-        const message = String(e || 'unknown error');
-        if (message.includes('OTA upload response was lost')) {
-          pushNetworkLog(`Bulk OTA uncertain for ${device.identity || device.ip}: ${message}. The device may already be rebooting; rescan after the batch.`);
-        } else {
-          pushNetworkLog(`Bulk OTA failed for ${device.identity || device.ip}: ${message}`);
-        }
-      }
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    }
-    pushNetworkLog('Bulk OTA uploads finished. Rescan after devices have rebooted.');
-    notify('Bulk OTA uploads finished. Rescan after reboot.');
+    const info = await invoke<FirmwareServerInfo>('start_firmware_file_server', {
+      options: firmwareOptions
+    });
+    firmwareServerInfo.value = info;
+    networkStatusMessage.value = `Serving ${info.filename} on ${info.urls[0] || `port ${info.port}`}.`;
+    pushNetworkLog(`${networkStatusMessage.value} SHA256 ${info.sha256}`);
+  } catch (e) {
+    pushNetworkLog('Firmware server failed: ' + e);
+    notify('Firmware server failed: ' + e);
   } finally {
-    isNetworkBulkOta.value = false;
-    networkBulkOtaIndex.value = 0;
-    networkBulkOtaTotal.value = 0;
+    isFirmwareServerStarting.value = false;
   }
 }
 
-async function waitForNetworkDevice(ip: string, password: string, timeoutMs: number) {
-  const started = Date.now();
-  await new Promise(resolve => setTimeout(resolve, 7000));
-  while (Date.now() - started < timeoutMs) {
-    if (networkOtaCancelRequested.value) {
-      throw new Error(`Stopped waiting for ${ip} to return. Rescan Network when the device is ready.`);
-    }
-    try {
-      const updated = await invoke<NetworkDevice>('authenticate_network_device', { ip, password });
-      mergeNetworkDevice(updated);
-      pushNetworkLog(`${updated.identity || ip} is back online.`);
-      return;
-    } catch {
-      pushNetworkLog(`Waiting for ${ip} to return...`);
-      await new Promise(resolve => setTimeout(resolve, 5000));
-    }
+async function stopFirmwareServer() {
+  try {
+    const stopped = await invoke<string>('stop_firmware_file_server');
+    pushNetworkLog(stopped);
+  } catch (e) {
+    pushNetworkLog('Firmware server stop error: ' + e);
+  } finally {
+    firmwareServerInfo.value = null;
+    networkStatusMessage.value = 'Firmware server stopped.';
   }
-  throw new Error('Device did not return before the 90s wait expired');
-}
-
-function stopWaitingForNetworkOtaReturn() {
-  if (!isNetworkOtaWaitingForReturn.value) return;
-  networkOtaCancelRequested.value = true;
-  pushNetworkLog('Stopping wait for OTA reboot return...');
 }
 
 function pairPassword(): string {
@@ -1339,6 +907,107 @@ async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string,
     request: { cmd, ...payload },
     timeoutMs
   });
+}
+
+async function loadNetworkGateway() {
+  if (!selectedPort.value || isNetworkGatewayLoading.value) return;
+  isNetworkGatewayLoading.value = true;
+  try {
+    const hello = await waitForSerialAdminHello(selectedPort.value, 6000);
+    const state = serialDeviceState(selectedPort.value);
+    if (state) {
+      state.adminSupported = true;
+      state.adminPassword = state.adminPassword || pairAdminPassword.value || deviceInfo.value?.password || '';
+    }
+    networkStatusMessage.value = `Gateway loaded on ${selectedPort.value}; firmware ${hello.fw_version || 'unknown'}.`;
+  } catch (e) {
+    networkStatusMessage.value = serialFeatureError('Gateway load', e);
+    notify(networkStatusMessage.value);
+  } finally {
+    isNetworkGatewayLoading.value = false;
+  }
+}
+
+function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
+  const selected = new Set(loraInventory.value.filter(d => d.selected).map(d => d.address));
+  loraInventory.value = rows
+    .slice()
+    .sort((a, b) => a.address - b.address)
+    .map(row => ({ ...row, selected: selected.has(row.address) }));
+}
+
+async function refreshLoraInventoryStatus() {
+  try {
+    const out = await sendEasyPairCommand<LoraInventoryStatus>('lora_inventory_status', {}, 5000);
+    loraInventoryScan.value = out.scan || null;
+    mergeLoraInventoryRows(out.devices || []);
+    isLoraInventoryScanning.value = !!out.scan?.active;
+    networkStatusMessage.value = `${loraInventoryProgressLabel.value}; ${loraInventory.value.length} device${loraInventory.value.length === 1 ? '' : 's'} visible.`;
+    if (!out.scan?.active) stopLoraInventoryPolling(false);
+  } catch (e) {
+    networkStatusMessage.value = serialFeatureError('LoRa inventory status', e);
+    stopLoraInventoryPolling(false);
+  }
+}
+
+function startLoraInventoryPolling() {
+  stopLoraInventoryPolling(false);
+  networkInventoryPollTimer.value = window.setInterval(() => {
+    refreshLoraInventoryStatus();
+  }, 1200);
+}
+
+function stopLoraInventoryPolling(markIdle = true) {
+  if (networkInventoryPollTimer.value) {
+    window.clearInterval(networkInventoryPollTimer.value);
+    networkInventoryPollTimer.value = null;
+  }
+  if (markIdle) isLoraInventoryScanning.value = false;
+}
+
+async function startLoraInventoryScan() {
+  if (!selectedPort.value) {
+    notify('Select the USB gateway first');
+    return;
+  }
+  const password = pairPassword();
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  if (!gatewayReady.value) await loadNetworkGateway();
+  try {
+    isLoraInventoryScanning.value = true;
+    loraInventoryFullscreen.value = true;
+    await sendEasyPairCommand('start_lora_inventory', {
+      admin_password: password,
+      start_address: 1,
+      end_address: 254,
+      interval_ms: 250
+    }, 8000);
+    networkStatusMessage.value = 'LoRa inventory scan started.';
+    await refreshLoraInventoryStatus();
+    startLoraInventoryPolling();
+  } catch (e) {
+    isLoraInventoryScanning.value = false;
+    networkStatusMessage.value = serialFeatureError('LoRa inventory scan', e);
+    notify(networkStatusMessage.value);
+  }
+}
+
+async function cancelLoraInventoryScan() {
+  const password = pairPassword();
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  try {
+    await sendEasyPairCommand('cancel_lora_inventory', { admin_password: password }, 5000);
+    stopLoraInventoryPolling();
+    await refreshLoraInventoryStatus();
+  } catch (e) {
+    notify(serialFeatureError('Cancel LoRa inventory', e));
+  }
 }
 
 async function probeSerialAdminSupport(port = selectedPort.value): Promise<boolean> {
@@ -2298,19 +1967,6 @@ onMounted(async () => {
     });
   });
 
-  unlistenNetworkScanProgress = await listen<NetworkScanProgressEvent>('network-scan-progress', (event) => {
-    networkScanProgress.value = event.payload;
-    const scanned = Number(event.payload.scanned_hosts || 0);
-    const total = Number(event.payload.total_hosts || 0);
-    const found = Number(event.payload.found_devices || 0);
-    networkStatusMessage.value = `Scanning ${event.payload.subnet_label}: ${scanned}/${total} hosts, ${found} found.`;
-  });
-
-  unlistenNetworkDeviceFound = await listen<NetworkDevice>('network-device-found', (event) => {
-    mergeNetworkDevice(event.payload);
-    pushNetworkLog(`Found ${event.payload.identity || event.payload.ip} at ${event.payload.ip}`);
-  });
-
   unlistenPortsChanged = await listen<PortsChangedEvent>('serial-ports-changed', () => {
     if (!isFlashing.value) {
       refreshPorts();
@@ -2344,17 +2000,17 @@ watch(eraseBeforeFlash, (next) => {
 
 onUnmounted(() => {
   stopEasyPairStatusPolling();
+  stopLoraInventoryPolling();
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
-  clearNetworkPasswordChecks();
-  clearNetworkUdpRenewal();
   if (unlistenFlash) unlistenFlash();
   if (unlistenMonitor) unlistenMonitor();
   if (unlistenNetworkMonitor) unlistenNetworkMonitor();
-  if (unlistenNetworkScanProgress) unlistenNetworkScanProgress();
-  if (unlistenNetworkDeviceFound) unlistenNetworkDeviceFound();
   if (unlistenPortsChanged) unlistenPortsChanged();
   if (isNetworkUdpMonitoring.value) {
     invoke('stop_network_udp_monitor').catch(() => {});
+  }
+  if (firmwareServerInfo.value) {
+    invoke('stop_firmware_file_server').catch(() => {});
   }
 });
 
@@ -2405,9 +2061,9 @@ function countCrashEvents(entries: string[]): number {
 
 <template>
   <div class="relative h-full flex flex-col">
-    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', activityFullscreen ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
+    <div :class="['grid gap-8 flex-1 min-h-0 transition-all duration-500', activityFullscreen || loraInventoryFullscreen ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
-      <div :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
+      <div v-if="!loraInventoryFullscreen" :class="['glass-card p-6 flex flex-col gap-4 text-left overflow-hidden h-full']">
         <div class="flex items-center justify-between border-b border-white/5 pb-4">
           <div class="flex flex-col gap-1">
             <h2 class="text-lg font-semibold text-slate-300 flex items-center gap-2">
@@ -2494,26 +2150,6 @@ function countCrashEvents(entries: string[]): number {
               </svg>
             </button>
             <button
-              v-if="activeMode === 'network' && isNetworkUdpMonitoring"
-              @click="copyNetworkPassword(activeNetworkDevice)"
-              :disabled="!activeNetworkPassword"
-              :class="[
-                'p-1.5 rounded-md border transition-all',
-                activeNetworkPassword
-                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-              ]"
-              title="Copy network device password"
-              aria-label="Copy network device password"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="7.5" cy="15.5" r="3.5"></circle>
-                <path d="m10.5 13 8-8"></path>
-                <path d="m16 5 3 3"></path>
-                <path d="m14 7 3 3"></path>
-              </svg>
-            </button>
-            <button
               v-if="activeMode === 'serial' && isMonitoring"
               @click="openActiveDeviceConsole"
               :disabled="!hasActiveDeviceInfo"
@@ -2525,26 +2161,6 @@ function countCrashEvents(entries: string[]): number {
               ]"
               title="Open device web console"
               aria-label="Open device web console"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="9"></circle>
-                <path d="M3 12h18"></path>
-                <path d="M12 3a14 14 0 0 1 0 18"></path>
-                <path d="M12 3a14 14 0 0 0 0 18"></path>
-              </svg>
-            </button>
-            <button
-              v-if="activeMode === 'network' && isNetworkUdpMonitoring"
-              @click="openNetworkDeviceConsole(activeNetworkDevice)"
-              :disabled="!activeNetworkDevice"
-              :class="[
-                'p-1.5 rounded-md border transition-all',
-                activeNetworkDevice
-                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-              ]"
-              title="Open network device web console"
-              aria-label="Open network device web console"
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="9"></circle>
@@ -3126,40 +2742,68 @@ function countCrashEvents(entries: string[]): number {
         </div>
       </div>
 
-      <div v-if="activeMode === 'network' && !isNetworkUdpMonitoring" class="flex flex-col gap-6 h-full overflow-hidden">
-        <div class="glass-card p-5 flex flex-col gap-4 text-left shrink-0">
-          <div class="flex items-start justify-between gap-4">
+      <div v-if="activeMode === 'network' && !isNetworkUdpMonitoring" :class="['flex flex-col h-full overflow-hidden', loraInventoryFullscreen ? 'gap-4' : 'gap-6']">
+        <div :class="['glass-card flex flex-col text-left shrink-0', loraInventoryFullscreen ? 'p-4 gap-3' : 'p-5 gap-4']">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <h2 class="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-                Network OTA
+                Network Inventory
               </h2>
-              <p class="mt-1 text-xs text-slate-400">{{ networkSubnetLabel }}</p>
+              <p class="mt-1 text-xs text-slate-400">
+                Use a USB-connected LoRa gateway to scan remotes and build the maintenance table.
+              </p>
             </div>
-            <button
-              @click="discoverNetworkDevices"
-              :disabled="isNetworkDiscovering || isNetworkBulkOta || (isNetworkOta && !isNetworkOtaWaitingForReturn)"
-              class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-indigo-400': isNetworkDiscovering }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
-              <span>{{ isNetworkDiscovering ? 'Scanning...' : 'Scan' }}</span>
-            </button>
-            <button
-              @click="startNetworkBulkOta"
-              :disabled="isNetworkBulkOta || isNetworkOta || isNetworkDiscovering || networkBulkCandidates.length === 0"
-              class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-            >
-              {{ isNetworkBulkOta ? `Bulk ${networkBulkOtaIndex}/${networkBulkOtaTotal}` : 'Bulk update' }}
-            </button>
-            <button
-              v-if="isNetworkOtaWaitingForReturn"
-              @click="stopWaitingForNetworkOtaReturn"
-              class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold text-amber-200"
-            >
-              Stop waiting
-            </button>
+            <div class="flex flex-wrap gap-3">
+              <button
+                @click="loadNetworkGateway"
+                :disabled="isNetworkGatewayLoading || !selectedPort"
+                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              >
+                {{ isNetworkGatewayLoading ? 'Loading...' : 'Load gateway' }}
+              </button>
+              <button
+                @click="isLoraInventoryScanning ? cancelLoraInventoryScan() : startLoraInventoryScan()"
+                :disabled="isNetworkGatewayLoading || !selectedPort"
+                class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              >
+                {{ isLoraInventoryScanning ? 'Stop scan' : 'Scan LoRa' }}
+              </button>
+              <button
+                @click="loraInventoryFullscreen = !loraInventoryFullscreen"
+                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+              >
+                {{ loraInventoryFullscreen ? 'Exit full screen' : 'Expand devices' }}
+              </button>
+              <button
+                @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
+                :disabled="isFirmwareServerStarting"
+                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              >
+                {{ firmwareServerInfo ? 'Stop firmware server' : (isFirmwareServerStarting ? 'Starting...' : 'Start firmware server') }}
+              </button>
+              <button
+                @click="startNetworkUdpListener"
+                class="glass-input m-0 h-10 px-4 hover:bg-white/10 flex items-center justify-center gap-2 text-xs font-bold"
+              >
+                Listen for UDP logs
+              </button>
+            </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div v-if="!loraInventoryFullscreen" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">USB gateway</label>
+              <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+                <option value="" disabled>Select USB gateway</option>
+                <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
+                  {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
+                </option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Gateway admin password</label>
+              <input v-model="pairAdminPassword" class="glass-input h-10 min-w-0 font-mono" :type="showPairAdminPassword ? 'text' : 'password'" autocomplete="current-password" />
+            </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Region</label>
               <select v-model="region" class="glass-input h-10 appearance-none">
@@ -3182,180 +2826,116 @@ function countCrashEvents(entries: string[]): number {
           </div>
 
           <div class="text-xs text-slate-400">
-            {{ isNetworkBulkOta ? `Bulk OTA in progress: ${networkBulkOtaIndex}/${networkBulkOtaTotal}. Uploads are sequential and UDP logging is not started.` : isNetworkOtaWaitingForReturn ? 'OTA upload accepted. Waiting for device return; you can stop waiting and rescan if it does not come back on the same IP.' : networkStatusMessage }}
-          </div>
-          <div v-if="networkScanProgress" class="h-2 overflow-hidden rounded bg-slate-800">
-            <div
-              class="h-full bg-indigo-500 transition-all"
-              :style="{ width: `${Math.min(100, Math.round((networkScanProgress.scanned_hosts / Math.max(1, networkScanProgress.total_hosts)) * 100))}%` }"
-            ></div>
+            {{ networkStatusMessage }} <span class="text-slate-500">{{ loraInventoryProgressLabel }}</span>
           </div>
         </div>
 
-        <div class="glass-card p-5 flex flex-col gap-4 text-left flex-1 min-h-0 overflow-hidden">
-          <div class="flex items-center justify-between">
-            <h2 class="text-xl font-bold text-slate-300">Discovered devices</h2>
-            <span class="text-xs text-slate-500">{{ networkDevices.length }} found</span>
-          </div>
-
-          <div v-if="networkDevices.length === 0" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
-            Scan the current LAN to find LRS devices.
-          </div>
-
-          <div v-else class="flex-1 min-h-0 overflow-auto custom-scrollbar pr-1">
-            <div
-              v-for="device in networkDevices"
-              :key="device.ip"
-              @click="selectedNetworkIp = device.ip"
-              :class="['rounded-md border p-3 mb-3 cursor-pointer transition-all', selectedNetworkIp === device.ip ? 'border-indigo-500/60 bg-indigo-500/10' : 'border-slate-800 bg-slate-900/30 hover:border-slate-600']"
-            >
-              <div class="flex flex-col gap-3">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <button
-                      @click.stop="copyNetworkIdentity(device)"
-                      class="m-0 block max-w-full bg-transparent p-0 text-left font-mono text-sm text-slate-200 shadow-none transition-colors hover:text-indigo-300"
-                      title="Copy device name"
-                      aria-label="Copy device name"
-                    >
-                      <span class="block truncate">{{ device.identity || device.ip }}</span>
-                    </button>
-                    <div class="font-mono text-xs text-slate-500">{{ device.ip }}</div>
-                  </div>
-                  <div class="hidden min-w-0 flex-1 sm:block">
-                    <div class="text-[11px] text-slate-500">Version</div>
-                    <div class="font-mono text-xs text-slate-300 truncate">{{ networkVersionTag(device) || '-' }}</div>
-                    <div v-if="networkVersionMeta(device)" class="font-mono text-[10px] text-slate-600 truncate">
-                      {{ networkVersionMeta(device) }}
-                    </div>
-                  </div>
-                  <div class="hidden min-w-0 flex-1 sm:block">
-                    <div class="text-[11px] text-slate-500">Mode</div>
-                    <div class="font-mono text-xs text-slate-300 truncate">{{ networkDeviceModeLabel(device) }}</div>
-                  </div>
-                  <div class="flex shrink-0 items-center gap-2">
-                    <span
-                      v-if="networkDeviceUsesDerivedPassword(device)"
-                      class="rounded border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300"
-                      title="This row is using the factory-derived admin password"
-                    >
-                      Factory pwd
-                    </span>
-                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', networkAuthClass(device.auth_status)]">
-                      {{ networkAuthLabel(device.auth_status) }}
-                    </span>
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2 text-xs sm:hidden">
-                  <div>
-                    <span class="text-slate-500">Version</span>
-                    <div class="font-mono text-slate-300 truncate">{{ networkVersionTag(device) || '-' }}</div>
-                    <div v-if="networkVersionMeta(device)" class="font-mono text-[10px] text-slate-600 truncate">
-                      {{ networkVersionMeta(device) }}
-                    </div>
-                  </div>
-                  <div>
-                    <span class="text-slate-500">Mode</span>
-                    <div class="font-mono text-slate-300">{{ networkDeviceModeLabel(device) }}</div>
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-1 xl:grid-cols-[minmax(13rem,1fr)_auto] gap-3 items-end">
-                  <div class="flex flex-col gap-1.5 text-xs">
-                    <label class="font-medium text-slate-400">Admin password</label>
-                    <input
-                      :value="passwordForNetworkDevice(device)"
-                      @click.stop
-                      @input="setNetworkPassword(device.ip, ($event.target as HTMLInputElement).value)"
-                      class="glass-input h-10"
-                      type="password"
-                      autocomplete="current-password"
-                    />
-                  </div>
-                  <div class="flex flex-wrap items-center gap-3 self-end">
-                    <button
-                      @click.stop="openNetworkDeviceConsole(device)"
-                      class="m-0 p-1.5 rounded-md border transition-all border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
-                      title="Open Web UI"
-                      aria-label="Open Web UI"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="9"></circle>
-                        <path d="M3 12h18"></path>
-                        <path d="M12 3a14 14 0 0 1 0 18"></path>
-                        <path d="M12 3a14 14 0 0 0 0 18"></path>
-                      </svg>
-                    </button>
-                    <button
-                      @click.stop="copyNetworkPassword(device)"
-                      :disabled="!passwordForNetworkDevice(device)"
-                      :class="[
-                        'm-0 p-1.5 rounded-md border transition-all',
-                        passwordForNetworkDevice(device)
-                          ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                          : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-                      ]"
-                      title="Copy admin password"
-                      aria-label="Copy admin password"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="7.5" cy="14.5" r="3.5"></circle>
-                        <path d="M10 12 20 2"></path>
-                        <path d="m16 6 2 2"></path>
-                        <path d="m14 8 2 2"></path>
-                      </svg>
-                    </button>
-                    <button
-                      @click.stop="isNetworkUdpMonitoring && networkUdpTarget === device.ip ? stopNetworkUdpMonitor() : startNetworkUdpMonitor(device)"
-                      :disabled="isNetworkBulkOta || (isNetworkOta && !isNetworkOtaWaitingForReturn)"
-                      :class="[
-                        'm-0 p-1.5 rounded-md border transition-all',
-                        !(isNetworkBulkOta || (isNetworkOta && !isNetworkOtaWaitingForReturn))
-                          ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                          : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-                      ]"
-                      :title="isNetworkUdpMonitoring && networkUdpTarget === device.ip ? 'Stop monitor' : 'Start monitor'"
-                      :aria-label="isNetworkUdpMonitoring && networkUdpTarget === device.ip ? 'Stop monitor' : 'Start monitor'"
-                    >
-                      <svg v-if="isNetworkUdpMonitoring && networkUdpTarget === device.ip" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
-                      </svg>
-                      <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a4 4 0 0 1 4-4z"></path>
-                        <path d="M16 2v4h4"></path>
-                        <path d="M8 9h5"></path>
-                        <path d="M8 13h4"></path>
-                        <path d="M8 17h3"></path>
-                        <path d="m14 14 4 2.5-4 2.5z"></path>
-                      </svg>
-                    </button>
-                    <button
-                      @click.stop="startNetworkOtaForDevice(device)"
-                      :disabled="isNetworkBulkOta || isNetworkOta || isNetworkDiscovering"
-                      :class="[
-                        'm-0 p-1.5 rounded-md border transition-all',
-                        !(isNetworkBulkOta || isNetworkOta || isNetworkDiscovering)
-                          ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300 hover:text-indigo-100 hover:border-indigo-400'
-                          : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-                      ]"
-                      title="Update firmware over OTA"
-                      aria-label="Update firmware over OTA"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': (isNetworkOta || isNetworkBulkOta) && selectedNetworkIp === device.ip }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 16.899A7 7 0 1 1 15.71 10h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
-                        <path d="M12 19V8"></path>
-                        <path d="m8 12 4-4 4 4"></path>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
+        <div :class="['glass-card p-4 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden', loraInventoryFullscreen ? 'min-h-[70vh]' : '']">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-bold text-slate-300">LoRa devices</h2>
+              <div v-if="loraInventoryFullscreen" class="mt-1 text-xs text-slate-500">
+                {{ networkStatusMessage }} <span class="text-slate-600">{{ loraInventoryProgressLabel }}</span>
               </div>
             </div>
+            <div class="flex items-center gap-3">
+              <div class="text-xs text-slate-500">{{ loraInventory.length }} found · {{ selectedLoraInventoryCount }} selected</div>
+              <button
+                v-if="loraInventoryFullscreen"
+                @click="loraInventoryFullscreen = false"
+                class="glass-input m-0 h-9 px-3 hover:bg-white/10 text-xs font-bold"
+              >
+                Exit full screen
+              </button>
+            </div>
+          </div>
+          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
+            <table class="w-full min-w-[980px] border-collapse text-xs">
+              <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
+                <tr class="border-b border-slate-800">
+                  <th class="w-10 px-3 py-2 text-left"></th>
+                  <th class="px-3 py-2 text-left font-semibold">LoRa</th>
+                  <th class="px-3 py-2 text-left font-semibold">Chip / Host</th>
+                  <th class="px-3 py-2 text-left font-semibold">Firmware</th>
+                  <th class="px-3 py-2 text-left font-semibold">Role</th>
+                  <th class="px-3 py-2 text-left font-semibold">WiFi</th>
+                  <th class="px-3 py-2 text-left font-semibold">IP</th>
+                  <th class="px-3 py-2 text-left font-semibold">MQTT</th>
+                  <th class="px-3 py-2 text-left font-semibold">RSSI</th>
+                  <th class="px-3 py-2 text-left font-semibold">Age</th>
+                  <th class="px-3 py-2 text-left font-semibold">OTA</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="loraInventory.length === 0">
+                  <td colspan="11" class="px-3 py-8 text-center text-slate-600">Load a USB gateway and scan LoRa to discover remotes.</td>
+                </tr>
+                <tr
+                  v-for="device in loraInventory"
+                  :key="device.address"
+                  class="border-b border-slate-900/80 bg-slate-950/20 hover:bg-white/5"
+                >
+                  <td class="px-3 py-2"><input v-model="device.selected" type="checkbox" /></td>
+                  <td class="px-3 py-2 font-mono text-slate-200">{{ device.address }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.chip_id || '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.fw_version || 'unsupported' }}</td>
+                  <td class="px-3 py-2 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
+                  <td class="px-3 py-2">
+                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_enabled_known ? (device.wifi_enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300') : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+                      {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : 'Unknown' }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+                  <td class="px-3 py-2 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
+                  <td class="px-3 py-2 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
+                  <td class="px-3 py-2">
+                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.ota_eligible ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+                      {{ device.ota_eligible ? 'Eligible' : 'Not yet' }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
-    </div>
+
+        <div v-if="!loraInventoryFullscreen" class="glass-card p-5 flex flex-col gap-4 text-left shrink-0 max-h-[38vh] overflow-auto custom-scrollbar">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-xl font-bold text-slate-300">Firmware pull server</h2>
+            <span :class="['rounded border px-2 py-1 text-[10px] font-bold', firmwareServerInfo ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+              {{ firmwareServerInfo ? 'Running' : 'Stopped' }}
+            </span>
+          </div>
+
+          <div v-if="!firmwareServerInfo" class="rounded-md border border-slate-800 bg-slate-900/30 p-4 text-sm text-slate-400">
+            Start the firmware server, then send an <span class="font-mono text-slate-300">ota_pull</span> admin command over USB serial or MQTT. LoRa is kept for discovery/config/log-control; full firmware binaries should not be pushed over LoRa airtime.
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-3 text-xs">
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">File</div>
+              <div class="font-mono text-slate-200 break-all">{{ firmwareServerInfo.filename }}</div>
+            </div>
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">URL</div>
+              <div v-for="url in firmwareServerInfo.urls" :key="url" class="font-mono text-slate-200 break-all">{{ url }}</div>
+            </div>
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">SHA256</div>
+              <div class="font-mono text-slate-200 break-all">{{ firmwareServerInfo.sha256 }}</div>
+            </div>
+            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
+              <div class="text-slate-500">Size</div>
+              <div class="font-mono text-slate-200">{{ formatBytes(firmwareServerInfo.size_bytes) }}</div>
+            </div>
+          </div>
+
+          <div class="rounded-md border border-indigo-500/20 bg-indigo-500/10 p-4 text-xs text-slate-300">
+            MQTT local OTA payload: <span class="font-mono">{"url":"http://.../firmware.bin","sha256":"..."}</span> to <span class="font-mono">&lt;topic_root&gt;/lrs-&lt;chipid&gt;/ota_pull</span>.
+          </div>
+        </div>
+      </div>    </div>
 
     <!-- Premium Toast Notification -->
     <Transition name="toast">

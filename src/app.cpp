@@ -246,6 +246,22 @@ void App::tick() {
     }
   }
   {
+    bool udpEnabled = false;
+    IPAddress udpHost;
+    uint16_t udpPort = 0;
+    uint32_t udpTtlS = 0;
+    uint8_t udpSrc = 0;
+    if (sm_.consumePendingUdpLogControl(udpEnabled, udpHost, udpPort, udpTtlS, udpSrc)) {
+      if (udpEnabled) {
+        lrslog::setUdpMirror(udpHost, udpPort, udpTtlS * 1000UL);
+      } else {
+        lrslog::disableUdpMirror();
+      }
+      lrslog::event(udpEnabled ? "udp_log_control_enable_apply" : "udp_log_control_disable_apply",
+                    0, udpSrc, static_cast<uint8_t>(udpPort & 0xFFU));
+    }
+  }
+  {
     // Provisioning over LoRa intentionally reuses the normal WiFi restart path;
     // the sender needs the device to retry immediately even if credentials are
     // unchanged.
@@ -685,10 +701,7 @@ void App::ensureApEnabled() {
 }
 
 void App::maybeDisableAp() {
-  if (config_.settings().ap_always_on || !ap_enabled_ || !sta_connected_) {
-    return;
-  }
-  if (millis() - sta_connected_since_ms_ < kApDisableDelayAfterStaMs) {
+  if (!ap_enabled_ || shouldEnableSoftAp()) {
     return;
   }
   WiFi.softAPdisconnect(true);
@@ -697,7 +710,8 @@ void App::maybeDisableAp() {
     dns_.stop();
     dns_running_ = false;
   }
-  LRS_LOGI(WIFI, "event=ap_disabled reason=sta_stable");
+  applyWifiRuntimeSettings();
+  LRS_LOGI(WIFI, "event=ap_disabled reason=sta_connected");
 }
 
 void App::refreshCaptiveDns() {
@@ -913,8 +927,10 @@ void App::stopWifiForAdminDisable() {
 bool App::shouldEnableSoftAp() const {
   const auto &cfg = config_.settings();
   if (!cfg.wifi_admin_enabled) return false;
+  if (cfg.wifi_ap_fallback_policy == "secure_sta_only") return false;
+  if (!cfg.ap_always_on) return false;
   if (cfg.wifi_sta_ssid.length() == 0) return true;
-  return cfg.wifi_ap_fallback_policy != "secure_sta_only";
+  return !sta_connected_;
 }
 
 bool App::parseIpAddress(const String &raw, IPAddress &out) const {

@@ -53,7 +53,7 @@ Recommended defaults:
 In `Network` tab:
 - Set STA SSID/password.
 - Set LAN hostname.
-- Choose whether AP remains enabled after STA connects.
+- Choose whether Soft AP is available while STA is disconnected.
 
 ## Fleet Behavior
 - `Standalone` mode is local-only. Fleet menu/actions are not available.

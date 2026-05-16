@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <IPAddress.h>
 #include <stddef.h>
 
 #include "config_store.h"
@@ -171,10 +172,13 @@ class NodeStateMachine {
   bool mqttPollPeerNow(uint8_t dstAddress);
   bool mqttForgetPeer(uint8_t dstAddress);
   bool mqttSetPeerWifi(uint8_t dstAddress, bool enabled);
+  bool mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS);
   bool sendBroadcastWifiDisable();
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
   bool sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter);
+  bool hasPendingUdpLogControl() const;
+  bool consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src);
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
   bool fleetScanSnapshot(FleetScanSnapshot &out) const;
@@ -379,6 +383,12 @@ class NodeStateMachine {
   bool wifi_control_pending_enabled_ = true;
   uint8_t wifi_control_pending_src_ = 0;
   uint32_t wifi_control_pending_counter_ = 0;
+  bool udp_log_control_pending_ = false;
+  bool udp_log_control_pending_enabled_ = false;
+  IPAddress udp_log_control_pending_host_;
+  uint16_t udp_log_control_pending_port_ = 0;
+  uint32_t udp_log_control_pending_ttl_s_ = 0;
+  uint8_t udp_log_control_pending_src_ = 0;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;
   uint8_t factory_reset_pending_src_ = 0;
@@ -496,6 +506,7 @@ class NodeStateMachine {
   void freePollStorage();
   bool handleWifiProvisionFrame(const ProtocolMessage &msg);
   bool handleWifiControlFrame(const ProtocolMessage &msg);
+  bool handleUdpLogControlFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
   bool isAuthorizedMqttController(uint8_t src) const;

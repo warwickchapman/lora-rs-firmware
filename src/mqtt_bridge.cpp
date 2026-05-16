@@ -5,6 +5,7 @@
 
 #include "build_info.h"
 #include "logger.h"
+#include "ota_pull.h"
 #include "state_machine.h"
 
 namespace {
@@ -171,6 +172,55 @@ bool parseBoolPayload(const uint8_t *payload, unsigned int length, bool &out) {
   }
   return false;
 }
+
+bool parseUdpLogControlPayload(const uint8_t *payload, unsigned int length, bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS) {
+  if (payload == nullptr || length == 0 || length > 192) return false;
+  bool boolValue = false;
+  if (parseBoolPayload(payload, length, boolValue)) {
+    enabled = boolValue;
+    host = IPAddress();
+    port = 0;
+    ttlS = 0;
+    return true;
+  }
+
+  JsonDocument doc;
+  auto err = deserializeJson(doc, payload, length);
+  if (err) return false;
+
+  enabled = true;
+  if (doc["enabled"].is<bool>()) {
+    enabled = doc["enabled"].as<bool>();
+  } else if (doc["enabled"].is<const char *>()) {
+    const char *raw = doc["enabled"];
+    if (raw == nullptr || !parseBoolPayload(reinterpret_cast<const uint8_t *>(raw), strlen(raw), enabled)) return false;
+  } else {
+    enabled = true;
+  }
+
+  port = static_cast<uint16_t>(doc["port"] | 5514);
+  ttlS = doc["ttl_s"] | 300UL;
+  if (ttlS > 3600UL) ttlS = 3600UL;
+
+  const char *hostStr = doc["host"] | "";
+  if (enabled && (port == 0 || !host.fromString(hostStr))) return false;
+  if (!enabled) {
+    host = IPAddress();
+    port = 0;
+    ttlS = 0;
+  }
+  return true;
+}
+
+bool parseOtaPullPayload(const uint8_t *payload, unsigned int length, String &url, String &sha256) {
+  if (payload == nullptr || length == 0 || length > 256) return false;
+  JsonDocument doc;
+  auto err = deserializeJson(doc, payload, length);
+  if (err) return false;
+  url = String(static_cast<const char *>(doc["url"] | ""));
+  sha256 = String(static_cast<const char *>(doc["sha256"] | ""));
+  return url.length() > 0;
+}
 }
 
 MqttBridge *MqttBridge::instance_ = nullptr;
@@ -313,6 +363,8 @@ void MqttBridge::rebuildTopics() {
   snprintf(topic_base_, sizeof(topic_base_), "%s/%s", settings_->mqtt_topic_root.c_str(), host_name_);
   snprintf(relay_topic_, sizeof(relay_topic_), "%s/relay", topic_base_);
   snprintf(control_topic_, sizeof(control_topic_), "%s/control", topic_base_);
+  snprintf(udp_log_control_topic_, sizeof(udp_log_control_topic_), "%s/udp_log_control", topic_base_);
+  snprintf(ota_pull_topic_, sizeof(ota_pull_topic_), "%s/ota_pull", topic_base_);
   snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peer/", topic_base_);
   snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
 
@@ -392,6 +444,52 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     return;
   }
 
+  if (strcmp(topic, udp_log_control_topic_) == 0) {
+    if (!runtime_.mqtt_control_enabled) {
+      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+      return;
+    }
+
+    bool enabled = false;
+    IPAddress host;
+    uint16_t port = 0;
+    uint32_t ttlS = 0;
+    if (!parseUdpLogControlPayload(payload, length, enabled, host, port, ttlS)) {
+      lrslog::event("mqtt_udp_log_control_json_err", 0, 0, 0);
+      return;
+    }
+
+    if (enabled) {
+      lrslog::setUdpMirror(host, port, ttlS * 1000UL);
+    } else {
+      lrslog::disableUdpMirror();
+    }
+    lrslog::event(enabled ? "mqtt_udp_log_control_enable" : "mqtt_udp_log_control_disable", 0, 0, static_cast<uint8_t>(port & 0xFFU));
+    return;
+  }
+
+  if (strcmp(topic, ota_pull_topic_) == 0) {
+    if (!runtime_.mqtt_control_enabled) {
+      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+      return;
+    }
+    String url;
+    String sha256;
+    if (!parseOtaPullPayload(payload, length, url, sha256)) {
+      lrslog::event("mqtt_ota_pull_json_err", 0, 0, 0);
+      return;
+    }
+    String error;
+    if (!otaPullFromUrl(url.c_str(), sha256.c_str(), error)) {
+      LRS_LOGW(SYS, "event=mqtt_ota_pull_failed error=%s", error.c_str());
+      return;
+    }
+    lrslog::event("mqtt_ota_pull_reboot", 0, 0, 0);
+    delay(150);
+    ESP.restart();
+    return;
+  }
+
   if (runtime_.role_tx && sm_ != nullptr) {
     if (!runtime_.mqtt_control_enabled) {
       return;
@@ -441,6 +539,18 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       sm_->mqttSetPeerWifi(addr, enabled);
       {
         lrslog::event(enabled ? "mqtt_remote_wifi_enable" : "mqtt_remote_wifi_disable", 0, 0, addr);
+      }
+      return;
+    }
+
+    if (strcmp(leaf, "udp_log_control") == 0) {
+      bool enabled = false;
+      IPAddress host;
+      uint16_t port = 0;
+      uint32_t ttlS = 0;
+      if (!parseUdpLogControlPayload(payload, length, enabled, host, port, ttlS)) return;
+      if (sm_->mqttSetPeerUdpLogControl(addr, enabled, host, port, ttlS)) {
+        lrslog::event(enabled ? "mqtt_remote_udp_log_control_enable" : "mqtt_remote_udp_log_control_disable", 0, 0, addr);
       }
       return;
     }
@@ -519,10 +629,13 @@ bool MqttBridge::connectIfNeeded() {
   if (runtime_.mqtt_control_enabled) {
     mqtt_client_.subscribe(relay_topic_);
     mqtt_client_.subscribe(control_topic_);
+    mqtt_client_.subscribe(udp_log_control_topic_);
+    mqtt_client_.subscribe(ota_pull_topic_);
     char topic[kMqttTopicBufBytes];
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "wifi")) mqtt_client_.subscribe(topic);
+    if (buildPeerTopic(topic, sizeof(topic), "+", "udp_log_control")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
   }
 

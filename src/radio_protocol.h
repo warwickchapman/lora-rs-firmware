@@ -14,6 +14,7 @@ enum class MessageType : uint8_t {
   PollResponse = 'R',
   WifiProvision = 'W',
   WifiControl = 'Y',
+  UdpLogControl = 'U',
   FactoryReset = 'X',
   Provisioning = 'V',
 };

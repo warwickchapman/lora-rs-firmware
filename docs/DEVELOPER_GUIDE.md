@@ -60,8 +60,8 @@ This ordering keeps LoRa control priority above MQTT.
 - Mode: AP+STA
 - AP starts immediately
 - STA attempts if credentials exist
-- On stable STA and `ap_always_on=false`, AP can be disabled
-- On STA failure, AP fallback remains available
+- On STA connection, Soft AP is disabled
+- On STA disconnect/failure, Soft AP fallback is re-enabled unless `wifi_ap_fallback_policy=secure_sta_only`
 - WiFi power-save disabled; TX power set high for stable local-link behavior
 
 ## 7. Web API

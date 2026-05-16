@@ -8,11 +8,14 @@
 - Flasher-first EasyPair commissioning foundation is implemented: USB serial admin protocol, selected USB gateway, LoRa remote discovery/provisioning, verified target finalization, WiFi credential provisioning, and local Identify LED action.
 - Web UI maintenance lifecycle is implemented: Web UI starts on boot, explicit user activity extends the 60-second window, background polling/SSE/captive probes do not extend it, and HTTP/SSE/captive DNS runtime work stops after inactivity. USB serial admin can re-enable it with `enable_web`.
 - Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher USB Cable mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
+- Flasher Network mode no longer uses device-side HTTP discovery/login/REST OTA/REST UDP-log paths; it now provides a temporary local firmware file server plus UDP-log listening, with OTA and UDP log-control commands moving to serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
+- Flasher Network mode now has a first LoRa inventory foundation: a selected USB gateway can scan remotes over the encrypted LoRa poll path and render a dense device table without HTTP/REST discovery.
 
 ## Web UI Removal Migration
-- Replace Flasher Network mode's current HTTP discovery/status/OTA/logging paths with MQTT admin/config workflows before removing the on-device REST API.
-- Add MQTT admin request/reply topics for online devices with broker ACL guidance and non-retained secret handling.
-- Add gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, and guarded factory reset.
+- Extend the LoRa inventory response beyond the current poll-status foundation with a bounded maintenance-status packet for chip ID, firmware version, WiFi connected/IP, and MQTT connected state.
+- Add selected-device `ota_pull` from Network inventory rows once WiFi/IP reachability is reported by the bounded maintenance-status response; add bulk OTA only after one-device flow is reliable.
+- Add MQTT admin request/reply topics for online device status/config actions with broker ACL guidance and non-retained secret handling.
+- Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
 - Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
 - After serial, MQTT, and LoRa admin parity are verified on hardware, remove Web UI/REST/captive DNS/`ESP8266WebServer` from normal firmware and record RAM/flash deltas.
 

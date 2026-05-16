@@ -39,6 +39,7 @@ constexpr uint8_t kWifiProvisionBroadcastAddress = 255;
 constexpr uint8_t kWifiControlBroadcastAddress = 255;
 constexpr uint8_t kWifiControlOpSet = 1;
 constexpr uint8_t kWifiControlOpStatus = 2;
+constexpr uint8_t kUdpLogControlOpSet = 1;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
 constexpr uint8_t kFactoryResetKeepFleetFlag = 0x01;
@@ -314,6 +315,12 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   wifi_prov_pending_ssid_ = "";
   wifi_prov_pending_password_ = "";
   wifi_prov_pending_src_ = 0;
+  udp_log_control_pending_ = false;
+  udp_log_control_pending_enabled_ = false;
+  udp_log_control_pending_host_ = IPAddress();
+  udp_log_control_pending_port_ = 0;
+  udp_log_control_pending_ttl_s_ = 0;
+  udp_log_control_pending_src_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -383,6 +390,12 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   wifi_prov_pending_ssid_ = "";
   wifi_prov_pending_password_ = "";
   wifi_prov_pending_src_ = 0;
+  udp_log_control_pending_ = false;
+  udp_log_control_pending_enabled_ = false;
+  udp_log_control_pending_host_ = IPAddress();
+  udp_log_control_pending_port_ = 0;
+  udp_log_control_pending_ttl_s_ = 0;
+  udp_log_control_pending_src_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -1145,6 +1158,37 @@ bool NodeStateMachine::sendBroadcastWifiDisable() {
   return true;
 }
 
+bool NodeStateMachine::mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS) {
+  if (!runtime_.role_tx) return false;
+  if (dstAddress == 0 || dstAddress == 255) return false;
+  if (enabled && (port == 0 || host == IPAddress())) return false;
+  if (radio_ == nullptr) return false;
+  if (!radioTxBudgetAvailable()) return false;
+
+  uint8_t payload[12]{};
+  payload[0] = kUdpLogControlOpSet;
+  payload[1] = enabled ? 1U : 0U;
+  payload[2] = static_cast<uint8_t>(port & 0xFFU);
+  payload[3] = static_cast<uint8_t>((port >> 8) & 0xFFU);
+  payload[4] = static_cast<uint8_t>(ttlS & 0xFFU);
+  payload[5] = static_cast<uint8_t>((ttlS >> 8) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((ttlS >> 16) & 0xFFU);
+  payload[7] = static_cast<uint8_t>((ttlS >> 24) & 0xFFU);
+  payload[8] = host[0];
+  payload[9] = host[1];
+  payload[10] = host[2];
+  payload[11] = host[3];
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::UdpLogControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event(enabled ? "udp_log_control_enable_tx" : "udp_log_control_disable_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
 bool NodeStateMachine::hasPendingWifiControl() const { return wifi_control_pending_; }
 
 bool NodeStateMachine::consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter) {
@@ -1170,6 +1214,24 @@ bool NodeStateMachine::sendWifiControlStatus(uint8_t dstAddress, bool enabled, u
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
   lrslog::event(enabled ? "wifi_control_status_on_tx" : "wifi_control_status_off_tx", 0, commandCounter, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::hasPendingUdpLogControl() const { return udp_log_control_pending_; }
+
+bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src) {
+  if (!udp_log_control_pending_) return false;
+  enabled = udp_log_control_pending_enabled_;
+  host = udp_log_control_pending_host_;
+  port = udp_log_control_pending_port_;
+  ttlS = udp_log_control_pending_ttl_s_;
+  src = udp_log_control_pending_src_;
+  udp_log_control_pending_ = false;
+  udp_log_control_pending_enabled_ = false;
+  udp_log_control_pending_host_ = IPAddress();
+  udp_log_control_pending_port_ = 0;
+  udp_log_control_pending_ttl_s_ = 0;
+  udp_log_control_pending_src_ = 0;
   return true;
 }
 
@@ -2119,13 +2181,14 @@ void NodeStateMachine::tickReceive() {
 
   const bool isWifiProvision = (msg.type == MessageType::WifiProvision);
   const bool isWifiControl = (msg.type == MessageType::WifiControl);
+  const bool isUdpLogControl = (msg.type == MessageType::UdpLogControl);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
   const bool isProvisioning = (msg.type == MessageType::Provisioning);
   if (isProvisioning) {
     handleProvisioningFrame(msg);
     return;
   }
-  if (!isWifiProvision && !isWifiControl && msg.dst != runtime_.local_address) {
+  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -2137,8 +2200,12 @@ void NodeStateMachine::tickReceive() {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
+  if (isUdpLogControl && msg.dst != runtime_.local_address) {
+    lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
+    return;
+  }
 
-  if (!isWifiProvision && runtime_.role_tx) {
+  if (!isWifiProvision && !isUdpLogControl && runtime_.role_tx) {
     const bool fromPaired = isPairedTargetAddress(msg.src);
     const bool mqttStatus = (msg.type == MessageType::MqttStatus);
     const bool pollResponse = (msg.type == MessageType::PollResponse);
@@ -2166,13 +2233,16 @@ void NodeStateMachine::tickReceive() {
     } else if (msg.type == MessageType::WifiControl) {
       // Same-key broadcast/targeted WiFi control is accepted so a TX can recover
       // or disable managed remotes even when pairing is being reworked.
+    } else if (msg.type == MessageType::UdpLogControl) {
+      // Targeted same-key diagnostics are accepted only to toggle UDP mirroring
+      // on remotes that already have WiFi. It is not a general remote shell.
     } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
   }
 
-  const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isFactoryReset);
+  const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl || isFactoryReset);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -2184,6 +2254,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isWifiControl) {
     handleWifiControlFrame(msg);
+    return;
+  }
+  if (isUdpLogControl) {
+    handleUdpLogControlFrame(msg);
     return;
   }
   if (isFactoryReset) {
@@ -2489,6 +2563,44 @@ bool NodeStateMachine::handleWifiControlFrame(const ProtocolMessage &msg) {
   wifi_control_pending_counter_ = msg.counter;
   wifi_control_pending_ = true;
   lrslog::event(enabled ? "wifi_control_enable_rx" : "wifi_control_disable_rx",
+                msg.rssi, msg.counter, msg.src);
+  return true;
+}
+
+bool NodeStateMachine::handleUdpLogControlFrame(const ProtocolMessage &msg) {
+  if (runtime_.role_tx) {
+    lrslog::event("udp_log_control_tx_ignored", msg.rssi, msg.counter, msg.src);
+    return false;
+  }
+  if (msg.relay_state != kUdpLogControlOpSet) {
+    lrslog::event("udp_log_control_bad_op", msg.rssi, msg.counter, msg.relay_state);
+    return false;
+  }
+
+  const bool enabled = msg.input_state != 0;
+  const uint16_t port = static_cast<uint16_t>(msg.flags) |
+                        (static_cast<uint16_t>(msg.temp_code) << 8);
+  const uint32_t ttlS = static_cast<uint32_t>(msg.sensor_mask) |
+                        (static_cast<uint32_t>(msg.sensor_digital0) << 8) |
+                        (static_cast<uint32_t>(msg.sensor_analog0 & 0xFFU) << 16) |
+                        (static_cast<uint32_t>((msg.sensor_analog0 >> 8) & 0xFFU) << 24);
+  const IPAddress host(static_cast<uint8_t>(msg.unix_time_s & 0xFFU),
+                       static_cast<uint8_t>((msg.unix_time_s >> 8) & 0xFFU),
+                       static_cast<uint8_t>((msg.unix_time_s >> 16) & 0xFFU),
+                       static_cast<uint8_t>((msg.unix_time_s >> 24) & 0xFFU));
+
+  if (enabled && (port == 0 || host == IPAddress())) {
+    lrslog::event("udp_log_control_bad_target", msg.rssi, msg.counter, msg.src);
+    return false;
+  }
+
+  udp_log_control_pending_enabled_ = enabled;
+  udp_log_control_pending_host_ = host;
+  udp_log_control_pending_port_ = port;
+  udp_log_control_pending_ttl_s_ = ttlS;
+  udp_log_control_pending_src_ = msg.src;
+  udp_log_control_pending_ = true;
+  lrslog::event(enabled ? "udp_log_control_enable_rx" : "udp_log_control_disable_rx",
                 msg.rssi, msg.counter, msg.src);
   return true;
 }

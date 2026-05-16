@@ -36,4 +36,10 @@ private:
   void handleConfigureWifi(JsonDocument &doc);
   void handleProvisionFleetWifi(JsonDocument &doc);
   void handleIdentify(JsonDocument &doc);
+  void handleStartLoraInventory(JsonDocument &doc);
+  void handleLoraInventoryStatus(JsonDocument &doc);
+  void handleCancelLoraInventory(JsonDocument &doc);
+  void handleUdpLogControl(JsonDocument &doc);
+  void handleRemoteUdpLogControl(JsonDocument &doc);
+  void handleOtaPull(JsonDocument &doc);
 };
