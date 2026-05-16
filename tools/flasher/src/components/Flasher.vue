@@ -324,7 +324,7 @@ const isFetchingFirmware = ref(false);
 const showToast = ref(false);
 const toastMessage = ref('');
 const logContainer = ref<HTMLElement | null>(null);
-const deviceInfoReadSeq = ref(0);
+const deviceInfoReadSeqByPort = ref<Record<string, number>>({});
 const monitorAfterFlash = ref(true);
 const eraseBeforeFlash = ref(false);
 const lastPortSnapshot = ref<string[]>([]);
@@ -440,42 +440,45 @@ const activeSerialDevice = computed(() => serialDeviceState());
 const deviceInfo = computed<DeviceInfo | null>({
   get: () => activeSerialDevice.value?.deviceInfo || null,
   set: (info) => {
-    const state = serialDeviceState();
+    const state = serialDeviceState(provisionSelectedPort.value);
     if (state) state.deviceInfo = info;
   }
 });
 const pairAdminPassword = computed<string>({
-  get: () => activeSerialDevice.value?.adminPassword || activeSerialDevice.value?.deviceInfo?.password?.trim() || '',
+  get: () => {
+    const state = serialDeviceState(provisionSelectedPort.value);
+    return state?.adminPassword || state?.deviceInfo?.password?.trim() || '';
+  },
   set: (password) => {
-    const state = serialDeviceState();
+    const state = serialDeviceState(provisionSelectedPort.value);
     if (state) state.adminPassword = password;
   }
 });
 const wifiNetworks = computed<WifiNetwork[]>({
-  get: () => activeSerialDevice.value?.wifiNetworks || [],
+  get: () => serialDeviceState(provisionSelectedPort.value)?.wifiNetworks || [],
   set: (networks) => {
-    const state = serialDeviceState();
+    const state = serialDeviceState(provisionSelectedPort.value);
     if (state) state.wifiNetworks = networks;
   }
 });
 const pairWifiSsid = computed<string>({
-  get: () => activeSerialDevice.value?.wifiSsid || '',
+  get: () => serialDeviceState(provisionSelectedPort.value)?.wifiSsid || '',
   set: (ssid) => {
-    const state = serialDeviceState();
+    const state = serialDeviceState(provisionSelectedPort.value);
     if (state) state.wifiSsid = ssid;
   }
 });
 const serialAdminStatus = computed<SerialAdminStatus | null>({
   get: () => activeSerialDevice.value?.status || null,
   set: (status) => {
-    const state = serialDeviceState();
+    const state = serialDeviceState(provisionSelectedPort.value);
     if (state) state.status = status;
   }
 });
 const serialAdminConfig = computed<SerialAdminConfig | null>({
   get: () => activeSerialDevice.value?.config || null,
   set: (config) => {
-    const state = serialDeviceState();
+    const state = serialDeviceState(provisionSelectedPort.value);
     if (state) state.config = config;
   }
 });
@@ -525,9 +528,9 @@ const loraInventoryProgressLabel = computed(() => {
   return `Scanning ${next}-${scan.end_address || LRS_REMOTE_SCAN_CAP}, ${scan.sent || 0} probes sent`;
 });
 const gatewayReady = computed(() =>
-  !!selectedPort.value &&
-  hasActiveDeviceInfo.value &&
-  !!activeSerialDevice.value?.adminSupported &&
+  !!provisionSelectedPort.value &&
+  !!serialDeviceState(provisionSelectedPort.value)?.deviceInfo &&
+  !!serialDeviceState(provisionSelectedPort.value)?.adminSupported &&
   !!pairPassword()
 );
 function portGatewayReady(port: string): boolean {
@@ -603,16 +606,16 @@ const fleetScanDisabled = computed(() =>
   !selectedPort.value
 );
 const gatewayWifiReady = computed(() =>
-  !!selectedPort.value &&
-  activeSerialDevice.value?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
-  !!activeSerialDevice.value?.gatewayWifiReadyIp
+  !!provisionSelectedPort.value &&
+  serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
+  !!serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadyIp
 );
 const pairWifiSsidInScan = computed(() =>
   !!pairWifiSsid.value.trim() &&
   wifiNetworks.value.some(n => n.ssid === pairWifiSsid.value.trim())
 );
 const gatewayWifiStatusText = computed(() => {
-  if (gatewayWifiReady.value) return `Gateway connected at ${activeSerialDevice.value?.gatewayWifiReadyIp}`;
+  if (gatewayWifiReady.value) return `Gateway connected at ${serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadyIp}`;
   return 'Connect the gateway before sending credentials to remotes.';
 });
 const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkUdpMonitoring.value || isFirmwareServerStarting.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
@@ -1138,16 +1141,18 @@ async function stopFirmwareServer() {
 }
 
 function pairPassword(): string {
-  return pairAdminPassword.value.trim() ||
-    activeSerialDevice.value?.adminPassword?.trim() ||
-    (hasActiveDeviceInfo.value ? deviceInfo.value?.password?.trim() || '' : '');
+  return adminPasswordForPort(provisionSelectedPort.value);
 }
 
 function adminPasswordForPort(port: string): string {
   const state = serialDeviceState(port);
   return state?.adminPassword?.trim() ||
     state?.deviceInfo?.password?.trim() ||
-    pairAdminPassword.value.trim();
+    '';
+}
+
+async function sendPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
+  return sendEasyPairCommandOnPort<T>(provisionSelectedPort.value, cmd, payload, timeoutMs, options);
 }
 
 function noteMonitorReleasedForPort(port: string, reason: string) {
@@ -1300,23 +1305,23 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
     .map(row => classifyFleetRow({ ...row, selected: selected.has(row.address) }, now));
 }
 
-async function refreshLoraInventoryStatus() {
+async function refreshLoraInventoryStatus(background = true) {
   try {
     const out = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
       fleetSelectedPort.value,
-      'lora_inventory_status',
+      'fleet_status',
       {},
       5000,
-      { label: 'Fleet inventory refresh', priority: 'background', dropIfBusy: true }
+      { label: 'Fleet peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
     loraInventoryScan.value = out.scan || null;
     mergeLoraInventoryRows(out.devices || []);
     isLoraInventoryScanning.value = !!out.scan?.active;
-    networkStatusMessage.value = `${loraInventoryProgressLabel.value}; ${loraInventory.value.length} device${loraInventory.value.length === 1 ? '' : 's'} visible.`;
+    networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
     if (!out.scan?.active) stopLoraInventoryPolling(false);
   } catch (e) {
     if (serialBackgroundSkipped(e)) return;
-    networkStatusMessage.value = serialFeatureError('LoRa inventory status', e);
+    networkStatusMessage.value = serialFeatureError('Fleet status', e);
     stopLoraInventoryPolling(false);
   }
 }
@@ -1418,10 +1423,10 @@ async function refreshMonitorData(background = false) {
     adoptMonitorMqttFromStatus(status);
     const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
       port,
-      'lora_inventory_status',
+      'fleet_status',
       {},
       5000,
-      { label: 'Monitor fleet refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
+      { label: 'Monitor peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
     monitorFleetRows.value = (inventory.devices || []).slice().sort((a, b) => a.address - b.address);
     monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
@@ -1747,11 +1752,7 @@ async function probeSerialAdminSupport(port = selectedPort.value): Promise<boole
   if (!port) return false;
   const state = serialDeviceState(port);
   try {
-    await invoke<any>('serial_admin_command', {
-      port,
-      request: { cmd: 'hello' },
-      timeoutMs: 1200
-    });
+    await sendEasyPairCommandOnPort<any>(port, 'hello', {}, 1200, { label: 'Probe serial admin' });
     if (state) state.adminSupported = true;
     return true;
   } catch {
@@ -1765,11 +1766,7 @@ async function waitForSerialAdminHello(port: string, timeoutMs = 18000): Promise
   let lastError: unknown = null;
   while (Date.now() - started < timeoutMs) {
     try {
-      const hello = await invoke<any>('serial_admin_command', {
-        port,
-        request: { cmd: 'hello' },
-        timeoutMs: 1800
-      });
+      const hello = await sendEasyPairCommandOnPort<any>(port, 'hello', {}, 1800, { label: 'Wait for serial admin' });
       const state = serialDeviceState(port);
       if (state) state.adminSupported = true;
       return hello;
@@ -2052,9 +2049,8 @@ async function factoryResetSerialDevice() {
 }
 
 async function loadEasyPairGateway() {
-  if (!selectedPort.value) return;
-  const port = selectedPort.value;
-  syncDeviceInfoForSelectedPort();
+  const port = provisionSelectedPort.value;
+  if (!port) return;
   if (gatewayReady.value) {
     pushPairLog(`Gateway already ready on ${port}.`);
     return;
@@ -2062,19 +2058,17 @@ async function loadEasyPairGateway() {
   isGatewayLoading.value = true;
   pushPairLog('Reading USB gateway identity...');
   try {
-    const ok = await readDeviceInfo();
-    if (!ok || !deviceInfo.value) throw new Error('Unable to read gateway factory details');
-    if (selectedPort.value !== port) return;
-    pairAdminPassword.value = deviceInfo.value.password || '';
+    const ok = await readDeviceInfoForPort(port, 'pair');
+    const state = serialDeviceState(port);
+    if (!ok || !state?.deviceInfo) throw new Error('Unable to read gateway factory details');
+    state.adminPassword = state.deviceInfo.password || '';
     pushPairLog('Waiting for serial admin to become ready...');
     const hello = await waitForSerialAdminHello(port);
-    if (selectedPort.value !== port) return;
-    pushPairLog(`Gateway ready on ${selectedPort.value}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
+    pushPairLog(`Gateway ready on ${port}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
     await refreshGatewayStatusForPair();
   } catch (e) {
-    if (selectedPort.value === port) {
-      pairAdminPassword.value = '';
-    }
+    const state = serialDeviceState(port);
+    if (state) state.adminPassword = '';
     pushPairLog('Gateway check failed: ' + e);
     notify('Gateway check failed: ' + e);
   } finally {
@@ -2096,7 +2090,7 @@ async function configureEasyPairGateway() {
   isPairBusy.value = true;
   pushPairLog('Configuring selected USB device as gateway...');
   try {
-    await sendEasyPairCommand('configure_gateway', {
+    await sendPairCommand('configure_gateway', {
       admin_password: password,
       fleet_passphrase: fleetKey,
       expected_remotes: pairExpectedCount.value
@@ -2127,13 +2121,13 @@ async function runEasyPair() {
       if (!gatewayReady.value) throw new Error('Unable to load gateway');
     }
     const password = pairPassword();
-    await sendEasyPairCommand('configure_gateway', {
+    await sendPairCommand('configure_gateway', {
       admin_password: password,
       fleet_passphrase: fleetKey,
       expected_remotes: expected
     }, 10000);
     pushPairLog(`Gateway prepared. Scanning for ${expected} remote device${expected === 1 ? '' : 's'}...`);
-    await sendEasyPairCommand('start_discovery', {
+    await sendPairCommand('start_discovery', {
       admin_password: password,
       expected_remotes: expected
     }, 10000);
@@ -2143,7 +2137,7 @@ async function runEasyPair() {
     const found = pairStatus.value?.session?.discovered_count || 0;
     if (found === 0) throw new Error('No remote devices found');
     pushPairLog(`Found ${found} remote device${found === 1 ? '' : 's'}. Provisioning...`);
-    await sendEasyPairCommand('provision_all', { admin_password: password }, 10000);
+    await sendPairCommand('provision_all', { admin_password: password }, 10000);
     await waitForEasyPairState(['complete', 'error'], 180000);
     if (pairStatus.value?.session?.state === 'error') throw new Error('Provisioning ended with an error');
     await saveEasyPairTargets();
@@ -2157,7 +2151,7 @@ async function runEasyPair() {
 
 async function refreshEasyPairStatus(log = false) {
   try {
-    pairStatus.value = await sendEasyPairCommand<EasyPairStatus>('provisioning_status', {}, 5000);
+    pairStatus.value = await sendPairCommand<EasyPairStatus>('provisioning_status', {}, 5000);
     if (log && pairStatus.value.session) {
       const s = pairStatus.value.session;
       pushPairLog(`Status: ${s.state}, found ${s.discovered_count}, verified ${s.verified_count}, failed ${s.failed_count}.`);
@@ -2201,7 +2195,7 @@ async function startEasyPairDiscovery() {
   isPairBusy.value = true;
   pushPairLog(`Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
   try {
-    await sendEasyPairCommand('start_discovery', {
+    await sendPairCommand('start_discovery', {
       admin_password: password,
       expected_remotes: pairExpectedCount.value
     }, 10000);
@@ -2224,7 +2218,7 @@ async function provisionEasyPairDevices() {
   isPairBusy.value = true;
   pushPairLog('Provisioning discovered remotes...');
   try {
-    await sendEasyPairCommand('provision_all', { admin_password: password }, 10000);
+    await sendPairCommand('provision_all', { admin_password: password }, 10000);
     startEasyPairStatusPolling();
     await refreshEasyPairStatus(true);
   } catch (e) {
@@ -2267,7 +2261,7 @@ async function saveEasyPairTargets() {
   devices.forEach(d => pushPairLog(`Address allocation: addr ${d.assigned_address} chip ${d.chip_id_hex || 'unknown'}`));
   pushPairLog(`Saving gateway target list: ${addresses.join(', ')}`);
   try {
-    await sendEasyPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
+    await sendPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
     pushPairLog('Provisioning complete.');
     await refreshGatewayStatusForPair();
     await refreshEasyPairStatus(false);
@@ -2283,7 +2277,7 @@ async function cancelEasyPair() {
   const password = pairPassword();
   if (!password) return;
   try {
-    await sendEasyPairCommand('cancel_provisioning', { admin_password: password }, 5000);
+    await sendPairCommand('cancel_provisioning', { admin_password: password }, 5000);
     stopEasyPairStatusPolling();
     await refreshEasyPairStatus(true);
   } catch (e) {
@@ -2313,7 +2307,7 @@ async function scanGatewayWifi() {
   isWifiScanning.value = true;
   pushPairLog('Scanning WiFi networks from the USB gateway...');
   try {
-    const out = await sendEasyPairCommand<WifiScanResponse>('wifi_scan', {
+    const out = await sendPairCommand<WifiScanResponse>('wifi_scan', {
       admin_password: password
     }, 20000);
     const networks = (out.networks || [])
@@ -2340,13 +2334,13 @@ async function scanGatewayWifi() {
 
 async function openPairWifiTab() {
   pairPanelTab.value = 'wifi';
-  if (!selectedPort.value || isGatewayLoading.value || isWifiScanning.value) {
+  if (!provisionSelectedPort.value || isGatewayLoading.value || isWifiScanning.value) {
     return;
   }
   if (gatewayWifiReady.value) {
     return;
   }
-  if (activeSerialDevice.value?.wifiScanned && wifiNetworks.value.length > 0) {
+  if (serialDeviceState(provisionSelectedPort.value)?.wifiScanned && wifiNetworks.value.length > 0) {
     return;
   }
   if (gatewayReady.value && await refreshGatewayStatusForPair()) {
@@ -2356,7 +2350,7 @@ async function openPairWifiTab() {
 }
 
 function clearGatewayWifiReady() {
-  const state = serialDeviceState();
+  const state = serialDeviceState(provisionSelectedPort.value);
   if (!state) return;
   state.gatewayWifiReadySsid = '';
   state.gatewayWifiReadyIp = '';
@@ -2372,7 +2366,7 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
 }
 
 function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.value): boolean {
-  if (!port || port !== selectedPort.value) return false;
+  if (!port) return false;
   const wifi = out.wifi;
   const ssid = wifi?.sta_ssid?.trim() || '';
   const ip = wifi?.ip?.trim() || '';
@@ -2387,7 +2381,7 @@ function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.
     return false;
   }
 
-  pairWifiSsid.value = ssid;
+  if (port === provisionSelectedPort.value) pairWifiSsid.value = ssid;
   const state = serialDeviceState(port);
   if (!state) return false;
   state.gatewayWifiReadySsid = ssid;
@@ -2396,14 +2390,14 @@ function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.
 }
 
 async function refreshGatewayStatusForPair(): Promise<boolean> {
-  if (!selectedPort.value) return false;
-  const port = selectedPort.value;
+  const port = provisionSelectedPort.value;
+  if (!port) return false;
   try {
-    const status = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
-    if (selectedPort.value !== port) return false;
+    const status = await sendPairCommand<SerialAdminStatus>('status', {}, 5000);
     applySerialAdminStatus(status, port);
     if (gatewayWifiReady.value) {
-      pushPairLog(`Gateway already connected to ${activeSerialDevice.value?.gatewayWifiReadySsid} at ${activeSerialDevice.value?.gatewayWifiReadyIp}.`);
+      const state = serialDeviceState(port);
+      pushPairLog(`Gateway already connected to ${state?.gatewayWifiReadySsid} at ${state?.gatewayWifiReadyIp}.`);
       return true;
     }
   } catch (statusErr) {
@@ -2430,7 +2424,7 @@ async function waitForGatewayWifiConnection(ssid: string, attemptId: number, tim
   let lastStatus: SerialAdminStatus | null = null;
   while (Date.now() - started < timeoutMs) {
     assertGatewayWifiAttemptActive(attemptId);
-    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
+    const out = await sendPairCommand<SerialAdminStatus>('status', {}, 5000);
     assertGatewayWifiAttemptActive(attemptId);
     lastStatus = out;
     const wifi = out.wifi;
@@ -2438,7 +2432,7 @@ async function waitForGatewayWifiConnection(ssid: string, attemptId: number, tim
     const wifiIp = wifi?.ip?.trim() || '';
     const wifiSsid = wifi?.sta_ssid?.trim() || '';
     if ((wifi?.sta_connected || wifiStatus === 'connected') && wifiSsid === ssid && wifiIp && wifiIp !== '0.0.0.0') {
-      applySerialAdminStatus(out);
+      applySerialAdminStatus(out, provisionSelectedPort.value);
       return out;
     }
     const label = wifi?.status || 'connecting';
@@ -2462,7 +2456,7 @@ async function connectGatewayWifi() {
   clearGatewayWifiReady();
   pushPairLog(`Saving WiFi credentials on gateway for ${ssid}...`);
   try {
-    await sendEasyPairCommand('configure_wifi', {
+    await sendPairCommand('configure_wifi', {
       admin_password: password,
       wifi_sta_ssid: ssid,
       wifi_sta_password: pairWifiPassword.value
@@ -2476,7 +2470,7 @@ async function connectGatewayWifi() {
       state.gatewayWifiReadySsid = ssid;
       state.gatewayWifiReadyIp = status.wifi?.ip || '';
     }
-    pushPairLog(`Gateway connected to ${ssid} at ${activeSerialDevice.value?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
+    pushPairLog(`Gateway connected to ${ssid} at ${serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
   } catch (e) {
     if (String(e).includes('gateway_wifi_cancelled')) return;
     const msg = serialFeatureError('WiFi save', e);
@@ -2503,7 +2497,7 @@ async function sendWifiToRemotes() {
   isFleetWifiSending.value = true;
   pushPairLog(`Sending WiFi credentials to remotes over LoRa for ${ssid}...`);
   try {
-    const out = await sendEasyPairCommand<any>('provision_fleet_wifi', {
+    const out = await sendPairCommand<any>('provision_fleet_wifi', {
       admin_password: password,
       wifi_sta_ssid: ssid,
       wifi_sta_password: pairWifiPassword.value
@@ -2551,8 +2545,8 @@ async function readDeviceInfo() {
 }
 
 async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'network'): Promise<boolean> {
-  const seq = deviceInfoReadSeq.value + 1;
-  deviceInfoReadSeq.value = seq;
+  const seq = (deviceInfoReadSeqByPort.value[port] || 0) + 1;
+  deviceInfoReadSeqByPort.value = { ...deviceInfoReadSeqByPort.value, [port]: seq };
   isLoadingInfo.value = true;
   if (isMonitoring.value && activeMonitorPort.value === port) {
     pushSerialLog(`Skipped device info read for ${port}: serial monitor owns this port.`);
@@ -2562,7 +2556,7 @@ async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'netw
   pushSerialLog(`Reading device information from ${port}...`);
   try {
     const info = await invoke<DeviceInfo>('get_device_info', { port });
-    if (deviceInfoReadSeq.value !== seq) {
+    if (deviceInfoReadSeqByPort.value[port] !== seq) {
       pushSerialLog(`Ignored stale device info from ${port}`);
       return false;
     }
@@ -2579,14 +2573,14 @@ async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'netw
     }
     return true;
   } catch (e) {
-    if (deviceInfoReadSeq.value !== seq) {
+    if (deviceInfoReadSeqByPort.value[port] !== seq) {
       pushSerialLog(`Ignored stale device info error from ${port}`);
       return false;
     }
     pushSerialLog('Failed to read device info: ' + e);
     return false;
   } finally {
-    if (deviceInfoReadSeq.value === seq) {
+    if (deviceInfoReadSeqByPort.value[port] === seq) {
       isLoadingInfo.value = false;
     }
   }
@@ -2726,11 +2720,18 @@ watch(activeMode, (mode) => {
   }
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
+  } else if (selectedPort.value) {
+    loadNetworkGateway().then(() => refreshLoraInventoryStatus(false));
   }
 });
 
 watch(selectedPort, (port) => {
-  deviceInfoReadSeq.value += 1;
+  if (port) {
+    deviceInfoReadSeqByPort.value = {
+      ...deviceInfoReadSeqByPort.value,
+      [port]: (deviceInfoReadSeqByPort.value[port] || 0) + 1
+    };
+  }
   isLoadingInfo.value = false;
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
@@ -2743,6 +2744,10 @@ watch(selectedPort, (port) => {
       startMonitorPolling();
       refreshMonitorData(true);
     }
+  } else if (activeMode.value === 'network') {
+    loraInventory.value = [];
+    loraInventoryScan.value = null;
+    loadNetworkGateway().then(() => refreshLoraInventoryStatus(false));
   }
 });
 
@@ -3878,8 +3883,8 @@ function countCrashEvents(entries: string[]): number {
         <div class="glass-card p-3 flex flex-col gap-2 text-left flex-1 min-h-0 overflow-hidden">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h2 class="text-sm font-bold text-slate-300">Fleet Diagnostics</h2>
-              <div class="mt-1 text-xs text-slate-500">Serial-backed monitor data from the selected gateway.</div>
+              <h2 class="text-sm font-bold text-slate-300">Gateway Peer Cache</h2>
+              <div class="mt-1 text-xs text-slate-500">Read-only serial view of the selected gateway's runtime state.</div>
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
@@ -3902,7 +3907,7 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="monitorFleetRows.length === 0">
-                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Refresh monitor data to load gateway and fleet diagnostics.</td>
+                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
                 </tr>
                 <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
@@ -4008,6 +4013,13 @@ function countCrashEvents(entries: string[]): number {
                 {{ isLoraInventoryScanning ? 'Stop scan' : 'Scan Fleet' }}
               </button>
               <button
+                @click="refreshLoraInventoryStatus(false)"
+                :disabled="fleetScanDisabled || isLoraInventoryScanning"
+                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              >
+                Refresh cache
+              </button>
+              <button
                 @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
                 :disabled="isFirmwareServerStarting"
                 class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
@@ -4062,10 +4074,10 @@ function countCrashEvents(entries: string[]): number {
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="text-lg font-bold text-slate-300">Devices</h2>
-              <div class="mt-1 text-xs text-slate-500">Fleet rows are expanded by default; actions are per device.</div>
+              <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Scan Fleet asks the gateway to refresh LoRa state.</div>
             </div>
             <div class="flex items-center gap-3">
-              <div class="text-xs text-slate-500">{{ loraInventory.length }} found · {{ selectedLoraInventoryCount }} selected</div>
+              <div class="text-xs text-slate-500">{{ loraInventory.length }} cached · {{ selectedLoraInventoryCount }} selected</div>
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
@@ -4088,7 +4100,7 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway and scan the fleet to discover remotes.</td>
+                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or scan the fleet to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"

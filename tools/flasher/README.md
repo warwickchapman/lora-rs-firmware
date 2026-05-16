@@ -30,9 +30,10 @@ Settings is the local USB maintenance surface for a selected device. It uses the
 Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 
 - loads a selected USB-connected LRS device as the LoRa gateway, including the factory-derived admin password needed for Fleet actions
-- scans the supported LRS remote range through the gateway with `start_lora_inventory`
+- reads the TX/gateway-owned peer cache over serial admin
+- scans the supported LRS remote range through the gateway with explicit `start_lora_inventory` operator action
 - refuses Fleet scans from factory-default gateways until Provision has commissioned the gateway with a secure fleet key
-- shows discovered remotes in a dense inventory table with LoRa address, chip ID, firmware version, role/mode, WiFi state/IP, MQTT state, link RSSI/freshness, and OTA eligibility
+- shows cached remotes in a dense fleet table with LoRa address, chip ID, firmware version, role/mode, WiFi state/IP, MQTT state, link RSSI/freshness, and OTA eligibility
 - starts a temporary local firmware file server from the selected release/local `.bin`
 - calculates and displays the firmware SHA256 before devices are commanded to pull it
 - shows reachable firmware URLs for the local machine's active LAN interfaces
@@ -40,7 +41,7 @@ Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 - shows the MQTT `ota_pull` payload shape for online devices
 - listens for UDP logs on fixed port `5514`
 
-Fleet mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. Inventory uses compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
+Fleet mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
 
 ## Provision foundation
 

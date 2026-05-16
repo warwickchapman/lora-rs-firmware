@@ -9,7 +9,7 @@
 - Web UI maintenance lifecycle is implemented: Web UI starts on boot, explicit user activity extends the 60-second window, background polling/SSE/captive probes do not extend it, and HTTP/SSE/captive DNS runtime work stops after inactivity. USB serial admin can re-enable it with `enable_web`.
 - Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher Flash mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
 - Flasher Fleet mode no longer uses device-side HTTP discovery/login/REST OTA/REST UDP-log paths; it now provides a temporary local firmware file server plus per-device UDP-log actions, with OTA and UDP log-control commands moving to serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
-- Flasher Fleet mode now has a first LoRa inventory foundation: a selected, commissioned USB gateway can scan remotes over encrypted LoRa maintenance-status packets and render a dense device table without HTTP/REST discovery.
+- Flasher Fleet mode now reads the TX/gateway-owned peer cache over serial admin; a selected, commissioned USB gateway can explicitly scan remotes over encrypted LoRa maintenance-status packets and render a dense device table without HTTP/REST discovery.
 
 ## Web UI Removal Migration
 - Extend Fleet inventory actions on top of the bounded maintenance-status packet, including identify, selected-device OTA, and WiFi/log actions that use the reported IP/connectivity state.

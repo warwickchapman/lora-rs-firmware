@@ -83,7 +83,7 @@ Run each milestone through:
 
 ## Replay Table Policy (2026-02 update)
 - Replay protection source capacity is now compile-time configurable via `LRS_REPLAY_TRACKED_SOURCES` (default `16`).
-- Peer runtime capacity remains `LRS_MAX_PEERS` (default `8`), and replay source capacity must be `>= LRS_MAX_PEERS`.
+- Peer runtime capacity remains `LRS_MAX_PEERS` (default `12`), matching the configured fleet address-list cap. Replay source capacity must be `>= LRS_MAX_PEERS`.
 - Rationale:
   - keep deterministic static RAM bounds,
   - preserve transient sender headroom during provisioning/commissioning,

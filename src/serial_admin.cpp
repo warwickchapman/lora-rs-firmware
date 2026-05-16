@@ -1079,15 +1079,13 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
     row["fw_version"] = p.chip_id == 0 ? "" : fwBuf;
     row["uptime_ms"] = p.uptime_ms;
-    row["maintenance_debug_known"] = p.maintenance_debug_known;
-    if (p.maintenance_debug_known) {
-      row["heap_free"] = p.heap_free;
-      row["heap_max_block"] = p.heap_max_block;
-      row["heap_frag_pct"] = p.heap_frag_pct;
-      row["relay_feedback"] = p.relay_feedback;
-      row["input_feedback"] = p.input_feedback;
-      row["debug_uptime_ms"] = p.debug_uptime_ms;
-    }
+    row["maintenance_debug_known"] = true;
+    row["heap_free"] = p.heap_free;
+    row["heap_max_block"] = p.heap_max_block;
+    row["heap_frag_pct"] = p.heap_frag_pct;
+    row["relay_feedback"] = p.relay_feedback;
+    row["input_feedback"] = p.input_feedback;
+    row["debug_uptime_ms"] = p.debug_uptime_ms;
     row["rssi"] = p.uplink_rssi;
     row["downlink_rssi_known"] = p.downlink_rssi_valid;
     row["downlink_rssi"] = p.downlink_rssi;
@@ -1360,6 +1358,11 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
   }
 
   if (strcmp(cmd, "lora_inventory_status") == 0) {
+    handleLoraInventoryStatus(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "fleet_status") == 0) {
     handleLoraInventoryStatus(doc);
     return;
   }
