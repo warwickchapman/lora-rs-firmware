@@ -263,6 +263,7 @@ const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
 const NETWORK_FIRMWARE_PATH = '/firmware.bin';
 const LRS_REMOTE_SCAN_CAP = 12;
+const DISCONNECTED_PORT_CACHE_GRACE_MS = 120000;
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'general', label: 'General' },
   { key: 'network', label: 'Network' },
@@ -316,6 +317,7 @@ const pairLogs = ref<string[]>([]);
 const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
 const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
+const disconnectedSerialPortSince = ref<Record<string, number>>({});
 const serialAdminPortBusy = ref<Record<string, string>>({});
 const serialAdminPortQueues = new Map<string, Promise<void>>();
 const isLoadingInfo = ref(false);
@@ -852,11 +854,21 @@ async function refreshPorts() {
         delete portSeenSequence.value[known];
       }
     }
+    const now = Date.now();
+    const nextDisconnectedSince = { ...disconnectedSerialPortSince.value };
+    for (const portName of currentNames) {
+      delete nextDisconnectedSince[portName];
+    }
     for (const known of Object.keys(serialDevicesByPort.value)) {
-      if (!currentNames.includes(known)) {
+      if (currentNames.includes(known)) continue;
+      const missingSince = nextDisconnectedSince[known] || now;
+      nextDisconnectedSince[known] = missingSince;
+      if (now - missingSince >= DISCONNECTED_PORT_CACHE_GRACE_MS) {
         delete serialDevicesByPort.value[known];
+        delete nextDisconnectedSince[known];
       }
     }
+    disconnectedSerialPortSince.value = nextDisconnectedSince;
 
     reconcileTabPortSelections(currentNames, newPorts, !hasActiveOperation);
 
