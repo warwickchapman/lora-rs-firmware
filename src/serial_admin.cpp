@@ -604,6 +604,7 @@ void SerialAdmin::handleStatus(JsonDocument &doc) {
   out["local_address"] = cfg.local_address;
   out["remote_address"] = cfg.remote_address;
   out["commissioned"] = cfg.commissioned;
+  out["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
 
   JsonObject wifi = out["wifi"].to<JsonObject>();
   wifi["admin_enabled"] = cfg.wifi_admin_enabled;
@@ -1158,6 +1159,46 @@ void SerialAdmin::handleRemoteUdpLogControl(JsonDocument &doc) {
   sendOk(out);
 }
 
+void SerialAdmin::handleRemoteOtaPull(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_ota_pull", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_ota_pull", "runtime_unavailable", id);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_ota_pull", "invalid_address", id);
+    return;
+  }
+
+  IPAddress host;
+  const uint16_t port = static_cast<uint16_t>(doc["port"] | 0);
+  const char *hostStr = doc["host"] | "";
+  if (port == 0 || !host.fromString(hostStr)) {
+    sendError("remote_ota_pull", "invalid_target", id);
+    return;
+  }
+
+  if (!sm_->sendPeerOtaPullControl(static_cast<uint8_t>(rawAddr), host, port)) {
+    sendError("remote_ota_pull", "send_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_ota_pull";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["addr"] = rawAddr;
+  out["host"] = host.toString();
+  out["port"] = port;
+  out["path"] = "/firmware.bin";
+  sendOk(out);
+}
+
 void SerialAdmin::handleOtaPull(JsonDocument &doc) {
   const char *id = requestId(doc);
   if (!requireAdmin(doc)) {
@@ -1293,6 +1334,11 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
 
   if (strcmp(cmd, "remote_udp_log_control") == 0) {
     handleRemoteUdpLogControl(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_ota_pull") == 0) {
+    handleRemoteOtaPull(doc);
     return;
   }
 

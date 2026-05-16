@@ -142,6 +142,7 @@ interface SerialAdminStatus {
   local_address: number;
   remote_address: number;
   commissioned: boolean;
+  fleet_passphrase_default?: boolean;
   wifi?: {
     admin_enabled: boolean;
     sta_ssid: string;
@@ -202,6 +203,8 @@ type RegionCode = 'ZA' | 'EU' | 'US';
 
 const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
+const NETWORK_DEFAULT_FIRMWARE = '/Users/warwick/Code/LoRa/lora_rs/.pio/build/lrs_za/firmware.bin';
+const NETWORK_FIRMWARE_PATH = '/firmware.bin';
 
 const ports = ref<SerialPort[]>([]);
 const selectedPort = ref('');
@@ -213,6 +216,7 @@ const isFlashing = ref(false);
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
 const isFirmwareServerStarting = ref(false);
+const remoteOtaBusyAddress = ref<number | null>(null);
 const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
@@ -434,8 +438,15 @@ const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDevi
 const serialStatusSummary = computed(() => {
   const st = serialAdminStatus.value;
   if (!st) return 'Load local status to inspect firmware health.';
+  if (!st.commissioned || st.fleet_passphrase_default) {
+    return `Factory default · awaiting commissioning · addr ${st.local_address}->${st.remote_address} · heap ${formatBytes(st.heap_free)} free`;
+  }
   const wifi = st.wifi?.sta_connected ? `WiFi ${st.wifi.ip || 'connected'}` : `WiFi ${st.wifi?.status || 'offline'}`;
   return `${st.role || 'unknown'} ${st.local_address}->${st.remote_address} · ${wifi} · heap ${formatBytes(st.heap_free)} free`;
+});
+const serialAdminIsFactoryDefault = computed(() => {
+  const st = serialAdminStatus.value;
+  return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
 });
 const gatewayWifiReady = computed(() =>
   !!selectedPort.value &&
@@ -865,6 +876,10 @@ async function stopNetworkUdpMonitor() {
 
 async function startFirmwareServer() {
   const firmwareOptions = networkOtaFirmwareOptions();
+  await startFirmwareServerWithOptions(firmwareOptions);
+}
+
+async function startFirmwareServerWithOptions(firmwareOptions: { firmware_path: string; region: RegionCode | null } | null) {
   if (!firmwareOptions) return;
   isFirmwareServerStarting.value = true;
   activeMode.value = 'network';
@@ -882,6 +897,16 @@ async function startFirmwareServer() {
   } finally {
     isFirmwareServerStarting.value = false;
   }
+}
+
+async function ensureRemoteFlashFirmwareServer(): Promise<FirmwareServerInfo> {
+  if (firmwareServerInfo.value) return firmwareServerInfo.value;
+  await startFirmwareServerWithOptions({
+    firmware_path: NETWORK_DEFAULT_FIRMWARE,
+    region: null
+  });
+  if (!firmwareServerInfo.value) throw new Error('Firmware server did not start');
+  return firmwareServerInfo.value;
 }
 
 async function stopFirmwareServer() {
@@ -1010,6 +1035,47 @@ async function cancelLoraInventoryScan() {
   }
 }
 
+function firmwareServerTarget(info: FirmwareServerInfo): { host: string; port: number } {
+  const raw = info.urls.find(u => !u.includes('127.0.0.1')) || info.urls[0] || '';
+  if (!raw) throw new Error('Firmware server has no reachable URL');
+  const parsed = new URL(raw);
+  return {
+    host: parsed.hostname,
+    port: Number(parsed.port || info.port)
+  };
+}
+
+async function flashLoraRemote(device: LoraInventoryDevice) {
+  if (remoteOtaBusyAddress.value != null) return;
+  const password = pairPassword();
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  try {
+    remoteOtaBusyAddress.value = device.address;
+    if (!gatewayReady.value) await loadNetworkGateway();
+    const info = await ensureRemoteFlashFirmwareServer();
+    const target = firmwareServerTarget(info);
+    const out = await sendEasyPairCommand<any>('remote_ota_pull', {
+      admin_password: password,
+      address: device.address,
+      host: target.host,
+      port: target.port
+    }, 8000);
+    networkStatusMessage.value = `Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`;
+    pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH})`);
+    notify(`Flash triggered for LoRa ${device.address}`);
+  } catch (e) {
+    const msg = serialFeatureError(`Remote flash ${device.address}`, e);
+    networkStatusMessage.value = msg;
+    pushNetworkLog(msg);
+    notify(msg);
+  } finally {
+    remoteOtaBusyAddress.value = null;
+  }
+}
+
 async function probeSerialAdminSupport(port = selectedPort.value): Promise<boolean> {
   if (!port) return false;
   const state = serialDeviceState(port);
@@ -1121,7 +1187,11 @@ async function refreshSerialAdminStatus() {
     }
     const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000);
     applySerialAdminStatus(out);
-    pushSerialLog(`Status loaded: ${out.role || 'unknown'} ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
+    if (!out.commissioned || out.fleet_passphrase_default) {
+      pushSerialLog(`Status loaded: factory default, awaiting commissioning, addr ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
+    } else {
+      pushSerialLog(`Status loaded: ${out.role || 'unknown'} ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
+    }
   } catch (e) {
     const msg = serialFeatureError('Status', e);
     pushSerialLog(msg);
@@ -1453,20 +1523,34 @@ async function provisionEasyPairDevices() {
 
 async function saveEasyPairTargets() {
   const password = pairPassword();
-  const addresses = (pairStatus.value?.devices || [])
+  const devices = (pairStatus.value?.devices || [])
     .filter(d =>
       d.selected &&
       !d.address_conflict &&
       d.state === 'verified' &&
       d.assigned_address > 0 &&
       d.assigned_address < 255
-    )
-    .map(d => d.assigned_address);
+    );
+  const addresses = devices.map(d => d.assigned_address);
   if (!password || addresses.length === 0) {
     notify('No provisioned target addresses to save yet');
     return;
   }
+  const seen = new Set<number>();
+  const duplicate = addresses.find(addr => {
+    if (seen.has(addr)) return true;
+    seen.add(addr);
+    return false;
+  });
+  if (duplicate !== undefined) {
+    devices
+      .filter(d => d.assigned_address === duplicate)
+      .forEach(d => pushPairLog(`Address allocation duplicate: addr ${duplicate} chip ${d.chip_id_hex || 'unknown'}`));
+    notify(`Duplicate target address ${duplicate}; scan/provision again with updated firmware`);
+    return;
+  }
   isPairBusy.value = true;
+  devices.forEach(d => pushPairLog(`Address allocation: addr ${d.assigned_address} chip ${d.chip_id_hex || 'unknown'}`));
   pushPairLog(`Saving gateway target list: ${addresses.join(', ')}`);
   try {
     await sendEasyPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
@@ -2578,6 +2662,10 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
+          <div v-if="serialAdminIsFactoryDefault" class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+            Factory default: this device is not commissioned yet. Use Pair Devices to assign its fleet key, role, address, and WiFi before treating it as an operational transmitter or receiver.
+          </div>
+
           <div v-if="serialAdminStatus" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             <div class="rounded-xl border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">Firmware</div>
@@ -2594,6 +2682,10 @@ function countCrashEvents(entries: string[]): number {
             <div class="rounded-xl border border-white/10 bg-black/15 p-3">
               <div class="text-slate-500">MQTT</div>
               <div class="font-mono text-slate-200">{{ serialAdminStatus.mqtt?.client_enabled ? 'enabled' : 'disabled' }}</div>
+            </div>
+            <div class="rounded-xl border border-white/10 bg-black/15 p-3">
+              <div class="text-slate-500">State</div>
+              <div class="font-mono text-slate-200">{{ serialAdminIsFactoryDefault ? 'factory' : 'commissioned' }}</div>
             </div>
           </div>
 
@@ -2890,9 +2982,13 @@ function countCrashEvents(entries: string[]): number {
                   <td class="px-3 py-2 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
                   <td class="px-3 py-2 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
                   <td class="px-3 py-2">
-                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.ota_eligible ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                      {{ device.ota_eligible ? 'Eligible' : 'Not yet' }}
-                    </span>
+                    <button
+                      @click="flashLoraRemote(device)"
+                      :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting"
+                      class="glass-input m-0 h-7 px-3 hover:bg-white/10 text-[10px] font-bold disabled:opacity-50"
+                    >
+                      {{ remoteOtaBusyAddress === device.address ? 'Flashing...' : 'Flash' }}
+                    </button>
                   </td>
                 </tr>
               </tbody>
@@ -2909,7 +3005,7 @@ function countCrashEvents(entries: string[]): number {
           </div>
 
           <div v-if="!firmwareServerInfo" class="rounded-md border border-slate-800 bg-slate-900/30 p-4 text-sm text-slate-400">
-            Start the firmware server, then send an <span class="font-mono text-slate-300">ota_pull</span> admin command over USB serial or MQTT. LoRa is kept for discovery/config/log-control; full firmware binaries should not be pushed over LoRa airtime.
+            Use a row's <span class="font-mono text-slate-300">Flash</span> action to start the firmware server and trigger a remote pull. The firmware binary is served over WiFi; LoRa only carries the small trigger.
           </div>
 
           <div v-else class="grid grid-cols-1 gap-3 text-xs">

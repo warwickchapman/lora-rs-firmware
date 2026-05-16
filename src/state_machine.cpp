@@ -40,6 +40,7 @@ constexpr uint8_t kWifiControlBroadcastAddress = 255;
 constexpr uint8_t kWifiControlOpSet = 1;
 constexpr uint8_t kWifiControlOpStatus = 2;
 constexpr uint8_t kUdpLogControlOpSet = 1;
+constexpr uint8_t kOtaPullControlOpStart = 1;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
 constexpr uint8_t kFactoryResetKeepFleetFlag = 0x01;
@@ -321,6 +322,10 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  ota_pull_pending_ = false;
+  ota_pull_pending_host_ = IPAddress();
+  ota_pull_pending_port_ = 0;
+  ota_pull_pending_src_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -396,6 +401,10 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  ota_pull_pending_ = false;
+  ota_pull_pending_host_ = IPAddress();
+  ota_pull_pending_port_ = 0;
+  ota_pull_pending_src_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -1189,6 +1198,32 @@ bool NodeStateMachine::mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled
   return true;
 }
 
+bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port) {
+  if (!runtime_.role_tx) return false;
+  if (dstAddress == 0 || dstAddress == 255) return false;
+  if (port == 0 || host == IPAddress()) return false;
+  if (radio_ == nullptr) return false;
+  if (!radioTxBudgetAvailable()) return false;
+
+  uint8_t payload[12]{};
+  payload[0] = kOtaPullControlOpStart;
+  payload[1] = static_cast<uint8_t>(port & 0xFFU);
+  payload[2] = static_cast<uint8_t>((port >> 8) & 0xFFU);
+  payload[3] = host[0];
+  payload[4] = host[1];
+  payload[5] = host[2];
+  payload[6] = host[3];
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("ota_pull_control_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
 bool NodeStateMachine::hasPendingWifiControl() const { return wifi_control_pending_; }
 
 bool NodeStateMachine::consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter) {
@@ -1232,6 +1267,18 @@ bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &hos
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  return true;
+}
+
+bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, uint8_t &src) {
+  if (!ota_pull_pending_) return false;
+  host = ota_pull_pending_host_;
+  port = ota_pull_pending_port_;
+  src = ota_pull_pending_src_;
+  ota_pull_pending_ = false;
+  ota_pull_pending_host_ = IPAddress();
+  ota_pull_pending_port_ = 0;
+  ota_pull_pending_src_ = 0;
   return true;
 }
 
@@ -1744,7 +1791,7 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   }
   for (size_t i = 0; i < prov_device_count_; ++i) {
     prov_devices_[i].address_conflict = false;
-    prov_devices_[i].assigned_address = prov_devices_[i].current_address;
+    prov_devices_[i].assigned_address = 0;
   }
   for (size_t i = 0; i < prov_device_count_; ++i) {
     if (!prov_devices_[i].in_use) continue;
@@ -1766,6 +1813,11 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     if (preferred >= kProvAddressMin && preferred <= kProvAddressMax && !used[preferred]) {
       d.assigned_address = preferred;
       used[d.assigned_address] = true;
+      LRS_LOGI(API,
+               "event=prov_address_alloc chip_id=0x%08lx current=%u assigned=%u source=preferred",
+               static_cast<unsigned long>(d.chip_id),
+               static_cast<unsigned>(d.current_address),
+               static_cast<unsigned>(d.assigned_address));
     }
   }
   uint8_t next = kProvAddressMin;
@@ -1781,6 +1833,11 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     }
     d.assigned_address = next;
     used[next] = true;
+    LRS_LOGI(API,
+             "event=prov_address_alloc chip_id=0x%08lx current=%u assigned=%u source=next_free",
+             static_cast<unsigned long>(d.chip_id),
+             static_cast<unsigned>(d.current_address),
+             static_cast<unsigned>(d.assigned_address));
     next++;
   }
 }
@@ -2182,13 +2239,14 @@ void NodeStateMachine::tickReceive() {
   const bool isWifiProvision = (msg.type == MessageType::WifiProvision);
   const bool isWifiControl = (msg.type == MessageType::WifiControl);
   const bool isUdpLogControl = (msg.type == MessageType::UdpLogControl);
+  const bool isOtaPullControl = (msg.type == MessageType::OtaPullControl);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
   const bool isProvisioning = (msg.type == MessageType::Provisioning);
   if (isProvisioning) {
     handleProvisioningFrame(msg);
     return;
   }
-  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && msg.dst != runtime_.local_address) {
+  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -2200,12 +2258,12 @@ void NodeStateMachine::tickReceive() {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
-  if (isUdpLogControl && msg.dst != runtime_.local_address) {
+  if ((isUdpLogControl || isOtaPullControl) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
 
-  if (!isWifiProvision && !isUdpLogControl && runtime_.role_tx) {
+  if (!isWifiProvision && !isUdpLogControl && !isOtaPullControl && runtime_.role_tx) {
     const bool fromPaired = isPairedTargetAddress(msg.src);
     const bool mqttStatus = (msg.type == MessageType::MqttStatus);
     const bool pollResponse = (msg.type == MessageType::PollResponse);
@@ -2236,13 +2294,16 @@ void NodeStateMachine::tickReceive() {
     } else if (msg.type == MessageType::UdpLogControl) {
       // Targeted same-key diagnostics are accepted only to toggle UDP mirroring
       // on remotes that already have WiFi. It is not a general remote shell.
+    } else if (msg.type == MessageType::OtaPullControl) {
+      // Targeted same-key OTA pull only carries the temporary firmware server
+      // endpoint; the device still downloads the binary over WiFi.
     } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
   }
 
-  const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl || isFactoryReset);
+  const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl || isOtaPullControl || isFactoryReset);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -2258,6 +2319,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isUdpLogControl) {
     handleUdpLogControlFrame(msg);
+    return;
+  }
+  if (isOtaPullControl) {
+    handleOtaPullControlFrame(msg);
     return;
   }
   if (isFactoryReset) {
@@ -2602,6 +2667,33 @@ bool NodeStateMachine::handleUdpLogControlFrame(const ProtocolMessage &msg) {
   udp_log_control_pending_ = true;
   lrslog::event(enabled ? "udp_log_control_enable_rx" : "udp_log_control_disable_rx",
                 msg.rssi, msg.counter, msg.src);
+  return true;
+}
+
+bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
+  if (runtime_.role_tx) {
+    lrslog::event("ota_pull_control_tx_ignored", msg.rssi, msg.counter, msg.src);
+    return false;
+  }
+  if (msg.relay_state != kOtaPullControlOpStart) {
+    lrslog::event("ota_pull_control_bad_op", msg.rssi, msg.counter, msg.relay_state);
+    return false;
+  }
+
+  const uint16_t port = static_cast<uint16_t>(msg.input_state) |
+                        (static_cast<uint16_t>(msg.flags) << 8);
+  const IPAddress host(msg.temp_code, msg.sensor_mask, msg.sensor_digital0,
+                       static_cast<uint8_t>(msg.sensor_analog0 & 0xFFU));
+  if (port == 0 || host == IPAddress()) {
+    lrslog::event("ota_pull_control_bad_target", msg.rssi, msg.counter, msg.src);
+    return false;
+  }
+
+  ota_pull_pending_host_ = host;
+  ota_pull_pending_port_ = port;
+  ota_pull_pending_src_ = msg.src;
+  ota_pull_pending_ = true;
+  lrslog::event("ota_pull_control_rx", msg.rssi, msg.counter, msg.src);
   return true;
 }
 

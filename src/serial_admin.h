@@ -41,5 +41,6 @@ private:
   void handleCancelLoraInventory(JsonDocument &doc);
   void handleUdpLogControl(JsonDocument &doc);
   void handleRemoteUdpLogControl(JsonDocument &doc);
+  void handleRemoteOtaPull(JsonDocument &doc);
   void handleOtaPull(JsonDocument &doc);
 };

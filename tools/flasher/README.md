@@ -25,10 +25,11 @@ Network mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 - starts a temporary local firmware file server from the selected release/local `.bin`
 - calculates and displays the firmware SHA256 before devices are commanded to pull it
 - shows reachable firmware URLs for the local machine's active LAN interfaces
+- can trigger a discovered remote's OTA pull over LoRa from the inventory `Flash` action; the gateway sends the temporary firmware server host/port and the remote downloads `/firmware.bin` over WiFi
 - shows the MQTT `ota_pull` payload shape for online devices
 - listens for UDP logs on fixed port `5514`
 
-Network mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. The current inventory table uses the compact encrypted LoRa poll response, so firmware version, chip ID, IP address, and MQTT state remain `unsupported`/`unknown` until the bounded maintenance-status response is added. Online devices should be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs.
+Network mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. The current inventory table uses the compact encrypted LoRa poll response, so firmware version, chip ID, IP address, and MQTT state remain `unsupported`/`unknown` until the bounded maintenance-status response is added. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `remote_ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
 
 ## EasyPair foundation
 

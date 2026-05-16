@@ -10,6 +10,7 @@ extern "C" {
 
 #include "build_info.h"
 #include "logger.h"
+#include "ota_pull.h"
 #include "runtime_utils.h"
 
 namespace {
@@ -33,6 +34,7 @@ constexpr uint32_t kSteadySlowPhaseWarnImmediateMs = 250;
 constexpr uint32_t kStaReconnectCriticalMinFreeHeapBytes = 5000;
 constexpr uint32_t kStaReconnectCriticalMinMaxBlockBytes = 2500;
 constexpr uint32_t kStaReconnectHeapLogIntervalMs = 30000;
+constexpr const char *kRemoteOtaPullPath = "/firmware.bin";
 constexpr uint8_t kStaFailureResetThreshold = 10;
 constexpr uint8_t kStaStackResetLimit = 10;
 constexpr uint32_t kStaReconnectFibMaxDelayS = 300;
@@ -259,6 +261,22 @@ void App::tick() {
       }
       lrslog::event(udpEnabled ? "udp_log_control_enable_apply" : "udp_log_control_disable_apply",
                     0, udpSrc, static_cast<uint8_t>(udpPort & 0xFFU));
+    }
+  }
+  {
+    IPAddress otaHost;
+    uint16_t otaPort = 0;
+    uint8_t otaSrc = 0;
+    if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSrc)) {
+      String url = String("http://") + otaHost.toString() + ":" + String(otaPort) + kRemoteOtaPullPath;
+      String error;
+      LRS_LOGW(SYS, "event=ota_pull_control_apply src=%u url=%s", otaSrc, url.c_str());
+      if (otaPullFromUrl(url.c_str(), "", error)) {
+        lrslog::event("ota_pull_control_reboot", 0, otaSrc, 0);
+        ESP.restart();
+      } else {
+        LRS_LOGW(SYS, "event=ota_pull_control_failed src=%u error=%s", otaSrc, error.c_str());
+      }
     }
   }
   {
