@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.9.0-beta] - 2026-05-17
+
 ### Added
 - Flasher now uses a compact operator-console visual style with flatter panels, tighter spacing, smaller controls, and denser Fleet/Monitor tables so the desktop app remains usable on lower-resolution Windows laptops.
 - Firmware USB serial admin now has Phase 1A local-maintenance parity commands: `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`, giving Flasher a non-HTTP path for inspecting health, editing core config, rebooting, and resetting a USB-connected device.
