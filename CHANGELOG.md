@@ -39,6 +39,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Fleet row Flash now requires confirmed WiFi/IP, automatically follows the selected remote with focused LoRa inventory probes, and expires stale `Flash sent` state into `No reboot seen` when no reboot is observed.
 - Flasher confirmation prompts now use an awaited in-app dialog so cancelling a Fleet gateway flash cannot leave the app in `Flashing...` state or start the flash anyway.
 - Flasher Fleet UDP logs now follow the latest line, can be copied, can expand to full screen, and label remotes as `lrs-<chip>` with address/role context instead of a bare LoRa address.
+- Flasher Fleet gateway flash now shows explicit gateway badge states for flashing, rebooting, waiting for serial admin, updated, and failed instead of leaving the stale `status loaded` badge visible.
 - Flasher Provision now refreshes or invalidates cached serial details for any separately connected remote whose chip ID was just provisioned, preventing stale transmitter role/address values on the Flash pane.
 - Flasher serial monitoring now stays active across tab changes and only yields when another operation needs the same USB port, so a remote serial monitor can keep running while Fleet uses a separate gateway port.
 - Flasher now keeps separate selected USB ports for Flash, Provision, and Fleet while continuing to share per-port device details, so changing the gateway port no longer steals the remote port being monitored or flashed.

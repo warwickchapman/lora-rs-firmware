@@ -11,6 +11,7 @@ const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'system';
 type SerialJobPriority = 'user' | 'background';
+type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed';
 
 interface SerialJobOptions {
   label?: string;
@@ -332,6 +333,7 @@ const provisionCacheRefreshedChips = new Set<string>();
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
+const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
 const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
@@ -642,11 +644,41 @@ const settingsEmptyMessage = computed(() => {
   return 'Fetch settings before saving config, or use the guarded reboot and factory reset actions when needed.';
 });
 const fleetGatewayStatusLabel = computed(() => {
+  if (fleetGatewayFlashPhase.value === 'flashing') return 'gateway flashing';
+  if (fleetGatewayFlashPhase.value === 'rebooting') return 'gateway rebooting';
+  if (fleetGatewayFlashPhase.value === 'waiting') return 'gateway waiting';
+  if (fleetGatewayFlashPhase.value === 'updated') return 'gateway updated';
+  if (fleetGatewayFlashPhase.value === 'failed') return 'gateway flash failed';
   if (fleetGatewayIsFactoryDefault.value) return 'gateway factory default';
   if (fleetGatewayReady.value) return 'gateway ready';
   return 'gateway not loaded';
 });
+const fleetGatewayBadgeLabel = computed(() => {
+  if (fleetGatewayFlashPhase.value === 'flashing') return 'flashing...';
+  if (fleetGatewayFlashPhase.value === 'rebooting') return 'rebooting...';
+  if (fleetGatewayFlashPhase.value === 'waiting') return 'waiting...';
+  if (fleetGatewayFlashPhase.value === 'updated') return 'updated';
+  if (fleetGatewayFlashPhase.value === 'failed') return 'flash failed';
+  if (fleetGatewayStatus.value) return 'status loaded';
+  if (fleetGatewayIdentity.value) return 'identity loaded';
+  return 'not loaded';
+});
+const fleetGatewayBadgeClass = computed(() => {
+  if (fleetGatewayFlashPhase.value === 'flashing' || fleetGatewayFlashPhase.value === 'rebooting' || fleetGatewayFlashPhase.value === 'waiting') {
+    return 'border-amber-500/40 bg-amber-500/15 text-amber-200';
+  }
+  if (fleetGatewayFlashPhase.value === 'updated') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  if (fleetGatewayFlashPhase.value === 'failed') return 'border-rose-500/40 bg-rose-500/10 text-rose-300';
+  if (fleetGatewayStatus.value) return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  if (fleetGatewayIdentity.value) return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
+  return 'border-slate-700 bg-slate-800/50 text-slate-400';
+});
 const fleetGatewaySummary = computed(() => {
+  if (fleetGatewayFlashPhase.value === 'flashing') return 'Writing firmware over USB serial.';
+  if (fleetGatewayFlashPhase.value === 'rebooting') return 'Flash completed; gateway is resetting.';
+  if (fleetGatewayFlashPhase.value === 'waiting') return 'Waiting for serial admin to return after reboot.';
+  if (fleetGatewayFlashPhase.value === 'updated') return 'Gateway responded after flash; status refreshed.';
+  if (fleetGatewayFlashPhase.value === 'failed') return 'Gateway flash did not complete; check activity log.';
   const status = fleetGatewayStatus.value;
   if (status) {
     const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
@@ -1956,6 +1988,7 @@ async function flashFleetGateway() {
     return;
   }
   isFlashing.value = true;
+  fleetGatewayFlashPhase.value = 'flashing';
   noteMonitorReleasedForPort(port, 'gateway firmware flash needs this port');
   networkStatusMessage.value = `Flashing USB gateway on ${port}...`;
   pushNetworkLog(`Flashing USB gateway on ${port} with ${firmwareOptions.firmware_path}.`);
@@ -1967,13 +2000,32 @@ async function flashFleetGateway() {
       eraseFirst: false
     });
     pushNetworkLog(out || `Gateway flash completed on ${port}.`);
+    fleetGatewayFlashPhase.value = 'rebooting';
     networkStatusMessage.value = 'Gateway flash complete; gateway is rebooting.';
     notify('Gateway flash complete');
+    await new Promise(resolve => setTimeout(resolve, 4000));
+    fleetGatewayFlashPhase.value = 'waiting';
+    networkStatusMessage.value = 'Waiting for gateway serial admin after reboot...';
+    await waitForSerialAdminHello(port, 18000);
+    fleetGatewayFlashPhase.value = 'updated';
+    networkStatusMessage.value = 'Gateway rebooted; refreshing status.';
+    await loadNetworkGateway();
+    window.setTimeout(() => {
+      if (fleetGatewayFlashPhase.value === 'updated') {
+        fleetGatewayFlashPhase.value = 'idle';
+      }
+    }, 8000);
   } catch (e) {
+    fleetGatewayFlashPhase.value = 'failed';
     const msg = `Gateway flash failed: ${e}`;
     networkStatusMessage.value = msg;
     pushNetworkLog(msg);
     notify(msg);
+    window.setTimeout(() => {
+      if (fleetGatewayFlashPhase.value === 'failed') {
+        fleetGatewayFlashPhase.value = 'idle';
+      }
+    }, 15000);
   } finally {
     isFlashing.value = false;
   }
@@ -3653,7 +3705,7 @@ function countCrashEvents(entries: string[]): number {
               <div>
                 <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Running firmware</div>
                 <div :class="['mt-1 font-mono text-xl font-bold', flashRunningFirmware ? 'text-cyan-100' : 'text-slate-500']">
-                  {{ flashRunningFirmware || 'Unknown' }}
+                  {{ flashRunningFirmware || '-' }}
                 </div>
               </div>
               <div class="text-xs text-slate-400 sm:text-right">
@@ -4358,8 +4410,8 @@ function countCrashEvents(entries: string[]): number {
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <h2 class="text-lg font-bold text-slate-300">Gateway</h2>
-                <span :class="['rounded border px-2 py-1 text-[10px] font-bold', fleetGatewayStatus ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : fleetGatewayIdentity ? 'border-sky-500/30 bg-sky-500/10 text-sky-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                  {{ fleetGatewayStatus ? 'status loaded' : fleetGatewayIdentity ? 'identity loaded' : 'not loaded' }}
+                <span :class="['rounded border px-2 py-1 text-[10px] font-bold', fleetGatewayBadgeClass]">
+                  {{ fleetGatewayBadgeLabel }}
                 </span>
               </div>
               <div class="mt-1 text-xs text-slate-500">{{ fleetGatewaySummary }}</div>
