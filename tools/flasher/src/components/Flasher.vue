@@ -2513,7 +2513,7 @@ async function sendWifiToRemotes() {
       admin_password: password,
       wifi_sta_ssid: ssid,
       wifi_sta_password: pairWifiPassword.value
-    }, 20000);
+    }, 60000);
     pushPairLog(`LoRa WiFi provisioning sent (${out.packets || '?'} packets).`);
   } catch (e) {
     const msg = serialFeatureError('WiFi provisioning', e);
@@ -2721,7 +2721,7 @@ watch([pairWifiSsid, pairWifiPassword], ([nextSsid, nextPassword], [prevSsid, pr
 watch(activeMode, (mode) => {
   nextTick(() => scrollToBottom());
   syncDeviceInfoForSelectedPort();
-  if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value) {
+  if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
     readDeviceInfo();
   }
   if (mode !== 'monitor') {
@@ -2747,7 +2747,7 @@ watch(selectedPort, (port) => {
   isLoadingInfo.value = false;
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
-  if (port && activeMode.value === 'serial') {
+  if (port && activeMode.value === 'serial' && !isSelectedPortMonitoring.value && !hasActiveDeviceInfo.value) {
     readDeviceInfo();
   }
   if (activeMode.value === 'monitor') {
