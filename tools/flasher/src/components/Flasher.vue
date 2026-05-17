@@ -1308,6 +1308,10 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   return '';
 }
 
+function mergeMonitorPeerRows(rows: LoraInventoryDevice[]) {
+  monitorFleetRows.value = rows.slice().sort((a, b) => a.address - b.address);
+}
+
 function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   const selected = new Set(loraInventory.value.filter(d => d.selected).map(d => d.address));
   const now = Date.now();
@@ -1315,6 +1319,9 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
     .slice()
     .sort((a, b) => a.address - b.address)
     .map(row => classifyFleetRow({ ...row, selected: selected.has(row.address) }, now));
+  if (fleetSelectedPort.value && fleetSelectedPort.value === monitorSelectedPort.value) {
+    mergeMonitorPeerRows(rows);
+  }
 }
 
 async function refreshLoraInventoryStatus(background = true) {
@@ -1440,7 +1447,10 @@ async function refreshMonitorData(background = false) {
       5000,
       { label: 'Monitor peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
-    monitorFleetRows.value = (inventory.devices || []).slice().sort((a, b) => a.address - b.address);
+    mergeMonitorPeerRows(inventory.devices || []);
+    if (monitorSelectedPort.value && monitorSelectedPort.value === fleetSelectedPort.value) {
+      mergeLoraInventoryRows(inventory.devices || []);
+    }
     monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
   } catch (e) {
     if (serialBackgroundSkipped(e)) return;

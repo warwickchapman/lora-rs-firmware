@@ -76,6 +76,7 @@ constexpr size_t kProvChunkBitmapMax = 31;
 constexpr uint8_t kProvAddressMin = 1;
 constexpr uint8_t kProvAddressMax = Settings::kAddressListCap;
 constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
+constexpr uint32_t kPeerMaintenanceProbeSpacingMs = 5000;
 constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
 
@@ -2270,6 +2271,49 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
   }
 }
 
+void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
+  if (!runtime_.role_tx || settings_ == nullptr || fleet_scan_active_) return;
+  if (static_cast<int32_t>(now - next_peer_maintenance_ms_) < 0) return;
+  if (!radioTxBudgetAvailable()) return;
+
+  uint8_t targets[Settings::kAddressListCap]{};
+  uint8_t count = settings_->known_peer_count;
+  const uint8_t *source = settings_->known_peer_addresses;
+  if (count == 0) {
+    count = settings_->paired_target_count;
+    source = settings_->paired_target_addresses;
+  }
+  if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
+  uint8_t targetCount = 0;
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint8_t addr = source[i];
+    if (addr == 0 || addr == 255) continue;
+    bool dup = false;
+    for (uint8_t j = 0; j < targetCount; ++j) {
+      if (targets[j] == addr) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    targets[targetCount++] = addr;
+  }
+  if (targetCount == 0 && runtime_.remote_address >= 1 && runtime_.remote_address <= 254) {
+    targets[targetCount++] = runtime_.remote_address;
+  }
+  if (targetCount == 0) return;
+
+  if (peer_maintenance_cursor_ >= targetCount) peer_maintenance_cursor_ = 0;
+  const uint8_t dst = targets[peer_maintenance_cursor_++];
+  uint32_t sentCounter = 0;
+  if (sendMaintenanceRequest(dst, &sentCounter)) {
+    lrslog::event("peer_maint_probe", 0, sentCounter, dst);
+    next_peer_maintenance_ms_ = now + kPeerMaintenanceProbeSpacingMs;
+  } else {
+    next_peer_maintenance_ms_ = now + 1000U;
+  }
+}
+
 void NodeStateMachine::tickFleetScan(uint32_t now) {
   if (!runtime_.role_tx) {
     fleet_scan_active_ = false;
@@ -2372,6 +2416,7 @@ void NodeStateMachine::tickTransmitter() {
 
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
+  tickPeerMaintenance(now);
   tickFleetScan(now);
   startupTxPhaseTrace("after_peer_polling");
 

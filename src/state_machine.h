@@ -405,6 +405,8 @@ class NodeStateMachine {
   uint32_t fleet_scan_started_ms_ = 0;
   uint32_t fleet_scan_last_tx_ms_ = 0;
   uint32_t fleet_scan_sent_ = 0;
+  uint32_t next_peer_maintenance_ms_ = 0;
+  uint8_t peer_maintenance_cursor_ = 0;
 
   struct WifiProvisionRxTransfer {
     bool active = false;
@@ -544,6 +546,7 @@ class NodeStateMachine {
   void sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent, bool resetRetryWindow = true);
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
+  void tickPeerMaintenance(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
