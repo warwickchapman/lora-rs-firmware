@@ -46,7 +46,7 @@ Important ESP8266 constraints:
 - DS18B20 support (local + remote telemetry over LoRa).
 
 ## 4. Networking and Access
-Default local access is USB serial through Flasher. Normal firmware no longer serves an on-device Web UI, REST API, or captive portal.
+Default local access is USB serial through Flasher. Remote online control and status use MQTT on installer-managed networks.
 
 ## 5. Configuration (Flasher)
 Flasher tabs:
@@ -87,8 +87,8 @@ TX behavior:
 - Later valid ACK/heartbeat ACK returns link to `Idle` and re-syncs relay state.
 
 ## 8. Security
-- Web auth: HTTP Basic Auth.
-- Failed-login rate limiting enabled.
+- USB serial admin is the local maintenance path.
+- MQTT control requires broker authentication, ACLs, and an isolated installer/operations network.
 - LoRa payload encryption + packet authentication enabled.
 - Credentials are derived from chip identity + product secret.
 

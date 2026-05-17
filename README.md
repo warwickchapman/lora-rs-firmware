@@ -7,7 +7,7 @@ Both hardware units are identical. Behavior is selected by commissioning mode/ro
 - `Paired` mode: roles `transmitter` and `receiver`
 - `Mesh` mode: roles `coordinator` and `node`
 
-The codebase has been rebuilt as a modular state-machine firmware with a protected web console, LittleFS settings, OTA support, and factory metadata generation.
+The codebase is modular state-machine firmware with LittleFS settings, USB serial admin for the desktop Flasher app, MQTT support, OTA pull support, and factory metadata generation.
 
 ## Release Flashing (No VSCode/PlatformIO)
 For shipped release `.bin` files, use `esptool` and the included helper:
@@ -17,8 +17,7 @@ For shipped release `.bin` files, use `esptool` and the included helper:
   - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.4.3-alpha.bin`
 
 The helper reads chip ID, flashes firmware, and prints:
-- SoftAP SSID: `lrs-<chipid>`
-- SoftAP password
+- device name: `lrs-<chipid>`
 - Admin password
 
 Direct `esptool` fallback:
@@ -40,11 +39,12 @@ What it does:
 - Lists available firmware binaries from the public firmware release repository ([lora-rs-firmware](https://github.com/warwickchapman/lora-rs-firmware)).
 - Supports local `.bin` override selection.
 - Flashes selected firmware via `esptool` and shows live operation logs.
+- Provisions gateways/remotes, scans Fleet inventory through a USB gateway, triggers OTA pull for WiFi-connected devices, and edits local Settings over USB serial admin.
 - **Linux Users**: Ensure you are in the `dialout` group (`sudo usermod -a -G dialout $USER`) and log out/in.
 - **Linux AppImage note**: prefer the `*.AppImage.tar.gz` release asset. Extracting it preserves executable permissions.
 
-Main entrypoint:
-- `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/main.py`
+Main project:
+- `/Users/warwick/Code/LoRa/lora_rs/tools/flasher`
 
 ## Start Here
 - User/operator quickstart: `/Users/warwick/Code/LoRa/lora_rs/docs/USER_GUIDE.md`
@@ -52,8 +52,6 @@ Main entrypoint:
 - Protocol details: `/Users/warwick/Code/LoRa/lora_rs/docs/PROTOCOL.md`
 - Factory/provisioning flow: `/Users/warwick/Code/LoRa/lora_rs/docs/PROVISIONING.md`
 - Product manual draft: `/Users/warwick/Code/LoRa/lora_rs/docs/PRODUCT_MANUAL.md`
-- Legacy manual alignment notes: `/Users/warwick/Code/LoRa/lora_rs/docs/MANUAL_ALIGNMENT.md`
-- Legacy branch parity map: `/Users/warwick/Code/LoRa/lora_rs/docs/FEATURE_PARITY.md`
 - Deferred scope TODO list: `/Users/warwick/Code/LoRa/lora_rs/docs/TODO.md`
 
 ## Build Targets
@@ -62,7 +60,7 @@ Main entrypoint:
 
 ## Release Version Source
 - Single source of truth: `/Users/warwick/Code/LoRa/lora_rs/VERSION`
-- Firmware build metadata (`fw_version` shown in Web UI/API), flasher app version label, and factory/release helper scripts all read from this file.
+- Firmware build metadata (`fw_version` reported through serial admin/MQTT), flasher app version label, and factory/release helper scripts all read from this file.
 - For a new release, bump `VERSION` once (for example `0.4.4-alpha`) and keep release tag/title/assets aligned to that value.
 
 Local non-release flasher build policy:
@@ -178,4 +176,4 @@ python3 tools/release_manager.py \
 ## Notes for New Contributors
 - Main runtime entrypoint: `/Users/warwick/Code/LoRa/lora_rs/src/main.cpp`
 - Application orchestrator: `/Users/warwick/Code/LoRa/lora_rs/src/app.cpp`
-- Runtime modules are split under `/Users/warwick/Code/LoRa/lora_rs/src/` (`app`, `state_machine`, `radio_protocol`, `web_console`, `mqtt_bridge`, `sensor_manager`, `config_store`, `log_buffer`).
+- Runtime modules are split under `/Users/warwick/Code/LoRa/lora_rs/src/` (`app`, `state_machine`, `radio_protocol`, `serial_admin`, `mqtt_bridge`, `sensor_manager`, `config_store`, `logger`).

@@ -3,22 +3,21 @@
 ## Done
 - Build-time log level override support (`LRS_LOG_LEVEL_DEFAULT`) is implemented and usable from `platformio.ini` build flags.
 - Log level numeric mapping for `LRS_LOG_LEVEL_DEFAULT` (`0=ERROR`, `1=WARN`, `2=INFO`, `3=DEBUG`) is implemented.
-- MQTT dependency guard is implemented: `mqtt_control_enabled` requires `mqtt_client_enabled` across UI and API validation paths.
-- Security review reference report captured at `docs/internal/security-review-2026-04-26.md`.
+- MQTT dependency guard is implemented: `mqtt_control_enabled` requires `mqtt_client_enabled` across firmware and Flasher validation paths.
 - Flasher-first EasyPair commissioning foundation is implemented: USB serial admin protocol, selected USB gateway, LoRa remote discovery/provisioning, verified target finalization, WiFi credential provisioning, and local Identify LED action.
 - Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher Flash mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
-- Flasher Fleet mode no longer uses device-side HTTP discovery/login/REST OTA/REST UDP-log paths; it now provides a temporary local firmware file server plus per-device UDP-log actions, with OTA and UDP log-control commands moving to serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
-- Flasher Fleet mode now reads the TX/gateway-owned peer cache over serial admin; a selected, commissioned USB gateway can explicitly scan remotes over encrypted LoRa maintenance-status packets and render a dense device table without HTTP/REST discovery.
-- Normal firmware no longer includes Web UI, REST API, captive DNS, `ESP8266WebServer`, or `DNSServer`; local maintenance now goes through Flasher/USB serial admin.
+- Flasher Fleet mode provides a temporary local firmware file server plus per-device UDP-log actions, with OTA and UDP log-control commands available through serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
+- Flasher Fleet mode reads the TX/gateway-owned peer cache over serial admin; a selected, commissioned USB gateway can explicitly scan remotes over encrypted LoRa maintenance-status packets and render a dense device table.
+- Local maintenance uses Flasher over USB serial admin.
 
-## Web UI Removal Migration
+## Admin and Fleet Roadmap
 - Extend Fleet inventory actions on top of the bounded maintenance-status packet, including identify, selected-device OTA, and WiFi/log actions that use the reported IP/connectivity state.
 - Add selected-device `ota_pull` from Fleet inventory rows once WiFi/IP reachability is reported by the bounded maintenance-status response; add bulk OTA only after one-device flow is reliable.
 - Add MQTT admin request/reply topics for online device status/config actions with broker ACL guidance and non-retained secret handling.
 - Default versioned maintenance debug telemetry to disabled once an explicit device debug mode exists; for pre-release diagnostics it is currently enabled by default so Flasher/Fleet can collect heap, fragmentation, relay feedback, and uptime from remotes.
 - Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
 - Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
-- Record before/after field heap and max-free-block measurements on hardware after the Web UI/REST removal build is flashed.
+- Record field heap and max-free-block measurements on hardware after the current build is flashed.
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
@@ -32,9 +31,9 @@
 - Keep ESP8266 support primary for current product.
 - Evaluate ESP32 baseboard migration path separately (no current firmware migration committed).
 
-## Protocol and Migration
+## Protocol
 - Introduce explicit protocol version field in packet.
-- Add backward/compatibility migration policy for future payload changes.
+- Define the update policy for future payload changes.
 
 ## Radio Configuration Change Protocol
 - Implement a safe gateway-controlled staged protocol for changing shared LoRa radio parameters across paired devices.
@@ -122,8 +121,8 @@
 - Immediate containment: rotate credentials for devices whose OTA/admin auth values were committed, remove real OTA secrets from `platformio.ini`, and replace tracked per-device OTA environments with placeholder templates plus an ignored local operator profile.
 - Firmware credential redesign: replace deterministic chip-ID-derived AP/admin credentials with per-device random factory credentials, record them in controlled factory outputs, and force admin password rotation during first commissioning.
 - Flasher/release trust: add a signed release manifest containing firmware asset names, regions, versions, and SHA256 hashes; make the flasher verify the manifest signature and asset hash before flashing downloaded firmware.
-- Runtime randomness: add a central ESP8266 secure-random helper seeded during boot and use it for web session tokens, LoRa packet nonces, boot nonces, provisioning session nonces, and transfer IDs.
-- Network security documentation: document isolated installer/OT network requirements for HTTP admin, ArduinoOTA, MQTT control, fleet provisioning, and support access; treat MQTT control as requiring broker ACLs plus VLAN/VPN isolation unless TLS is later proven practical.
+- Runtime randomness: add a central ESP8266 secure-random helper seeded during boot and use it for LoRa packet nonces, boot nonces, provisioning session nonces, and transfer IDs.
+- Network security documentation: document isolated installer/OT network requirements for ArduinoOTA, MQTT control, fleet provisioning, and support access; treat MQTT control as requiring broker ACLs plus VLAN/VPN isolation unless TLS is later proven practical.
 - SoftAP posture: decide whether `ap_always_on` should default off after successful STA commissioning and document the recovery path if the AP is disabled.
 - Secret export/support handling: make normal config export redacted by default, add an explicit include-secrets path if needed, and document how to handle stickers, CSVs, screenshots, flasher logs, and support bundles.
 - Flasher hardening: add a restrictive Tauri CSP, keep shell permissions limited to the esptool sidecar, and avoid remote UI assets.
@@ -133,8 +132,8 @@
 - Validate full 12-device EasyPair sessions on real hardware, including serial `provisioning_status` response sizing and operator-visible progress.
 - Add production output records for EasyPair runs (gateway chip/serial, verified remote chip/address list, fleet key handling policy, firmware version, timestamp/operator).
 
-## UX / API Cleanup
-- Unify `deployment_key` and `fleet_passphrase` terminology under user-facing `Shared Fleet Key` (short form: `Fleet Key` where space is tight); place helper text directly under the key input explaining it is the shared passphrase used to derive LoRa encryption/authentication keys; choose one canonical API field name and treat old names as temporary input aliases only.
+## UX / Config Cleanup
+- Unify `deployment_key` and `fleet_passphrase` terminology under user-facing `Shared Fleet Key` (short form: `Fleet Key` where space is tight); place helper text directly under the key input explaining it is the shared passphrase used to derive LoRa encryption/authentication keys; choose one canonical config field name.
 - Public firmware repo README update (`lora-rs-firmware`): add a brief desktop flasher summary covering what the app is, supported operating systems/architectures, and include at least one UI screenshot in the README.
 
 ## Flasher
@@ -204,8 +203,8 @@
 - Cloud dashboard (future workstream): capture requirements and architecture options, but do not begin implementation yet.
 
 ## Memory / Stability
-- Measure steady-state heap and `max_free_block` before/after the Web UI/REST removal build on hardware.
-- Watch Settings `get_config` heap headroom on ESP8266 now that HTTP/SSE/captive DNS are gone.
+- Measure steady-state heap and `max_free_block` on hardware after flashing the current build.
+- Watch Settings `get_config` heap headroom on ESP8266 during local maintenance.
 
 ## Testing / Stability
 - Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.

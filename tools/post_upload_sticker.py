@@ -91,7 +91,7 @@ def _post_upload(source, target, env, **kwargs):
     upload_protocol = env.subst("$UPLOAD_PROTOCOL").strip().lower()
     if upload_protocol == "espota" or not _looks_like_serial_port(upload_port):
         print("[sticker] OTA/non-serial upload detected; skipping esptool sticker read (serial-only)")
-        print("[sticker] Use the web console Factory panel (/api/factory) to read current values")
+        print("[sticker] Use Flasher over USB serial to read current device identity/settings")
         return
 
     try:

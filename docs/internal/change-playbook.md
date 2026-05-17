@@ -22,7 +22,7 @@ After changes:
 - run runtime memory checks (`max_free_block` primary)
 - compare logs for slow-phase warnings and expected protocol events
 
-## WebConsole Split Work
+## Admin/Runtime Split Work
 - Preserve low-heap thresholds and fallback paths exactly.
 - Preserve auth/session behavior exactly.
 - Preserve route registration behavior exactly in route split milestone.

@@ -3,7 +3,6 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openUrl } from '@tauri-apps/plugin-opener';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -1079,10 +1078,8 @@ function saveTabPort(key: keyof typeof TAB_PORT_STORAGE_KEYS, port: string) {
 async function fetchFirmware() {
   isFetchingFirmware.value = true;
   try {
-    const [defaultLocalFirmware, remoteVersions] = await Promise.all([
-      invoke<string | null>('get_default_local_firmware'),
-      invoke<string[]>('get_firmware_list')
-    ]);
+    const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware').catch(() => null);
+    const remoteVersions = await invoke<string[]>('get_firmware_list');
     if (defaultLocalFirmware && !selectedLocalPath.value) {
       setLocalFirmwareSelection(defaultLocalFirmware, false);
     }
@@ -3082,32 +3079,6 @@ async function sendWifiToRemotes() {
   }
 }
 
-function latestStaIpFromLogs(): string | null {
-  for (let i = serialLogs.value.length - 1; i >= 0; i--) {
-    const line = String(serialLogs.value[i] || '');
-    const match = line.match(/\bevent=sta_connected\b.*\bip=((?:\d{1,3}\.){3}\d{1,3})\b/);
-    if (match && match[1]) {
-      return match[1];
-    }
-  }
-  return null;
-}
-
-async function openActiveDeviceConsole() {
-  if (!deviceInfo.value) {
-    notify('Load device info first to open device URL');
-    return;
-  }
-  const staIp = latestStaIpFromLogs();
-  const url = staIp ? `http://${staIp}` : 'http://192.168.4.1';
-  try {
-    await openUrl(url);
-    pushSerialLog(`Opened ${url}`);
-  } catch (e) {
-    notify('Failed to open device URL: ' + e);
-  }
-}
-
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
   const port = selectedPort.value;
@@ -3636,26 +3607,6 @@ function countCrashEvents(entries: string[]): number {
                 <path d="m10.5 13 8-8"></path>
                 <path d="m16 5 3 3"></path>
                 <path d="m14 7 3 3"></path>
-              </svg>
-            </button>
-            <button
-              v-if="activeMode === 'serial' && isMonitoring"
-              @click="openActiveDeviceConsole"
-              :disabled="!hasActiveDeviceInfo"
-              :class="[
-                'p-1 rounded border transition-all',
-                hasActiveDeviceInfo
-                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-              ]"
-              title="Open device web console"
-              aria-label="Open device web console"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="9"></circle>
-                <path d="M3 12h18"></path>
-                <path d="M12 3a14 14 0 0 1 0 18"></path>
-                <path d="M12 3a14 14 0 0 0 0 18"></path>
               </svg>
             </button>
             <button

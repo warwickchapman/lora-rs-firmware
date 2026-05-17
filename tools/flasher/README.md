@@ -18,7 +18,7 @@ Flash mode is the USB firmware and local maintenance workflow:
 ### Settings
 
 Settings is the local USB maintenance surface for a selected device. It uses the
-`LRS:` serial-admin protocol rather than the on-device Web UI:
+`LRS:` serial-admin protocol:
 
 - load status and redacted configuration from a USB-connected LRS device
 - edit local role/address, LoRa timing/failsafe/debug settings, WiFi STA/AP/static-IP settings, MQTT client/control settings, and DS18B20 settings
@@ -27,7 +27,7 @@ Settings is the local USB maintenance surface for a selected device. It uses the
 
 ### Fleet
 
-Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
+Fleet mode is a LoRa/MQTT admin helper:
 
 - loads a selected USB-connected LRS device as the LoRa gateway, including the factory-derived admin password needed for Fleet actions
 - keeps the gateway visible as its own Fleet panel with load, identify, and USB flash actions, while remote counts remain remote-only
@@ -43,7 +43,7 @@ Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 - shows the MQTT `ota_pull` payload shape for online devices
 - listens for UDP logs on fixed port `5514`
 
-Fleet mode intentionally does not scan devices by HTTP, open device Web UIs, log into REST endpoints, or upload firmware through `/api/ota`. The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can still be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
+The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can also be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
 
 ## Provision foundation
 

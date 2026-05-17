@@ -1,10 +1,10 @@
 # Takeover Risk Register (Baseline)
 
-## R1: `WebConsole` monolith regressions during split
-- Risk: low-heap guards/SSE/auth/route behaviors drift during file moves.
+## R1: Admin/runtime regressions during split
+- Risk: low-heap guards, admin auth, config apply, or runtime behavior drift during file moves.
 - Impact: runtime instability, request storms, broken admin flows.
 - Mitigation:
-  - preserve thresholds/behavior exactly
+  - preserve thresholds and behavior exactly
   - split UI assets first
   - route split before feature splits
   - runtime memory checks after risky milestones

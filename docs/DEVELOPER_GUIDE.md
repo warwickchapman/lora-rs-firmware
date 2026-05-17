@@ -27,7 +27,7 @@ Commands:
 - `src/mqtt_bridge.*`: MQTT publish/subscribe bridge
 - `src/sensor_manager.*`: DS18B20 detection/reads
 - `src/serial_admin.*`: local USB maintenance, provisioning, Settings, Fleet, Monitor, and OTA-pull commands for Flasher
-- `src/runtime_utils.*`: shared pure helpers (role/mode parsing and WiFi status text) used by app + web/config paths to avoid cross-module coupling
+- `src/runtime_utils.*`: shared pure helpers (role/mode parsing and WiFi status text) used by app and admin/config paths to avoid cross-module coupling
 - `src/logger.*`: structured serial logs + optional UDP mirror
 
 ## 4. Critical Defaults
@@ -66,7 +66,7 @@ This ordering keeps LoRa control priority above MQTT.
 - WiFi power-save disabled; TX power set high for stable local-link behavior
 
 ## 7. Local Admin and Fleet Control
-Normal firmware no longer includes an embedded Web UI, REST API, captive portal, `ESP8266WebServer`, or `DNSServer`. Local maintenance is via USB serial admin in Flasher. Remote maintenance is via MQTT admin where online, plus gateway-mediated LoRa admin for bounded remote actions.
+Local maintenance is via USB serial admin in Flasher. Remote maintenance is via MQTT admin where online, plus gateway-mediated LoRa admin for bounded remote actions.
 
 Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
@@ -84,9 +84,8 @@ USB serial admin protocol:
 - `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
 - Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
 
-## 8. Packet and Compatibility
+## 8. Packet Format
 Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.
-Older 8-byte payload firmware is not wire-compatible.
 
 Current message types include control/status (`A/C/H/M/S/P/R`) plus provisioning/reset extensions (`W`/`X`).
 `W` (WiFi provisioning) and `X` (factory reset) reuse the same encrypted 12-byte payload slot with custom byte layouts via the radio layer raw-payload send path.

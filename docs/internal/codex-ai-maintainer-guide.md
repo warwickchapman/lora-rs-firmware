@@ -12,7 +12,7 @@ Enable safe AI-assisted maintenance on an ESP8266 firmware codebase with tight h
 ## High-Risk Areas (Read Before Editing)
 - `NodeStateMachine` replay, RX dispatch, provisioning state machines
 - `App::tick()` ordering and apply boundary behavior
-- `WebConsole` status cache/SSE/low-heap behavior and settings apply path
+- serial admin status/config behavior and settings apply path
 - `RadioProtocol` crypto/MAC/default-key gating
 
 ## Validation Checklist (Minimum)

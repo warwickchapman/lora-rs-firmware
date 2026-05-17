@@ -12,4 +12,4 @@ Accepted (Milestone 1 baseline)
 - Matches current code structure and stability-oriented design.
 
 ## Implication
-Monolith splitting should not move apply/restart ownership into `WebConsole` or other modules.
+Monolith splitting should not move apply/restart ownership into low-level protocol or feature modules.

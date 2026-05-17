@@ -12,7 +12,7 @@ Factory script:
 
 Firmware USB serial admin protocol:
 - Flasher-facing commands are newline-delimited JSON prefixed with `LRS:`.
-- Flasher can inspect a USB-connected device without HTTP using `status`.
+- Flasher can inspect a USB-connected device using `status`.
 - Flasher can load and save local device configuration with authenticated `get_config` and `set_config`. Secret fields are redacted by default; blank password fields in Flasher preserve existing stored passwords. Settings > Network can scan WiFi from the selected USB device with serial admin `wifi_scan`, and Settings > Sensors only exposes DS18B20 enablement because the current hardware fixes the data pin and runtime cadence.
 - Flasher can trigger authenticated `factory_reset` with `keep_shared_fleet_key` and `keep_wifi_credentials` options, and can use authenticated `reboot` for local recovery/admin flows.
 - The selected USB-connected device can be configured as the TX/gateway with `configure_gateway`.
