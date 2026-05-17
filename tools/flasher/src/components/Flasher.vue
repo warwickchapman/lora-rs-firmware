@@ -312,6 +312,7 @@ const selectedPort = computed<string>({
 const firmwareVersions = ref<string[]>(['__local_browse__']);
 const selectedVersion = ref('');
 const selectedLocalPath = ref('');
+const flasherAppVersion = ref('');
 const region = ref<RegionCode>('ZA');
 const isFlashing = ref(false);
 const isMonitoring = ref(false);
@@ -1300,6 +1301,32 @@ function adminPasswordForPort(port: string): string {
 
 function normalizeChipId(raw: string | undefined | null): string {
   return String(raw || '').trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '').toLowerCase();
+}
+
+function lrsDeviceName(rawChipId: string | undefined | null): string {
+  const chip = normalizeChipId(rawChipId);
+  if (!chip) return '-';
+  return `lrs-${chip.length < 8 ? chip.padStart(8, '0') : chip}`;
+}
+
+function firmwareVersionCore(version: string): string {
+  const match = String(version || '').trim().replace(/^v/i, '').match(/^(\d+\.\d+\.\d+)/);
+  return match?.[1] || '';
+}
+
+function displayFirmwareVersion(rawVersion: string | undefined | null): string {
+  const version = String(rawVersion || '').trim();
+  if (!version) return '-';
+  if (/[+-]/.test(version.replace(/^v/i, '').replace(/^\d+\.\d+\.\d+/, ''))) return version;
+
+  const appVersion = flasherAppVersion.value.trim();
+  const appCore = firmwareVersionCore(appVersion);
+  const rawCore = firmwareVersionCore(version);
+  if (appCore && rawCore && appCore === rawCore) {
+    const suffix = appVersion.replace(/^v/i, '').slice(appCore.length);
+    if (suffix) return `${version}${suffix}`;
+  }
+  return version;
 }
 
 function provisionedRemoteChipIds(): Set<string> {
@@ -3105,6 +3132,11 @@ watch(provisionSelectedPort, () => {
 onMounted(async () => {
   generatePairFleetKey(false);
   try {
+    flasherAppVersion.value = await invoke<string>('get_app_version');
+  } catch {
+    flasherAppVersion.value = '';
+  }
+  try {
     const savedMonitor = localStorage.getItem(MONITOR_AFTER_FLASH_STORAGE_KEY);
     if (savedMonitor === 'true' || savedMonitor === 'false') {
       monitorAfterFlash.value = savedMonitor === 'true';
@@ -4178,12 +4210,12 @@ function countCrashEvents(entries: string[]): number {
             <div class="grid grid-cols-1 gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
               <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
                 <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</div>
-                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.chip_id || '-' }}</div>
+                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ lrsDeviceName(monitorGatewayStatus?.chip_id) }}</div>
                 <div class="mt-1 text-slate-400">{{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</div>
               </div>
               <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
                 <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Firmware</div>
-                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.fw_version || '-' }}</div>
+                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ displayFirmwareVersion(monitorGatewayStatus?.fw_version) }}</div>
                 <div class="mt-1 text-slate-400">uptime {{ monitorGatewayStatus?.uptime_ms ? formatUptime(monitorGatewayStatus.uptime_ms) : '-' }}</div>
               </div>
               <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
@@ -4275,7 +4307,7 @@ function countCrashEvents(entries: string[]): number {
                   <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', monitorFreshnessClass(device)]">{{ monitorFreshnessLabel(device) }}</span>
                   </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version || '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ displayFirmwareVersion(device.fw_version) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">ack {{ device.relay_state ?? '-' }} · fb {{ device.relay_feedback ?? '-' }}</td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
@@ -4474,12 +4506,12 @@ function countCrashEvents(entries: string[]): number {
               <div class="mt-1 truncate font-mono text-slate-300">{{ selectedPort || '-' }}</div>
             </div>
             <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Chip</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus?.chip_id || fleetGatewayIdentity?.chip_id || '-' }}</div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Name</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ lrsDeviceName(fleetGatewayStatus?.chip_id || fleetGatewayIdentity?.chip_id) }}</div>
             </div>
             <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
               <div class="text-[10px] uppercase tracking-wide text-slate-600">Firmware</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus?.fw_version || '-' }}</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ displayFirmwareVersion(fleetGatewayStatus?.fw_version) }}</div>
             </div>
             <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
               <div class="text-[10px] uppercase tracking-wide text-slate-600">Role</div>
@@ -4516,7 +4548,7 @@ function countCrashEvents(entries: string[]): number {
                 <tr class="border-b border-slate-800">
                   <th class="w-10 px-2 py-1.5 text-left"></th>
                   <th class="px-2 py-1.5 text-left font-semibold">LoRa</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Chip / Host</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Device</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Role</th>
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
@@ -4539,8 +4571,8 @@ function countCrashEvents(entries: string[]): number {
                 >
                   <td class="px-2 py-1.5"><input v-model="device.selected" type="checkbox" /></td>
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id || '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version || 'unsupported' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ lrsDeviceName(device.chip_id) }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ displayFirmwareVersion(device.fw_version) }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_enabled_known ? (device.wifi_enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300') : 'border-slate-700 bg-slate-800/50 text-slate-400']">
