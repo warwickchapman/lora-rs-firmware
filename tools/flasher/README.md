@@ -30,11 +30,13 @@ Settings is the local USB maintenance surface for a selected device. It uses the
 Fleet mode is now a LoRa/MQTT admin helper, not a device-side Web UI client:
 
 - loads a selected USB-connected LRS device as the LoRa gateway, including the factory-derived admin password needed for Fleet actions
+- keeps the gateway visible as its own Fleet panel with load, identify, and USB flash actions, while remote counts remain remote-only
 - reads the TX/gateway-owned peer cache over serial admin
 - scans the supported LRS remote range through the gateway with explicit `start_lora_inventory` operator action
 - refuses Fleet scans from factory-default gateways until Provision has commissioned the gateway with a secure fleet key
 - shows cached remotes in a dense fleet table with LoRa address, chip ID, firmware version, role/mode, WiFi state/IP, MQTT state, link RSSI/freshness, and OTA eligibility
 - starts a temporary local firmware file server from the selected release/local `.bin`
+- defaults the shared firmware picker to the repo-local `.pio/build/lrs_za/firmware.bin` artifact when that PlatformIO build output exists
 - calculates and displays the firmware SHA256 before devices are commanded to pull it
 - shows reachable firmware URLs for the local machine's active LAN interfaces
 - can trigger a discovered remote's OTA pull over LoRa from the inventory `Flash` action; the gateway sends the temporary firmware server host/port and the remote downloads `/firmware.bin` over WiFi

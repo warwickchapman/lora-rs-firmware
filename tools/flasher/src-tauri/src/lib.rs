@@ -140,6 +140,7 @@ pub fn run() {
             crate::commands::serial::list_serial_ports,
             crate::commands::flash::flash_firmware,
             crate::commands::github::get_firmware_list,
+            crate::commands::github::get_default_local_firmware,
             crate::commands::status::get_system_status,
             crate::commands::status::get_app_version,
             crate::commands::device::get_device_info,

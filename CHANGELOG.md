@@ -17,8 +17,11 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Firmware LoRa inventory now uses a compact maintenance-status response so Fleet rows can show remote chip ID, firmware version, WiFi connected/IP, and MQTT state without HTTP/REST.
 - Firmware LoRa inventory now includes remote uptime in the compact maintenance-status response so Flasher can distinguish expected OTA reboots from unexpected restarts.
 - Flasher Fleet mode now has a dense LoRa inventory table driven by a selected USB gateway, with compact rows for address, role/mode, WiFi state, link RSSI/freshness, and OTA eligibility.
+- Flasher Fleet mode now shows the selected USB gateway as a pinned gateway panel, with identity/status, identify, and USB firmware flash actions kept separate from the remote cache count.
 - Flasher Fleet mode now starts a temporary local firmware file server and shows operator-ready OTA pull details, including reachable URLs, SHA256, size, and the MQTT `ota_pull` payload to send to online devices.
 - Flasher Fleet mode replaces the old Network tab with a Winbox-style fleet header and expanded device table; firmware serving and UDP logging are now status/per-device actions instead of separate primary panes.
+- Flasher firmware pickers now default to the local `.pio/build/lrs_za/firmware.bin` artifact when it exists, making local firmware testing the zero-click path after a successful PlatformIO build.
+- Flasher Flash now shows a prominent running-firmware readout after device info/status is read, so operators can compare the connected device version with the selected firmware before flashing.
 - Flasher tabs are now ordered Flash, Provision, and Fleet; the app restores the last active tab on launch.
 
 ### Fixed
@@ -34,6 +37,7 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Provision WiFi now times out failed gateway WiFi joins sooner, and changing the SSID/password cancels the current connection wait so the operator can immediately retry corrected credentials.
 - Flasher Fleet rows now show uptime and highlight reboot events: expected reboots after a row Flash action are marked as progress, while unexpected uptime drops are treated as an alarm state.
 - Flasher Fleet row Flash now requires confirmed WiFi/IP, automatically follows the selected remote with focused LoRa inventory probes, and expires stale `Flash sent` state into `No reboot seen` when no reboot is observed.
+- Flasher confirmation prompts now use an awaited in-app dialog so cancelling a Fleet gateway flash cannot leave the app in `Flashing...` state or start the flash anyway.
 - Flasher serial monitoring now stays active across tab changes and only yields when another operation needs the same USB port, so a remote serial monitor can keep running while Fleet uses a separate gateway port.
 - Flasher now keeps separate selected USB ports for Flash, Provision, and Fleet while continuing to share per-port device details, so changing the gateway port no longer steals the remote port being monitored or flashed.
 - Flasher Identify LED actions now stay visible when the selected LRS supports serial admin and disable only while the selected port is busy, instead of disappearing during temporary port ownership conflicts.

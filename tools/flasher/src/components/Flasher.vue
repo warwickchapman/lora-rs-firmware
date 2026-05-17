@@ -18,6 +18,14 @@ interface SerialJobOptions {
   dropIfBusy?: boolean;
 }
 
+interface ConfirmDialogState {
+  message: string;
+  confirmText: string;
+  cancelText: string;
+  danger: boolean;
+  resolve: ((confirmed: boolean) => void) | null;
+}
+
 interface SerialPort {
   port_name: string;
   description: string | null;
@@ -325,6 +333,7 @@ const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
 const showToast = ref(false);
 const toastMessage = ref('');
+const confirmDialog = ref<ConfirmDialogState | null>(null);
 const logContainer = ref<HTMLElement | null>(null);
 const deviceInfoReadSeqByPort = ref<Record<string, number>>({});
 const monitorAfterFlash = ref(true);
@@ -392,6 +401,7 @@ const serialFactoryKeepFleet = ref(true);
 const serialFactoryKeepWifi = ref(true);
 
 const LOCAL_OPTION = '__local_browse__';
+const LOCAL_LABEL_PREFIX = 'Local: ';
 const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'ssid',
   'password',
@@ -522,6 +532,28 @@ const monitorContextLabel = computed(() => {
   return parts.join(' on ');
 });
 const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
+const fleetGatewayDevice = computed(() => serialDeviceState(fleetSelectedPort.value));
+const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
+const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
+const fleetGatewayReady = computed(() =>
+  !!fleetSelectedPort.value &&
+  !!fleetGatewayIdentity.value &&
+  !!fleetGatewayDevice.value?.adminSupported &&
+  !!adminPasswordForPort(fleetSelectedPort.value)
+);
+const fleetGatewayIsFactoryDefault = computed(() => {
+  const st = fleetGatewayStatus.value;
+  return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
+});
+const fleetGatewayFlashDisabled = computed(() =>
+  !fleetSelectedPort.value ||
+  isFlashing.value ||
+  isNetworkGatewayLoading.value ||
+  isLoraInventoryScanning.value ||
+  remoteOtaBusyAddress.value !== null ||
+  isFirmwareServerStarting.value ||
+  isPairBusy.value
+);
 const loraInventoryProgressLabel = computed(() => {
   const scan = loraInventoryScan.value;
   if (!scan) return 'Idle';
@@ -576,6 +608,14 @@ const serialStatusSummary = computed(() => {
   const wifi = st.wifi?.sta_connected ? `WiFi ${st.wifi.ip || 'connected'}` : `WiFi ${st.wifi?.status || 'offline'}`;
   return `${st.role || 'unknown'} ${st.local_address}->${st.remote_address} · ${wifi} · heap ${formatBytes(st.heap_free)} free`;
 });
+const flashRunningFirmware = computed(() => serialDeviceState(flashSelectedPort.value)?.status?.fw_version || '');
+const flashRunningFirmwareSummary = computed(() => {
+  const st = serialDeviceState(flashSelectedPort.value)?.status;
+  if (!st) return 'Click Get device info to read running firmware.';
+  const identity = serialDeviceState(flashSelectedPort.value)?.deviceInfo;
+  const addr = `${st.local_address}->${st.remote_address}`;
+  return `${st.role || 'device'} ${addr}${identity?.chip_id ? ` · chip ${identity.chip_id}` : ''}`;
+});
 const serialAdminIsFactoryDefault = computed(() => {
   const st = serialAdminStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
@@ -599,9 +639,20 @@ const settingsEmptyMessage = computed(() => {
   return 'Fetch settings before saving config, or use the guarded reboot and factory reset actions when needed.';
 });
 const fleetGatewayStatusLabel = computed(() => {
-  if (serialAdminIsFactoryDefault.value) return 'gateway factory default';
-  if (gatewayReady.value) return 'gateway ready';
+  if (fleetGatewayIsFactoryDefault.value) return 'gateway factory default';
+  if (fleetGatewayReady.value) return 'gateway ready';
   return 'gateway not loaded';
+});
+const fleetGatewaySummary = computed(() => {
+  const status = fleetGatewayStatus.value;
+  if (status) {
+    const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
+    return `${status.role || 'gateway'} addr ${status.local_address} · ${wifi} · heap ${formatBytes(status.heap_free)} free`;
+  }
+  if (fleetGatewayIdentity.value) {
+    return `Identity loaded · addr ${fleetGatewayIdentity.value.local_addr}->${fleetGatewayIdentity.value.remote_addr}`;
+  }
+  return 'Select or load the USB gateway to inspect and flash it.';
 });
 const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
@@ -737,6 +788,18 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${(n / 1024).toFixed(1)} KB`;
 }
 
+function setLocalFirmwareSelection(path: string, announce = true) {
+  selectedLocalPath.value = path;
+  const filename = path.split(/[\\/]/).pop() || 'firmware.bin';
+  const localLabel = `${LOCAL_LABEL_PREFIX}${filename}`;
+  firmwareVersions.value = firmwareVersions.value.filter(v => !v.startsWith(LOCAL_LABEL_PREFIX));
+  firmwareVersions.value.splice(1, 0, localLabel);
+  selectedVersion.value = localLabel;
+  if (announce) {
+    pushSerialLog(`Local firmware selected: ${path}`);
+  }
+}
+
 async function openLocalFileDialog() {
   try {
     const selected = await open({
@@ -748,15 +811,7 @@ async function openLocalFileDialog() {
     });
 
     if (selected && typeof selected === 'string') {
-      selectedLocalPath.value = selected;
-      const filename = selected.split(/[\\/]/).pop();
-      // Add or update the local selection in the list
-      const localLabel = `Local: ${filename}`;
-      // Remove any existing 'Local: ' entries to avoid duplicates
-      firmwareVersions.value = firmwareVersions.value.filter(v => !v.startsWith('Local: '));
-      firmwareVersions.value.splice(1, 0, localLabel); // Insert after LOCAL_OPTION
-      selectedVersion.value = localLabel;
-      pushSerialLog(`Local firmware selected: ${selected}`);
+      setLocalFirmwareSelection(selected);
     } else {
       // If cancelled and we were on "browse", revert to previous or first available
       if (selectedVersion.value === LOCAL_OPTION) {
@@ -946,9 +1001,15 @@ function chooseDefaultPort(portNames: string[]): string {
 async function fetchFirmware() {
   isFetchingFirmware.value = true;
   try {
-    const remoteVersions: string[] = await invoke('get_firmware_list');
+    const [defaultLocalFirmware, remoteVersions] = await Promise.all([
+      invoke<string | null>('get_default_local_firmware'),
+      invoke<string[]>('get_firmware_list')
+    ]);
+    if (defaultLocalFirmware && !selectedLocalPath.value) {
+      setLocalFirmwareSelection(defaultLocalFirmware, false);
+    }
     // Maintain local selection if it exists
-    const localEntry = firmwareVersions.value.find(v => v.startsWith('Local: '));
+    const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
     firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : []), ...remoteVersions];
 
     if (!selectedVersion.value && firmwareVersions.value.length > 1) {
@@ -957,7 +1018,15 @@ async function fetchFirmware() {
     await new Promise(resolve => setTimeout(resolve, 400));
   } catch (e) {
     // Keep local-flash path available even when network release fetch fails.
-    const localEntry = firmwareVersions.value.find(v => v.startsWith('Local: '));
+    try {
+      const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware');
+      if (defaultLocalFirmware && !selectedLocalPath.value) {
+        setLocalFirmwareSelection(defaultLocalFirmware, false);
+      }
+    } catch {
+      // Ignore default-local lookup failure; the manual chooser remains available.
+    }
+    const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
     firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : [])];
     notify('Error fetching firmware: ' + e);
   } finally {
@@ -971,6 +1040,27 @@ function notify(msg: string) {
   setTimeout(() => {
     showToast.value = false;
   }, 3000);
+}
+
+function confirmOperatorAction(message: string, options: { confirmText?: string; cancelText?: string; danger?: boolean } = {}): Promise<boolean> {
+  if (confirmDialog.value?.resolve) {
+    confirmDialog.value.resolve(false);
+  }
+  return new Promise(resolve => {
+    confirmDialog.value = {
+      message,
+      confirmText: options.confirmText || 'Continue',
+      cancelText: options.cancelText || 'Cancel',
+      danger: !!options.danger,
+      resolve
+    };
+  });
+}
+
+function resolveConfirmDialog(confirmed: boolean) {
+  const active = confirmDialog.value;
+  confirmDialog.value = null;
+  active?.resolve?.(confirmed);
 }
 
 async function copyToClipboard(text: string, label: string) {
@@ -1069,7 +1159,7 @@ function copyPairAdminPassword() {
 
 
 function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCode | null } | null {
-  const isLocal = selectedVersion.value.startsWith('Local: ');
+  const isLocal = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX);
   const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
   if (!firmwarePath || (isLocal && !selectedLocalPath.value)) {
     notify('Local file path missing');
@@ -1770,6 +1860,61 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
   }
 }
 
+function fleetGatewayFlashUnavailableReason(): string {
+  if (!fleetSelectedPort.value) return 'Select a USB gateway first';
+  if (isFlashing.value) return 'Another flash is already running';
+  if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
+  if (isLoraInventoryScanning.value) return 'Stop the fleet scan before flashing the gateway';
+  if (remoteOtaBusyAddress.value !== null) return 'Wait for the remote flash command to finish';
+  if (isFirmwareServerStarting.value) return 'Firmware server is starting';
+  if (isPairBusy.value) return 'Provisioning is active';
+  return 'Flash the selected USB gateway';
+}
+
+async function flashFleetGateway() {
+  const port = fleetSelectedPort.value;
+  if (!port) {
+    notify('Select a USB gateway first');
+    return;
+  }
+  if (fleetGatewayFlashDisabled.value) {
+    notify(fleetGatewayFlashUnavailableReason());
+    return;
+  }
+  const firmwareOptions = networkOtaFirmwareOptions();
+  if (!firmwareOptions) return;
+  const label = fleetGatewayIdentity.value?.ssid || fleetGatewayIdentity.value?.serial || port;
+  const confirmed = await confirmOperatorAction(
+    `Flash the USB gateway ${label} on ${port}?\n\nThis will reboot the gateway and pause Fleet operations while flashing.`,
+    { confirmText: 'Flash gateway', danger: true }
+  );
+  if (!confirmed) {
+    return;
+  }
+  isFlashing.value = true;
+  noteMonitorReleasedForPort(port, 'gateway firmware flash needs this port');
+  networkStatusMessage.value = `Flashing USB gateway on ${port}...`;
+  pushNetworkLog(`Flashing USB gateway on ${port} with ${firmwareOptions.firmware_path}.`);
+  try {
+    const out = await invoke<string>('flash_firmware', {
+      port,
+      firmwarePath: firmwareOptions.firmware_path,
+      region: firmwareOptions.region,
+      eraseFirst: false
+    });
+    pushNetworkLog(out || `Gateway flash completed on ${port}.`);
+    networkStatusMessage.value = 'Gateway flash complete; gateway is rebooting.';
+    notify('Gateway flash complete');
+  } catch (e) {
+    const msg = `Gateway flash failed: ${e}`;
+    networkStatusMessage.value = msg;
+    pushNetworkLog(msg);
+    notify(msg);
+  } finally {
+    isFlashing.value = false;
+  }
+}
+
 async function probeSerialAdminSupport(port = selectedPort.value): Promise<boolean> {
   if (!port) return false;
   const state = serialDeviceState(port);
@@ -2026,7 +2171,7 @@ async function rebootSerialDevice() {
     notify('Get device info first to use the factory password');
     return;
   }
-  if (!confirm('Reboot the selected USB device now?')) return;
+  if (!await confirmOperatorAction('Reboot the selected USB device now?', { confirmText: 'Reboot' })) return;
   isSerialSystemAction.value = true;
   pushSerialLog('Sending reboot command...');
   try {
@@ -2051,7 +2196,7 @@ async function factoryResetSerialDevice() {
     serialFactoryKeepFleet.value ? 'keep fleet key' : 'clear fleet key',
     serialFactoryKeepWifi.value ? 'keep WiFi' : 'clear WiFi'
   ].join(', ');
-  if (!confirm(`Factory reset the selected USB device (${summary})?`)) return;
+  if (!await confirmOperatorAction(`Factory reset the selected USB device (${summary})?`, { confirmText: 'Factory reset', danger: true })) return;
   isSerialSystemAction.value = true;
   pushSerialLog(`Sending factory reset command (${summary})...`);
   try {
@@ -2592,6 +2737,7 @@ async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'netw
     pushSerialLog('Device info read successfully');
     if (ownerMode === 'serial') {
       await probeSerialAdminSupport(port);
+      await refreshFlashPortStatus(port);
     }
     return true;
   } catch (e) {
@@ -2605,6 +2751,24 @@ async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'netw
     if (deviceInfoReadSeqByPort.value[port] === seq) {
       isLoadingInfo.value = false;
     }
+  }
+}
+
+async function refreshFlashPortStatus(port: string): Promise<void> {
+  try {
+    const out = await sendEasyPairCommandOnPort<SerialAdminStatus>(
+      port,
+      'status',
+      {},
+      5000,
+      { label: 'Read running firmware' }
+    );
+    applySerialAdminStatus(out, port);
+    pushSerialLog(`Running firmware: ${out.fw_version || 'unknown'}`);
+  } catch (e) {
+    const state = serialDeviceState(port);
+    if (state) state.adminSupported = false;
+    pushSerialLog(serialFeatureError('Running firmware read', e));
   }
 }
 
@@ -2624,7 +2788,7 @@ async function startFlash() {
       if (!loaded) throw new Error('Unable to read device information before flashing');
     }
 
-    const isLocal = selectedVersion.value.startsWith('Local: ');
+    const isLocal = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX);
     const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
 
     if (isLocal && !firmwarePath) throw new Error('Local file path missing');
@@ -3401,6 +3565,20 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
 
+          <div :class="['rounded-md border p-3', flashRunningFirmware ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/30']">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Running firmware</div>
+                <div :class="['mt-1 font-mono text-xl font-bold', flashRunningFirmware ? 'text-cyan-100' : 'text-slate-500']">
+                  {{ flashRunningFirmware || 'Unknown' }}
+                </div>
+              </div>
+              <div class="text-xs text-slate-400 sm:text-right">
+                {{ flashRunningFirmwareSummary }}
+              </div>
+            </div>
+          </div>
+
           <div class="flex flex-col gap-1.5 text-xs">
             <label class="font-medium text-slate-400">Firmware version</label>
             <div class="flex gap-2">
@@ -4020,7 +4198,7 @@ function countCrashEvents(entries: string[]): number {
                 Fleet
               </h2>
               <p class="mt-1 text-xs text-slate-400 max-w-3xl">
-                {{ fleetGatewayStatusLabel }} · {{ selectedPort || 'no USB gateway selected' }} · {{ loraInventoryProgressLabel }}
+                {{ fleetGatewayStatusLabel }} · Gateway + {{ loraInventory.length }} remote{{ loraInventory.length === 1 ? '' : 's' }} · {{ loraInventoryProgressLabel }}
               </p>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-3">
@@ -4092,14 +4270,83 @@ function countCrashEvents(entries: string[]): number {
           </div>
         </div>
 
+        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h2 class="text-lg font-bold text-slate-300">Gateway</h2>
+                <span :class="['rounded border px-2 py-1 text-[10px] font-bold', fleetGatewayStatus ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : fleetGatewayIdentity ? 'border-sky-500/30 bg-sky-500/10 text-sky-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+                  {{ fleetGatewayStatus ? 'status loaded' : fleetGatewayIdentity ? 'identity loaded' : 'not loaded' }}
+                </span>
+              </div>
+              <div class="mt-1 text-xs text-slate-500">{{ fleetGatewaySummary }}</div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                @click="loadNetworkGateway"
+                :disabled="isNetworkGatewayLoading || !selectedPort"
+                class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
+              >
+                {{ isNetworkGatewayLoading ? 'Loading...' : 'Load gateway' }}
+              </button>
+              <button
+                @click="triggerIdentify"
+                :disabled="identifyDisabled"
+                :class="['glass-input m-0 h-9 w-11 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50', { 'identify-led-active': isIdentifying }]"
+                title="Identify selected USB gateway"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
+              </button>
+              <button
+                @click="flashFleetGateway"
+                :disabled="fleetGatewayFlashDisabled"
+                :title="fleetGatewayFlashUnavailableReason()"
+                class="primary-btn m-0 h-9 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+              >
+                {{ isFlashing ? 'Flashing...' : 'Flash gateway' }}
+              </button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 text-xs">
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Port</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ selectedPort || '-' }}</div>
+            </div>
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Chip</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus?.chip_id || fleetGatewayIdentity?.chip_id || '-' }}</div>
+            </div>
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Firmware</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus?.fw_version || '-' }}</div>
+            </div>
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Role</div>
+              <div class="mt-1 truncate text-slate-300">{{ fleetGatewayStatus?.role || '-' }}</div>
+            </div>
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Address</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus ? `${fleetGatewayStatus.local_address}->${fleetGatewayStatus.remote_address}` : fleetGatewayIdentity ? `${fleetGatewayIdentity.local_addr}->${fleetGatewayIdentity.remote_addr}` : '-' }}</div>
+            </div>
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">WiFi</div>
+              <div class="mt-1 truncate text-slate-300">{{ fleetGatewayStatus?.wifi?.sta_connected ? (fleetGatewayStatus.wifi.ip || 'connected') : (fleetGatewayStatus?.wifi?.status || '-') }}</div>
+            </div>
+            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
+              <div class="text-[10px] uppercase tracking-wide text-slate-600">Uptime</div>
+              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus?.uptime_ms ? formatUptime(fleetGatewayStatus.uptime_ms) : '-' }}</div>
+            </div>
+          </div>
+        </div>
+
         <div class="glass-card p-3 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h2 class="text-lg font-bold text-slate-300">Devices</h2>
+              <h2 class="text-lg font-bold text-slate-300">Remotes</h2>
               <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Scan Fleet asks the gateway to refresh LoRa state.</div>
             </div>
             <div class="flex items-center gap-3">
-              <div class="text-xs text-slate-500">{{ loraInventory.length }} cached · {{ selectedLoraInventoryCount }} selected</div>
+              <div class="text-xs text-slate-500">{{ loraInventory.length }} remote{{ loraInventory.length === 1 ? '' : 's' }} cached · {{ selectedLoraInventoryCount }} selected</div>
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
@@ -4187,6 +4434,29 @@ function countCrashEvents(entries: string[]): number {
 
       </div>
     </div>
+
+    <!-- Operator confirmation -->
+    <Transition name="toast">
+      <div v-if="confirmDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-2xl">
+          <p class="whitespace-pre-line text-sm leading-6 text-slate-200">{{ confirmDialog.message }}</p>
+          <div class="mt-4 flex justify-end gap-2">
+            <button
+              @click="resolveConfirmDialog(false)"
+              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
+            >
+              {{ confirmDialog.cancelText }}
+            </button>
+            <button
+              @click="resolveConfirmDialog(true)"
+              :class="['m-0 h-9 rounded-md border px-4 text-xs font-bold transition-colors', confirmDialog.danger ? 'border-rose-500/40 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30' : 'primary-btn']"
+            >
+              {{ confirmDialog.confirmText }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Toast Notification -->
     <Transition name="toast">
