@@ -10,15 +10,13 @@
 class SerialAdmin {
 public:
   bool begin(ConfigStore *config, NodeStateMachine *sm,
-             std::function<void(bool, bool)> onApply,
-             std::function<void(uint32_t)> onEnableWeb);
+             std::function<void(bool, bool)> onApply);
   void tick();
 
 private:
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
-  std::function<void(uint32_t)> on_enable_web_;
   String input_;
 
   void handleLine(const String &line);

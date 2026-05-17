@@ -1,7 +1,5 @@
 #pragma once
 
-#include <DNSServer.h>
-
 #include "feature_flags.h"
 #include "config_store.h"
 #include "logger.h"
@@ -10,7 +8,6 @@
 #include "sensor_manager.h"
 #include "serial_admin.h"
 #include "state_machine.h"
-#include "web_console.h"
 #if LRS_ENABLE_AUTOMATIONS
 #include "automation_rules_engine.h"
 #endif
@@ -26,7 +23,6 @@ class App {
   RadioProtocol radio_;
   SensorManager sensors_;
   NodeStateMachine sm_;
-  WebConsole web_;
   SerialAdmin serial_admin_;
 #if LRS_ENABLE_AUTOMATIONS
   AutomationRulesEngine automations_;
@@ -41,7 +37,6 @@ class App {
   bool sta_connected_ = false;
   uint32_t sta_connected_since_ms_ = 0;
   bool ap_enabled_ = false;
-  bool dns_running_ = false;
   bool ntp_started_ = false;
   bool ntp_time_valid_ = false;
   uint32_t ntp_last_check_ms_ = 0;
@@ -62,13 +57,11 @@ class App {
   int32_t sta_target_channel_ = 0;
   int32_t sta_last_sdk_status_ = 0;
   uint32_t sta_last_connect_time_ms_ = 0;
-  DNSServer dns_;
 
   void startNetworking();
   void updateNetworking();
   void ensureApEnabled();
   void maybeDisableAp();
-  void refreshCaptiveDns();
   void beginStaConnect();
   void startStaScan();
   void finishStaScan(int scanCount);

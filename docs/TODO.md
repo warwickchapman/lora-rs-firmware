@@ -6,10 +6,10 @@
 - MQTT dependency guard is implemented: `mqtt_control_enabled` requires `mqtt_client_enabled` across UI and API validation paths.
 - Security review reference report captured at `docs/internal/security-review-2026-04-26.md`.
 - Flasher-first EasyPair commissioning foundation is implemented: USB serial admin protocol, selected USB gateway, LoRa remote discovery/provisioning, verified target finalization, WiFi credential provisioning, and local Identify LED action.
-- Web UI maintenance lifecycle is implemented: Web UI starts on boot, explicit user activity extends the 60-second window, background polling/SSE/captive probes do not extend it, and HTTP/SSE/captive DNS runtime work stops after inactivity. USB serial admin can re-enable it with `enable_web`.
 - Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher Flash mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
 - Flasher Fleet mode no longer uses device-side HTTP discovery/login/REST OTA/REST UDP-log paths; it now provides a temporary local firmware file server plus per-device UDP-log actions, with OTA and UDP log-control commands moving to serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
 - Flasher Fleet mode now reads the TX/gateway-owned peer cache over serial admin; a selected, commissioned USB gateway can explicitly scan remotes over encrypted LoRa maintenance-status packets and render a dense device table without HTTP/REST discovery.
+- Normal firmware no longer includes Web UI, REST API, captive DNS, `ESP8266WebServer`, or `DNSServer`; local maintenance now goes through Flasher/USB serial admin.
 
 ## Web UI Removal Migration
 - Extend Fleet inventory actions on top of the bounded maintenance-status packet, including identify, selected-device OTA, and WiFi/log actions that use the reported IP/connectivity state.
@@ -18,7 +18,7 @@
 - Default versioned maintenance debug telemetry to disabled once an explicit device debug mode exists; for pre-release diagnostics it is currently enabled by default so Flasher/Fleet can collect heap, fragmentation, relay feedback, and uptime from remotes.
 - Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
 - Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
-- After serial, MQTT, and LoRa admin parity are verified on hardware, remove Web UI/REST/captive DNS/`ESP8266WebServer` from normal firmware and record RAM/flash deltas.
+- Record before/after field heap and max-free-block measurements on hardware after the Web UI/REST removal build is flashed.
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
@@ -141,9 +141,9 @@
 
 ## Logging / Observability
 - Use `DEBUG` temporarily for diagnostics (startup watchdog investigation, provisioning flow tracing, API polling behavior); revert to `INFO` after testing to reduce log volume/serial overhead.
-- Add lightweight crash breadcrumbs for ESP8266 Web UI instability: keep a documented exception-decoding workflow for bench/support use, persist last-reset context (`reset reason`, `heap_free`, `max_free_block`, and active web feature/path if known), and avoid building a heavyweight always-on crash-report pipeline unless later evidence shows it is needed.
-- Phase 1 (minimal patch, ESP8266-safe): keep structured logging focused on diagnosability with low overhead: levels (`ERROR/WARN/INFO/DEBUG`), categories (`SYS/WIFI/NTP/LORA/SENSOR/WEB/API/FS`), redaction helpers, web/API request summaries (status + duration), and heap diagnostics on high-risk endpoints (`/api/status`, `/api/fleet`, `/api/provisioning/status`); keep default level at `INFO`; keep polling endpoints (`/api/status`, `/api/session`) at `DEBUG`.
-- Phase 2 (later mass refactor): convert remaining ad-hoc prints across modules to the shared logging API; standardize event names/fields; add state-change/rate-limited logging patterns; review LoRa/web/API logs for spam/noise; expand structured coverage for provisioning/fleet workflows; document log taxonomy and operational/debug logging policy.
+- Add lightweight crash breadcrumbs for ESP8266 instability: keep a documented exception-decoding workflow for bench/support use, persist last-reset context (`reset reason`, `heap_free`, `max_free_block`, and active subsystem if known), and avoid building a heavyweight always-on crash-report pipeline unless later evidence shows it is needed.
+- Phase 1 (minimal patch, ESP8266-safe): keep structured logging focused on diagnosability with low overhead: levels (`ERROR/WARN/INFO/DEBUG`), categories (`SYS/WIFI/NTP/LORA/SENSOR/FS`), redaction helpers, and heap diagnostics around high-risk serial-admin, MQTT, LoRa, and provisioning paths; keep default level at `INFO`.
+- Phase 2 (later mass refactor): convert remaining ad-hoc prints across modules to the shared logging API; standardize event names/fields; add state-change/rate-limited logging patterns; expand structured coverage for provisioning/fleet workflows; document log taxonomy and operational/debug logging policy.
 - Phase 2 guardrails: no secret leakage (fleet keys, passwords, tokens), avoid heap-heavy log string construction in hot paths, and preserve current runtime timing priorities (LoRa control path before MQTT).
 
 ## MQTT / Heap Discipline
@@ -190,15 +190,12 @@
 - If DS18B20 is detected later, activate automatically without requiring a reboot or config rewrite.
 - Do not auto-disable DS18B20 config on failed detection (avoid boot-time false negatives becoming sticky state).
 - Consider configurable RX fail-safe in paired-input mode: latch last state indefinitely if TX stream disappears.
-- Add runtime-visible Web UI maintenance state reporting (`webui_enabled=true/false`, idle timeout remaining, last activity age, re-enable source) where it is useful for Flasher/support tooling.
-- Consider whether a non-USB re-enable path is still worth adding. Current recovery path is reboot or USB serial admin `enable_web`; avoid adding HTTP/MQTT toggles unless there is a clear field-support need.
-- Keep REST/API lifecycle coupled to Web UI for ESP8266 simplicity unless a future support workflow strongly justifies a separate always-on API surface.
 
 ## Observability / Logging
 - Implement structured logging with levels: `ERROR`, `WARN`, `INFO` (default), `DEBUG`, `TRACE`.
-- Standardize categories/tags (e.g. `SYS`, `WIFI`, `NTP`, `LORA`, `SENSOR`, `WEB`, `API`, `FS`).
+- Standardize categories/tags (e.g. `SYS`, `WIFI`, `NTP`, `LORA`, `SENSOR`, `FS`).
 - Standardize one-line log format with level/category, `t=<millis>`, optional `unix=<epoch>`, `event=<name>`, and key-value fields.
-- Log web page/path requests and API calls with method, path, status, duration (`dur_ms`), and client IP (if available).
+- Log serial-admin and remote-admin requests with command, status, duration (`dur_ms`), and source where available.
 - Add mandatory secret redaction in logs (WiFi passwords, fleet keys, tokens, other secrets).
 - Keep default logging at `INFO`; make `DEBUG` / `TRACE` opt-in diagnostics modes.
 - Avoid log spam in tight loops (prefer state-change logging and/or repeated-warning rate limiting).
@@ -207,8 +204,8 @@
 - Cloud dashboard (future workstream): capture requirements and architecture options, but do not begin implementation yet.
 
 ## Memory / Stability
-- Measure steady-state heap and `max_free_block` before/after Web UI idle shutdown to confirm HTTP/SSE/captive DNS shutdown removes normal-operation pressure as intended.
-- Keep the Web UI disabled-after-inactivity model simple on ESP8266. Do not add a separate low-memory hook/stub mode unless real field data shows reboot/USB re-enable is insufficient.
+- Measure steady-state heap and `max_free_block` before/after the Web UI/REST removal build on hardware.
+- Watch Settings `get_config` heap headroom on ESP8266 now that HTTP/SSE/captive DNS are gone.
 
 ## Testing / Stability
 - Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.

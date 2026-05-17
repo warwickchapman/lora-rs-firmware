@@ -3,7 +3,7 @@
 ## 1. Scope
 Current production firmware for ESP8266 LRS devices (identical hardware; mode/role selected in commissioning), including:
 - LoRa relay control and ACK logic
-- Web configuration console
+- USB serial admin via the desktop Flasher app
 - MQTT bridge
 - Sensor baseline (DS18B20 + dry-contact state)
 
@@ -26,7 +26,7 @@ Commands:
 - `src/state_machine.*`: TX/RX logic, timeout/ack, relay/input state
 - `src/mqtt_bridge.*`: MQTT publish/subscribe bridge
 - `src/sensor_manager.*`: DS18B20 detection/reads
-- `src/web_console.*`: embedded UI + REST endpoints
+- `src/serial_admin.*`: local USB maintenance, provisioning, Settings, Fleet, Monitor, and OTA-pull commands for Flasher
 - `src/runtime_utils.*`: shared pure helpers (role/mode parsing and WiFi status text) used by app + web/config paths to avoid cross-module coupling
 - `src/logger.*`: structured serial logs + optional UDP mirror
 
@@ -47,12 +47,13 @@ Mode/role mapping:
 
 ## 5. Tick Order and Performance
 In `App::tick`:
-1. networking update
-2. inject local temperature into state machine
-3. state machine tick (LoRa control path)
-4. MQTT tick
-5. sensor manager tick
-6. web tick
+1. USB serial admin
+2. networking update
+3. time sync
+4. inject local temperature into state machine
+5. state machine tick (LoRa control path)
+6. MQTT tick
+7. sensor manager tick
 
 This ordering keeps LoRa control priority above MQTT.
 
@@ -64,66 +65,21 @@ This ordering keeps LoRa control priority above MQTT.
 - On STA disconnect/failure, Soft AP fallback is re-enabled unless `wifi_ap_fallback_policy=secure_sta_only`
 - WiFi power-save disabled; TX power set high for stable local-link behavior
 
-## 7. Web API
-- `GET /`
-- `GET /setup`
-- `POST /api/login`
-- `POST /api/logout`
-- `POST /api/ui/activity`
-- `POST /api/setup/fleet-key`
-- `POST /api/setup/commissioning`
-- `GET /api/status-live`
-- `GET /api/status-live/events` (SSE)
-- `GET /api/status-static`
-- `GET /api/status-lite`
-- `GET /api/fleet`
-- `POST /api/fleet/scan`
-- `POST /api/fleet/:addr/actions/poll-now`
-- `POST /api/fleet/:addr/actions/forget`
-- `POST /api/fleet/:addr/actions/poll-interval`
-- `POST /api/fleet/:addr/actions/schedule`
-- `GET /api/automation-rules` (`LRS_ENABLE_AUTOMATIONS`)
-- `POST /api/automation-rules` (`LRS_ENABLE_AUTOMATIONS`)
-- `GET /api/settings`
-- `POST /api/settings`
-- `GET /api/settings/export`
-- `POST /api/settings/import`
-- `GET /api/factory`
-- `GET /api/wifi/scan`
-- `POST /api/network/test`
-- `POST /api/network/provision-fleet`
-- `POST /api/provisioning/start`
-- `GET /api/provisioning/status`
-- `POST /api/provisioning/provision-all`
-- `POST /api/provisioning/cancel`
-- `POST /api/mqtt/test`
-- `POST /api/logging/udp`
-- `POST /api/ota`
-- `GET /api/logs.csv`
-- `GET /api/logs.txt`
-- `POST /api/system/factory-reset`
-- `POST /api/reboot`
+## 7. Local Admin and Fleet Control
+Normal firmware no longer includes an embedded Web UI, REST API, captive portal, `ESP8266WebServer`, or `DNSServer`. Local maintenance is via USB serial admin in Flasher. Remote maintenance is via MQTT admin where online, plus gateway-mediated LoRa admin for bounded remote actions.
 
 Fleet/Provisioning implementation notes:
-- Fleet endpoints are disabled in `standalone` mode (`fleet_disabled_in_standalone`).
-- Fleet devices response includes both live peers and cached known peers (bounded to 12) so Devices page can render before a fresh scan.
+- Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
+- Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes.
 - ESP8266 provisioning supports up to 12 remotes per gateway, matching `Settings::kAddressListCap` and `LRS_MAX_PEERS`.
-- Provisioning status no longer uses compact/count-only response mode; rows remain authoritative for UI state.
-- `/api/network/provision-fleet` supports optional `target_address` for per-device sends (`255` broadcast default).
-- `POST /api/system/identify` flashes the local LED with the Identify pattern for physical unit lookup. It is authenticated and accepts optional `duration_ms` clamped to 1000..30000.
-
-Web UI lifecycle:
-- The Web UI is a boot-time maintenance surface, not a steady-state runtime dependency.
-- HTTP handling and status SSE start on boot, then stop after 60 seconds without explicit user activity.
-- Background polling, SSE keepalives, and captive-portal probes must not extend the maintenance window.
-- When the window closes, `App::tick()` skips `web_.tick()` and captive DNS processing stops until the next reboot or the USB `enable_web` maintenance command.
+- `identify` flashes the local LED with the Identify pattern for physical unit lookup.
 
 USB serial admin protocol:
 - Flasher commands are line-delimited JSON prefixed with `LRS:` so responses can be separated from normal serial logs.
 - Replies use the same `LRS:` prefix and include `ok`, `cmd`, optional `id`, and command-specific fields.
 - Read-only commands: `hello`, `identity`, `status`, `provisioning_status`.
-- Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `enable_web`, `reboot`.
-- `get_config` returns redacted secrets by default. `set_config` accepts a partial `config` object, validates the same safety bounds as the Web UI settings path, saves atomically, and applies runtime changes through the normal config reload hook.
+- Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `reboot`, `udp_log_control`, `remote_udp_log_control`, `ota_pull`, `remote_ota_pull`, `start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`.
+- `get_config` returns redacted secrets by default. `set_config` accepts a partial `config` object, validates safety bounds, saves atomically, and applies runtime changes through the normal config reload hook.
 - `factory_reset` supports `keep_shared_fleet_key` and `keep_wifi_credentials`, then reboots after acknowledging the command.
 - `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
 - Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
@@ -235,9 +191,7 @@ Build identity at runtime includes:
 - `build_date`, `build_time`
 
 Visibility:
-- Web UI status table
-- `/api/status`
-- `/api/factory`
+- Flasher Flash/Settings/Monitor/Fleet panes via USB serial admin
 - MQTT discovery topic (`<root>/discovery/lrs-<chipid>`)
 
 Release alignment policy:

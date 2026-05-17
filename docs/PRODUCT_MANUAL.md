@@ -38,24 +38,23 @@ Important ESP8266 constraints:
 ## 3. Core Features
 - LoRa relay control with ACK/timeout behavior.
 - Configurable commissioning mode/role on identical hardware (`standalone`, `paired`, `mesh`).
-- SoftAP + web configuration console (password protected).
+- USB local maintenance through the desktop Flasher app.
 - LittleFS persistent settings.
 - Optional MQTT bridge (STA mode).
 - OTA support in STA mode.
-- Structured logs available through serial plus `GET /api/logs.csv` and `GET /api/logs.txt`.
+- Structured logs available through serial, optional temporary UDP mirroring, and Flasher Monitor/Fleet views.
 - DS18B20 support (local + remote telemetry over LoRa).
 
 ## 4. Networking and Access
-Default access:
-1. Join AP SSID: `lrs-<chipid>`
-2. Open `http://192.168.4.1`
-3. Login: user `admin`, password = factory-derived credential
+Default local access is USB serial through Flasher. Normal firmware no longer serves an on-device Web UI, REST API, or captive portal.
 
-## 5. Configuration (Web UI)
-Tabs:
-- Status
-- Fleet (hidden in standalone mode)
-- Settings: LoRa / Network / MQTT / System
+## 5. Configuration (Flasher)
+Flasher tabs:
+- Flash
+- Provision
+- Fleet
+- Monitor
+- Settings
 
 Minimum required settings:
 - Mode and role (mode-aware)
@@ -130,7 +129,7 @@ This is not wire-compatible with older 8-byte or 4-byte payload firmware.
 Update paired TX/RX devices together.
 
 ## 12. Field Diagnostics
-Status page provides:
+Flasher status and Monitor/Fleet views provide:
 - Relay state
 - LoRa RSSI and last LoRa packet age
 - WiFi station state and RSSI
@@ -138,13 +137,12 @@ Status page provides:
 - Sensor tiles (including dry-contact OPEN/CLOSED and local/remote temperature state)
 
 Logs:
-- `GET /api/logs.csv` download
-- `GET /api/logs.txt` live text view
+- USB serial activity log
+- optional temporary UDP log mirroring from Flasher/Fleet
 
 ## 13. Provisioning and Sticker Data
 Provisioning tooling:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py`
-- `/Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py`
 - `/Users/warwick/Code/LoRa/lora_rs/tools/post_upload_sticker.py`
 
 Factory metadata includes:

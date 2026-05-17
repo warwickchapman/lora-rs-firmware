@@ -27,6 +27,10 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Flash now shows a prominent running-firmware readout after device info/status is read, so operators can compare the connected device version with the selected firmware before flashing.
 - Flasher tabs are now ordered Flash, Provision, and Fleet; the app restores the last active tab on launch.
 
+### Removed
+- Firmware no longer includes the embedded Web UI, REST API, captive portal, `ESP8266WebServer`, `DNSServer`, generated web assets, or the web-console build step. Local maintenance now goes through Flasher over USB serial admin, with MQTT and gateway-mediated LoRa admin covering remote workflows.
+- USB serial admin no longer exposes `enable_web`, because there is no browser maintenance surface to re-enable.
+
 ### Fixed
 - Firmware now disables Soft AP as soon as STA WiFi connects and only brings Soft AP back after STA disconnect/failure when disconnected fallback is enabled.
 - Flasher now keeps one per-port serial device state shared by Flash and Provision, so device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks stay consistent when switching tabs on the same selected USB port.

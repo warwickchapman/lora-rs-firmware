@@ -96,22 +96,11 @@ void App::begin() {
 #if LRS_ENABLE_AUTOMATIONS
   automations_.begin();
 #endif
-  web_.begin(
-      &config_, &sm_, &sensors_,
-      [this](bool restartNetwork, bool restartOtaAuth) {
-        applyUpdatedConfig(restartNetwork, restartOtaAuth);
-      },
-      [this]() {
-#if LRS_ENABLE_AUTOMATIONS
-        automations_.requestReload();
-#endif
-      });
   serial_admin_.begin(
       &config_, &sm_,
       [this](bool restartNetwork, bool restartOtaAuth) {
         applyUpdatedConfig(restartNetwork, restartOtaAuth);
-      },
-      [this](uint32_t durationMs) { web_.enableForMaintenance(durationMs); });
+      });
 
   startOta();
   startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
@@ -204,11 +193,6 @@ void App::tick() {
   tickTimeSync();
   phaseSlowWarn("tick_time_sync", phaseStartMs);
   phaseStartMs = millis();
-  refreshCaptiveDns();
-  if (dns_running_) {
-    dns_.processNextRequest();
-  }
-  phaseSlowWarn("dns", phaseStartMs);
   const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   if (emitStartupBreadcrumb) {
@@ -398,15 +382,6 @@ void App::tick() {
   phaseStartMs = millis();
   sensors_.tick();
   phaseSlowWarn("sensors_tick", phaseStartMs);
-  if (emitStartupBreadcrumb) {
-    LRS_LOGD(SYS, "event=startup_tick phase=web_enter ms=%lu",
-             static_cast<unsigned long>(millis()));
-  }
-  phaseStartMs = millis();
-  if (web_.isWebServing()) {
-    web_.tick();
-    phaseSlowWarn("web_tick", phaseStartMs);
-  }
   if (!startupDeferNonEssential) {
     if (ota_enabled_) {
       phaseStartMs = millis();
@@ -437,7 +412,6 @@ void App::startNetworking() {
   sta_connected_since_ms_ = 0;
   sta_reconnect_heap_block_log_ms_ = 0;
   ap_enabled_ = false;
-  dns_running_ = false;
   ntp_started_ = false;
   ntp_time_valid_ = false;
   ntp_last_check_ms_ = 0;
@@ -725,29 +699,8 @@ void App::maybeDisableAp() {
   }
   WiFi.softAPdisconnect(true);
   ap_enabled_ = false;
-  if (dns_running_) {
-    dns_.stop();
-    dns_running_ = false;
-  }
   applyWifiRuntimeSettings();
   LRS_LOGI(WIFI, "event=ap_disabled reason=sta_connected");
-}
-
-void App::refreshCaptiveDns() {
-  if (!ap_enabled_ || !web_.isWebServing()) {
-    // Captive DNS is only useful while both AP and Web UI are actively serving.
-    if (dns_running_) {
-      dns_.stop();
-      dns_running_ = false;
-      LRS_LOGI(WIFI, "event=captive_dns_stopped reason=%s",
-               ap_enabled_ ? "web_ui_inactive" : "ap_inactive");
-    }
-    return;
-  }
-  if (dns_running_)
-    return;
-  dns_.start(53, "*", WiFi.softAPIP());
-  dns_running_ = true;
 }
 
 void App::beginStaConnect() {
@@ -873,7 +826,6 @@ void App::failStaConnectAttempt(const char *reason, wl_status_t status) {
       WiFi.mode(WIFI_OFF);
       delay(100);
       ap_enabled_ = false;
-      dns_running_ = false;
       applyWifiRuntimeSettings();
       if (shouldEnableSoftAp()) {
         ensureApEnabled();
@@ -934,10 +886,6 @@ void App::stopWifiForAdminDisable() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
   ap_enabled_ = false;
-  if (dns_running_) {
-    dns_.stop();
-    dns_running_ = false;
-  }
   resetWifiStaAttempt();
   sta_connected_ = false;
   LRS_LOGW(WIFI, "event=wifi_admin_disabled");

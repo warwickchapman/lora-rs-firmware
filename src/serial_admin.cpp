@@ -7,10 +7,10 @@
 #include "build_info.h"
 #include "logger.h"
 #include "ota_pull.h"
-#include "web_console_internal.h"
-#include "web_console_settings_backup.h"
+#include "admin_config_utils.h"
+#include "settings_backup.h"
 
-using namespace webconsole_internal;
+using namespace admin_config_utils;
 
 namespace {
 constexpr size_t kMaxLineBytes = 4096;
@@ -467,12 +467,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
 } // namespace
 
 bool SerialAdmin::begin(ConfigStore *config, NodeStateMachine *sm,
-                        std::function<void(bool, bool)> onApply,
-                        std::function<void(uint32_t)> onEnableWeb) {
+                        std::function<void(bool, bool)> onApply) {
   config_ = config;
   sm_ = sm;
   on_apply_ = onApply;
-  on_enable_web_ = onEnableWeb;
   input_.reserve(256);
   return true;
 }
@@ -1503,23 +1501,6 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
     out["cmd"] = cmd;
     if (id[0] != '\0')
       out["id"] = id;
-    sendOk(out);
-    return;
-  }
-
-  if (strcmp(cmd, "enable_web") == 0) {
-    if (!requireAdmin(doc)) {
-      sendError(cmd, "auth_failed", id);
-      return;
-    }
-    const uint32_t seconds = doc["seconds"] | 300UL;
-    if (on_enable_web_)
-      on_enable_web_(seconds * 1000UL);
-    JsonDocument out;
-    out["cmd"] = cmd;
-    if (id[0] != '\0')
-      out["id"] = id;
-    out["seconds"] = seconds;
     sendOk(out);
     return;
   }

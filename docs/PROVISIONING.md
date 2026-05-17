@@ -3,15 +3,12 @@
 ## Goals
 - Flash firmware for target region.
 - Capture deterministic device metadata for sticker/traceability.
-- Ensure first field login is predictable.
+- Ensure first field maintenance via Flasher/USB serial is predictable.
 - Commission mode/role and fleet key correctly on first login.
 
 ## Tooling
 Factory script:
 - `/Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py`
-
-API-first provisioning helper:
-- `/Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py`
 
 Firmware USB serial admin protocol:
 - Flasher-facing commands are newline-delimited JSON prefixed with `LRS:`.
@@ -29,9 +26,6 @@ Firmware USB serial admin protocol:
 Example:
 - `python3 /Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py --port /dev/cu.usbserial-XXXX --env lrs_za --flash --csv factory_sticker.csv`
 - Optional: generate deployment key per batch automatically by passing `--batch-id <YYMMDD>` (or explicit `--deployment-key <value>`).
-
-Example (API-first coordinator workflow):
-- `python3 /Users/warwick/Code/LoRa/lora_rs/tools/lrs_provisioning_cli.py run --host 192.168.4.1 --admin-password <pwd> --fleet-key <key> --role tx --local-address 254 --remote-address 1`
 
 ## What the Script Produces
 A CSV row with:
@@ -70,48 +64,26 @@ Notes:
 - `input_control_paired_lora_enabled` is valid only for paired TX.
 - Current LoRa provisioning apply path configures `mode=paired` with role `transmitter` or `receiver`.
 
-## Pair Provisioning (Current Manual)
+## Pair Provisioning (Flasher)
 For a TX/RX pair:
-1. Provision device A as TX.
-2. Provision device B as RX in web console.
-3. Set addresses as inverse pair:
+1. Open Flasher > Provision.
+2. Select the USB gateway/TX device and provision it with the fleet key, gateway role, WiFi, and local address.
+3. Scan for powered factory remotes and provision selected remotes.
+4. Flasher assigns inverse addressing:
 - TX local=`A`, remote=`B`
 - RX local=`B`, remote=`A`
-4. Set identical fleet passphrase and radio parameters.
 5. Validate ACK behavior and relay mirror.
 
-## Fleet Provisioning APIs (Coordinator/TX)
-Provisioning endpoints in current firmware:
-- `POST /api/provisioning/start`
-- `GET /api/provisioning/status`
-- `POST /api/provisioning/provision-all`
-- `POST /api/provisioning/cancel`
-- `POST /api/network/provision-fleet` (broadcast or targeted STA WiFi credentials over LoRa)
+## Fleet Provisioning Over Serial Admin
+Flasher uses the selected USB TX/gateway and `LRS:` serial admin commands:
+- `configure_gateway`
+- `start_discovery`
+- `provisioning_status`
+- `provision_all`
+- `cancel_provisioning`
+- `provision_fleet_wifi`
 
-`/api/network/provision-fleet` request fields:
-- `wifi_sta_ssid` (optional override; defaults to stored STA SSID)
-- `wifi_sta_password` (optional override; defaults to stored STA password)
-- `target_address` (optional; `1..254`; default `255` for broadcast)
-
-Web Console operator cues (Fleet -> Manage -> LoRa):
-- Provisioning results table uses explicit addressing/version labels: `Cur Addr`, `New Addr`, `FW Ver`.
-- `Provision All` now shows an inline reason whenever it is disabled (for example: discovery still running, no discovered devices, provisioning already in progress).
-- A compact session line is shown during active sessions with phase/progress and elapsed time (for example: `Discovering...`, `Verified x/y`, `Provisioned x/y`, `elapsed mm:ss`).
-- Discovery reliability: factory-key targets now transmit two announce frames per discover command (short jitter before the second frame). Coordinator device list remains deduped by `chip_id`.
-- Discovery timing model is two-phase: coordinator sends a short `DiscoverStart` burst first, then remains silent while targets reply on randomized jitter within the declared reply window.
-- Discovery is now single-pass (no automatic retry cycle). If another scan is desired, the operator explicitly presses `Start Discovery` again.
-- Discovery start prompts for expected device count (`1..12` on ESP8266) and stops on expected count reached or `120s`.
-- During discovery/readiness UI updates, discovered rows are sticky by `chip_id` and remain visible until `Provision All` is started (or session is cancelled).
-- Address auto-assignment for provisioning is constrained to `1..32`.
-- If `verify` is missed after apply, coordinator performs a fleet-key probe on the assigned address before final classification; status may show `applied_unconfirmed` when apply likely succeeded but confirmation was not observed.
-- Provisioning status responses always include row data (no low-memory count-only mode).
-
-Mode gating:
-- Fleet APIs are blocked in `standalone` mode (`fleet_disabled_in_standalone`).
-
-CLI mirrors:
-- `run`, `status`, `cancel`
-- `udp-log-start`, `udp-log-stop` (temporary UDP log mirror while provisioning/debugging)
+Discovery is explicit and bounded to the supported ESP8266 remote count. The gateway owns peer truth; Flasher reads serial-admin status/cache data and triggers LoRa probes only when the operator asks.
 
 ## Planned Improvement
 Add explicit pair mode in factory script:
@@ -134,6 +106,6 @@ Suggested handoff block:
 - Hardware: ESP-12F + `<Ra-01|Ra-01H>`
 - Current state: state-machine runtime under `src/app.*`
 - Config path: LittleFS `/config.json`
-- Web API: `/api/status-lite`, `/api/settings`, `/api/factory`, `/api/wifi/scan`, `/api/logs.csv`
+- Local admin: Flasher over USB serial admin (`status`, `get_config`, `set_config`, `wifi_scan`, `factory_reset`, Fleet/Monitor commands)
 - Priority task: `<describe task>`
 - Constraints: pre-release firmware; favor clean/small implementation over backward-compat layers.
