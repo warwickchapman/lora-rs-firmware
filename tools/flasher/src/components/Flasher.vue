@@ -330,12 +330,12 @@ const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
 const disconnectedSerialPortSince = ref<Record<string, number>>({});
 const serialAdminPortBusy = ref<Record<string, string>>({});
 const serialAdminPortQueues = new Map<string, Promise<void>>();
+const fleetInitialScanPorts = new Set<string>();
 const provisionCacheRefreshedChips = new Set<string>();
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
 const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
-const isFleetPeerAutoRefreshing = ref(false);
 const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
@@ -694,7 +694,6 @@ const fleetGatewaySummary = computed(() => {
 });
 const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
-  isFleetPeerAutoRefreshing.value ||
   !selectedPort.value
 );
 const gatewayWifiReady = computed(() =>
@@ -1454,7 +1453,13 @@ async function loadNetworkGateway() {
       state.adminPassword = state.adminPassword || pairAdminPassword.value || state.deviceInfo?.password || '';
     }
     await ensureFleetGatewayStatus(true);
-    networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
+    if (!fleetInitialScanPorts.has(port)) {
+      fleetInitialScanPorts.add(port);
+      networkStatusMessage.value = `Gateway loaded on ${port}; starting initial fleet scan.`;
+      await beginLoraInventoryScan(port, false);
+    } else {
+      networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
+    }
   } catch (e) {
     networkStatusMessage.value = serialFeatureError('Gateway load', e);
     notify(networkStatusMessage.value);
@@ -1530,15 +1535,6 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   if (fleetSelectedPort.value && fleetSelectedPort.value === monitorSelectedPort.value) {
     mergeMonitorPeerRows(rows);
   }
-}
-
-function fleetRowNeedsIdentityRefresh(row: LoraInventoryDevice): boolean {
-  if (!row.address || row.address < 1 || row.address > LRS_REMOTE_SCAN_CAP) return false;
-  return !row.chip_id ||
-    !row.fw_version ||
-    !row.wifi_enabled_known ||
-    !row.wifi_connected_known ||
-    !row.mqtt_known;
 }
 
 async function refreshLoraInventoryStatus(background = true) {
@@ -1641,7 +1637,7 @@ async function refreshMonitorData(background = false) {
   }
 }
 
-async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor', autoRefreshKnown = true) {
+async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor') {
   if (!port) return;
   if (background && gatewaySnapshotPauseCount.value > 0) return;
   try {
@@ -1669,9 +1665,6 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       isLoraInventoryScanning.value = !!inventory.scan?.active;
       networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
       if (!inventory.scan?.active) stopLoraInventoryPolling(false);
-      if (source === 'fleet' && autoRefreshKnown && !inventory.scan?.active) {
-        await refreshIncompleteFleetPeers(port);
-      }
     }
     if (port === monitorSelectedPort.value) {
       mergeMonitorPeerRows(inventory.devices || []);
@@ -1688,41 +1681,11 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
   }
 }
 
-async function refreshIncompleteFleetPeers(port: string) {
-  if (isFleetPeerAutoRefreshing.value || isLoraInventoryScanning.value) return;
-  const password = adminPasswordForPort(port);
-  if (!password) return;
-  const targets = loraInventory.value
-    .filter(fleetRowNeedsIdentityRefresh)
-    .map(row => row.address);
-  if (targets.length === 0) return;
-
-  isFleetPeerAutoRefreshing.value = true;
-  networkStatusMessage.value = `Refreshing details for ${targets.length} cached peer${targets.length === 1 ? '' : 's'}...`;
-  try {
-    for (const address of targets) {
-      await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
-        admin_password: password,
-        start_address: address,
-        end_address: address,
-        interval_ms: 250
-      }, 8000, { label: `Refresh peer ${address}` });
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await refreshGatewaySnapshot(port, false, 'fleet', false);
-    }
-    networkStatusMessage.value = `Refreshed cached peer details for ${targets.length} peer${targets.length === 1 ? '' : 's'}.`;
-  } catch (e) {
-    networkStatusMessage.value = serialFeatureError('Cached peer refresh', e);
-    pushNetworkLog(networkStatusMessage.value);
-  } finally {
-    isFleetPeerAutoRefreshing.value = false;
-  }
-}
-
 async function withGatewayForeground<T>(port: string, work: () => Promise<T>): Promise<T> {
   const resumeMonitorLoop = isMonitorLoopRunning.value && monitorAutoRefresh.value && monitorSelectedPort.value === port;
   gatewaySnapshotPauseCount.value++;
   stopMonitorPolling();
+  stopLoraInventoryPolling(false);
   try {
     return await work();
   } finally {
@@ -1815,11 +1778,15 @@ async function startLoraInventoryScan() {
     notify('Select the USB gateway first');
     return;
   }
+  await beginLoraInventoryScan(port, true);
+}
+
+async function beginLoraInventoryScan(port: string, showErrors = true) {
   await withGatewayForeground(port, async () => {
     if (!portGatewayReady(port)) await loadNetworkGateway();
     const password = adminPasswordForPort(port);
     if (!password) {
-      notify('Unable to read the gateway admin password from device details');
+      if (showErrors) notify('Unable to read the gateway admin password from device details');
       return;
     }
     const gatewayStatus = await ensureFleetGatewayStatus(true);
@@ -1827,7 +1794,7 @@ async function startLoraInventoryScan() {
     if (blockedMessage) {
       isLoraInventoryScanning.value = false;
       networkStatusMessage.value = blockedMessage;
-      notify(blockedMessage);
+      if (showErrors) notify(blockedMessage);
       return;
     }
     try {
@@ -1844,7 +1811,7 @@ async function startLoraInventoryScan() {
     } catch (e) {
       isLoraInventoryScanning.value = false;
       networkStatusMessage.value = fleetScanErrorMessage(e);
-      notify(networkStatusMessage.value);
+      if (showErrors) notify(networkStatusMessage.value);
     }
   });
 }
@@ -4618,16 +4585,16 @@ function countCrashEvents(entries: string[]): number {
                 >
                   <td class="px-2 py-1.5"><input v-model="device.selected" type="checkbox" /></td>
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id ? lrsDeviceName(device.chip_id) : (isFleetPeerAutoRefreshing ? 'refreshing...' : '-') }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : (isFleetPeerAutoRefreshing ? 'refreshing...' : '-') }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id ? lrsDeviceName(device.chip_id) : '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : '-' }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_enabled_known ? (device.wifi_enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300') : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                      {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : (isFleetPeerAutoRefreshing ? 'Refreshing' : 'Unknown') }}
+                      {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : 'Unknown' }}
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : (isFleetPeerAutoRefreshing ? 'Refreshing' : 'Unknown') }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
                   <td class="px-2 py-1.5 font-mono">
                     <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
                     <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']">
