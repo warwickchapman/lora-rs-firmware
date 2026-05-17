@@ -328,6 +328,7 @@ const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
 const disconnectedSerialPortSince = ref<Record<string, number>>({});
 const serialAdminPortBusy = ref<Record<string, string>>({});
 const serialAdminPortQueues = new Map<string, Promise<void>>();
+const provisionCacheRefreshedChips = new Set<string>();
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
@@ -335,6 +336,7 @@ const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
 const logContainer = ref<HTMLElement | null>(null);
+const networkUdpLogContainer = ref<HTMLElement | null>(null);
 const deviceInfoReadSeqByPort = ref<Record<string, number>>({});
 const monitorAfterFlash = ref(true);
 const eraseBeforeFlash = ref(false);
@@ -342,6 +344,7 @@ const lastPortSnapshot = ref<string[]>([]);
 const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
 const stickLogToBottom = ref(true);
+const networkUdpLogsExpanded = ref(false);
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
 const networkStatusMessage = ref('Ready to scan the fleet.');
@@ -1088,6 +1091,14 @@ function copyActivityLog() {
   copyToClipboard(activeLogs.value.join('\n'), 'activity log');
 }
 
+function copyNetworkUdpLog() {
+  if (networkLogs.value.length === 0) {
+    notify('No UDP logs to copy');
+    return;
+  }
+  copyToClipboard(networkLogs.value.join('\n'), 'UDP log');
+}
+
 function copyActivePassword() {
   const password = deviceInfo.value?.password?.trim();
   if (!password) {
@@ -1193,6 +1204,7 @@ async function stopNetworkUdpMonitor() {
   } finally {
     isNetworkUdpMonitoring.value = false;
     networkUdpTarget.value = '';
+    networkUdpLogsExpanded.value = false;
   }
 }
 
@@ -1251,6 +1263,50 @@ function adminPasswordForPort(port: string): string {
   return state?.adminPassword?.trim() ||
     state?.deviceInfo?.password?.trim() ||
     '';
+}
+
+function normalizeChipId(raw: string | undefined | null): string {
+  return String(raw || '').trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '').toLowerCase();
+}
+
+function provisionedRemoteChipIds(): Set<string> {
+  return new Set((pairStatus.value?.devices || [])
+    .filter(d => d.selected && d.state === 'verified' && d.assigned_address > 0 && d.assigned_address < 255)
+    .map(d => normalizeChipId(d.chip_id_hex))
+    .filter(Boolean));
+}
+
+async function refreshProvisionedSerialDeviceCaches(reason: string) {
+  const chips = provisionedRemoteChipIds();
+  if (chips.size === 0) return;
+  const pendingChips = [...chips].filter(chip => !provisionCacheRefreshedChips.has(chip));
+  if (pendingChips.length === 0) return;
+
+  for (const [port, state] of Object.entries(serialDevicesByPort.value)) {
+    if (port === provisionSelectedPort.value) continue;
+    const chip = normalizeChipId(state.deviceInfo?.chip_id || state.status?.chip_id);
+    if (!chip || !pendingChips.includes(chip)) continue;
+
+    state.status = null;
+    state.config = null;
+    state.deviceInfo = null;
+    provisionCacheRefreshedChips.add(chip);
+
+    if (isMonitoring.value && activeMonitorPort.value === port) {
+      pushPairLog(`Invalidated cached serial details for ${port} chip ${chip} after ${reason}; serial monitor owns the port.`);
+      continue;
+    }
+    if (serialAdminBusyForPort(port)) {
+      pushPairLog(`Invalidated cached serial details for ${port} chip ${chip} after ${reason}; port is busy.`);
+      continue;
+    }
+
+    pushPairLog(`Refreshing serial details for provisioned remote on ${port} chip ${chip}...`);
+    const ok = await readDeviceInfoForPort(port, 'serial');
+    if (!ok) {
+      pushPairLog(`Cached serial details for ${port} chip ${chip} were cleared; refresh manually when the port is available.`);
+    }
+  }
 }
 
 async function sendPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
@@ -1695,6 +1751,13 @@ function fleetLogsAvailable(device: LoraInventoryDevice): boolean {
   return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
 }
 
+function fleetDeviceUdpLabel(device: LoraInventoryDevice): string {
+  const chip = String(device.chip_id || '').trim().replace(/^0x/i, '').toLowerCase();
+  const name = chip ? `lrs-${chip}` : `addr ${device.address}`;
+  const role = [device.role, device.mode].filter(Boolean).join('/');
+  return `${name} addr ${device.address}${role ? ` (${role})` : ''}`;
+}
+
 function fleetFlashAvailable(device: LoraInventoryDevice): boolean {
   return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
 }
@@ -1792,6 +1855,7 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
     notify('UDP logs need confirmed WiFi connection and IP from fleet status');
     return;
   }
+  const targetLabel = fleetDeviceUdpLabel(device);
   try {
     remoteUdpBusyAddress.value = device.address;
     if (!portGatewayReady(port)) await loadNetworkGateway();
@@ -1809,11 +1873,11 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
       port: 5514,
       ttl_s: 300
     }, 8000);
-    networkUdpTarget.value = `LoRa ${device.address}`;
-    networkStatusMessage.value = `UDP logging enabled for LoRa ${device.address} to ${host}:5514.`;
-    notify(`UDP logs enabled for LoRa ${device.address}`);
+    networkUdpTarget.value = targetLabel;
+    networkStatusMessage.value = `UDP logging enabled for ${targetLabel} to ${host}:5514.`;
+    notify(`UDP logs enabled for ${targetLabel}`);
   } catch (e) {
-    const msg = serialFeatureError(`UDP logs ${device.address}`, e);
+    const msg = serialFeatureError(`UDP logs ${targetLabel}`, e);
     networkStatusMessage.value = msg;
     pushNetworkLog(msg);
     notify(msg);
@@ -2281,6 +2345,7 @@ async function runEasyPair() {
     return;
   }
   isPairBusy.value = true;
+  provisionCacheRefreshedChips.clear();
   pushPairLog('--- EasyPair ---');
   try {
     if (!gatewayReady.value) {
@@ -2323,6 +2388,9 @@ async function refreshEasyPairStatus(log = false) {
       const s = pairStatus.value.session;
       pushPairLog(`Status: ${s.state}, found ${s.discovered_count}, verified ${s.verified_count}, failed ${s.failed_count}.`);
     }
+    if (pairStatus.value?.session?.state === 'complete') {
+      await refreshProvisionedSerialDeviceCaches('provisioning');
+    }
   } catch (e) {
     if (log) pushPairLog('Status refresh failed: ' + e);
   }
@@ -2360,6 +2428,7 @@ async function startEasyPairDiscovery() {
     return;
   }
   isPairBusy.value = true;
+  provisionCacheRefreshedChips.clear();
   pushPairLog(`Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
   try {
     await sendPairCommand('start_discovery', {
@@ -2383,6 +2452,7 @@ async function provisionEasyPairDevices() {
     return;
   }
   isPairBusy.value = true;
+  provisionCacheRefreshedChips.clear();
   pushPairLog('Provisioning discovered remotes...');
   try {
     await sendPairCommand('provision_all', { admin_password: password }, 10000);
@@ -2432,6 +2502,7 @@ async function saveEasyPairTargets() {
     pushPairLog('Provisioning complete.');
     await refreshGatewayStatusForPair();
     await refreshEasyPairStatus(false);
+    await refreshProvisionedSerialDeviceCaches('target save');
   } catch (e) {
     pushPairLog('Saving target list failed: ' + e);
     notify('Saving target list failed: ' + e);
@@ -2869,6 +2940,12 @@ function scrollToBottom() {
   }
 }
 
+function scrollNetworkUdpToBottom() {
+  if (networkUdpLogContainer.value) {
+    networkUdpLogContainer.value.scrollTop = networkUdpLogContainer.value.scrollHeight;
+  }
+}
+
 function handleLogScroll() {
   if (!logContainer.value) return;
   const { scrollTop, clientHeight, scrollHeight } = logContainer.value;
@@ -2885,6 +2962,9 @@ watch(networkLogs, () => {
   if (stickLogToBottom.value) {
     nextTick(() => scrollToBottom());
   }
+  if (isNetworkUdpMonitoring.value) {
+    nextTick(() => scrollNetworkUdpToBottom());
+  }
 }, { deep: true });
 
 watch([pairWifiSsid, pairWifiPassword], ([nextSsid, nextPassword], [prevSsid, prevPassword]) => {
@@ -2894,6 +2974,9 @@ watch([pairWifiSsid, pairWifiPassword], ([nextSsid, nextPassword], [prevSsid, pr
 
 watch(activeMode, (mode) => {
   nextTick(() => scrollToBottom());
+  if (mode === 'network') {
+    nextTick(() => scrollNetworkUdpToBottom());
+  }
   syncDeviceInfoForSelectedPort();
   if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
     readDeviceInfo();
@@ -4420,12 +4503,24 @@ function countCrashEvents(entries: string[]): number {
               </tbody>
             </table>
           </div>
-          <div v-if="isNetworkUdpMonitoring" class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
+          <div
+            v-if="isNetworkUdpMonitoring"
+            :class="networkUdpLogsExpanded ? 'fixed inset-4 z-40 flex flex-col rounded-md border border-slate-700 bg-slate-950 p-4 shadow-2xl' : 'shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3'"
+          >
             <div class="mb-2 flex items-center justify-between gap-3">
-              <div class="text-xs font-bold text-slate-300">UDP logs · {{ networkUdpTarget || 'Fleet' }}</div>
-              <button @click="stopNetworkUdpMonitor" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Stop logs</button>
+              <div class="min-w-0">
+                <div class="truncate text-xs font-bold text-slate-300">UDP logs · {{ networkUdpTarget || 'Fleet' }}</div>
+                <div class="mt-0.5 text-[10px] text-slate-600">{{ networkLogs.length }} lines · following latest</div>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <button @click="copyNetworkUdpLog" :disabled="networkLogs.length === 0" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50">Copy</button>
+                <button @click="networkUdpLogsExpanded = !networkUdpLogsExpanded; nextTick(() => scrollNetworkUdpToBottom())" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">
+                  {{ networkUdpLogsExpanded ? 'Collapse' : 'Full screen' }}
+                </button>
+                <button @click="stopNetworkUdpMonitor" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Stop logs</button>
+              </div>
             </div>
-            <div class="max-h-44 overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400">
+            <div ref="networkUdpLogContainer" :class="['overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400', networkUdpLogsExpanded ? 'min-h-0 flex-1 rounded border border-slate-800 bg-slate-950/60 p-2' : 'max-h-44']">
               <div v-for="(log, i) in networkLogs.slice(-200)" :key="i">{{ log }}</div>
               <div v-if="networkLogs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
             </div>
