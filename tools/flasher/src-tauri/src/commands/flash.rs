@@ -38,6 +38,12 @@ pub async fn flash_firmware(
         log(format!("Using local firmware file at {}...", firmware_path));
         local_path
     } else {
+        if region.is_none() {
+            return Err(format!(
+                "Local firmware file not found: {}. Build firmware first or choose a local .bin file.",
+                firmware_path
+            ));
+        }
         // Tag based GitHub download
         let reg = region.ok_or_else(|| "Region is required for GitHub downloads".to_string())?;
         log(format!("Starting cloud flash for {} (Region: {})...", firmware_path, reg));

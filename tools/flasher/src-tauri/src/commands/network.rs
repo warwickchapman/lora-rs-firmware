@@ -200,6 +200,12 @@ async fn resolve_firmware_path(
     if local_path.exists() && local_path.is_file() {
         return Ok(local_path);
     }
+    if region.is_none() {
+        return Err(format!(
+            "Local firmware file not found: {}. Build firmware first or choose a local .bin file.",
+            firmware_path
+        ));
+    }
 
     let reg = region.ok_or_else(|| "Region is required for GitHub downloads".to_string())?;
     let releases = firmware::fetch_releases().await?;
