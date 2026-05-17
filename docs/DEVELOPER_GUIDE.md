@@ -232,6 +232,18 @@ Release execution guardrails:
      - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
 
+Deterministic release mode (preferred):
+1. Draft final release notes first (delta-only vs previous release) and save to a file.
+2. Run:
+   - `python3 tools/release_one_shot.py --notes-file /absolute/path/to/release-notes.md --title "vX.Y.Z-suffix OneWordName"`
+3. The script handles end-to-end:
+   - firmware release publish (`lora-rs` + `lora-rs-firmware`),
+   - Windows/Linux flasher CI release dispatch from the release tag and completion wait,
+   - local macOS arm64/x86_64 portable ZIP builds from the release tag,
+   - macOS asset upload to both repos,
+   - full 10-asset contract verification in both repos.
+4. Release notes are deterministic in this mode: the file content is published verbatim.
+
 Conditional checklist: when `tools/flasher/**` changed in the release:
 - Rebuild flasher installers from current source for all supported targets (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
 - Ensure flasher metadata is synchronized first via `python3 tools/flasher/sync_version.py` so `package.json`, `Cargo.toml`, and `tauri.conf.json` match root `VERSION`.

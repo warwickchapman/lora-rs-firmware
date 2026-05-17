@@ -693,12 +693,21 @@ def verify_full_asset_contract(
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Build and publish lora-rs release from VERSION.")
     ap.add_argument("--repo", default="warwickchapman/lora-rs", help="GitHub repo in owner/name form.")
-    ap.add_argument("--summary", required=True, help="Short summary paragraph for release notes.")
+    ap.add_argument("--summary", help="Short summary paragraph for generated release notes.")
     ap.add_argument(
         "--highlight",
         action="append",
         default=[],
         help="Highlight bullet line. Can be provided multiple times.",
+    )
+    ap.add_argument(
+        "--notes-file",
+        type=Path,
+        help="Use exact release notes Markdown from file (deterministic mode; skips generated notes).",
+    )
+    ap.add_argument(
+        "--title",
+        help="Exact release title. Required with --notes-file for deterministic naming.",
     )
     ap.add_argument(
         "--alpha-only",
@@ -785,8 +794,16 @@ def main() -> int:
     if not args.no_clean_check:
         ensure_clean_tracked_tree(root)
 
-    if not args.highlight:
-        raise RuntimeError("At least one --highlight is required.")
+    if args.notes_file:
+        if not args.notes_file.exists():
+            raise RuntimeError(f"--notes-file does not exist: {args.notes_file}")
+        if not args.title:
+            raise RuntimeError("--title is required when using --notes-file")
+    else:
+        if not args.summary:
+            raise RuntimeError("--summary is required unless --notes-file is provided.")
+        if not args.highlight:
+            raise RuntimeError("At least one --highlight is required unless --notes-file is provided.")
 
     tag = f"v{version}"
     print(f"Preparing release {tag}")
@@ -801,17 +818,24 @@ def main() -> int:
 
     za_asset, us_asset, eu_asset = assets
     
-    word, quote = pick_unique_quote(args.repo)
-    title = f"{tag} {word}"
+    if args.notes_file:
+        notes = args.notes_file.read_text(encoding="utf-8")
+        if not notes.strip():
+            raise RuntimeError(f"--notes-file is empty: {args.notes_file}")
+        title = args.title.strip()
+    else:
+        word, quote = pick_unique_quote(args.repo)
+        title = f"{tag} {word}"
+        notes = ""
     commit = get_head_commit(root)
 
     # If reusing flasher, we add a flag to the release notes that the CI can check
     # to skip the build steps.
-    summary_with_flags = args.summary
-    if args.no_build_flasher or args.reuse_flasher:
-        summary_with_flags += "\n\n<!-- SKIP_FLASHER_BUILD -->"
-
-    notes = build_release_notes(version, summary_with_flags, args.highlight, za_asset, us_asset, quote)
+    if not args.notes_file:
+        summary_with_flags = args.summary
+        if args.no_build_flasher or args.reuse_flasher:
+            summary_with_flags += "\n\n<!-- SKIP_FLASHER_BUILD -->"
+        notes = build_release_notes(version, summary_with_flags, args.highlight, za_asset, us_asset, quote)
     notes_file = Path(tempfile.gettempdir()) / f"release-{tag}.md"
     notes_file.write_text(notes, encoding="utf-8")
 

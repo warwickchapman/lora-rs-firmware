@@ -140,6 +140,23 @@ Changelog/release-notes rule:
 - Release notes and `CHANGELOG.md` entries must describe deltas from the immediately previous release, not generic project capability lists.
 - Include all non-trivial firmware/flasher changes since the previous release as the baseline draft for release announcements.
 
+Deterministic one-command release (recommended):
+- Prepare release notes in a file first (for example `docs/release_notes/v0.9.0-beta.md`).
+- Then run one command:
+```bash
+cd /Users/warwick/Code/LoRa/lora_rs
+python3 tools/release_one_shot.py \
+  --notes-file /absolute/path/to/release-notes.md \
+  --title "vX.Y.Z-suffix OneWordName"
+```
+- This script performs the full flow:
+  - firmware build + publish to both repos,
+  - flasher Windows/Linux CI dispatch from the release tag and wait-for-success,
+  - local macOS portable ZIP builds from the release tag,
+  - macOS upload to both repos,
+  - full 10-asset verification in both repos.
+- Release notes are used exactly as provided (no auto-generated summary/highlights).
+
 Example:
 ```bash
 cd /Users/warwick/Code/LoRa/lora_rs
