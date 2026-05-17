@@ -370,6 +370,7 @@ const isMonitorRefreshing = ref(false);
 const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const monitorAutoRefresh = ref(true);
+const gatewaySnapshotPauseCount = ref(0);
 const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const settingsTab = ref<SettingsTab>('general');
 const networkUdpTarget = ref('');
@@ -1503,24 +1504,7 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
 }
 
 async function refreshLoraInventoryStatus(background = true) {
-  try {
-    const out = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
-      fleetSelectedPort.value,
-      'lora_inventory_status',
-      {},
-      5000,
-      { label: 'Fleet peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
-    );
-    loraInventoryScan.value = out.scan || null;
-    mergeLoraInventoryRows(out.devices || []);
-    isLoraInventoryScanning.value = !!out.scan?.active;
-    networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
-    if (!out.scan?.active) stopLoraInventoryPolling(false);
-  } catch (e) {
-    if (serialBackgroundSkipped(e)) return;
-    networkStatusMessage.value = serialFeatureError('Fleet status', e);
-    stopLoraInventoryPolling(false);
-  }
+  await refreshGatewaySnapshot(fleetSelectedPort.value, background, 'fleet');
 }
 
 function startLoraInventoryPolling() {
@@ -1609,33 +1593,71 @@ async function refreshMonitorData(background = false) {
   if (background && activeMode.value !== 'monitor') return;
   isMonitorRefreshing.value = true;
   try {
-    const status = await sendEasyPairCommandOnPort<SerialAdminStatus>(
-      port,
-      'status',
-      {},
-      5000,
-      { label: 'Monitor status refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
-    );
-    applySerialAdminStatus(status, port);
-    adoptMonitorMqttFromStatus(status);
-    const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
-      port,
-      'lora_inventory_status',
-      {},
-      5000,
-      { label: 'Monitor peer cache refresh', priority: background ? 'background' : 'user', dropIfBusy: background }
-    );
-    mergeMonitorPeerRows(inventory.devices || []);
-    if (monitorSelectedPort.value && monitorSelectedPort.value === fleetSelectedPort.value) {
-      mergeLoraInventoryRows(inventory.devices || []);
-    }
-    monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
+    await refreshGatewaySnapshot(port, background, 'monitor');
   } catch (e) {
     if (serialBackgroundSkipped(e)) return;
     monitorStatusMessage.value = serialFeatureError('Monitor refresh', e);
     notify(monitorStatusMessage.value);
   } finally {
     isMonitorRefreshing.value = false;
+  }
+}
+
+async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor') {
+  if (!port) return;
+  if (background && gatewaySnapshotPauseCount.value > 0) return;
+  try {
+    const status = await sendEasyPairCommandOnPort<SerialAdminStatus>(
+      port,
+      'status',
+      {},
+      5000,
+      { label: 'Gateway status snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
+    );
+    applySerialAdminStatus(status, port);
+    if (port === monitorSelectedPort.value) adoptMonitorMqttFromStatus(status);
+
+    const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
+      port,
+      'lora_inventory_status',
+      {},
+      5000,
+      { label: 'Gateway peer cache snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
+    );
+
+    if (port === fleetSelectedPort.value) {
+      loraInventoryScan.value = inventory.scan || null;
+      mergeLoraInventoryRows(inventory.devices || []);
+      isLoraInventoryScanning.value = !!inventory.scan?.active;
+      networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
+      if (!inventory.scan?.active) stopLoraInventoryPolling(false);
+    }
+    if (port === monitorSelectedPort.value) {
+      mergeMonitorPeerRows(inventory.devices || []);
+      monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
+    }
+  } catch (e) {
+    if (serialBackgroundSkipped(e)) return;
+    if (source === 'fleet') {
+      networkStatusMessage.value = serialFeatureError('Fleet status', e);
+      stopLoraInventoryPolling(false);
+      return;
+    }
+    throw e;
+  }
+}
+
+async function withGatewayForeground<T>(port: string, work: () => Promise<T>): Promise<T> {
+  const resumeMonitorLoop = isMonitorLoopRunning.value && monitorAutoRefresh.value && monitorSelectedPort.value === port;
+  gatewaySnapshotPauseCount.value++;
+  stopMonitorPolling();
+  try {
+    return await work();
+  } finally {
+    gatewaySnapshotPauseCount.value = Math.max(0, gatewaySnapshotPauseCount.value - 1);
+    if (resumeMonitorLoop && monitorAutoRefresh.value && monitorSelectedPort.value === port) {
+      startMonitorPolling();
+    }
   }
 }
 
@@ -1721,36 +1743,38 @@ async function startLoraInventoryScan() {
     notify('Select the USB gateway first');
     return;
   }
-  if (!portGatewayReady(port)) await loadNetworkGateway();
-  const password = adminPasswordForPort(port);
-  if (!password) {
-    notify('Unable to read the gateway admin password from device details');
-    return;
-  }
-  const gatewayStatus = await ensureFleetGatewayStatus(true);
-  const blockedMessage = fleetScanBlockedMessage(gatewayStatus);
-  if (blockedMessage) {
-    isLoraInventoryScanning.value = false;
-    networkStatusMessage.value = blockedMessage;
-    notify(blockedMessage);
-    return;
-  }
-  try {
-    isLoraInventoryScanning.value = true;
-    await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
-      admin_password: password,
-      start_address: 1,
-      end_address: LRS_REMOTE_SCAN_CAP,
-      interval_ms: 250
-    }, 8000);
-    networkStatusMessage.value = 'LoRa inventory scan started.';
-    await refreshLoraInventoryStatus();
-    startLoraInventoryPolling();
-  } catch (e) {
-    isLoraInventoryScanning.value = false;
-    networkStatusMessage.value = fleetScanErrorMessage(e);
-    notify(networkStatusMessage.value);
-  }
+  await withGatewayForeground(port, async () => {
+    if (!portGatewayReady(port)) await loadNetworkGateway();
+    const password = adminPasswordForPort(port);
+    if (!password) {
+      notify('Unable to read the gateway admin password from device details');
+      return;
+    }
+    const gatewayStatus = await ensureFleetGatewayStatus(true);
+    const blockedMessage = fleetScanBlockedMessage(gatewayStatus);
+    if (blockedMessage) {
+      isLoraInventoryScanning.value = false;
+      networkStatusMessage.value = blockedMessage;
+      notify(blockedMessage);
+      return;
+    }
+    try {
+      isLoraInventoryScanning.value = true;
+      await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
+        admin_password: password,
+        start_address: 1,
+        end_address: LRS_REMOTE_SCAN_CAP,
+        interval_ms: 250
+      }, 8000);
+      networkStatusMessage.value = 'LoRa inventory scan started.';
+      await refreshLoraInventoryStatus(false);
+      startLoraInventoryPolling();
+    } catch (e) {
+      isLoraInventoryScanning.value = false;
+      networkStatusMessage.value = fleetScanErrorMessage(e);
+      notify(networkStatusMessage.value);
+    }
+  });
 }
 
 async function cancelLoraInventoryScan() {
@@ -1761,9 +1785,11 @@ async function cancelLoraInventoryScan() {
     return;
   }
   try {
-    await sendEasyPairCommandOnPort(port, 'cancel_lora_inventory', { admin_password: password }, 5000);
-    stopLoraInventoryPolling();
-    await refreshLoraInventoryStatus();
+    await withGatewayForeground(port, async () => {
+      await sendEasyPairCommandOnPort(port, 'cancel_lora_inventory', { admin_password: password }, 5000);
+      stopLoraInventoryPolling();
+      await refreshLoraInventoryStatus(false);
+    });
   } catch (e) {
     notify(serialFeatureError('Cancel LoRa inventory', e));
   }
