@@ -13,6 +13,9 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - MQTT admin now accepts local `udp_log_control` and `ota_pull` commands plus gateway-mediated `peer/<addr>/udp_log_control` commands for remote UDP log enable/disable on remotes that already have WiFi, moving network maintenance control onto the MQTT/LoRa admin path instead of the on-device Web UI.
 - Flasher now has a dedicated Settings tab for serial-admin status, basic device/WiFi/MQTT/sensor config editing, reboot, and guarded factory reset actions without opening the on-device Web UI.
 - Flasher Settings now covers the remaining safe local USB maintenance fields from the legacy Web UI, including LoRa timing/failsafe/debug controls, WiFi hostname/AP/PHY/TX power/static-IP controls, MQTT controller addresses, and redacted secret-preserving saves.
+- Flasher Settings Network can now scan WiFi from the selected USB device over serial admin and fill the SSID field without using the legacy Web UI WiFi scan endpoint.
+- Flasher Settings now makes redacted secret-preserving saves explicit, clears cached status/settings after reboot or factory reset, and only exposes DS18B20 enablement because pin and cadence are firmware-defined on current hardware.
+- Flasher Settings now normalizes serial-admin config responses before binding fields, so a low-memory or partial settings load does not leave selects and numeric fields blank.
 - Firmware serial admin now exposes gateway-driven LoRa inventory commands (`start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`) using bounded encrypted poll probes instead of HTTP discovery.
 - Firmware LoRa inventory now uses a compact maintenance-status response so Fleet rows can show remote chip ID, firmware version, WiFi connected/IP, and MQTT state without HTTP/REST.
 - Firmware LoRa inventory now includes remote uptime in the compact maintenance-status response so Flasher can distinguish expected OTA reboots from unexpected restarts.
@@ -42,6 +45,9 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Flasher Fleet gateway flash now shows explicit gateway badge states for flashing, rebooting, waiting for serial admin, updated, and failed instead of leaving the stale `status loaded` badge visible.
 - Flasher Fleet and Monitor now display device names as `lrs-<chipid>` and expand compact matching firmware versions with the current build suffix, so `0.8.16` appears as `0.8.16-dev` during dev testing.
 - Flasher Fleet now automatically refreshes incomplete cached peer rows on page load by probing only the known cached addresses, so identity, firmware, WiFi, and MQTT fields fill in without requiring a full Scan Fleet.
+- Flasher Fleet now rejects non-gateway USB serial selections after status validation, clears the Fleet selection, and tells the operator to choose the TX/gateway port.
+- Flasher Monitor now applies the same TX/gateway-only serial-port guard as Fleet, rejecting remote USB devices because they cannot provide the gateway peer-cache diagnostics view.
+- Flasher now persists the selected USB port separately for Flash, Provision, Fleet, Monitor, and Settings, keeps valid selections stable across manual refreshes, and only jumps the active tab to a newly plugged adapter on real port-change events.
 - Flasher Provision now refreshes or invalidates cached serial details for any separately connected remote whose chip ID was just provisioned, preventing stale transmitter role/address values on the Flash pane.
 - Flasher serial monitoring now stays active across tab changes and only yields when another operation needs the same USB port, so a remote serial monitor can keep running while Fleet uses a separate gateway port.
 - Flasher now keeps separate selected USB ports for Flash, Provision, and Fleet while continuing to share per-port device details, so changing the gateway port no longer steals the remote port being monitored or flashed.

@@ -430,6 +430,14 @@ const ZA_COUNTRY_CODES = new Set(['ZA']);
 const REGION_STORAGE_KEY = 'lrs_flasher_region';
 const MONITOR_AFTER_FLASH_STORAGE_KEY = 'lrs_flasher_monitor_after_flash';
 const ERASE_BEFORE_FLASH_STORAGE_KEY = 'lrs_flasher_erase_before_flash';
+const MONITOR_AUTO_REFRESH_STORAGE_KEY = 'lrs_flasher_monitor_auto_refresh';
+const TAB_PORT_STORAGE_KEYS = {
+  serial: 'lrs_flasher_flash_port',
+  pair: 'lrs_flasher_provision_port',
+  network: 'lrs_flasher_fleet_port',
+  monitor: 'lrs_flasher_monitor_port',
+  settings: 'lrs_flasher_settings_port'
+} as const;
 const REGION_CONFIDENT_MIN_SCORE = 5;
 const REGION_CONFIDENT_MIN_GAP = 2;
 
@@ -478,6 +486,13 @@ const wifiNetworks = computed<WifiNetwork[]>({
   get: () => serialDeviceState(provisionSelectedPort.value)?.wifiNetworks || [],
   set: (networks) => {
     const state = serialDeviceState(provisionSelectedPort.value);
+    if (state) state.wifiNetworks = networks;
+  }
+});
+const settingsWifiNetworks = computed<WifiNetwork[]>({
+  get: () => serialDeviceState(settingsSelectedPort.value)?.wifiNetworks || [],
+  set: (networks) => {
+    const state = serialDeviceState(settingsSelectedPort.value);
     if (state) state.wifiNetworks = networks;
   }
 });
@@ -642,7 +657,7 @@ const settingsEmptyMessage = computed(() => {
     return 'Fetch settings to edit MQTT broker, topic, control, and controller values.';
   }
   if (settingsTab.value === 'sensors') {
-    return 'Fetch settings to edit DS18B20 sensor values.';
+    return 'Fetch settings to edit DS18B20 sensor enablement.';
   }
   return 'Fetch settings before saving config, or use the guarded reboot and factory reset actions when needed.';
 });
@@ -924,7 +939,8 @@ function detectRegionFromSystem(): { region: RegionCode | null; reliable: boolea
   return { region: top[0], reliable, reason };
 }
 
-async function refreshPorts() {
+async function refreshPorts(fromPortChange: boolean | Event = false) {
+  const allowPortChangeAutoSwitch = fromPortChange === true;
   if (isRefreshingPorts.value) return;
   isRefreshingPorts.value = true;
   try {
@@ -963,7 +979,7 @@ async function refreshPorts() {
     }
     disconnectedSerialPortSince.value = nextDisconnectedSince;
 
-    reconcileTabPortSelections(currentNames, newPorts, !hasActiveOperation);
+    reconcileTabPortSelections(currentNames, newPorts, allowPortChangeAutoSwitch && !hasActiveOperation);
 
     lastPortSnapshot.value = currentNames;
     syncDeviceInfoForSelectedPort();
@@ -974,15 +990,15 @@ async function refreshPorts() {
   }
 }
 
-function reconcileTabPortSelections(currentNames: string[], newPorts: string[], allowAutoSwitch: boolean) {
+function reconcileTabPortSelections(currentNames: string[], newPorts: string[], allowAutoSwitchToNewPort: boolean) {
   const defaultPort = chooseDefaultPort(currentNames);
   const preferredNewPort = chooseMostRecentPort(newPorts) ?? defaultPort;
-  const activeReplacement = allowAutoSwitch && preferredNewPort ? preferredNewPort : defaultPort;
+  const activeReplacement = allowAutoSwitchToNewPort && preferredNewPort ? preferredNewPort : defaultPort;
 
   const ensureSelection = (port: string, active: boolean): string => {
     if (currentNames.length === 0) return '';
     if (!port || !currentNames.includes(port)) return activeReplacement;
-    if (active && allowAutoSwitch && preferredNewPort) return preferredNewPort;
+    if (active && allowAutoSwitchToNewPort && newPorts.length > 0 && preferredNewPort) return preferredNewPort;
     return port;
   };
 
@@ -1034,6 +1050,30 @@ function chooseDefaultPort(portNames: string[]): string {
     .filter(isLrsAdapterPort)
     .sort((a, b) => b.score - a.score);
   return ranked[0]?.port_name || '';
+}
+
+function loadSavedTabPorts() {
+  try {
+    flashSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.serial) || flashSelectedPort.value;
+    provisionSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || provisionSelectedPort.value;
+    fleetSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || fleetSelectedPort.value;
+    monitorSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.monitor) || monitorSelectedPort.value;
+    settingsSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.settings) || settingsSelectedPort.value;
+  } catch {
+    // Ignore storage failures; runtime auto-selection still works.
+  }
+}
+
+function saveTabPort(key: keyof typeof TAB_PORT_STORAGE_KEYS, port: string) {
+  try {
+    if (port) {
+      localStorage.setItem(TAB_PORT_STORAGE_KEYS[key], port);
+    } else {
+      localStorage.removeItem(TAB_PORT_STORAGE_KEYS[key]);
+    }
+  } catch {
+    // Ignore storage failures; in-memory selection still works.
+  }
 }
 
 async function fetchFirmware() {
@@ -1422,6 +1462,90 @@ function serialBackgroundSkipped(err: unknown): boolean {
   return String(err || '').includes('serial_admin_background_skipped');
 }
 
+function stringValue(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boolValue(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeAddressArray(value: unknown, fallback: number[] = []): number[] {
+  if (!Array.isArray(value)) return fallback;
+  return value
+    .map(item => Number(item))
+    .filter(item => Number.isInteger(item) && item >= 1 && item <= 254);
+}
+
+function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | undefined, status: SerialAdminStatus | null): SerialAdminConfig {
+  const cfg = raw || {};
+  const roleTx = typeof cfg.role_tx === 'boolean' ? cfg.role_tx : !!status?.role_tx;
+  const localAddress = numberValue(cfg.local_address, status?.local_address || (roleTx ? 254 : 1));
+  const remoteAddress = numberValue(cfg.remote_address, status?.remote_address || (roleTx ? 1 : 254));
+  const wifi = status?.wifi;
+  const mqtt = status?.mqtt;
+
+  return {
+    ...cfg,
+    mode: stringValue(cfg.mode, status?.mode || 'paired'),
+    commissioned: typeof cfg.commissioned === 'boolean' ? cfg.commissioned : status?.commissioned,
+    role_tx: roleTx,
+    local_address: localAddress,
+    remote_address: remoteAddress,
+    paired_target_addresses: normalizeAddressArray(cfg.paired_target_addresses, [remoteAddress]),
+    allowed_controller_addresses: normalizeAddressArray(cfg.allowed_controller_addresses, [remoteAddress]),
+    known_peer_addresses: normalizeAddressArray(cfg.known_peer_addresses),
+    lora_tx_power: numberValue(cfg.lora_tx_power, 17),
+    lora_spreading_factor: numberValue(cfg.lora_spreading_factor, 12),
+    lora_bandwidth_hz: numberValue(cfg.lora_bandwidth_hz, 125000),
+    lora_coding_rate: numberValue(cfg.lora_coding_rate, 5),
+    heartbeat_ms: numberValue(cfg.heartbeat_ms, 60000),
+    ack_timeout_ms: numberValue(cfg.ack_timeout_ms, 3000),
+    mqtt_remote_retry_timeout_ms: numberValue(cfg.mqtt_remote_retry_timeout_ms, 180000),
+    tx_mqtt_remote_polling_enabled: boolValue(cfg.tx_mqtt_remote_polling_enabled, false),
+    tx_mqtt_remote_default_poll_interval_ms: numberValue(cfg.tx_mqtt_remote_default_poll_interval_ms, 300000),
+    maintenance_debug_telemetry_enabled: boolValue(cfg.maintenance_debug_telemetry_enabled, false),
+    rx_push_on_change_enabled: boolValue(cfg.rx_push_on_change_enabled, false),
+    rx_push_min_interval_ms: numberValue(cfg.rx_push_min_interval_ms, 60000),
+    input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, true),
+    tx_command_retry_timeout_ms: numberValue(cfg.tx_command_retry_timeout_ms, 180000),
+    rx_failsafe_mode: stringValue(cfg.rx_failsafe_mode, 'hold_last'),
+    rx_failsafe_timeout_ms: numberValue(cfg.rx_failsafe_timeout_ms, 180000),
+    wifi_sta_ssid: stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || ''),
+    wifi_sta_password: '',
+    lan_hostname: stringValue(cfg.lan_hostname, ''),
+    ap_always_on: boolValue(cfg.ap_always_on, false),
+    wifi_phy_mode: stringValue(cfg.wifi_phy_mode, '11b'),
+    wifi_tx_power_dbm: numberValue(cfg.wifi_tx_power_dbm, 20.5),
+    wifi_sleep_enabled: boolValue(cfg.wifi_sleep_enabled, false),
+    wifi_static_ip_enabled: boolValue(cfg.wifi_static_ip_enabled, false),
+    wifi_static_ip: stringValue(cfg.wifi_static_ip, ''),
+    wifi_static_gateway: stringValue(cfg.wifi_static_gateway, ''),
+    wifi_static_subnet: stringValue(cfg.wifi_static_subnet, ''),
+    wifi_channel_override: numberValue(cfg.wifi_channel_override, 0),
+    wifi_ap_fallback_policy: stringValue(cfg.wifi_ap_fallback_policy, 'fallback_on_disconnect'),
+    wifi_admin_enabled: boolValue(cfg.wifi_admin_enabled, wifi?.admin_enabled || false),
+    mqtt_client_enabled: boolValue(cfg.mqtt_client_enabled, mqtt?.client_enabled || false),
+    mqtt_control_enabled: boolValue(cfg.mqtt_control_enabled, mqtt?.control_enabled || false),
+    mqtt_controller_addresses: stringValue(cfg.mqtt_controller_addresses, ''),
+    mqtt_host: stringValue(cfg.mqtt_host, mqtt?.host || ''),
+    mqtt_port: numberValue(cfg.mqtt_port, mqtt?.port || 1883),
+    mqtt_user: stringValue(cfg.mqtt_user, ''),
+    mqtt_password: '',
+    mqtt_topic_root: stringValue(cfg.mqtt_topic_root, mqtt?.topic_root || 'lora'),
+    sensor_temp_enabled: boolValue(cfg.sensor_temp_enabled, !!status?.local_temp_valid),
+    sensor_temp_pin: numberValue(cfg.sensor_temp_pin, 0),
+    sensor_temp_interval_s: numberValue(cfg.sensor_temp_interval_s, 10),
+    fleet_passphrase: '',
+    admin_password: ''
+  };
+}
+
 async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
   if (!port) throw new Error('Select the USB gateway first');
   const label = options.label || cmd.replace(/_/g, ' ');
@@ -1452,7 +1576,19 @@ async function loadNetworkGateway() {
       state.adminSupported = true;
       state.adminPassword = state.adminPassword || pairAdminPassword.value || state.deviceInfo?.password || '';
     }
-    await ensureFleetGatewayStatus(true);
+    const status = await ensureFleetGatewayStatus(true);
+    if (status && !status.role_tx) {
+      const message = gatewayRequiredMessage('Fleet');
+      networkStatusMessage.value = message;
+      notify(message);
+      loraInventory.value = [];
+      loraInventoryScan.value = null;
+      isLoraInventoryScanning.value = false;
+      if (fleetSelectedPort.value === port) {
+        fleetSelectedPort.value = '';
+      }
+      return;
+    }
     if (!fleetInitialScanPorts.has(port)) {
       fleetInitialScanPorts.add(port);
       networkStatusMessage.value = `Gateway loaded on ${port}; starting initial fleet scan.`;
@@ -1650,6 +1786,27 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
     );
     applySerialAdminStatus(status, port);
     if (port === monitorSelectedPort.value) adoptMonitorMqttFromStatus(status);
+    if (!status.role_tx) {
+      if (source === 'fleet') {
+        networkStatusMessage.value = gatewayRequiredMessage('Fleet');
+        loraInventory.value = [];
+        loraInventoryScan.value = null;
+        isLoraInventoryScanning.value = false;
+        stopLoraInventoryPolling(false);
+        if (fleetSelectedPort.value === port) {
+          fleetSelectedPort.value = '';
+        }
+      } else {
+        monitorStatusMessage.value = gatewayRequiredMessage('Monitor');
+        monitorFleetRows.value = [];
+        stopMonitorPolling();
+        if (monitorSelectedPort.value === port) {
+          monitorSelectedPort.value = '';
+        }
+      }
+      if (!background) notify(source === 'fleet' ? networkStatusMessage.value : monitorStatusMessage.value);
+      return;
+    }
 
     const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
       port,
@@ -1699,9 +1856,11 @@ async function withGatewayForeground<T>(port: string, work: () => Promise<T>): P
 function startMonitorPolling() {
   stopMonitorPolling();
   isMonitorLoopRunning.value = true;
-  monitorPollTimer.value = window.setInterval(() => {
-    refreshMonitorData(true);
-  }, 5000);
+  if (monitorAutoRefresh.value) {
+    monitorPollTimer.value = window.setInterval(() => {
+      refreshMonitorData(true);
+    }, 5000);
+  }
 }
 
 function stopMonitorPolling() {
@@ -1714,13 +1873,13 @@ function stopMonitorPolling() {
 
 function toggleMonitorLoop() {
   if (isMonitorLoopRunning.value) {
-    monitorAutoRefresh.value = false;
     stopMonitorPolling();
     return;
   }
-  monitorAutoRefresh.value = true;
   startMonitorPolling();
-  refreshMonitorData(false);
+  refreshMonitorData(false).finally(() => {
+    if (!monitorAutoRefresh.value) stopMonitorPolling();
+  });
 }
 
 function toggleMonitorMqttConnection() {
@@ -1752,6 +1911,9 @@ async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatu
 
 function fleetScanBlockedMessage(st: SerialAdminStatus | null): string | null {
   if (!st) return null;
+  if (!st.role_tx) {
+    return gatewayRequiredMessage('Fleet');
+  }
   if (!st.commissioned) {
     return 'Fleet scan needs a commissioned gateway. Use Provision first to assign the fleet key, role, address, and WiFi.';
   }
@@ -1768,6 +1930,9 @@ function fleetScanErrorMessage(err: unknown): string {
   }
   if (text.includes('factory_fleet_key')) {
     return 'Fleet scan needs a secure fleet key. Use Provision first to replace the factory key.';
+  }
+  if (text.includes('not_gateway')) {
+    return gatewayRequiredMessage('Fleet');
   }
   return serialFeatureError('LoRa inventory scan', err);
 }
@@ -2137,6 +2302,10 @@ function serialFeatureError(feature: string, err: unknown): string {
   return `${feature} failed: ${text}`;
 }
 
+function gatewayRequiredMessage(surface: 'Fleet' | 'Monitor'): string {
+  return `${surface} requires a TX/gateway USB device. The selected serial port is a remote; choose the gateway port.`;
+}
+
 function startIdentifyUiPattern(durationMs: number) {
   if (identifyTimer.value) {
     window.clearTimeout(identifyTimer.value);
@@ -2231,12 +2400,8 @@ async function loadSerialAdminConfig() {
     }
     const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
       admin_password: password
-    }, 8000, { label: 'Fetch settings' });
-    serialAdminConfig.value = {
-      ...out.config,
-      wifi_sta_password: '',
-      mqtt_password: ''
-    };
+    }, 15000, { label: 'Fetch settings' });
+    serialAdminConfig.value = normalizeSerialAdminConfig(out.config, serialAdminStatus.value);
     pushSerialLog('Local configuration loaded. Password fields stay blank unless you enter new values.');
   } catch (e) {
     const msg = serialFeatureError('Config load', e);
@@ -2335,7 +2500,11 @@ async function saveSerialAdminConfig() {
       admin_password: password,
       config: serialConfigPatch()
     }, 12000, { label: 'Save settings' });
-    pushSerialLog(`Configuration saved${out.network_restarted ? '; networking restarted' : ''}.`);
+    const effects = [
+      out.network_restarted ? 'networking restarted' : '',
+      out.ota_auth_changed ? 'admin password changed; use the new password after reboot' : ''
+    ].filter(Boolean);
+    pushSerialLog(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
     await refreshSerialAdminStatus();
   } catch (e) {
     const msg = serialFeatureError('Config save', e);
@@ -2357,7 +2526,8 @@ async function rebootSerialDevice() {
   pushSerialLog('Sending reboot command...');
   try {
     await sendEasyPairCommand('reboot', { admin_password: password }, 5000, { label: 'Reboot device' });
-    pushSerialLog('Reboot command accepted.');
+    serialAdminStatus.value = null;
+    pushSerialLog('Reboot command accepted; cached live status was cleared until the device responds again.');
   } catch (e) {
     const msg = serialFeatureError('Reboot', e);
     pushSerialLog(msg);
@@ -2386,7 +2556,10 @@ async function factoryResetSerialDevice() {
       keep_shared_fleet_key: serialFactoryKeepFleet.value,
       keep_wifi_credentials: serialFactoryKeepWifi.value
     }, 6000, { label: 'Factory reset' });
-    pushSerialLog('Factory reset command accepted; device is rebooting.');
+    serialAdminStatus.value = null;
+    serialAdminConfig.value = null;
+    settingsWifiNetworks.value = [];
+    pushSerialLog('Factory reset command accepted; device is rebooting and loaded settings were invalidated.');
   } catch (e) {
     const msg = serialFeatureError('Factory reset', e);
     pushSerialLog(msg);
@@ -2681,6 +2854,48 @@ async function scanGatewayWifi() {
   } catch (e) {
     const msg = serialFeatureError('WiFi scan', e);
     pushPairLog(msg);
+    notify(msg);
+  } finally {
+    isWifiScanning.value = false;
+  }
+}
+
+async function scanSettingsWifi() {
+  if (!selectedPort.value) {
+    notify('Select a USB device first');
+    return;
+  }
+  if (!hasActiveDeviceInfo.value) {
+    const ok = await readDeviceInfo();
+    if (!ok) return;
+  }
+  const password = serialAdminPassword.value;
+  if (!password) {
+    notify('Read identity first to use the factory password');
+    return;
+  }
+  isWifiScanning.value = true;
+  pushSerialLog('Scanning WiFi networks from the selected USB device...');
+  try {
+    if (!activeSerialDevice.value?.adminSupported) {
+      await probeSerialAdminSupport(selectedPort.value);
+    }
+    const out = await sendEasyPairCommand<WifiScanResponse>('wifi_scan', {
+      admin_password: password
+    }, 20000, { label: 'Scan WiFi' });
+    const networks = (out.networks || [])
+      .filter(n => n && n.ssid)
+      .sort((a, b) => Number(b.rssi || -999) - Number(a.rssi || -999));
+    settingsWifiNetworks.value = networks;
+    const state = serialDeviceState(settingsSelectedPort.value);
+    if (state) state.wifiScanned = true;
+    if (serialAdminConfig.value && !serialAdminConfig.value.wifi_sta_ssid && networks.length > 0) {
+      serialAdminConfig.value.wifi_sta_ssid = networks[0].ssid;
+    }
+    pushSerialLog(`Settings WiFi scan found ${networks.length} network${networks.length === 1 ? '' : 's'}.`);
+  } catch (e) {
+    const msg = serialFeatureError('WiFi scan', e);
+    pushSerialLog(msg);
     notify(msg);
   } finally {
     isWifiScanning.value = false;
@@ -3098,12 +3313,7 @@ watch(activeMode, (mode) => {
   if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
     readDeviceInfo();
   }
-  if (mode !== 'monitor') {
-    stopMonitorPolling();
-  } else if (monitorAutoRefresh.value && selectedPort.value) {
-    startMonitorPolling();
-    refreshMonitorData(true);
-  }
+  if (mode !== 'monitor') stopMonitorPolling();
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
   } else if (selectedPort.value) {
@@ -3126,10 +3336,7 @@ watch(selectedPort, (port) => {
   }
   if (activeMode.value === 'monitor') {
     monitorFleetRows.value = [];
-    if (monitorAutoRefresh.value) {
-      startMonitorPolling();
-      refreshMonitorData(true);
-    }
+    stopMonitorPolling();
   } else if (activeMode.value === 'network') {
     loraInventory.value = [];
     loraInventoryScan.value = null;
@@ -3141,8 +3348,15 @@ watch(provisionSelectedPort, () => {
   pairStatus.value = null;
 });
 
+watch(flashSelectedPort, port => saveTabPort('serial', port));
+watch(provisionSelectedPort, port => saveTabPort('pair', port));
+watch(fleetSelectedPort, port => saveTabPort('network', port));
+watch(monitorSelectedPort, port => saveTabPort('monitor', port));
+watch(settingsSelectedPort, port => saveTabPort('settings', port));
+
 onMounted(async () => {
   generatePairFleetKey(false);
+  loadSavedTabPorts();
   try {
     flasherAppVersion.value = await invoke<string>('get_app_version');
   } catch {
@@ -3156,6 +3370,10 @@ onMounted(async () => {
     const savedErase = localStorage.getItem(ERASE_BEFORE_FLASH_STORAGE_KEY);
     if (savedErase === 'true' || savedErase === 'false') {
       eraseBeforeFlash.value = savedErase === 'true';
+    }
+    const savedMonitorAutoRefresh = localStorage.getItem(MONITOR_AUTO_REFRESH_STORAGE_KEY);
+    if (savedMonitorAutoRefresh === 'true' || savedMonitorAutoRefresh === 'false') {
+      monitorAutoRefresh.value = savedMonitorAutoRefresh === 'true';
     }
   } catch (_) {
     // Ignore storage failures; checkbox defaults still work.
@@ -3182,7 +3400,7 @@ onMounted(async () => {
     pushSerialLog(`Region auto-detection unavailable; using default: ${region.value}`);
   }
 
-  refreshPorts();
+  refreshPorts(false);
   fetchFirmware();
 
   unlistenFlash = await listen<LogEvent>('flash-log', (event) => {
@@ -3216,7 +3434,7 @@ onMounted(async () => {
 
   unlistenPortsChanged = await listen<PortsChangedEvent>('serial-ports-changed', () => {
     if (!isFlashing.value) {
-      refreshPorts();
+      refreshPorts(true);
     }
   });
 });
@@ -3246,7 +3464,13 @@ watch(eraseBeforeFlash, (next) => {
 });
 
 watch(monitorAutoRefresh, (enabled) => {
-  if (enabled) {
+  try {
+    localStorage.setItem(MONITOR_AUTO_REFRESH_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch (_) {
+    // Ignore storage failures; current checkbox value still applies.
+  }
+  if (!isMonitorLoopRunning.value) return;
+  if (enabled && activeMode.value === 'monitor' && selectedPort.value) {
     startMonitorPolling();
     refreshMonitorData(true);
   } else {
@@ -4011,8 +4235,23 @@ function countCrashEvents(entries: string[]): number {
 
             <div v-if="settingsTab === 'network'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
               <template v-if="serialAdminConfig">
+                <div class="col-span-2 rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span>WiFi passwords are redacted on fetch. Leave password fields blank to keep the stored value.</span>
+                    <button @click="scanSettingsWifi" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy || isWifiScanning" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+                      {{ isWifiScanning ? 'Scanning...' : 'Scan WiFi' }}
+                    </button>
+                  </div>
+                </div>
                 <label class="self-center text-right font-semibold text-slate-300">WiFi SSID</label>
-                <input v-model="serialAdminConfig.wifi_sta_ssid" class="glass-input h-9" placeholder="Leave blank for no WiFi" />
+                <div class="flex gap-2">
+                  <input v-model="serialAdminConfig.wifi_sta_ssid" class="glass-input h-9 flex-1" placeholder="Leave blank for no WiFi" list="settings-wifi-networks" />
+                  <datalist id="settings-wifi-networks">
+                    <option v-for="network in settingsWifiNetworks" :key="`${network.ssid}-${network.bssid}`" :value="network.ssid">
+                      {{ network.ssid }} · {{ wifiSignalLabel(network.rssi) }} · ch {{ network.channel }}{{ network.secure ? ' · secured' : ' · open' }}
+                    </option>
+                  </datalist>
+                </div>
                 <label class="self-center text-right font-semibold text-slate-300">New WiFi password</label>
                 <div class="flex gap-2">
                   <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
@@ -4096,21 +4335,23 @@ function countCrashEvents(entries: string[]): number {
 
             <div v-if="settingsTab === 'sensors'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
               <template v-if="serialAdminConfig">
+                <div class="col-span-2 rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
+                  This hardware uses the firmware-defined DS18B20 pin and runtime cadence. Settings only exposes whether temperature reporting is enabled.
+                </div>
                 <label class="self-center text-right font-semibold text-slate-300">DS18B20</label>
                 <label class="flex items-center gap-2 text-slate-300">
                   <input v-model="serialAdminConfig.sensor_temp_enabled" type="checkbox" />
                   Temperature sensor enabled
                 </label>
-                <label class="self-center text-right font-semibold text-slate-300">Sensor pin</label>
-                <input v-model.number="serialAdminConfig.sensor_temp_pin" type="number" min="0" max="16" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Report seconds</label>
-                <input v-model.number="serialAdminConfig.sensor_temp_interval_s" type="number" min="5" max="3600" class="glass-input h-9" />
               </template>
             </div>
 
             <div v-if="settingsTab === 'system'" class="flex flex-col gap-3 text-xs">
               <div class="rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
-                Save applies the loaded settings over the selected transport. Reboot and factory reset use the same authenticated serial-admin path for now.
+                Save applies the loaded settings over USB serial admin. Reboot clears cached live status. Factory reset clears loaded settings in Flasher because the device reboots into a new/default configuration.
+              </div>
+              <div class="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
+                Keep fleet key preserves pairing material. Keep WiFi preserves STA credentials. Clearing either one returns that part of the device to factory-default setup.
               </div>
               <div class="flex flex-wrap items-center gap-3">
                 <button @click="saveSerialAdminConfig" :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig" class="primary-btn h-9 px-4 text-xs font-bold disabled:opacity-60">
