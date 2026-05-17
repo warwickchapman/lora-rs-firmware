@@ -335,6 +335,7 @@ const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
 const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
+const isFleetPeerAutoRefreshing = ref(false);
 const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
@@ -693,6 +694,7 @@ const fleetGatewaySummary = computed(() => {
 });
 const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
+  isFleetPeerAutoRefreshing.value ||
   !selectedPort.value
 );
 const gatewayWifiReady = computed(() =>
@@ -1530,6 +1532,15 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   }
 }
 
+function fleetRowNeedsIdentityRefresh(row: LoraInventoryDevice): boolean {
+  if (!row.address || row.address < 1 || row.address > LRS_REMOTE_SCAN_CAP) return false;
+  return !row.chip_id ||
+    !row.fw_version ||
+    !row.wifi_enabled_known ||
+    !row.wifi_connected_known ||
+    !row.mqtt_known;
+}
+
 async function refreshLoraInventoryStatus(background = true) {
   await refreshGatewaySnapshot(fleetSelectedPort.value, background, 'fleet');
 }
@@ -1630,7 +1641,7 @@ async function refreshMonitorData(background = false) {
   }
 }
 
-async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor') {
+async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor', autoRefreshKnown = true) {
   if (!port) return;
   if (background && gatewaySnapshotPauseCount.value > 0) return;
   try {
@@ -1658,6 +1669,9 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       isLoraInventoryScanning.value = !!inventory.scan?.active;
       networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
       if (!inventory.scan?.active) stopLoraInventoryPolling(false);
+      if (source === 'fleet' && autoRefreshKnown && !inventory.scan?.active) {
+        await refreshIncompleteFleetPeers(port);
+      }
     }
     if (port === monitorSelectedPort.value) {
       mergeMonitorPeerRows(inventory.devices || []);
@@ -1671,6 +1685,37 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       return;
     }
     throw e;
+  }
+}
+
+async function refreshIncompleteFleetPeers(port: string) {
+  if (isFleetPeerAutoRefreshing.value || isLoraInventoryScanning.value) return;
+  const password = adminPasswordForPort(port);
+  if (!password) return;
+  const targets = loraInventory.value
+    .filter(fleetRowNeedsIdentityRefresh)
+    .map(row => row.address);
+  if (targets.length === 0) return;
+
+  isFleetPeerAutoRefreshing.value = true;
+  networkStatusMessage.value = `Refreshing details for ${targets.length} cached peer${targets.length === 1 ? '' : 's'}...`;
+  try {
+    for (const address of targets) {
+      await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
+        admin_password: password,
+        start_address: address,
+        end_address: address,
+        interval_ms: 250
+      }, 8000, { label: `Refresh peer ${address}` });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await refreshGatewaySnapshot(port, false, 'fleet', false);
+    }
+    networkStatusMessage.value = `Refreshed cached peer details for ${targets.length} peer${targets.length === 1 ? '' : 's'}.`;
+  } catch (e) {
+    networkStatusMessage.value = serialFeatureError('Cached peer refresh', e);
+    pushNetworkLog(networkStatusMessage.value);
+  } finally {
+    isFleetPeerAutoRefreshing.value = false;
   }
 }
 
@@ -4281,10 +4326,11 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
-            <table class="w-full min-w-[1180px] border-collapse text-xs">
+            <table class="w-full min-w-[1280px] border-collapse text-xs">
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
                   <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Device</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Freshness</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
                   <th class="px-2 py-1.5 text-left font-semibold">IP</th>
@@ -4300,10 +4346,11 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="monitorFleetRows.length === 0">
-                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
+                  <td colspan="13" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
                 </tr>
                 <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ lrsDeviceName(device.chip_id) }}</td>
                   <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', monitorFreshnessClass(device)]">{{ monitorFreshnessLabel(device) }}</span>
                   </td>
@@ -4571,16 +4618,16 @@ function countCrashEvents(entries: string[]): number {
                 >
                   <td class="px-2 py-1.5"><input v-model="device.selected" type="checkbox" /></td>
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ lrsDeviceName(device.chip_id) }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ displayFirmwareVersion(device.fw_version) }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id ? lrsDeviceName(device.chip_id) : (isFleetPeerAutoRefreshing ? 'refreshing...' : '-') }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : (isFleetPeerAutoRefreshing ? 'refreshing...' : '-') }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_enabled_known ? (device.wifi_enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300') : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                      {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : 'Unknown' }}
+                      {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : (isFleetPeerAutoRefreshing ? 'Refreshing' : 'Unknown') }}
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : (isFleetPeerAutoRefreshing ? 'Refreshing' : 'Unknown') }}</td>
                   <td class="px-2 py-1.5 font-mono">
                     <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
                     <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']">
