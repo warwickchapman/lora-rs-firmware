@@ -9,9 +9,8 @@ LRS extends a control signal over LoRa between identical ESP8266-based boards.
 Mode/role model:
 - `standalone` mode with role `none`
 - `paired` mode with roles `transmitter` / `receiver`
-- `mesh` mode with roles `coordinator` / `node`
 
-Operationally, TX/coordinator behavior and RX/node behavior are selected from the commissioned role.
+Operationally, TX and RX behavior are selected from the commissioned role.
 
 Primary use: reliable remote control signaling (generator start/stop interfaces, contactor coil control, remote dry-contact extension).
 
@@ -37,7 +36,7 @@ Important ESP8266 constraints:
 
 ## 3. Core Features
 - LoRa relay control with ACK/timeout behavior.
-- Configurable commissioning mode/role on identical hardware (`standalone`, `paired`, `mesh`).
+- Configurable commissioning mode/role on identical hardware (`standalone`, `paired`).
 - USB local maintenance through the desktop Flasher app.
 - LittleFS persistent settings.
 - Optional MQTT bridge (STA mode).
@@ -64,7 +63,6 @@ Minimum required settings:
 
 ## 6. Topologies
 - `paired` mode: classic TX/RX behavior with heartbeat + ACK semantics.
-- `mesh` mode: coordinator/node role naming with the same underlying TX/RX branch behavior.
 - `standalone` mode: local-only role (`none`) for non-paired local operation.
 - Addressing still defines 1-to-1, 1-to-many, and many-to-1 layouts.
 

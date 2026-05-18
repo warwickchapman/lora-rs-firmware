@@ -21,12 +21,9 @@ constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
 constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
-constexpr char kModeMesh[] = "mesh";
 constexpr char kRoleNone[] = "none";
 constexpr char kRoleTransmitter[] = "transmitter";
 constexpr char kRoleReceiver[] = "receiver";
-constexpr char kRoleCoordinator[] = "coordinator";
-constexpr char kRoleNode[] = "node";
 #ifdef REGION_US
 constexpr long kLockedLoraFrequencyHz = 915000000L;
 constexpr float kDefaultWifiTxPowerDbm = 19.37f;
@@ -91,13 +88,16 @@ constexpr const char *kAllowedFields[] = {
     "fleet_setup_prompt_dismissed",
     "admin_password",
     "factory_serial",
+};
+constexpr size_t kAllowedFieldCount = sizeof(kAllowedFields) / sizeof(kAllowedFields[0]);
+constexpr const char *kDeprecatedAcceptedFields[] = {
     "audit_last_saved_by",
     "audit_last_saved_ms",
     "audit_last_reboot_reason",
     "audit_last_reboot_ms",
     "audit_boot_count",
 };
-constexpr size_t kAllowedFieldCount = sizeof(kAllowedFields) / sizeof(kAllowedFields[0]);
+constexpr size_t kDeprecatedAcceptedFieldCount = sizeof(kDeprecatedAcceptedFields) / sizeof(kDeprecatedAcceptedFields[0]);
 
 int monthFromShort(const String &m) {
   if (m == "Jan") return 1;
@@ -157,6 +157,9 @@ bool isAllowedConfigKey(const char *key) {
   if (key == nullptr || key[0] == '\0') return false;
   for (size_t i = 0; i < kAllowedFieldCount; ++i) {
     if (strcmp(key, kAllowedFields[i]) == 0) return true;
+  }
+  for (size_t i = 0; i < kDeprecatedAcceptedFieldCount; ++i) {
+    if (strcmp(key, kDeprecatedAcceptedFields[i]) == 0) return true;
   }
   return false;
 }
@@ -355,11 +358,6 @@ bool ConfigStore::begin() {
   cfg_.fleet_setup_prompt_dismissed = root["fleet_setup_prompt_dismissed"] | false;
   cfg_.admin_password = root["admin_password"] | "";
   cfg_.factory_serial = root["factory_serial"] | "";
-  cfg_.audit_last_saved_by = root["audit_last_saved_by"] | "factory";
-  cfg_.audit_last_saved_ms = root["audit_last_saved_ms"] | 0;
-  cfg_.audit_last_reboot_reason = root["audit_last_reboot_reason"] | "power_on";
-  cfg_.audit_last_reboot_ms = root["audit_last_reboot_ms"] | 0;
-  cfg_.audit_boot_count = root["audit_boot_count"] | 0;
 
   if (cfg_.local_address < 1 || cfg_.local_address > 254 || cfg_.remote_address < 1 || cfg_.remote_address > 254 ||
       cfg_.local_address == cfg_.remote_address) {
@@ -428,7 +426,6 @@ bool ConfigStore::begin() {
     cfg_.wifi_ap_fallback_policy = "fallback_on_disconnect";
   }
 
-  cfg_.audit_boot_count += 1;
   LRS_LOGI(FS,
            "event=config_loaded path=%s schema_version=%u commissioned=%u role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
@@ -507,11 +504,6 @@ bool ConfigStore::save() {
   doc["fleet_setup_prompt_dismissed"] = cfg_.fleet_setup_prompt_dismissed;
   doc["admin_password"] = cfg_.admin_password;
   doc["factory_serial"] = cfg_.factory_serial;
-  doc["audit_last_saved_by"] = cfg_.audit_last_saved_by;
-  doc["audit_last_saved_ms"] = cfg_.audit_last_saved_ms;
-  doc["audit_last_reboot_reason"] = cfg_.audit_last_reboot_reason;
-  doc["audit_last_reboot_ms"] = cfg_.audit_last_reboot_ms;
-  doc["audit_boot_count"] = cfg_.audit_boot_count;
 
   const size_t estimatedBytes = measureJson(doc);
   if (estimatedBytes == 0 || estimatedBytes > kConfigMaxBytes) {
@@ -580,21 +572,6 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
     cfg_.wifi_sta_password = preservedWifiPassword;
   }
 
-  if (keepSharedFleetKey && keepWifiCredentials) {
-    cfg_.audit_last_saved_by = "factory_reset_keep_fleet_wifi";
-    cfg_.audit_last_reboot_reason = "factory_reset_keep_fleet_wifi";
-  } else if (keepSharedFleetKey) {
-    cfg_.audit_last_saved_by = "factory_reset_keep_fleet";
-    cfg_.audit_last_reboot_reason = "factory_reset_keep_fleet";
-  } else if (keepWifiCredentials) {
-    cfg_.audit_last_saved_by = "factory_reset_keep_wifi";
-    cfg_.audit_last_reboot_reason = "factory_reset_keep_wifi";
-  } else {
-    cfg_.audit_last_saved_by = "factory_reset_full";
-    cfg_.audit_last_reboot_reason = "factory_reset_full";
-  }
-  cfg_.audit_last_saved_ms = 0;
-  cfg_.audit_last_reboot_ms = 0;
   LRS_LOGW(SYS,
            "event=factory_reset_apply keep_fleet_key=%u keep_wifi=%u fleet_key=%s wifi_ssid=%s",
            keepSharedFleetKey ? 1U : 0U,
@@ -800,11 +777,6 @@ void ConfigStore::setDefaults() {
   cfg_.fleet_setup_prompt_dismissed = false;
   cfg_.admin_password = "";
   cfg_.factory_serial = "";
-  cfg_.audit_last_saved_by = "factory";
-  cfg_.audit_last_saved_ms = 0;
-  cfg_.audit_last_reboot_reason = "power_on";
-  cfg_.audit_last_reboot_ms = 0;
-  cfg_.audit_boot_count = 0;
 }
 
 void ConfigStore::ensureProvisionedDefaults() {
@@ -836,11 +808,6 @@ void ConfigStore::ensureProvisionedDefaults() {
   char serialBuf[24];
   snprintf(serialBuf, sizeof(serialBuf), "lrs%s-%s", weekStamp, chipHex.c_str());
   cfg_.factory_serial = serialBuf;
-  cfg_.audit_last_saved_by = "factory";
-  cfg_.audit_last_saved_ms = 0;
-  cfg_.audit_last_reboot_reason = "power_on";
-  cfg_.audit_last_reboot_ms = 0;
-  cfg_.audit_boot_count = 1;
   cfg_.commissioned = true;
   cfg_.mode = kModePaired;
   cfg_.role = cfg_.role_tx ? kRoleTransmitter : kRoleReceiver;

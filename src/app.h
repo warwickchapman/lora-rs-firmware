@@ -1,6 +1,5 @@
 #pragma once
 
-#include "feature_flags.h"
 #include "config_store.h"
 #include "logger.h"
 #include "mqtt_bridge.h"
@@ -8,9 +7,6 @@
 #include "sensor_manager.h"
 #include "serial_admin.h"
 #include "state_machine.h"
-#if LRS_ENABLE_AUTOMATIONS
-#include "automation_rules_engine.h"
-#endif
 
 class App {
  public:
@@ -24,9 +20,6 @@ class App {
   SensorManager sensors_;
   NodeStateMachine sm_;
   SerialAdmin serial_admin_;
-#if LRS_ENABLE_AUTOMATIONS
-  AutomationRulesEngine automations_;
-#endif
 
   bool wifi_sta_connecting_ = false;
   bool wifi_sta_scanning_ = false;
@@ -52,7 +45,7 @@ class App {
   uint8_t sta_connect_consecutive_failures_ = 0;
   uint8_t sta_stack_reset_count_ = 0;
   bool wifi_stack_disabled_ = false;
-  String cached_sta_hostname_;
+  FixedSettingString<32> cached_sta_hostname_;
   uint8_t sta_target_bssid_[6]{};
   int32_t sta_target_channel_ = 0;
   int32_t sta_last_sdk_status_ = 0;
@@ -70,7 +63,6 @@ class App {
   void applyWifiRuntimeSettings();
   void stopWifiForAdminDisable();
   bool shouldEnableSoftAp() const;
-  bool parseIpAddress(const String &raw, IPAddress &out) const;
   WiFiPhyMode_t configuredWifiPhyMode() const;
   const char *configuredWifiPhyModeText() const;
   void startNtpClient();
@@ -78,7 +70,7 @@ class App {
   void applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth);
   void startOta();
   void refreshCachedStaHostname();
-  String normalizeHostname(const String &input) const;
+  void normalizeHostname(const char *input, char *out, size_t outSize) const;
   void advanceStaReconnectFibonacci();
   void resetStaReconnectFibonacci();
 

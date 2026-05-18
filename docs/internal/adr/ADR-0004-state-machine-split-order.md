@@ -11,7 +11,7 @@ Split `NodeStateMachine` only after documentation/invariant prep, using a risk-o
 2. time/LED helpers
 3. peers + MQTT peer commands/polling
 4. WiFi provisioning/factory reset helpers
-5. provisioning coordinator/target helpers
+5. provisioning gateway/target helpers
 6. provisioning frame handler
 7. TX/RX branches
 8. `tickReceive()` near last

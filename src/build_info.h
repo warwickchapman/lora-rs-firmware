@@ -5,6 +5,18 @@
 #define LRS_FW_VERSION "0.0.0-dev"
 #endif
 
+#ifndef LRS_FW_MAJOR
+#define LRS_FW_MAJOR 0
+#endif
+
+#ifndef LRS_FW_MINOR
+#define LRS_FW_MINOR 0
+#endif
+
+#ifndef LRS_FW_PATCH
+#define LRS_FW_PATCH 0
+#endif
+
 #ifndef LRS_GIT_SHA
 #define LRS_GIT_SHA "nogit"
 #endif

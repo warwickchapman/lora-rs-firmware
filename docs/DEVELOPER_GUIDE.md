@@ -42,8 +42,7 @@ Commands:
 Mode/role mapping:
 - `standalone` mode: role `none`
 - `paired` mode: role `transmitter` or `receiver`
-- `mesh` mode: role `coordinator` or `node`
-- Runtime behavior still branches on `role_tx` (`true` => TX/coordinator path, `false` => RX/node path).
+- Runtime behavior still branches on `role_tx` (`true` => TX path, `false` => RX path).
 
 ## 5. Tick Order and Performance
 In `App::tick`:

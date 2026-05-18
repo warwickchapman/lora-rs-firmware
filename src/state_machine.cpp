@@ -182,44 +182,9 @@ uint32_t decodeU32LE(const uint8_t *p) {
 }
 
 void parseFwVersionPacked(uint8_t &major, uint8_t &minor, uint8_t &patch) {
-  major = 0;
-  minor = 0;
-  patch = 0;
-  const String s = String(LRS_FW_VERSION);
-  int part = 0;
-  int value = 0;
-  bool inDigits = false;
-  for (int i = 0; i < s.length(); ++i) {
-    const char c = s[i];
-    if (c >= '0' && c <= '9') {
-      inDigits = true;
-      value = (value * 10) + (c - '0');
-      if (value > 255) value = 255;
-      continue;
-    }
-    if (inDigits) {
-      if (part == 0)
-        major = static_cast<uint8_t>(value);
-      else if (part == 1)
-        minor = static_cast<uint8_t>(value);
-      else if (part == 2) {
-        patch = static_cast<uint8_t>(value);
-        return;
-      }
-      part++;
-      value = 0;
-      inDigits = false;
-    }
-    if (c == '-') break;
-  }
-  if (inDigits) {
-    if (part == 0)
-      major = static_cast<uint8_t>(value);
-    else if (part == 1)
-      minor = static_cast<uint8_t>(value);
-    else if (part == 2)
-      patch = static_cast<uint8_t>(value);
-  }
+  major = static_cast<uint8_t>(LRS_FW_MAJOR);
+  minor = static_cast<uint8_t>(LRS_FW_MINOR);
+  patch = static_cast<uint8_t>(LRS_FW_PATCH);
 }
 
 uint32_t fnv1a32(const uint8_t *data, size_t len) {
@@ -669,19 +634,6 @@ void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
   {
     lrslog::event("mqtt_local_relay", 0, last_counter_, relay_state_);
   }
-}
-
-void NodeStateMachine::automationSetLocalRelay(uint8_t relayState) {
-  if ((runtime_.role_tx && runtime_.input_control_paired_lora_enabled) || (!runtime_.role_tx && paired_input_slave_mode_)) {
-    lrslog::event("relay_local_automation_blocked", 0, last_counter_, relayState ? 1 : 0);
-    return;
-  }
-  relay_state_ = relayState ? 1 : 0;
-  digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
-  if (!runtime_.role_tx) {
-    last_rx_control_source_ = RxControlSource::Automation;
-  }
-  lrslog::event("automation_local_relay", 0, last_counter_, relay_state_);
 }
 
 void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent, bool resetRetryWindow) {
@@ -1624,7 +1576,7 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   }
   if (isDefaultFleetKey()) {
     LRS_LOGW(API, "event=provisioning_start_reject reason=default_fleet_key");
-    return false;  // coordinator must have a production key
+    return false;  // gateway must have a production key
   }
 
   prov_ = ProvisioningSessionRuntime{};
@@ -1654,7 +1606,7 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   prov_.provision_all_requested = false;
   prov_.current_index = 0;
   prov_.watchdog_last_log_ms = 0;
-  // Queue discovery broadcast(s) for coordinator tick instead of requiring
+  // Queue discovery broadcast(s) for the gateway tick instead of requiring
   // immediate radio TX in the API request path.
   prov_.discover_broadcast_remaining = (kProvDiscoverBroadcastBurstCount > 0) ? kProvDiscoverBroadcastBurstCount : 1U;
   prov_.next_discover_broadcast_ms = prov_.started_ms;
@@ -3395,7 +3347,7 @@ bool NodeStateMachine::radioTxBudgetAvailable() const {
 void NodeStateMachine::resetRadioTxBudgetForTick() {
   const bool provisioningBurstActive =
       prov_.active && prov_.state == ProvisioningSessionState::Provisioning;
-  // Normal runtime stays one-send-per-tick; active provisioning uses its own bounded burst inside the coordinator.
+  // Normal runtime stays one-send-per-tick; active provisioning uses its own bounded burst inside the gateway.
   radio_tx_budget_active_ = !provisioningBurstActive;
   radio_tx_used_this_tick_ = false;
 }

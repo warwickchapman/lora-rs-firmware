@@ -62,7 +62,29 @@ def _read_repo_version(default):
         return default
 
 
+def _version_parts(version):
+    parts = []
+    value = ""
+    for char in version:
+        if char.isdigit():
+            value += char
+            continue
+        if value:
+            parts.append(min(int(value), 255))
+            value = ""
+            if len(parts) == 3:
+                break
+        if char == "-":
+            break
+    if value and len(parts) < 3:
+        parts.append(min(int(value), 255))
+    while len(parts) < 3:
+        parts.append(0)
+    return parts[:3]
+
+
 fw_version = _read_repo_version(env.GetProjectOption("custom_fw_version", "0.0.0-dev"))
+fw_major, fw_minor, fw_patch = _version_parts(fw_version)
 git_sha = _run_git(["rev-parse", "--short", "HEAD"], "nogit")
 git_branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
 dirty = _git_dirty_flag()
@@ -73,6 +95,9 @@ build_id = _deterministic_tree_id(git_sha, dirty)
 env.Append(
     CPPDEFINES=[
         ("LRS_FW_VERSION", '\\"%s\\"' % fw_version),
+        ("LRS_FW_MAJOR", fw_major),
+        ("LRS_FW_MINOR", fw_minor),
+        ("LRS_FW_PATCH", fw_patch),
         ("LRS_GIT_SHA", '\\"%s\\"' % git_sha),
         ("LRS_GIT_BRANCH", '\\"%s\\"' % git_branch),
         ("LRS_GIT_DIRTY", dirty),

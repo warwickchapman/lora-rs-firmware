@@ -5,7 +5,6 @@ This repository contains ESP8266 firmware for LoRa relay control devices with mo
 Both hardware units are identical. Behavior is selected by commissioning mode/role:
 - `Standalone` mode: role `none` (local-only control, no paired LoRa role split)
 - `Paired` mode: roles `transmitter` and `receiver`
-- `Mesh` mode: roles `coordinator` and `node`
 
 The codebase is modular state-machine firmware with LittleFS settings, USB serial admin for the desktop Flasher app, MQTT support, OTA pull support, and factory metadata generation.
 

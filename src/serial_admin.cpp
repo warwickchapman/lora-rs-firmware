@@ -162,11 +162,6 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["admin_password"] = includeSecrets ? cfg.admin_password : "";
   doc["admin_password_set"] = cfg.admin_password.length() > 0;
   doc["factory_serial"] = cfg.factory_serial;
-  doc["audit_last_saved_by"] = cfg.audit_last_saved_by;
-  doc["audit_last_saved_ms"] = cfg.audit_last_saved_ms;
-  doc["audit_last_reboot_reason"] = cfg.audit_last_reboot_reason;
-  doc["audit_last_reboot_ms"] = cfg.audit_last_reboot_ms;
-  doc["audit_boot_count"] = cfg.audit_boot_count;
 }
 
 bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
@@ -206,9 +201,14 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       !doc["allowed_controller_addresses"].isNull();
   if (cfg.mode == "paired") {
     cfg.role = cfg.role_tx ? "transmitter" : "receiver";
+  } else if (cfg.mode == "standalone") {
+    cfg.role = "none";
+    cfg.role_tx = true;
   } else if (cfg.mode.length() == 0) {
     cfg.mode = "paired";
     cfg.role = cfg.role_tx ? "transmitter" : "receiver";
+  } else {
+    return fail("mode_invalid");
   }
   cfg.local_address = parseAddressField(doc["local_address"], cfg.local_address);
   cfg.remote_address =
@@ -454,8 +454,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   if (cfg.sensor_temp_interval_s > 3600)
     cfg.sensor_temp_interval_s = 3600;
 
-  cfg.audit_last_saved_by = "serial_admin";
-  cfg.audit_last_saved_ms = millis();
   networkChanged = (cfg.wifi_sta_ssid != prevStaSsid) ||
                    (cfg.wifi_sta_password != prevStaPassword) ||
                    (cfg.lan_hostname != prevLanHost) ||
@@ -711,10 +709,9 @@ void SerialAdmin::handleSetConfig(JsonDocument &doc) {
   JsonDocument out;
   out["cmd"] = "set_config";
   if (id[0] != '\0')
-    out["id"] = id;
+  out["id"] = id;
   out["network_restarted"] = networkChanged;
   out["rebooting"] = otaAuthChanged;
-  out["saved_by"] = config_->settings().audit_last_saved_by;
   sendOk(out);
 }
 
@@ -785,8 +782,6 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
                    cfg.allowed_controller_count);
   cfg.input_control_paired_lora_enabled =
       doc["input_control_paired_lora_enabled"] | true;
-  cfg.audit_last_saved_by = "serial_easy_pair_gateway";
-  cfg.audit_last_saved_ms = millis();
 
   if (!config_->save()) {
     sendError("configure_gateway", "save_failed", requestId(doc));
@@ -861,8 +856,6 @@ void SerialAdmin::handleConfigureWifi(JsonDocument &doc) {
   auto &cfg = config_->settings();
   cfg.wifi_sta_ssid = ssid;
   cfg.wifi_sta_password = pass;
-  cfg.audit_last_saved_by = "serial_easy_pair_wifi";
-  cfg.audit_last_saved_ms = millis();
   if (!config_->save()) {
     sendError("configure_wifi", "save_failed", requestId(doc));
     return;
@@ -1441,8 +1434,6 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
       cfg.known_peer_addresses[cfg.known_peer_count++] = addr;
     }
     cfg.remote_address = cfg.paired_target_addresses[0];
-    cfg.audit_last_saved_by = "serial_easy_pair_targets";
-    cfg.audit_last_saved_ms = millis();
     if (!config_->save()) {
       sendError(cmd, "save_failed", id);
       return;

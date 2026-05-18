@@ -14,17 +14,6 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
     }
     return false;
   }
-  if (mode == "mesh") {
-    if (role == "coordinator") {
-      roleTx = true;
-      return true;
-    }
-    if (role == "node") {
-      roleTx = false;
-      return true;
-    }
-    return false;
-  }
   if (mode == "standalone" && role == "none") {
     roleTx = true;
     return true;

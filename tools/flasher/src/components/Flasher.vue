@@ -1489,7 +1489,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
 
   return {
     ...cfg,
-    mode: stringValue(cfg.mode, status?.mode || 'paired'),
+    mode: cfg.mode === 'standalone' || (!cfg.mode && status?.mode === 'standalone') ? 'standalone' : 'paired',
     commissioned: typeof cfg.commissioned === 'boolean' ? cfg.commissioned : status?.commissioned,
     role_tx: roleTx,
     local_address: localAddress,
@@ -2432,7 +2432,7 @@ function serialConfigPatch(): Record<string, any> {
   const cfg = serialAdminConfig.value;
   if (!cfg) return {};
   const patch: Record<string, any> = {
-    mode: cfg.mode || 'paired',
+    mode: cfg.mode === 'standalone' ? 'standalone' : 'paired',
     role_tx: !!cfg.role_tx,
     local_address: Number(cfg.local_address || 1),
     remote_address: Number(cfg.remote_address || 254),

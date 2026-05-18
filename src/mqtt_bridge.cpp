@@ -621,13 +621,14 @@ bool MqttBridge::connectIfNeeded() {
   }
   last_reconnect_attempt_ms_ = now;
 
-  String clientId = String("LRS-") + chip_id_hex_;
+  char clientId[32]{};
+  snprintf(clientId, sizeof(clientId), "LRS-%s", chip_id_hex_.c_str());
   bool ok = false;
   if (!settings_) return false;
   if (settings_->mqtt_user.length() > 0) {
-    ok = mqtt_client_.connect(clientId.c_str(), settings_->mqtt_user.c_str(), settings_->mqtt_password.c_str());
+    ok = mqtt_client_.connect(clientId, settings_->mqtt_user.c_str(), settings_->mqtt_password.c_str());
   } else {
-    ok = mqtt_client_.connect(clientId.c_str());
+    ok = mqtt_client_.connect(clientId);
   }
 
   if (!ok) {

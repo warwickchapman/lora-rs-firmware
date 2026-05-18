@@ -6,9 +6,8 @@ LRS extends dry-contact control over LoRa between ESP8266-based devices.
 Operating modes:
 - `Standalone`: one device works locally only. The input and relay are not split across LoRa peers.
 - `Paired`: a `transmitter` reads the local input and sends control updates to a `receiver`. The receiver applies the relay state and returns ACK.
-- `Mesh`: uses `coordinator` and `node` role names for gateway-style operation. Internally, the coordinator follows the TX/gateway control path and nodes follow the RX/remote path.
 
-In paired-style control, the transmitter/coordinator relay mirrors ACK-confirmed remote state after a short delay.
+In paired-style control, the transmitter relay mirrors ACK-confirmed remote state after a short delay.
 
 ## Operator Tool
 Use the desktop Flasher app for local setup and maintenance:
@@ -29,9 +28,8 @@ Normal local maintenance is performed with Flasher over USB serial.
 4. Choose the operating mode for the installation:
    - For a simple local-only device, set `Standalone` / `none` in Settings.
    - For one transmitter and one or more receivers, provision the TX/gateway first, then remotes.
-   - For gateway/node naming, use `Mesh` with a coordinator and nodes.
-5. In `Provision`, configure the TX/gateway or coordinator with fleet key, role, address, and WiFi.
-6. Power factory remotes/nodes, scan from the gateway, and provision selected devices.
+5. In `Provision`, configure the TX/gateway with fleet key, role, address, and WiFi.
+6. Power factory remotes, scan from the gateway, and provision selected devices.
 7. In `Fleet`, scan the gateway peer cache and verify remotes appear with current identity/status.
 8. In `Monitor`, confirm relay, input, WiFi, MQTT, heap, and link status.
 

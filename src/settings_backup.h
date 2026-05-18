@@ -61,8 +61,6 @@ struct SettingsBackup {
   uint8_t sensor_temp_pin = 0;
   uint16_t sensor_temp_interval_s = 10;
   bool commissioned = false;
-  FixedSettingString<33> audit_last_saved_by;
-  uint32_t audit_last_saved_ms = 0;
 };
 
 inline void captureSettingsBackup(const Settings &src, SettingsBackup &dst) {
@@ -126,8 +124,6 @@ inline void captureSettingsBackup(const Settings &src, SettingsBackup &dst) {
   dst.sensor_temp_pin = src.sensor_temp_pin;
   dst.sensor_temp_interval_s = src.sensor_temp_interval_s;
   dst.commissioned = src.commissioned;
-  dst.audit_last_saved_by = src.audit_last_saved_by.c_str();
-  dst.audit_last_saved_ms = src.audit_last_saved_ms;
 }
 
 inline void restoreSettingsBackup(const SettingsBackup &src, Settings &dst) {
@@ -191,6 +187,4 @@ inline void restoreSettingsBackup(const SettingsBackup &src, Settings &dst) {
   dst.sensor_temp_pin = src.sensor_temp_pin;
   dst.sensor_temp_interval_s = src.sensor_temp_interval_s;
   dst.commissioned = src.commissioned;
-  dst.audit_last_saved_by = src.audit_last_saved_by.c_str();
-  dst.audit_last_saved_ms = src.audit_last_saved_ms;
 }

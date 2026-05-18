@@ -135,11 +135,6 @@ struct Settings {
   FixedSettingString<33> admin_password;
 
   FixedSettingString<33> factory_serial;
-  FixedSettingString<33> audit_last_saved_by;
-  uint32_t audit_last_saved_ms;
-  FixedSettingString<33> audit_last_reboot_reason;
-  uint32_t audit_last_reboot_ms;
-  uint32_t audit_boot_count;
 };
 
 class ConfigStore {

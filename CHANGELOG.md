@@ -21,8 +21,12 @@ All notable changes to this pre-release project are documented here in current o
 - Device-hosted operator UI/admin services have been removed from normal firmware.
 - Stale device-admin helper scripts and contract/spec documents have been removed from the repository.
 - Orphaned Web UI extraction and local DevMon web helper scripts have been removed.
+- Dormant onboard automation-rule runtime code has been removed until automation returns with a supported Flasher and serial-admin management surface.
+- Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Firmware version packet fields now use build-generated numeric macros instead of parsing `LRS_FW_VERSION` at runtime.
+- Firmware avoids several transient heap-string helpers in WiFi static IP setup, hostname normalization, DS18B20 address formatting, and MQTT client ID creation.
 - Firmware settings strings now use fixed inline buffers instead of long-lived heap-backed `String` fields, reducing ESP8266 heap fragmentation during settings load/save and serial-admin edits.
 - Serial-admin settings patches avoid unnecessary temporary heap strings for fleet keys and admin password validation.
 - OTA pull now verifies the same HTTP stream it flashes, so a checksum match cannot be followed by a second unchecked download.

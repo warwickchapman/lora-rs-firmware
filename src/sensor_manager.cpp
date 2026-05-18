@@ -143,12 +143,9 @@ void SensorManager::setupBus() {
 }
 
 String SensorManager::formatAddress() const {
-  String out;
-  for (size_t i = 0; i < 8; i++) {
-    if (i) out += ":";
-    if (addr_[i] < 16) out += "0";
-    out += String(addr_[i], HEX);
-  }
-  out.toLowerCase();
-  return out;
+  char out[24]{};
+  snprintf(out, sizeof(out), "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
+           addr_[0], addr_[1], addr_[2], addr_[3],
+           addr_[4], addr_[5], addr_[6], addr_[7]);
+  return String(out);
 }

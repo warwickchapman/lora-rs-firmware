@@ -57,10 +57,9 @@ A CSV row with:
 Commissioning enforces canonical mode/role pairs:
 - `standalone` mode -> role `none`
 - `paired` mode -> roles `transmitter` / `receiver`
-- `mesh` mode -> roles `coordinator` / `node`
 
 Notes:
-- Runtime still uses `role_tx` internally (`true` = transmitter/coordinator behavior, `false` = receiver/node behavior).
+- Runtime still uses `role_tx` internally (`true` = transmitter behavior, `false` = receiver behavior).
 - `input_control_paired_lora_enabled` is valid only for paired TX.
 - Current LoRa provisioning apply path configures `mode=paired` with role `transmitter` or `receiver`.
 

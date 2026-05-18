@@ -93,9 +93,6 @@ void App::begin() {
   };
   lrslog::setUnixTimeProvider(unixProvider);
   mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_);
-#if LRS_ENABLE_AUTOMATIONS
-  automations_.begin();
-#endif
   serial_admin_.begin(
       &config_, &sm_,
       [this](bool restartNetwork, bool restartOtaAuth) {
@@ -202,11 +199,6 @@ void App::tick() {
   phaseStartMs = millis();
   sm_.tick();
   phaseSlowWarn("sm_tick", phaseStartMs);
-#if LRS_ENABLE_AUTOMATIONS
-  phaseStartMs = millis();
-  automations_.tick(config_.settings(), sm_);
-  phaseSlowWarn("automations_tick", phaseStartMs);
-#endif
   {
     // Remote LoRa admin commands are applied in App so persistent config,
     // network restarts, and acknowledgement status stay in one place.
@@ -218,8 +210,6 @@ void App::tick() {
         auto &cfg = config_.settings();
         const bool changed = (cfg.wifi_admin_enabled != wifiEnabled);
         cfg.wifi_admin_enabled = wifiEnabled;
-        cfg.audit_last_saved_by = wifiEnabled ? "lora_wifi_enable" : "lora_wifi_disable";
-        cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
           const bool statusSent = sm_.sendWifiControlStatus(ctrlSrc, wifiEnabled, ctrlCounter);
           lrslog::event(wifiEnabled ? "wifi_control_enable_apply" : "wifi_control_disable_apply",
@@ -280,8 +270,6 @@ void App::tick() {
         cfg.wifi_sta_ssid = provSsid;
         cfg.wifi_sta_password = provPassword;
         cfg.wifi_admin_enabled = true;
-        cfg.audit_last_saved_by = "lora_wifi_provision";
-        cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
           lrslog::event("wifi_prov_applied", 0, provSrc,
                         static_cast<uint8_t>(provSsid.length() & 0xFFU));
@@ -347,8 +335,6 @@ void App::tick() {
         }
         cfg.fleet_passphrase = provFleetKey;
         cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
-        cfg.audit_last_saved_by = "lora_fleet_provision";
-        cfg.audit_last_saved_ms = millis();
         if (config_.save()) {
           lrslog::event("fleet_prov_applied", 0, provSession, provAddr);
           if (changed) {
@@ -868,9 +854,12 @@ void App::applyWifiRuntimeSettings() {
     IPAddress local;
     IPAddress gateway;
     IPAddress subnet;
-    if (parseIpAddress(String(cfg.wifi_static_ip.c_str()), local) &&
-        parseIpAddress(String(cfg.wifi_static_gateway.c_str()), gateway) &&
-        parseIpAddress(String(cfg.wifi_static_subnet.c_str()), subnet)) {
+    if (cfg.wifi_static_ip.length() > 0 &&
+        cfg.wifi_static_gateway.length() > 0 &&
+        cfg.wifi_static_subnet.length() > 0 &&
+        local.fromString(cfg.wifi_static_ip.c_str()) &&
+        gateway.fromString(cfg.wifi_static_gateway.c_str()) &&
+        subnet.fromString(cfg.wifi_static_subnet.c_str())) {
       WiFi.config(local, gateway, subnet);
     } else {
       LRS_LOGW(WIFI, "event=wifi_static_ip_invalid local=%s gateway=%s subnet=%s",
@@ -899,12 +888,6 @@ bool App::shouldEnableSoftAp() const {
   if (!cfg.ap_always_on) return false;
   if (cfg.wifi_sta_ssid.length() == 0) return true;
   return !sta_connected_;
-}
-
-bool App::parseIpAddress(const String &raw, IPAddress &out) const {
-  String trimmed = raw;
-  trimmed.trim();
-  return trimmed.length() > 0 && out.fromString(trimmed);
 }
 
 WiFiPhyMode_t App::configuredWifiPhyMode() const {
@@ -950,8 +933,7 @@ void App::startOta() {
   if (cached_sta_hostname_.length() == 0) {
     refreshCachedStaHostname();
   }
-  const String &host = cached_sta_hostname_;
-  ArduinoOTA.setHostname(host.c_str());
+  ArduinoOTA.setHostname(cached_sta_hostname_.c_str());
   ArduinoOTA.setPassword(cfg.admin_password.c_str());
   // Disable ArduinoOTA's internal service advertisement to keep heap usage
   // predictable on ESP8266.
@@ -963,36 +945,42 @@ void App::startOta() {
 void App::refreshCachedStaHostname() {
   const auto &cfg = config_.settings();
   if (cfg.lan_hostname.length() > 0) {
-    cached_sta_hostname_ = normalizeHostname(String(cfg.lan_hostname.c_str()));
+    normalizeHostname(cfg.lan_hostname.c_str(), cached_sta_hostname_.value,
+                      sizeof(cached_sta_hostname_.value));
     return;
   }
-  String fallback = "lrs-";
-  fallback += config_.chipIdHex();
-  cached_sta_hostname_ = normalizeHostname(fallback);
+  char fallback[32]{};
+  snprintf(fallback, sizeof(fallback), "lrs-%s", config_.chipIdHex().c_str());
+  normalizeHostname(fallback, cached_sta_hostname_.value,
+                    sizeof(cached_sta_hostname_.value));
 }
 
-String App::normalizeHostname(const String &input) const {
-  String out;
-  out.reserve(input.length());
+void App::normalizeHostname(const char *input, char *out, size_t outSize) const {
+  if (outSize == 0) return;
+  size_t len = 0;
   // Keep hostnames conservative for mDNS/DHCP clients: lowercase, hyphenated,
   // non-empty, and short enough for the ESP8266 SDK.
-  for (size_t i = 0; i < input.length(); i++) {
+  for (size_t i = 0; input != nullptr && input[i] != '\0' && len + 1 < outSize; i++) {
     char c = input[i];
     if (c >= 'A' && c <= 'Z')
       c = static_cast<char>(c - 'A' + 'a');
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
-      out += c;
+      out[len++] = c;
     } else if (c == ' ' || c == '_' || c == '.') {
-      out += '-';
+      out[len++] = '-';
     }
   }
-  while (out.startsWith("-"))
-    out.remove(0, 1);
-  while (out.endsWith("-"))
-    out.remove(out.length() - 1);
-  if (out.length() == 0)
-    return "lrs";
-  if (out.length() > 31)
-    out.remove(31);
-  return out;
+  out[len] = '\0';
+
+  char *start = out;
+  while (*start == '-') ++start;
+  char *end = start + strlen(start);
+  while (end > start && end[-1] == '-') --end;
+  len = static_cast<size_t>(end - start);
+  if (len == 0) {
+    strlcpy(out, "lrs", outSize);
+    return;
+  }
+  if (start != out) memmove(out, start, len);
+  out[len] = '\0';
 }

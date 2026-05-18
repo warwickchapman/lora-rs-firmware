@@ -210,17 +210,16 @@
 ## Testing / Stability
 - Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.
 - Update bench serial monitoring to treat monotonic uptime as the primary health signal during stability runs; ignore Unix time drift/resets for pass/fail.
-- Test automation on a standalone unit first, then implement and verify automation behavior across multiple units.
-- Validate `mesh` mode (gateway + multiple nodes) responsiveness and MQTT control reliability before wider deployment.
-- Plan and execute a full field deployment test once `mesh` mode is confirmed stable on the bench.
+- Validate gateway plus multiple remotes responsiveness and MQTT control reliability before wider deployment.
+- Plan and execute a full field deployment test once gateway/remotes are confirmed stable on the bench.
 
 ## Bench / Flasher Tooling
 - Add a small Raspberry Pi serial logger if long soak tests need unattended boot-log and reboot-cause capture outside Flasher.
 - Add reboot/crash pattern detection to that serial logger, including reset/reboot code extraction from serial logs.
 
-## Mesh Mode
-- Verify `mesh` mode commissioning and runtime behavior for one gateway with multiple nodes.
-- Confirm that MQTT-enabled mesh nodes remain responsive and that gateway-side control/status propagation is reliable under load.
+## Gateway / Remote Mode
+- Verify paired-mode commissioning and runtime behavior for one gateway with multiple remotes.
+- Confirm that MQTT-enabled remotes remain responsive and that gateway-side control/status propagation is reliable under load.
 
 ## Paired Mode
 - Implement multi-unit paired-mode workflow with unique addresses per unit.
@@ -229,6 +228,7 @@
 ## Deferred From Addressing/Fleet Release
 - Standalone LoRa telemetry-only behavior (local-only control with optional LoRa status broadcasting).
 - Multi-controller management UX beyond primary-controller-first behavior.
-- Fleet WiFi policy automation (site templates / zone-based credential assignment).
+- Flasher-managed automation rules, including a serial-admin configuration surface and bench validation before reintroducing any onboard runtime.
+- Fleet WiFi policy automation (site templates / zone-based credential assignment) as part of the future Flasher-managed automation workstream.
 - Extended connectivity verification signals beyond current LoRa/app-level status.
 - Terminology redesign beyond current `Transmitter`/`Receiver` UI naming.
