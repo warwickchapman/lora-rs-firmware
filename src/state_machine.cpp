@@ -105,10 +105,12 @@ inline void startupTxSendTimingTrace(const char *phase, uint32_t startMs) {
            static_cast<unsigned long>(endMs - startMs));
 }
 
-bool isDefaultDeploymentKey(const String &v) {
-  String key = v;
-  key.trim();
-  return key == "lora-default-passphrase";
+bool isDefaultDeploymentKey(const char *v) {
+  if (v == nullptr) return false;
+  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
+  size_t len = strlen(v);
+  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
+  return strlen("lora-default-passphrase") == len && strncmp(v, "lora-default-passphrase", len) == 0;
 }
 
 bool csvContainsAddress(const String &raw, uint8_t src) {
@@ -480,7 +482,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
   runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
-  runtime_.rx_failsafe_mode = parseRxFailsafeMode(cfg.rx_failsafe_mode);
+  runtime_.rx_failsafe_mode = parseRxFailsafeMode(String(cfg.rx_failsafe_mode.c_str()));
   runtime_.tx_command_retry_timeout_ms = cfg.tx_command_retry_timeout_ms;
   runtime_.rx_failsafe_timeout_ms = cfg.rx_failsafe_timeout_ms;
   if (runtime_.tx_command_retry_timeout_ms < kMinRetryTimeoutMs) runtime_.tx_command_retry_timeout_ms = kMinRetryTimeoutMs;
@@ -1589,7 +1591,7 @@ bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
   if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
     return true;
   }
-  const String &raw = settings_->mqtt_controller_addresses;
+  const String raw(settings_->mqtt_controller_addresses.c_str());
   if (raw.length() == 0) return false;
   return csvContainsAddress(raw, src);
 }
@@ -1603,7 +1605,8 @@ bool NodeStateMachine::isAuthorizedPairedSource(uint8_t src) const {
 }
 
 bool NodeStateMachine::isDefaultFleetKey() const {
-  return settings_ != nullptr && isDefaultDeploymentKey(settings_->fleet_passphrase);
+  return settings_ != nullptr &&
+         isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
 }
 
 bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
@@ -3272,8 +3275,8 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         prov_.pause_normal_tx = false;
         return;
       }
-      const String &fleetKey = settings_->fleet_passphrase;
-      const size_t keyLen = static_cast<size_t>(fleetKey.length());
+      const char *fleetKey = settings_->fleet_passphrase.c_str();
+      const size_t keyLen = strlen(fleetKey);
       if (keyLen == 0 || keyLen > (kProvChunkBitmapMax * kProvKeyChunkBytes)) {
         d.state = ProvisioningDeviceState::Failed;
         prov_.state = ProvisioningSessionState::Error;
@@ -3283,7 +3286,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         return;
       }
       const uint8_t totalChunks = static_cast<uint8_t>((keyLen + (kProvKeyChunkBytes - 1U)) / kProvKeyChunkBytes);
-      const uint16_t keyCrc = crc16Ccitt(reinterpret_cast<const uint8_t *>(fleetKey.c_str()), keyLen);
+      const uint16_t keyCrc = crc16Ccitt(reinterpret_cast<const uint8_t *>(fleetKey), keyLen);
 
       if (d.state == ProvisioningDeviceState::Discovered) {
         d.key_total_chunks = totalChunks;
@@ -3334,7 +3337,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         size_t chunkLen = static_cast<size_t>(d.key_len) - offset;
         if (chunkLen > kProvKeyChunkBytes) chunkLen = kProvKeyChunkBytes;
         payload[8] = static_cast<uint8_t>(chunkLen);
-        memcpy(payload + 9, fleetKey.c_str() + offset, chunkLen);
+        memcpy(payload + 9, fleetKey + offset, chunkLen);
         if (txBurstRemaining == 0) return;
         if (!sendProvisioningCoordinatorPacketFactory(payload, kProvBroadcastAddress)) return;
         txBurstRemaining--;

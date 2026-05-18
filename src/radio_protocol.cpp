@@ -47,10 +47,12 @@ void computeMac(const uint8_t macKey[32], const Packet &p, uint8_t out[32]) {
   hash.finalize(out, 32);
 }
 
-bool isDefaultDeploymentKey(const String &v) {
-  String key = v;
-  key.trim();
-  return key == kDefaultDeploymentKey;
+bool isDefaultDeploymentKey(const char *v) {
+  if (v == nullptr) return false;
+  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
+  size_t len = strlen(v);
+  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
+  return strlen(kDefaultDeploymentKey) == len && strncmp(v, kDefaultDeploymentKey, len) == 0;
 }
 }
 
@@ -308,7 +310,8 @@ void RadioProtocol::refreshRuntimeCfg(const Settings &cfg) {
 }
 
 void RadioProtocol::refreshRadioRuntimeState() {
-  default_key_configured_ = settings_ && isDefaultDeploymentKey(settings_->fleet_passphrase);
+  default_key_configured_ =
+      settings_ && isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
   lora_enabled_ = true;
   LoRa.idle();
   LoRa.receive();

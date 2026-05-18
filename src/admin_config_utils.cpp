@@ -126,6 +126,14 @@ bool isDefaultDeploymentKey(const String &v) {
   return k == kDefaultDeploymentKey;
 }
 
+bool isDefaultDeploymentKey(const char *v) {
+  if (v == nullptr) return false;
+  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
+  size_t len = strlen(v);
+  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
+  return strlen(kDefaultDeploymentKey) == len && strncmp(v, kDefaultDeploymentKey, len) == 0;
+}
+
 const char *linkStateText(LinkState st) {
   switch (st) {
     case LinkState::Boot: return "boot";

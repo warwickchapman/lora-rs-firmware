@@ -4,10 +4,10 @@ This folder is maintainer-facing documentation for the ESP8266 LoRa/MQTT firmwar
 
 Scope:
 - takeover notes
-- runtime invariants
-- contract/freeze policy for refactor work
-- memory measurement guidance
-- file ownership and safe-change playbooks
+- runtime and protocol invariants captured in the public developer/protocol docs
+- admin ownership notes for the Flasher-first serial-admin surface
+- memory measurement history in release build metrics
+- safe-change playbooks
 - ADRs for architecture decisions
 
 These are not customer docs.
@@ -18,8 +18,9 @@ This baseline was created before monolith splitting to support behavior-preservi
 ## Review gates
 Use the acceptance criteria in the refactor milestone plan plus:
 - runtime memory checks (`ESP.getMaxFreeBlockSize()` primary)
-- route/contract compatibility policy in `admin-api-contract-notes.md`
-- runtime invariants in `runtime-invariants.md`
+- protocol compatibility notes in `../PROTOCOL.md`
+- serial-admin command ownership in `../DEVELOPER_GUIDE.md`
+- open hardening and measurement actions in `../TODO.md`
 
 ## Heap Pressure Milestones (2026-02-25)
 Baseline and milestone measurements for `lrs_za`:

@@ -8,7 +8,7 @@
 
 ## Hot-Path Code (LoRa / State Machine / App tick)
 Before changing:
-- identify runtime invariants in `runtime-invariants.md`
+- identify runtime and wire-protocol invariants in `../PROTOCOL.md`
 - map call order and side effects
 - define exact acceptance checks (protocol + timing + memory)
 
@@ -24,8 +24,8 @@ After changes:
 
 ## Admin/Runtime Split Work
 - Preserve low-heap thresholds and fallback paths exactly.
-- Preserve auth/session behavior exactly.
-- Preserve route registration behavior exactly in route split milestone.
+- Preserve serial-admin authentication and redacted-secret behavior exactly.
+- Keep local maintenance owned by Flasher over USB serial admin.
 - Do not “clean up” wrappers until post-split stabilization milestone.
 
 ## Exception Handling

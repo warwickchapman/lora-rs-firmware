@@ -1,13 +1,77 @@
 #pragma once
 
 #include <Arduino.h>
+#include <cstring>
+
+template <size_t N>
+struct FixedSettingString {
+  char value[N]{};
+
+  FixedSettingString() = default;
+  FixedSettingString(const char *s) { set(s); }
+  FixedSettingString(const String &s) { set(s.c_str()); }
+
+  FixedSettingString &operator=(const char *s) {
+    set(s);
+    return *this;
+  }
+  FixedSettingString &operator=(const String &s) {
+    set(s.c_str());
+    return *this;
+  }
+  FixedSettingString &operator=(const FixedSettingString &other) {
+    if (this != &other) set(other.value);
+    return *this;
+  }
+
+  const char *c_str() const { return value; }
+  size_t length() const { return strlen(value); }
+  bool isEmpty() const { return value[0] == '\0'; }
+  operator const char *() const { return value; }
+
+  bool equals(const char *s) const { return *this == s; }
+  bool equals(const String &s) const { return s.equals(value); }
+  bool operator==(const char *s) const {
+    return strcmp(value, s ? s : "") == 0;
+  }
+  bool operator!=(const char *s) const { return !(*this == s); }
+  bool operator==(const String &s) const { return s.equals(value); }
+  bool operator!=(const String &s) const { return !s.equals(value); }
+
+  void trim() {
+    char *start = value;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') ++start;
+    char *end = start + strlen(start);
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+                           end[-1] == '\r' || end[-1] == '\n')) {
+      --end;
+    }
+    const size_t len = static_cast<size_t>(end - start);
+    if (start != value) memmove(value, start, len);
+    value[len] = '\0';
+  }
+
+  void toLowerCase() {
+    for (size_t i = 0; value[i] != '\0'; ++i) {
+      if (value[i] >= 'A' && value[i] <= 'Z') {
+        value[i] = static_cast<char>(value[i] - 'A' + 'a');
+      }
+    }
+  }
+
+ private:
+  void set(const char *s) {
+    if (s == nullptr) s = "";
+    strlcpy(value, s, N);
+  }
+};
 
 struct Settings {
   static constexpr uint8_t kAddressListCap = 12;
   uint16_t schema_version;
   bool commissioned;
-  String mode;
-  String role;
+  FixedSettingString<16> mode;
+  FixedSettingString<16> role;
 
   bool role_tx;
   uint8_t local_address;
@@ -35,45 +99,45 @@ struct Settings {
   uint32_t rx_push_min_interval_ms;
   bool input_control_paired_lora_enabled;
   uint32_t tx_command_retry_timeout_ms;
-  String rx_failsafe_mode;
+  FixedSettingString<16> rx_failsafe_mode;
   uint32_t rx_failsafe_timeout_ms;
 
-  String wifi_sta_ssid;
-  String wifi_sta_password;
-  String lan_hostname;
+  FixedSettingString<33> wifi_sta_ssid;
+  FixedSettingString<65> wifi_sta_password;
+  FixedSettingString<65> lan_hostname;
   bool ap_always_on;
-  String wifi_phy_mode;
+  FixedSettingString<16> wifi_phy_mode;
   float wifi_tx_power_dbm;
   bool wifi_sleep_enabled;
   bool wifi_static_ip_enabled;
-  String wifi_static_ip;
-  String wifi_static_gateway;
-  String wifi_static_subnet;
+  FixedSettingString<16> wifi_static_ip;
+  FixedSettingString<16> wifi_static_gateway;
+  FixedSettingString<16> wifi_static_subnet;
   uint8_t wifi_channel_override;
-  String wifi_ap_fallback_policy;
+  FixedSettingString<24> wifi_ap_fallback_policy;
   bool wifi_admin_enabled;
 
   bool mqtt_client_enabled;
   bool mqtt_control_enabled;
-  String mqtt_controller_addresses;
-  String mqtt_host;
+  FixedSettingString<80> mqtt_controller_addresses;
+  FixedSettingString<65> mqtt_host;
   uint16_t mqtt_port;
-  String mqtt_user;
-  String mqtt_password;
-  String mqtt_topic_root;
+  FixedSettingString<65> mqtt_user;
+  FixedSettingString<65> mqtt_password;
+  FixedSettingString<65> mqtt_topic_root;
 
   bool sensor_temp_enabled;
   uint8_t sensor_temp_pin;
   uint16_t sensor_temp_interval_s;
 
-  String fleet_passphrase;
+  FixedSettingString<65> fleet_passphrase;
   bool fleet_setup_prompt_dismissed;
-  String admin_password;
+  FixedSettingString<33> admin_password;
 
-  String factory_serial;
-  String audit_last_saved_by;
+  FixedSettingString<33> factory_serial;
+  FixedSettingString<33> audit_last_saved_by;
   uint32_t audit_last_saved_ms;
-  String audit_last_reboot_reason;
+  FixedSettingString<33> audit_last_reboot_reason;
   uint32_t audit_last_reboot_ms;
   uint32_t audit_boot_count;
 };

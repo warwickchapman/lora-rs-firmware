@@ -4,10 +4,10 @@
 Enable safe AI-assisted maintenance on an ESP8266 firmware codebase with tight heap/fragmentation constraints.
 
 ## What To Read First (by task type)
-- Architecture/takeover: `architecture-map.md`, `file-ownership-map.md`
-- Runtime-sensitive changes: `runtime-invariants.md`, `memory-budget-and-measurement.md`
-- API/admin changes: `admin-api-contract-notes.md`
-- Refactors/splits: `change-playbook.md`, ADRs
+- Architecture/takeover: `../DEVELOPER_GUIDE.md`, `takeover-risk-register.md`, ADRs under `adr/`
+- Runtime-sensitive changes: `../PROTOCOL.md`, `change-playbook.md`, `../TODO.md`
+- Admin changes: `../DEVELOPER_GUIDE.md` for serial-admin commands and Flasher ownership
+- Refactors/splits: `change-playbook.md`, ADRs under `adr/`
 
 ## High-Risk Areas (Read Before Editing)
 - `NodeStateMachine` replay, RX dispatch, provisioning state machines

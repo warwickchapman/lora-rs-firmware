@@ -130,7 +130,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["wifi_sta_password"] = includeSecrets ? cfg.wifi_sta_password : "";
   doc["wifi_sta_password_set"] = cfg.wifi_sta_password.length() > 0;
   doc["lan_hostname"] =
-      cfg.lan_hostname.length() > 0 ? cfg.lan_hostname : config.defaultLanHostname();
+      cfg.lan_hostname.length() > 0 ? cfg.lan_hostname.c_str() : config.defaultLanHostname();
   doc["computed_lan_hostname"] = config.defaultLanHostname();
   doc["ap_always_on"] = cfg.ap_always_on;
   doc["wifi_phy_mode"] = cfg.wifi_phy_mode;
@@ -157,7 +157,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
   doc["fleet_passphrase"] = includeSecrets ? cfg.fleet_passphrase : "";
   doc["fleet_passphrase_set"] = cfg.fleet_passphrase.length() > 0;
-  doc["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
+  doc["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
   doc["admin_password"] = includeSecrets ? cfg.admin_password : "";
   doc["admin_password_set"] = cfg.admin_password.length() > 0;
@@ -175,21 +175,21 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   auto &cfg = config.settings();
   SettingsBackup backup;
   captureSettingsBackup(cfg, backup);
-  const String prevStaSsid = cfg.wifi_sta_ssid;
-  const String prevStaPassword = cfg.wifi_sta_password;
-  const String prevLanHost = cfg.lan_hostname;
+  FixedSettingString<33> prevStaSsid = cfg.wifi_sta_ssid;
+  FixedSettingString<65> prevStaPassword = cfg.wifi_sta_password;
+  FixedSettingString<65> prevLanHost = cfg.lan_hostname;
   const bool prevApAlwaysOn = cfg.ap_always_on;
-  const String prevWifiPhyMode = cfg.wifi_phy_mode;
+  FixedSettingString<16> prevWifiPhyMode = cfg.wifi_phy_mode;
   const float prevWifiTxPowerDbm = cfg.wifi_tx_power_dbm;
   const bool prevWifiSleepEnabled = cfg.wifi_sleep_enabled;
   const bool prevWifiStaticIpEnabled = cfg.wifi_static_ip_enabled;
-  const String prevWifiStaticIp = cfg.wifi_static_ip;
-  const String prevWifiStaticGateway = cfg.wifi_static_gateway;
-  const String prevWifiStaticSubnet = cfg.wifi_static_subnet;
+  FixedSettingString<16> prevWifiStaticIp = cfg.wifi_static_ip;
+  FixedSettingString<16> prevWifiStaticGateway = cfg.wifi_static_gateway;
+  FixedSettingString<16> prevWifiStaticSubnet = cfg.wifi_static_subnet;
   const uint8_t prevWifiChannelOverride = cfg.wifi_channel_override;
-  const String prevWifiApFallbackPolicy = cfg.wifi_ap_fallback_policy;
+  FixedSettingString<24> prevWifiApFallbackPolicy = cfg.wifi_ap_fallback_policy;
   const bool prevWifiAdminEnabled = cfg.wifi_admin_enabled;
-  const String prevAdminPassword = cfg.admin_password;
+  FixedSettingString<33> prevAdminPassword = cfg.admin_password;
 
   auto fail = [&](const String &msg) {
     restoreSettingsBackup(backup, cfg);
@@ -309,18 +309,19 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.sensor_temp_interval_s =
       static_cast<uint16_t>(doc["sensor_temp_interval_s"] |
                             cfg.sensor_temp_interval_s);
+  const char *postedFleetPassphrase = doc["fleet_passphrase"] | "";
   const bool hasFleetPassphraseField =
-      !doc["fleet_passphrase"].isNull() &&
-      String(static_cast<const char *>(doc["fleet_passphrase"] | "")).length() > 0;
+      !doc["fleet_passphrase"].isNull() && postedFleetPassphrase[0] != '\0';
   if (hasFleetPassphraseField) {
-    cfg.fleet_passphrase = doc["fleet_passphrase"] | cfg.fleet_passphrase.c_str();
+    cfg.fleet_passphrase = postedFleetPassphrase;
   }
   if (!doc["admin_password"].isNull()) {
-    const String newAdmin = doc["admin_password"] | cfg.admin_password.c_str();
-    if (newAdmin.length() == 0) {
+    const char *newAdmin = doc["admin_password"] | "";
+    const size_t newAdminLen = strlen(newAdmin);
+    if (newAdminLen == 0) {
       // Redacted get_config responses include an empty admin_password field;
       // keep the current password unless a new non-empty value is supplied.
-    } else if (newAdmin.length() < 8) {
+    } else if (newAdminLen < 8) {
       return fail("admin_password_too_short");
     } else {
       cfg.admin_password = newAdmin;
@@ -360,10 +361,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     return fail("fleet_passphrase_too_short");
   }
   if (hasFleetPassphraseField && !allowDefaultDeploymentKey &&
-      isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+      isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     return fail("fleet_passphrase_default_blocked");
   }
-  if (hasFleetPassphraseField && !isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+  if (hasFleetPassphraseField && !isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     cfg.fleet_setup_prompt_dismissed = true;
   }
 
@@ -618,7 +619,7 @@ void SerialAdmin::handleStatus(JsonDocument &doc) {
   out["local_address"] = cfg.local_address;
   out["remote_address"] = cfg.remote_address;
   out["commissioned"] = cfg.commissioned;
-  out["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase);
+  out["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
 
   JsonObject wifi = out["wifi"].to<JsonObject>();
   wifi["admin_enabled"] = cfg.wifi_admin_enabled;
@@ -755,9 +756,8 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
     return;
   }
 
-  const String fleetKey = String(static_cast<const char *>(
-      doc["fleet_passphrase"] | doc["fleet_key"] | ""));
-  if (fleetKey.length() < kMinDeploymentKeyLen ||
+  const char *fleetKey = doc["fleet_passphrase"] | doc["fleet_key"] | "";
+  if (strlen(fleetKey) < kMinDeploymentKeyLen ||
       isDefaultDeploymentKey(fleetKey)) {
     sendError("configure_gateway", "invalid_fleet_key", requestId(doc));
     return;
@@ -911,7 +911,7 @@ void SerialAdmin::handleProvisionFleetWifi(JsonDocument &doc) {
     sendError("provision_fleet_wifi", "credentials_too_long", requestId(doc));
     return;
   }
-  if (isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+  if (isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     sendError("provision_fleet_wifi", "fleet_key_default", requestId(doc));
     return;
   }
@@ -1007,7 +1007,7 @@ void SerialAdmin::handleStartLoraInventory(JsonDocument &doc) {
     sendError("start_lora_inventory", "not_commissioned", id);
     return;
   }
-  if (isDefaultDeploymentKey(cfg.fleet_passphrase)) {
+  if (isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     sendError("start_lora_inventory", "factory_fleet_key", id);
     return;
   }

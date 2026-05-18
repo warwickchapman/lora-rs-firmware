@@ -23,6 +23,8 @@ All notable changes to this pre-release project are documented here in current o
 - Orphaned Web UI extraction and local DevMon web helper scripts have been removed.
 
 ### Fixed
+- Firmware settings strings now use fixed inline buffers instead of long-lived heap-backed `String` fields, reducing ESP8266 heap fragmentation during settings load/save and serial-admin edits.
+- Serial-admin settings patches avoid unnecessary temporary heap strings for fleet keys and admin password validation.
 - OTA pull now verifies the same HTTP stream it flashes, so a checksum match cannot be followed by a second unchecked download.
 - Gateway-mediated LoRa OTA sends the expected firmware SHA256 over encrypted LoRa control before the remote pulls `/firmware.bin`.
 - Flasher keeps selected USB ports independently for Flash, Provision, Fleet, Monitor, and Settings.

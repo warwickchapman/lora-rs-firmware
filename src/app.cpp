@@ -750,7 +750,7 @@ void App::finishStaScan(int scanCount) {
   // If multiple APs share the SSID, prefer the strongest candidate that also
   // matches an optional channel override.
   for (int i = 0; i < scanCount; ++i) {
-    if (!WiFi.SSID(i).equals(cfg.wifi_sta_ssid)) continue;
+    if (!WiFi.SSID(i).equals(cfg.wifi_sta_ssid.c_str())) continue;
     const int32_t channel = WiFi.channel(i);
     if (cfg.wifi_channel_override != 0 && channel != cfg.wifi_channel_override) continue;
     const int rssi = WiFi.RSSI(i);
@@ -868,9 +868,9 @@ void App::applyWifiRuntimeSettings() {
     IPAddress local;
     IPAddress gateway;
     IPAddress subnet;
-    if (parseIpAddress(cfg.wifi_static_ip, local) &&
-        parseIpAddress(cfg.wifi_static_gateway, gateway) &&
-        parseIpAddress(cfg.wifi_static_subnet, subnet)) {
+    if (parseIpAddress(String(cfg.wifi_static_ip.c_str()), local) &&
+        parseIpAddress(String(cfg.wifi_static_gateway.c_str()), gateway) &&
+        parseIpAddress(String(cfg.wifi_static_subnet.c_str()), subnet)) {
       WiFi.config(local, gateway, subnet);
     } else {
       LRS_LOGW(WIFI, "event=wifi_static_ip_invalid local=%s gateway=%s subnet=%s",
@@ -908,7 +908,7 @@ bool App::parseIpAddress(const String &raw, IPAddress &out) const {
 }
 
 WiFiPhyMode_t App::configuredWifiPhyMode() const {
-  String mode = config_.settings().wifi_phy_mode;
+  String mode = config_.settings().wifi_phy_mode.c_str();
   mode.trim();
   mode.toLowerCase();
   if (mode == "11g") return WIFI_PHY_MODE_11G;
@@ -963,7 +963,7 @@ void App::startOta() {
 void App::refreshCachedStaHostname() {
   const auto &cfg = config_.settings();
   if (cfg.lan_hostname.length() > 0) {
-    cached_sta_hostname_ = normalizeHostname(cfg.lan_hostname);
+    cached_sta_hostname_ = normalizeHostname(String(cfg.lan_hostname.c_str()));
     return;
   }
   String fallback = "lrs-";

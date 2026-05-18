@@ -33,6 +33,7 @@ uint8_t parseAddressText(const String &text, uint8_t fallback);
 bool parseBoolField(const JsonVariantConst &value, bool fallback);
 bool softApActiveNow();
 bool isDefaultDeploymentKey(const String &v);
+bool isDefaultDeploymentKey(const char *v);
 const char *linkStateText(LinkState st);
 
 }  // namespace admin_config_utils

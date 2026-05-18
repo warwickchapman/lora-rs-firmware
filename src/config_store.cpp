@@ -287,9 +287,11 @@ bool ConfigStore::begin() {
     return save();
   }
   cfg_.commissioned = root["commissioned"] | false;
-  cfg_.mode = String(static_cast<const char *>(root["mode"] | ""));
-  cfg_.role = String(static_cast<const char *>(root["role"] | ""));
-  if (!runtime_utils::parseRoleTxFromModeRole(cfg_.mode, cfg_.role, cfg_.role_tx)) {
+  cfg_.mode = root["mode"] | "";
+  cfg_.role = root["role"] | "";
+  if (!runtime_utils::parseRoleTxFromModeRole(String(cfg_.mode.c_str()),
+                                              String(cfg_.role.c_str()),
+                                              cfg_.role_tx)) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=mode_role_invalid mode=%s role=%s action=reset_defaults", kConfigPath,
              cfg_.mode.c_str(), cfg_.role.c_str());
     ensureProvisionedDefaults();
@@ -320,42 +322,42 @@ bool ConfigStore::begin() {
   cfg_.rx_push_min_interval_ms = root["rx_push_min_interval_ms"] | 60000;
   cfg_.input_control_paired_lora_enabled = root["input_control_paired_lora_enabled"] | false;
   cfg_.tx_command_retry_timeout_ms = root["tx_command_retry_timeout_ms"] | 180000;
-  cfg_.rx_failsafe_mode = String(static_cast<const char *>(root["rx_failsafe_mode"] | "hold_last"));
+  cfg_.rx_failsafe_mode = root["rx_failsafe_mode"] | "hold_last";
   cfg_.rx_failsafe_timeout_ms = root["rx_failsafe_timeout_ms"] | 180000;
 
-  cfg_.wifi_sta_ssid = String(static_cast<const char *>(root["wifi_sta_ssid"] | ""));
-  cfg_.wifi_sta_password = String(static_cast<const char *>(root["wifi_sta_password"] | ""));
-  cfg_.lan_hostname = String(static_cast<const char *>(root["lan_hostname"] | ""));
+  cfg_.wifi_sta_ssid = root["wifi_sta_ssid"] | "";
+  cfg_.wifi_sta_password = root["wifi_sta_password"] | "";
+  cfg_.lan_hostname = root["lan_hostname"] | "";
   cfg_.ap_always_on = root["ap_always_on"] | true;
-  cfg_.wifi_phy_mode = String(static_cast<const char *>(root["wifi_phy_mode"] | "11b"));
+  cfg_.wifi_phy_mode = root["wifi_phy_mode"] | "11b";
   cfg_.wifi_tx_power_dbm = root["wifi_tx_power_dbm"] | kDefaultWifiTxPowerDbm;
   cfg_.wifi_sleep_enabled = root["wifi_sleep_enabled"] | false;
   cfg_.wifi_static_ip_enabled = root["wifi_static_ip_enabled"] | false;
-  cfg_.wifi_static_ip = String(static_cast<const char *>(root["wifi_static_ip"] | ""));
-  cfg_.wifi_static_gateway = String(static_cast<const char *>(root["wifi_static_gateway"] | ""));
-  cfg_.wifi_static_subnet = String(static_cast<const char *>(root["wifi_static_subnet"] | "255.255.255.0"));
+  cfg_.wifi_static_ip = root["wifi_static_ip"] | "";
+  cfg_.wifi_static_gateway = root["wifi_static_gateway"] | "";
+  cfg_.wifi_static_subnet = root["wifi_static_subnet"] | "255.255.255.0";
   cfg_.wifi_channel_override = static_cast<uint8_t>(root["wifi_channel_override"] | 0);
-  cfg_.wifi_ap_fallback_policy = String(static_cast<const char *>(root["wifi_ap_fallback_policy"] | "fallback_on_disconnect"));
+  cfg_.wifi_ap_fallback_policy = root["wifi_ap_fallback_policy"] | "fallback_on_disconnect";
   cfg_.wifi_admin_enabled = root["wifi_admin_enabled"] | true;
   cfg_.mqtt_client_enabled = root["mqtt_client_enabled"] | false;
   cfg_.mqtt_control_enabled = root["mqtt_control_enabled"] | false;
-  cfg_.mqtt_controller_addresses = String(static_cast<const char *>(root["mqtt_controller_addresses"] | ""));
-  cfg_.mqtt_host = String(static_cast<const char *>(root["mqtt_host"] | "venus.local"));
+  cfg_.mqtt_controller_addresses = root["mqtt_controller_addresses"] | "";
+  cfg_.mqtt_host = root["mqtt_host"] | "venus.local";
   cfg_.mqtt_port = root["mqtt_port"] | 1883;
-  cfg_.mqtt_user = String(static_cast<const char *>(root["mqtt_user"] | ""));
-  cfg_.mqtt_password = String(static_cast<const char *>(root["mqtt_password"] | ""));
-  cfg_.mqtt_topic_root = String(static_cast<const char *>(root["mqtt_topic_root"] | "lora"));
+  cfg_.mqtt_user = root["mqtt_user"] | "";
+  cfg_.mqtt_password = root["mqtt_password"] | "";
+  cfg_.mqtt_topic_root = root["mqtt_topic_root"] | "lora";
   cfg_.sensor_temp_enabled = root["sensor_temp_enabled"] | false;
   cfg_.sensor_temp_pin = root["sensor_temp_pin"] | 0;
   cfg_.sensor_temp_interval_s = root["sensor_temp_interval_s"] | 10;
 
-  cfg_.fleet_passphrase = String(static_cast<const char *>(root["fleet_passphrase"] | "lora-default-passphrase"));
+  cfg_.fleet_passphrase = root["fleet_passphrase"] | "lora-default-passphrase";
   cfg_.fleet_setup_prompt_dismissed = root["fleet_setup_prompt_dismissed"] | false;
-  cfg_.admin_password = String(static_cast<const char *>(root["admin_password"] | ""));
-  cfg_.factory_serial = String(static_cast<const char *>(root["factory_serial"] | ""));
-  cfg_.audit_last_saved_by = String(static_cast<const char *>(root["audit_last_saved_by"] | "factory"));
+  cfg_.admin_password = root["admin_password"] | "";
+  cfg_.factory_serial = root["factory_serial"] | "";
+  cfg_.audit_last_saved_by = root["audit_last_saved_by"] | "factory";
   cfg_.audit_last_saved_ms = root["audit_last_saved_ms"] | 0;
-  cfg_.audit_last_reboot_reason = String(static_cast<const char *>(root["audit_last_reboot_reason"] | "power_on"));
+  cfg_.audit_last_reboot_reason = root["audit_last_reboot_reason"] | "power_on";
   cfg_.audit_last_reboot_ms = root["audit_last_reboot_ms"] | 0;
   cfg_.audit_boot_count = root["audit_boot_count"] | 0;
 
@@ -436,7 +438,7 @@ bool ConfigStore::begin() {
            static_cast<unsigned>(cfg_.local_address),
            static_cast<unsigned>(cfg_.remote_address),
            cfg_.wifi_sta_ssid.c_str(),
-           lrslog::maskSecret(cfg_.fleet_passphrase).c_str());
+           lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str());
   return true;
 }
 
@@ -556,15 +558,15 @@ bool ConfigStore::save() {
            static_cast<unsigned>(cfg_.local_address),
            static_cast<unsigned>(cfg_.remote_address),
            cfg_.wifi_sta_ssid.c_str(),
-           lrslog::maskSecret(cfg_.fleet_passphrase).c_str());
+           lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str());
   return ok;
 }
 
 bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials) {
-  const String preservedFleetKey = cfg_.fleet_passphrase;
+  const String preservedFleetKey = cfg_.fleet_passphrase.c_str();
   const bool preservedFleetPromptDismissed = cfg_.fleet_setup_prompt_dismissed;
-  const String preservedWifiSsid = cfg_.wifi_sta_ssid;
-  const String preservedWifiPassword = cfg_.wifi_sta_password;
+  const String preservedWifiSsid = cfg_.wifi_sta_ssid.c_str();
+  const String preservedWifiPassword = cfg_.wifi_sta_password.c_str();
 
   setDefaults();
   ensureProvisionedDefaults();
@@ -597,7 +599,7 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
            "event=factory_reset_apply keep_fleet_key=%u keep_wifi=%u fleet_key=%s wifi_ssid=%s",
            keepSharedFleetKey ? 1U : 0U,
            keepWifiCredentials ? 1U : 0U,
-           lrslog::maskSecret(cfg_.fleet_passphrase).c_str(),
+           lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str(),
            cfg_.wifi_sta_ssid.c_str());
   return save();
 }
