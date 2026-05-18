@@ -7,12 +7,13 @@
 - Flasher-first EasyPair commissioning foundation is implemented: USB serial admin protocol, selected USB gateway, LoRa remote discovery/provisioning, verified target finalization, WiFi credential provisioning, and local Identify LED action.
 - Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher Flash mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
 - Flasher Fleet mode provides a temporary local firmware file server plus per-device UDP-log actions, with OTA and UDP log-control commands available through serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
+- OTA pull now requires a 64-character SHA256. Gateway-mediated LoRa OTA sends the digest over encrypted LoRa control before the remote downloads `/firmware.bin`, and firmware verifies the HTTP stream before finalizing the update.
 - Flasher Fleet mode reads the TX/gateway-owned peer cache over serial admin; a selected, commissioned USB gateway can explicitly scan remotes over encrypted LoRa maintenance-status packets and render a dense device table.
 - Local maintenance uses Flasher over USB serial admin.
 
 ## Admin and Fleet Roadmap
-- Extend Fleet inventory actions on top of the bounded maintenance-status packet, including identify, selected-device OTA, and WiFi/log actions that use the reported IP/connectivity state.
-- Add selected-device `ota_pull` from Fleet inventory rows once WiFi/IP reachability is reported by the bounded maintenance-status response; add bulk OTA only after one-device flow is reliable.
+- Extend Fleet inventory actions on top of the bounded maintenance-status packet for remaining remote WiFi/config/reboot actions that use the reported IP/connectivity state.
+- Add bulk OTA only after the one-device Flasher Fleet flow has enough hardware soak time.
 - Add MQTT admin request/reply topics for online device status/config actions with broker ACL guidance and non-retained secret handling.
 - Default versioned maintenance debug telemetry to disabled once an explicit device debug mode exists; for pre-release diagnostics it is currently enabled by default so Flasher/Fleet can collect heap, fragmentation, relay feedback, and uptime from remotes.
 - Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
@@ -120,7 +121,7 @@
 ## Security Review Actions (2026-04-26)
 - Immediate containment: rotate credentials for devices whose OTA/admin auth values were committed, remove real OTA secrets from `platformio.ini`, and replace tracked per-device OTA environments with placeholder templates plus an ignored local operator profile.
 - Firmware credential redesign: replace deterministic chip-ID-derived AP/admin credentials with per-device random factory credentials, record them in controlled factory outputs, and force admin password rotation during first commissioning.
-- Flasher/release trust: add a signed release manifest containing firmware asset names, regions, versions, and SHA256 hashes; make the flasher verify the manifest signature and asset hash before flashing downloaded firmware.
+- Flasher/release trust: add a signed release manifest containing firmware asset names, regions, versions, and SHA256 hashes; make the flasher verify the manifest signature and asset hash before flashing downloaded firmware. Runtime OTA pull already requires SHA256, but this still needs signed source authenticity.
 - Runtime randomness: add a central ESP8266 secure-random helper seeded during boot and use it for LoRa packet nonces, boot nonces, provisioning session nonces, and transfer IDs.
 - Network security documentation: document isolated installer/OT network requirements for ArduinoOTA, MQTT control, fleet provisioning, and support access; treat MQTT control as requiring broker ACLs plus VLAN/VPN isolation unless TLS is later proven practical.
 - SoftAP posture: decide whether `ap_always_on` should default off after successful STA commissioning and document the recovery path if the AP is disabled.
@@ -208,15 +209,14 @@
 
 ## Testing / Stability
 - Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.
-- Update Devmon uptime monitoring to treat monotonic uptime as the primary health signal during stability runs; ignore Unix time drift/resets for pass/fail.
+- Update bench serial monitoring to treat monotonic uptime as the primary health signal during stability runs; ignore Unix time drift/resets for pass/fail.
 - Test automation on a standalone unit first, then implement and verify automation behavior across multiple units.
 - Validate `mesh` mode (gateway + multiple nodes) responsiveness and MQTT control reliability before wider deployment.
 - Plan and execute a full field deployment test once `mesh` mode is confirmed stable on the bench.
 
-## Devmon / Flasher Tooling
-- Extend Devmon to run over serial on a Raspberry Pi instead of UDP so it can capture boot logs and reboot causes directly.
-- Add reboot/crash pattern detection to the serial Devmon flow, including reset/reboot code extraction from serial logs.
-- Port the crash/reboot detection logic from the flasher tool into the Raspberry Pi Devmon extension.
+## Bench / Flasher Tooling
+- Add a small Raspberry Pi serial logger if long soak tests need unattended boot-log and reboot-cause capture outside Flasher.
+- Add reboot/crash pattern detection to that serial logger, including reset/reboot code extraction from serial logs.
 
 ## Mesh Mode
 - Verify `mesh` mode commissioning and runtime behavior for one gateway with multiple nodes.

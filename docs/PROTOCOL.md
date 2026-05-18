@@ -24,6 +24,9 @@ Packed fields:
 - `PollRequest` (`'P'`)
 - `PollResponse` (`'R'`)
 - `WifiProvision` (`'W'`)
+- `WifiControl` (`'Y'`)
+- `UdpLogControl` (`'U'`)
+- `OtaPullControl` (`'O'`)
 - `FactoryReset` (`'X'`)
 - `Provisioning` (`'V'`)
 - `MaintenanceRequest` (`'Q'`)
@@ -102,6 +105,9 @@ Otherwise packet is dropped and logged.
 - Broadcast disable uses destination `0xFF`; targeted enable/disable uses the remote LoRa address.
 - RX persists the requested Wi-Fi enabled state, replies with `WifiControl` op `status` (`payload b0=2`), and echoes the command counter in payload bytes `b8..b11`.
 - TX stores Wi-Fi state confirmations in runtime peer state only; polling/status responses can refresh the state after reboot.
+- `OtaPullControl` (`'O'`) triggers a remote WiFi-connected node to pull `/firmware.bin` from a temporary HTTP server.
+- OTA pull control is segmented as `start`, four `hash` chunks, and `commit`. The encrypted LoRa payload carries the server host/port and the 32-byte firmware SHA256; the target refuses to flash without a complete digest.
+- The HTTP firmware stream is hashed while being written to the inactive OTA slot. The update is finalized only if the final SHA256 matches the authenticated digest.
 - `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
 - `FactoryReset` supports an option to preserve the current shared fleet key during reset.
 
@@ -137,4 +143,6 @@ Otherwise packet is dropped and logged.
 The current 12-byte payload format is not wire-compatible with older 8-byte payload firmware.
 Upgrade paired nodes together.
 
-Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`FactoryReset` do not change frame size; they only define additional message types and alternate payload semantics.
+Gateway-mediated remote OTA requires digest-capable firmware on both the USB gateway and target remote; older one-packet OTA trigger firmware will not interoperate with the SHA256-segmented trigger.
+
+Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset` do not change frame size; they only define additional message types and alternate payload semantics.

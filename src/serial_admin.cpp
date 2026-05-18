@@ -31,6 +31,17 @@ uint8_t clampExpectedRemotes(int raw) {
   return static_cast<uint8_t>(raw);
 }
 
+bool isSha256Hex(const char *hex) {
+  if (hex == nullptr || strlen(hex) != 64) return false;
+  for (size_t i = 0; i < 64; ++i) {
+    const char c = hex[i];
+    const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F');
+    if (!ok) return false;
+  }
+  return true;
+}
+
 void clearAddressList(uint8_t *list, uint8_t &count) {
   count = 0;
   memset(list, 0, Settings::kAddressListCap);
@@ -1221,7 +1232,17 @@ void SerialAdmin::handleRemoteOtaPull(JsonDocument &doc) {
     return;
   }
 
-  if (!sm_->sendPeerOtaPullControl(static_cast<uint8_t>(rawAddr), host, port)) {
+  const char *sha256 = doc["sha256"] | "";
+  if (sha256[0] == '\0') {
+    sendError("remote_ota_pull", "sha256_required", id);
+    return;
+  }
+  if (!isSha256Hex(sha256)) {
+    sendError("remote_ota_pull", "invalid_sha256", id);
+    return;
+  }
+
+  if (!sm_->sendPeerOtaPullControl(static_cast<uint8_t>(rawAddr), host, port, sha256)) {
     sendError("remote_ota_pull", "send_failed", id);
     return;
   }
@@ -1234,6 +1255,7 @@ void SerialAdmin::handleRemoteOtaPull(JsonDocument &doc) {
   out["host"] = host.toString();
   out["port"] = port;
   out["path"] = "/firmware.bin";
+  out["sha256"] = sha256;
   sendOk(out);
 }
 

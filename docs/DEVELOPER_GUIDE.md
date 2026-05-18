@@ -67,6 +67,7 @@ This ordering keeps LoRa control priority above MQTT.
 
 ## 7. Local Admin and Fleet Control
 Local maintenance is via USB serial admin in Flasher. Remote maintenance is via MQTT admin where online, plus gateway-mediated LoRa admin for bounded remote actions.
+The firmware no longer hosts an onboard Web UI, REST API, captive portal, or `ESP8266WebServer` admin surface; returning contributors should use Flasher/serial admin for local work.
 
 Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
@@ -81,6 +82,7 @@ USB serial admin protocol:
 - Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `reboot`, `udp_log_control`, `remote_udp_log_control`, `ota_pull`, `remote_ota_pull`, `start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`.
 - `get_config` returns redacted secrets by default. `set_config` accepts a partial `config` object, validates safety bounds, saves atomically, and applies runtime changes through the normal config reload hook.
 - `factory_reset` supports `keep_shared_fleet_key` and `keep_wifi_credentials`, then reboots after acknowledging the command.
+- `ota_pull` and `remote_ota_pull` require a 64-character SHA256 for the firmware payload. The remote LoRa trigger sends that digest over the encrypted LoRa control channel before the target downloads `/firmware.bin`.
 - `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
 - Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
 

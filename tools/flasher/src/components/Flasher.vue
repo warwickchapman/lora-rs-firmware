@@ -467,7 +467,7 @@ const activeSerialDevice = computed(() => serialDeviceState());
 const deviceInfo = computed<DeviceInfo | null>({
   get: () => activeSerialDevice.value?.deviceInfo || null,
   set: (info) => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(selectedPort.value);
     if (state) state.deviceInfo = info;
   }
 });
@@ -505,14 +505,14 @@ const pairWifiSsid = computed<string>({
 const serialAdminStatus = computed<SerialAdminStatus | null>({
   get: () => activeSerialDevice.value?.status || null,
   set: (status) => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(selectedPort.value);
     if (state) state.status = status;
   }
 });
 const serialAdminConfig = computed<SerialAdminConfig | null>({
   get: () => activeSerialDevice.value?.config || null,
   set: (config) => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(selectedPort.value);
     if (state) state.config = config;
   }
 });
@@ -2166,12 +2166,13 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
       admin_password: password,
       address: device.address,
       host: target.host,
-      port: target.port
+      port: target.port,
+      sha256: info.sha256
     }, 8000);
     markFleetOtaPending(device);
     startFleetOtaFollowup(device);
     networkStatusMessage.value = `Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`;
-    pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH})`);
+    pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH}), SHA256 ${info.sha256}`);
     notify(`Flash triggered for LoRa ${device.address}`);
   } catch (e) {
     const msg = serialFeatureError(`Remote flash ${device.address}`, e);
@@ -2357,14 +2358,15 @@ async function refreshSerialAdminStatus() {
     notify('Select a USB device first');
     return;
   }
+  const port = selectedPort.value;
   isSerialAdminLoading.value = true;
   pushSerialLog('Refreshing local admin status...');
   try {
     if (!activeSerialDevice.value?.adminSupported) {
-      await probeSerialAdminSupport(selectedPort.value);
+      await probeSerialAdminSupport(port);
     }
     const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000, { label: 'Refresh status' });
-    applySerialAdminStatus(out);
+    applySerialAdminStatus(out, port);
     if (!out.commissioned || out.fleet_passphrase_default) {
       pushSerialLog(`Status loaded: factory default, awaiting commissioning, addr ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
     } else {
@@ -2384,6 +2386,7 @@ async function loadSerialAdminConfig() {
     notify('Select a USB device first');
     return;
   }
+  const port = selectedPort.value;
   const password = serialAdminPassword.value;
   if (!password) {
     notify('Get device info first to use the factory password');
@@ -2393,12 +2396,15 @@ async function loadSerialAdminConfig() {
   pushSerialLog('Loading local device configuration...');
   try {
     if (!activeSerialDevice.value?.adminSupported) {
-      await probeSerialAdminSupport(selectedPort.value);
+      await probeSerialAdminSupport(port);
     }
     const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
       admin_password: password
     }, 15000, { label: 'Fetch settings' });
-    serialAdminConfig.value = normalizeSerialAdminConfig(out.config, serialAdminStatus.value);
+    const state = serialDeviceState(port);
+    if (state) {
+      state.config = normalizeSerialAdminConfig(out.config, state.status);
+    }
     pushSerialLog('Local configuration loaded. Password fields stay blank unless you enter new values.');
   } catch (e) {
     const msg = serialFeatureError('Config load', e);
@@ -2497,12 +2503,20 @@ async function saveSerialAdminConfig() {
       admin_password: password,
       config: serialConfigPatch()
     }, 12000, { label: 'Save settings' });
+    const rebooting = !!(out.rebooting || out.ota_auth_changed);
     const effects = [
       out.network_restarted ? 'networking restarted' : '',
-      out.ota_auth_changed ? 'admin password changed; use the new password after reboot' : ''
+      rebooting ? 'admin password changed; device is rebooting' : ''
     ].filter(Boolean);
     pushSerialLog(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
-    await refreshSerialAdminStatus();
+    if (rebooting) {
+      serialAdminStatus.value = null;
+      serialAdminConfig.value = null;
+    } else {
+      await refreshSerialAdminStatus();
+      await loadSerialAdminConfig();
+    }
+    notify(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
   } catch (e) {
     const msg = serialFeatureError('Config save', e);
     pushSerialLog(msg);

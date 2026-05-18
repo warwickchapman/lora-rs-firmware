@@ -1,6 +1,8 @@
 #include "state_machine.h"
 
 #include <ESP8266WiFi.h>
+#include <cstdio>
+#include <cstring>
 #include <new>
 #include <stdlib.h>
 
@@ -44,6 +46,10 @@ constexpr uint8_t kMaintenancePayloadVersion = 1;
 constexpr uint8_t kMaintenancePageIdentity = 0;
 constexpr uint8_t kMaintenancePageDebug = 1;
 constexpr uint8_t kOtaPullControlOpStart = 1;
+constexpr uint8_t kOtaPullControlOpHash = 2;
+constexpr uint8_t kOtaPullControlOpCommit = 3;
+constexpr uint8_t kOtaPullControlHashChunkBytes = 8;
+constexpr uint8_t kOtaPullControlHashChunks = 4;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
 constexpr uint8_t kFactoryResetKeepFleetFlag = 0x01;
@@ -223,6 +229,33 @@ uint32_t fnv1a32(const uint8_t *data, size_t len) {
   return h;
 }
 
+int hexNibble(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+bool sha256HexToBytes(const char *hex, uint8_t out[32]) {
+  if (hex == nullptr || strlen(hex) != 64) return false;
+  for (size_t i = 0; i < 32; ++i) {
+    const int hi = hexNibble(hex[i * 2]);
+    const int lo = hexNibble(hex[(i * 2) + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  return true;
+}
+
+String sha256BytesToHex(const uint8_t digest[32]) {
+  char out[65];
+  for (size_t i = 0; i < 32; ++i) {
+    snprintf(out + (i * 2), 3, "%02x", digest[i]);
+  }
+  out[64] = '\0';
+  return String(out);
+}
+
 void fillProvisionPayloadBytes(const ProtocolMessage &msg, uint8_t out[7]) {
   out[0] = msg.sensor_digital0;
   out[1] = static_cast<uint8_t>(msg.sensor_analog0 & 0xFFU);
@@ -326,9 +359,11 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  ota_pull_rx_ = OtaPullRxTransfer{};
   ota_pull_pending_ = false;
   ota_pull_pending_host_ = IPAddress();
   ota_pull_pending_port_ = 0;
+  ota_pull_pending_sha256_ = "";
   ota_pull_pending_src_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
@@ -405,9 +440,11 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  ota_pull_rx_ = OtaPullRxTransfer{};
   ota_pull_pending_ = false;
   ota_pull_pending_host_ = IPAddress();
   ota_pull_pending_port_ = 0;
+  ota_pull_pending_sha256_ = "";
   ota_pull_pending_src_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
@@ -1224,26 +1261,58 @@ bool NodeStateMachine::mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled
   return true;
 }
 
-bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port) {
+bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,
+                                              const char *sha256Hex) {
   if (!runtime_.role_tx) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (port == 0 || host == IPAddress()) return false;
   if (radio_ == nullptr) return false;
   if (!radioTxBudgetAvailable()) return false;
+  uint8_t sha256[32]{};
+  if (!sha256HexToBytes(sha256Hex, sha256)) return false;
+
+  uint8_t transferId = static_cast<uint8_t>((millis() ^ last_counter_ ^ dstAddress) & 0xFFU);
+  if (transferId == 0) transferId = 1;
 
   uint8_t payload[12]{};
   payload[0] = kOtaPullControlOpStart;
-  payload[1] = static_cast<uint8_t>(port & 0xFFU);
-  payload[2] = static_cast<uint8_t>((port >> 8) & 0xFFU);
-  payload[3] = host[0];
-  payload[4] = host[1];
-  payload[5] = host[2];
-  payload[6] = host[3];
+  payload[1] = transferId;
+  payload[2] = static_cast<uint8_t>(port & 0xFFU);
+  payload[3] = static_cast<uint8_t>((port >> 8) & 0xFFU);
+  payload[4] = host[0];
+  payload[5] = host[1];
+  payload[6] = host[2];
+  payload[7] = host[3];
+  payload[8] = kOtaPullControlHashChunks;
 
   last_counter_++;
   if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
     return false;
   }
+
+  for (uint8_t idx = 0; idx < kOtaPullControlHashChunks; ++idx) {
+    memset(payload, 0, sizeof(payload));
+    payload[0] = kOtaPullControlOpHash;
+    payload[1] = transferId;
+    payload[2] = idx;
+    payload[3] = kOtaPullControlHashChunkBytes;
+    memcpy(payload + 4, sha256 + (idx * kOtaPullControlHashChunkBytes),
+           kOtaPullControlHashChunkBytes);
+    last_counter_++;
+    if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
+      return false;
+    }
+  }
+
+  memset(payload, 0, sizeof(payload));
+  payload[0] = kOtaPullControlOpCommit;
+  payload[1] = transferId;
+  payload[2] = kOtaPullControlHashChunks;
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
   lrslog::event("ota_pull_control_tx", 0, last_counter_, dstAddress);
@@ -1296,14 +1365,17 @@ bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &hos
   return true;
 }
 
-bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, uint8_t &src) {
+bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, String &sha256Hex,
+                                             uint8_t &src) {
   if (!ota_pull_pending_) return false;
   host = ota_pull_pending_host_;
   port = ota_pull_pending_port_;
+  sha256Hex = ota_pull_pending_sha256_;
   src = ota_pull_pending_src_;
   ota_pull_pending_ = false;
   ota_pull_pending_host_ = IPAddress();
   ota_pull_pending_port_ = 0;
+  ota_pull_pending_sha256_ = "";
   ota_pull_pending_src_ = 0;
   return true;
 }
@@ -2930,26 +3002,75 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
     lrslog::event("ota_pull_control_tx_ignored", msg.rssi, msg.counter, msg.src);
     return false;
   }
-  if (msg.relay_state != kOtaPullControlOpStart) {
-    lrslog::event("ota_pull_control_bad_op", msg.rssi, msg.counter, msg.relay_state);
+
+  const uint8_t *payload = msg.raw_payload;
+  const uint8_t op = payload[0];
+  const uint8_t transferId = payload[1];
+
+  if (op == kOtaPullControlOpStart) {
+    const uint16_t port = static_cast<uint16_t>(payload[2]) |
+                          (static_cast<uint16_t>(payload[3]) << 8);
+    const IPAddress host(payload[4], payload[5], payload[6], payload[7]);
+    const uint8_t totalChunks = payload[8];
+    if (transferId == 0 || port == 0 || host == IPAddress() ||
+        totalChunks != kOtaPullControlHashChunks) {
+      ota_pull_rx_ = OtaPullRxTransfer{};
+      lrslog::event("ota_pull_control_bad_start", msg.rssi, msg.counter, op);
+      return false;
+    }
+    ota_pull_rx_ = OtaPullRxTransfer{};
+    ota_pull_rx_.active = true;
+    ota_pull_rx_.src = msg.src;
+    ota_pull_rx_.transfer_id = transferId;
+    ota_pull_rx_.host = host;
+    ota_pull_rx_.port = port;
+    lrslog::event("ota_pull_control_start_rx", msg.rssi, msg.counter, msg.src);
+    return true;
+  }
+
+  if (!ota_pull_rx_.active || ota_pull_rx_.src != msg.src ||
+      ota_pull_rx_.transfer_id != transferId) {
+    lrslog::event("ota_pull_control_orphan", msg.rssi, msg.counter, op);
     return false;
   }
 
-  const uint16_t port = static_cast<uint16_t>(msg.input_state) |
-                        (static_cast<uint16_t>(msg.flags) << 8);
-  const IPAddress host(msg.temp_code, msg.sensor_mask, msg.sensor_digital0,
-                       static_cast<uint8_t>(msg.sensor_analog0 & 0xFFU));
-  if (port == 0 || host == IPAddress()) {
-    lrslog::event("ota_pull_control_bad_target", msg.rssi, msg.counter, msg.src);
-    return false;
+  if (op == kOtaPullControlOpHash) {
+    const uint8_t chunkIndex = payload[2];
+    const uint8_t chunkLen = payload[3];
+    if (chunkIndex >= kOtaPullControlHashChunks ||
+        chunkLen != kOtaPullControlHashChunkBytes) {
+      lrslog::event("ota_pull_control_bad_hash", msg.rssi, msg.counter, chunkIndex);
+      return false;
+    }
+    memcpy(ota_pull_rx_.sha256 + (chunkIndex * kOtaPullControlHashChunkBytes),
+           payload + 4, kOtaPullControlHashChunkBytes);
+    ota_pull_rx_.received_bitmap |= (1UL << chunkIndex);
+    return true;
   }
 
-  ota_pull_pending_host_ = host;
-  ota_pull_pending_port_ = port;
-  ota_pull_pending_src_ = msg.src;
-  ota_pull_pending_ = true;
-  lrslog::event("ota_pull_control_rx", msg.rssi, msg.counter, msg.src);
-  return true;
+  if (op == kOtaPullControlOpCommit) {
+    const uint8_t totalChunks = payload[2];
+    const uint32_t wantBitmap = (1UL << kOtaPullControlHashChunks) - 1UL;
+    if (totalChunks != kOtaPullControlHashChunks ||
+        (ota_pull_rx_.received_bitmap & wantBitmap) != wantBitmap) {
+      lrslog::event("ota_pull_control_incomplete", msg.rssi, msg.counter, totalChunks);
+      ota_pull_rx_ = OtaPullRxTransfer{};
+      return false;
+    }
+
+    ota_pull_pending_host_ = ota_pull_rx_.host;
+    ota_pull_pending_port_ = ota_pull_rx_.port;
+    ota_pull_pending_sha256_ = sha256BytesToHex(ota_pull_rx_.sha256);
+    ota_pull_pending_src_ = ota_pull_rx_.src;
+    ota_pull_pending_ = true;
+    ota_pull_rx_ = OtaPullRxTransfer{};
+    lrslog::event("ota_pull_control_rx", msg.rssi, msg.counter, msg.src);
+    return true;
+  }
+
+  lrslog::event("ota_pull_control_bad_op", msg.rssi, msg.counter, op);
+  ota_pull_rx_ = OtaPullRxTransfer{};
+  return false;
 }
 
 bool NodeStateMachine::ackMatchesPendingCommand(const ProtocolMessage &msg) const {

@@ -193,14 +193,16 @@ class NodeStateMachine {
   bool mqttForgetPeer(uint8_t dstAddress);
   bool mqttSetPeerWifi(uint8_t dstAddress, bool enabled);
   bool mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS);
-  bool sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port);
+  bool sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,
+                              const char *sha256Hex);
   bool sendBroadcastWifiDisable();
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
   bool sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter);
   bool hasPendingUdpLogControl() const;
   bool consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src);
-  bool consumePendingOtaPull(IPAddress &host, uint16_t &port, uint8_t &src);
+  bool consumePendingOtaPull(IPAddress &host, uint16_t &port, String &sha256Hex,
+                             uint8_t &src);
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
   bool fleetScanSnapshot(FleetScanSnapshot &out) const;
@@ -434,9 +436,20 @@ class NodeStateMachine {
   uint16_t udp_log_control_pending_port_ = 0;
   uint32_t udp_log_control_pending_ttl_s_ = 0;
   uint8_t udp_log_control_pending_src_ = 0;
+  struct OtaPullRxTransfer {
+    bool active = false;
+    uint8_t src = 0;
+    uint8_t transfer_id = 0;
+    IPAddress host;
+    uint16_t port = 0;
+    uint32_t received_bitmap = 0;
+    uint8_t sha256[32]{};
+  };
+  OtaPullRxTransfer ota_pull_rx_{};
   bool ota_pull_pending_ = false;
   IPAddress ota_pull_pending_host_;
   uint16_t ota_pull_pending_port_ = 0;
+  String ota_pull_pending_sha256_;
   uint8_t ota_pull_pending_src_ = 0;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;

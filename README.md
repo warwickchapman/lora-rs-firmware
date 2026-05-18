@@ -9,6 +9,8 @@ Both hardware units are identical. Behavior is selected by commissioning mode/ro
 
 The codebase is modular state-machine firmware with LittleFS settings, USB serial admin for the desktop Flasher app, MQTT support, OTA pull support, and factory metadata generation.
 
+The former device-hosted Web UI, REST API, and captive-portal admin flow have been removed. Local maintenance now runs through the desktop Flasher app over USB serial admin; remote maintenance uses MQTT admin or gateway-mediated encrypted LoRa admin where supported.
+
 ## Release Flashing (No VSCode/PlatformIO)
 For shipped release `.bin` files, use `esptool` and the included helper:
 

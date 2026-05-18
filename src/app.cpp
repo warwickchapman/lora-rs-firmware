@@ -250,12 +250,13 @@ void App::tick() {
   {
     IPAddress otaHost;
     uint16_t otaPort = 0;
+    String otaSha256;
     uint8_t otaSrc = 0;
-    if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSrc)) {
+    if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSha256, otaSrc)) {
       String url = String("http://") + otaHost.toString() + ":" + String(otaPort) + kRemoteOtaPullPath;
       String error;
       LRS_LOGW(SYS, "event=ota_pull_control_apply src=%u url=%s", otaSrc, url.c_str());
-      if (otaPullFromUrl(url.c_str(), "", error)) {
+      if (otaPullFromUrl(url.c_str(), otaSha256.c_str(), error)) {
         lrslog::event("ota_pull_control_reboot", 0, otaSrc, 0);
         ESP.restart();
       } else {

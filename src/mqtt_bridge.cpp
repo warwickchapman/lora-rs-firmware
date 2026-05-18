@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <ctype.h>
+#include <cstring>
 
 #include "build_info.h"
 #include "logger.h"
@@ -36,6 +37,17 @@ bool knownPeerAddress(NodeStateMachine *sm, uint8_t addr) {
     if (sm->peerByIndex(i, node) && node.address == addr) return true;
   }
   return false;
+}
+
+bool isSha256Hex(const char *hex) {
+  if (hex == nullptr || strlen(hex) != 64) return false;
+  for (size_t i = 0; i < 64; ++i) {
+    const char c = hex[i];
+    const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F');
+    if (!ok) return false;
+  }
+  return true;
 }
 
 bool parseHexAddressSegmentCstr(const char *segment, size_t len, uint8_t &out) {
@@ -219,7 +231,7 @@ bool parseOtaPullPayload(const uint8_t *payload, unsigned int length, String &ur
   if (err) return false;
   url = String(static_cast<const char *>(doc["url"] | ""));
   sha256 = String(static_cast<const char *>(doc["sha256"] | ""));
-  return url.length() > 0;
+  return url.length() > 0 && isSha256Hex(sha256.c_str());
 }
 }
 
