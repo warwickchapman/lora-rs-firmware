@@ -76,6 +76,11 @@ Local non-release flasher build policy:
 
 ## Release Automation Script
 Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same release flow end-to-end:
+- runs mandatory pre-release validation gate (release blocks unless all pass):
+  - `pio test -e native`
+  - `python3 tools/test_version_metadata.py`
+  - `pio run -e lrs_za`
+  - `pio run -e lrs_us`
 - builds fresh `lrs_za` + `lrs_us` firmware
 - captures firmware RAM/Flash usage for both environments and prints deltas vs previous release in the release run output
 - generates named assets + SHA256 checksums
@@ -88,6 +93,13 @@ Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same 
 - optional verification mode:
   - `--verify-firmware-only-assets` for firmware-first publish
   - `--verify-full-assets` only after flasher assets are present
+
+Pre-release gate notes:
+- Native tests are intentionally limited to pure firmware helpers (no ESP8266 hardware mocks).
+- Bench/soak validation is still required for LoRa ACK behavior, WiFi reconnect, OTA pull, serial-admin/Flasher workflows, and long-running heap stability.
+- Flasher `npm run build` is not part of this specific gate unless `tools/flasher/**` changed.
+- `pio test -e native` may install PlatformIO native platform/toolchain on first run.
+- Release metrics files (`docs/release_build_metrics.csv`, `docs/release_build_metrics.md`) are generated artifacts and should remain out of source commits unless explicitly updating release history.
 
 Release build metrics history:
 - Historical table: `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.md`

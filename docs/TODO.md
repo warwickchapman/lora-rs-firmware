@@ -22,10 +22,9 @@
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
-- Add UI and payload mapping for tank level model(s).
+- Add tank calibration UI and per-site alarm/status thresholds.
 - Define flow sensor model and units.
-- Implement reserved `sensor_analog0` usage and scaling conventions.
-- Add sensor alarm/status thresholds in UI.
+- Decide whether future analog sensors should use `sensor_analog0` or additional maintenance telemetry pages.
 
 ## Hardware and Architecture
 - Document CN1 usage and strap-pin caveats in production manuals.

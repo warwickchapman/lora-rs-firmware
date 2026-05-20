@@ -595,10 +595,11 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   const char *addrSegments[] = {addrHexPrefixed, addrHex, addrDec};
 
   const char *leaves[] = {
-      "relay",           "input",          "ack_state",        "addr_hex",         "addr_dec",
-      "uplink_rssi_dbm", "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter", "poll_interval_s",
-      "last_poll_tx_ms", "poll_state",     "temp_c",           "forget",           "poll_now",
-      "wifi",
+      "relay",           "input",              "dry_contact",      "ack_state",        "addr_hex",
+      "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter",
+      "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
+      "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
+      "wifi",            "input_feedback",
   };
 
   char topic[kMqttTopicBufBytes];
@@ -716,6 +717,23 @@ void MqttBridge::publishStatus() {
       if (buildLocalTopic(topic, sizeof(topic), "remote_temp_c")) publishRetained(topic, "");
     }
 
+    char tankBuf[24];
+    if (buildLocalTopic(topic, sizeof(topic), "tank_status")) {
+      publishRetained(topic, sm_->localTankEnabled() ? tankSensorStateText(sm_->localTankState()) : "disabled");
+    }
+    if (sm_->localTankEnabled() && sm_->localTankValid()) {
+      snprintf(tankBuf, sizeof(tankBuf), "%u", static_cast<unsigned>(sm_->localTankDepthMm()));
+      if (buildLocalTopic(topic, sizeof(topic), "tank_depth_mm")) publishRetained(topic, tankBuf);
+      dtostrf(static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f, 0, 2, tankBuf);
+      if (buildLocalTopic(topic, sizeof(topic), "tank_current_ma")) publishRetained(topic, tankBuf);
+      snprintf(tankBuf, sizeof(tankBuf), "%u", static_cast<unsigned>(sm_->localTankVoltageMv()));
+      if (buildLocalTopic(topic, sizeof(topic), "tank_voltage_mv")) publishRetained(topic, tankBuf);
+    } else {
+      if (buildLocalTopic(topic, sizeof(topic), "tank_depth_mm")) publishRetained(topic, "");
+      if (buildLocalTopic(topic, sizeof(topic), "tank_current_ma")) publishRetained(topic, "");
+      if (buildLocalTopic(topic, sizeof(topic), "tank_voltage_mv")) publishRetained(topic, "");
+    }
+
     char updatedMs[16];
     snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));
     if (buildLocalTopic(topic, sizeof(topic), "last_updated")) publishRetained(topic, updatedMs);
@@ -771,6 +789,7 @@ void MqttBridge::publishStatus() {
         const uint8_t inputValue = node.input_state ? 1 : 0;
         if (!peerCache->input_published || peerCache->input_value != inputValue) {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "dry_contact")) publishRetainedTopic(topic, inputValue ? "1" : "0");
           peerCache->input_published = true;
           peerCache->input_value = inputValue;
         }
@@ -807,6 +826,21 @@ void MqttBridge::publishStatus() {
         } else {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
         }
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_status")) {
+          publishRetainedTopic(topic, node.tank_enabled ? tankSensorStateText(node.tank_state) : "disabled");
+        }
+        if (node.tank_enabled && node.tank_valid) {
+          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_depth_mm));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, numBuf);
+          dtostrf(static_cast<float>(node.tank_current_centi_ma) / 100.0f, 0, 2, numBuf);
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, numBuf);
+          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_voltage_mv));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, numBuf);
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, "");
+        }
         if (node.maintenance_debug_known) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_free));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, numBuf);
@@ -816,6 +850,8 @@ void MqttBridge::publishStatus() {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, numBuf);
           snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.relay_feedback));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay_feedback")) publishRetainedTopic(topic, numBuf);
+          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.input_feedback));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, numBuf);
         }
       };
 

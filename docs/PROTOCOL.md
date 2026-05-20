@@ -88,7 +88,10 @@ Otherwise packet is dropped and logged.
 - TX may send `MaintenanceRequest` to RX.
 - RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages. Page `0`
   carries identity/connectivity (`version`, `page`, flags, chip ID, firmware
-  version, IP). When debug telemetry is enabled, page `1` follows in a later
+  version, IP). Page `2` follows in a later radio tick with sensor state:
+  dry-contact input, rounded DS18B20 temperature, tank status, tank depth in mm,
+  tank current in centi-mA, tank voltage in mV, and tank enabled/valid flags.
+  When debug telemetry is enabled, page `1` follows in a later
   radio tick with heap free, max heap block, heap fragmentation, relay feedback,
   input feedback, and uptime.
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
@@ -119,6 +122,9 @@ Otherwise packet is dropped and logged.
 - `addr` as JSON string is parsed as hex (example: `"0x28"` or `"28"`).
 - TX publishes local `addr` topic value as `0xNN`.
 - TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peer/0xNN/...`.
+- Peer status leaves include `input`, `dry_contact`, `temp_c`, `tank_status`,
+  `tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv` when that telemetry
+  is known from maintenance status.
 - TX accepts peer control leaves:
   - `poll_interval_s`
   - `poll_now`

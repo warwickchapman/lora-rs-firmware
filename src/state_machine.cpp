@@ -45,6 +45,7 @@ constexpr uint8_t kUdpLogControlOpSet = 1;
 constexpr uint8_t kMaintenancePayloadVersion = 1;
 constexpr uint8_t kMaintenancePageIdentity = 0;
 constexpr uint8_t kMaintenancePageDebug = 1;
+constexpr uint8_t kMaintenancePageSensors = 2;
 constexpr uint8_t kOtaPullControlOpStart = 1;
 constexpr uint8_t kOtaPullControlOpHash = 2;
 constexpr uint8_t kOtaPullControlOpCommit = 3;
@@ -68,13 +69,13 @@ constexpr uint8_t kProvRoleTxFlag = 0x01;
 constexpr uint32_t kProvVerifyTimeoutMs = 4000;
 constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 1500;
 constexpr uint32_t kProvDiscoverReplyBaseMs = 2000;
-constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 1200;
-constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 10000;
+constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 1600;
+constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 18000;
 constexpr uint8_t kProvDiscoverBroadcastBurstCount = 2;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
 constexpr uint8_t kProvMaxRetriesPerNode = 1;
 constexpr uint8_t kProvCoordinatorBurstPacketsPerTick = 6;
-constexpr uint8_t kProvAnnounceRepeatCount = 2;
+constexpr uint8_t kProvAnnounceRepeatCount = 3;
 constexpr uint16_t kProvAnnounceRetryBackoffMs = 120;
 constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
@@ -241,6 +242,13 @@ uint8_t encodeTempCode(bool valid, float celsius) {
   return static_cast<uint8_t>(static_cast<int8_t>(t));
 }
 
+TankSensorState decodeTankState(uint8_t raw) {
+  if (raw <= static_cast<uint8_t>(TankSensorState::Overrange)) {
+    return static_cast<TankSensorState>(raw);
+  }
+  return TankSensorState::Disabled;
+}
+
 RxFailsafeMode parseRxFailsafeMode(const String &rawMode) {
   String mode = rawMode;
   mode.trim();
@@ -300,6 +308,10 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
   last_rx_control_ms_ = 0;
+  maintenance_debug_pending_ = false;
+  maintenance_debug_dst_ = 0;
+  maintenance_sensor_pending_ = false;
+  maintenance_sensor_dst_ = 0;
   last_wifi_prov_tx_ms_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
@@ -386,6 +398,10 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
   last_rx_control_ms_ = 0;
+  maintenance_debug_pending_ = false;
+  maintenance_debug_dst_ = 0;
+  maintenance_sensor_pending_ = false;
+  maintenance_sensor_dst_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
@@ -547,7 +563,7 @@ void NodeStateMachine::tick() {
 
   resetRadioTxBudgetForTick();
   tickReceive();
-  tickPendingMaintenanceDebug();
+  tickPendingMaintenancePages();
 
   if (runtime_.role_tx) {
     tickTransmitter();
@@ -569,9 +585,25 @@ int NodeStateMachine::lastPacketRssi() const { return last_packet_rssi_; }
 uint32_t NodeStateMachine::lastPacketMs() const { return last_packet_ms_; }
 uint32_t NodeStateMachine::lastTxMs() const { return last_tx_ms_; }
 void NodeStateMachine::setLocalTemperature(bool valid, float celsius) { local_temp_code_ = encodeTempCode(valid, celsius); }
+void NodeStateMachine::setLocalTank(bool enabled, bool valid, TankSensorState state,
+                                    uint16_t depthMm, uint16_t currentCentiMa,
+                                    uint16_t voltageMv) {
+  local_tank_enabled_ = enabled;
+  local_tank_valid_ = valid;
+  local_tank_state_ = state;
+  local_tank_depth_mm_ = depthMm;
+  local_tank_current_centi_ma_ = currentCentiMa;
+  local_tank_voltage_mv_ = voltageMv;
+}
 void NodeStateMachine::setMqttConnected(bool connected) { mqtt_connected_ = connected; }
 bool NodeStateMachine::localTemperatureValid() const { return local_temp_code_ != 0xFF; }
 float NodeStateMachine::localTemperatureC() const { return static_cast<float>(static_cast<int8_t>(local_temp_code_)); }
+bool NodeStateMachine::localTankEnabled() const { return local_tank_enabled_; }
+bool NodeStateMachine::localTankValid() const { return local_tank_valid_; }
+TankSensorState NodeStateMachine::localTankState() const { return local_tank_state_; }
+uint16_t NodeStateMachine::localTankDepthMm() const { return local_tank_depth_mm_; }
+uint16_t NodeStateMachine::localTankCurrentCentiMa() const { return local_tank_current_centi_ma_; }
+uint16_t NodeStateMachine::localTankVoltageMv() const { return local_tank_voltage_mv_; }
 bool NodeStateMachine::remoteTemperatureValid() const { return remote_temp_valid_; }
 float NodeStateMachine::remoteTemperatureC() const { return static_cast<float>(remote_temp_c_); }
 uint32_t NodeStateMachine::remoteTemperatureMs() const { return remote_temp_ms_; }
@@ -590,6 +622,12 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.input_state = node.input_state;
   out.temp_valid = node.temp_valid;
   out.temp_c = node.temp_c;
+  out.tank_enabled = node.tank_enabled;
+  out.tank_valid = node.tank_valid;
+  out.tank_state = node.tank_state;
+  out.tank_depth_mm = node.tank_depth_mm;
+  out.tank_current_centi_ma = node.tank_current_centi_ma;
+  out.tank_voltage_mv = node.tank_voltage_mv;
   out.uplink_rssi = node.uplink_rssi;
   out.downlink_rssi_valid = node.downlink_rssi_valid;
   out.downlink_rssi = node.downlink_rssi;
@@ -1846,6 +1884,20 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   if (runtime_.local_address >= kProvAddressMin && runtime_.local_address <= kProvAddressMax) {
     used[runtime_.local_address] = true;
   }
+  if (settings_ != nullptr) {
+    for (size_t i = 0; i < settings_->paired_target_count && i < Settings::kAddressListCap; ++i) {
+      const uint8_t addr = settings_->paired_target_addresses[i];
+      if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
+      if (addressBelongsToCurrentProvisioningDevice(addr)) continue;
+      used[addr] = true;
+    }
+    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+      const uint8_t addr = settings_->known_peer_addresses[i];
+      if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
+      if (addressBelongsToCurrentProvisioningDevice(addr)) continue;
+      used[addr] = true;
+    }
+  }
   for (size_t i = 0; i < peer_count_; ++i) {
     const PeerRuntime &peer = peers_[i];
     if (!peer.in_use) continue;
@@ -1869,7 +1921,9 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     if (!prov_devices_[i].in_use) continue;
     for (size_t j = i + 1; j < prov_device_count_; ++j) {
       if (!prov_devices_[j].in_use) continue;
-      if (prov_devices_[i].current_address != 0 && prov_devices_[i].current_address == prov_devices_[j].current_address) {
+      const uint8_t current = prov_devices_[i].current_address;
+      if (current >= kProvAddressMin && current <= kProvAddressMax &&
+          current == prov_devices_[j].current_address) {
         prov_devices_[i].address_conflict = true;
         prov_devices_[j].address_conflict = true;
       }
@@ -2111,11 +2165,38 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
+  maintenance_sensor_pending_ = true;
+  maintenance_sensor_dst_ = dstAddress;
   if (runtime_.maintenance_debug_telemetry_enabled) {
     maintenance_debug_pending_ = true;
     maintenance_debug_dst_ = dstAddress;
   }
   lrslog::event("maint_status_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::sendMaintenanceSensorStatus(uint8_t dstAddress) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  uint8_t payload[12]{};
+  payload[0] = kMaintenancePayloadVersion;
+  payload[1] = kMaintenancePageSensors;
+  payload[2] = localDryContactState();
+  payload[3] = local_temp_code_;
+  payload[4] = static_cast<uint8_t>(local_tank_state_);
+  encodeU16LE(payload + 5, local_tank_depth_mm_);
+  encodeU16LE(payload + 7, local_tank_current_centi_ma_);
+  encodeU16LE(payload + 9, local_tank_voltage_mv_);
+  payload[11] = (local_tank_enabled_ ? 0x01U : 0U) | (local_tank_valid_ ? 0x02U : 0U);
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
+                       runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("maint_sensor_status_tx", 0, last_counter_, dstAddress);
   return true;
 }
 
@@ -2153,7 +2234,15 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
   return true;
 }
 
-void NodeStateMachine::tickPendingMaintenanceDebug() {
+void NodeStateMachine::tickPendingMaintenancePages() {
+  if (maintenance_sensor_pending_) {
+    if (sendMaintenanceSensorStatus(maintenance_sensor_dst_)) {
+      maintenance_sensor_pending_ = false;
+      maintenance_sensor_dst_ = 0;
+    }
+    return;
+  }
+
   if (!maintenance_debug_pending_) return;
   if (!runtime_.maintenance_debug_telemetry_enabled) {
     maintenance_debug_pending_ = false;
@@ -2191,6 +2280,23 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->mqtt_enabled = (flags & 0x04U) != 0U;
     node->mqtt_connected = (flags & 0x08U) != 0U;
     memcpy(node->ip, p + 8, sizeof(node->ip));
+  } else if (p[1] == kMaintenancePageSensors) {
+    node->input_state = p[2] ? 1 : 0;
+    node->input_feedback = node->input_state;
+    if (p[3] == 0xFFU) {
+      node->temp_valid = false;
+      node->temp_c = 0;
+    } else {
+      node->temp_valid = true;
+      node->temp_c = static_cast<int8_t>(p[3]);
+    }
+    const uint8_t tankFlags = p[11];
+    node->tank_enabled = (tankFlags & 0x01U) != 0U;
+    node->tank_valid = (tankFlags & 0x02U) != 0U;
+    node->tank_state = decodeTankState(p[4]);
+    node->tank_depth_mm = decodeU16LE(p + 5);
+    node->tank_current_centi_ma = decodeU16LE(p + 7);
+    node->tank_voltage_mv = decodeU16LE(p + 9);
   } else if (p[1] == kMaintenancePageDebug) {
     node->maintenance_debug_known = true;
     node->heap_free = static_cast<uint32_t>(p[2]) |

@@ -192,6 +192,9 @@ void App::tick() {
   phaseStartMs = millis();
   const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
+  const TankSensorStatus &tank = sensors_.tankStatus();
+  sm_.setLocalTank(tank.enabled, tank.valid, tank.state, tank.depth_mm,
+                   tank.current_centi_ma, tank.voltage_mv);
   if (emitStartupBreadcrumb) {
     LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu",
              static_cast<unsigned long>(millis()));

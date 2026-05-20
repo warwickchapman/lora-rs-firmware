@@ -1,20 +1,29 @@
 #include "runtime_utils.h"
 
+#include <cstring>
+
 namespace runtime_utils {
 
+#if !defined(UNIT_TEST)
 bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleTx) {
-  if (mode == "paired") {
-    if (role == "transmitter") {
+  return parseRoleTxFromModeRole(mode.c_str(), role.c_str(), roleTx);
+}
+#endif
+
+bool parseRoleTxFromModeRole(const char *mode, const char *role, bool &roleTx) {
+  if (mode == nullptr || role == nullptr) return false;
+  if (strcmp(mode, "paired") == 0) {
+    if (strcmp(role, "transmitter") == 0) {
       roleTx = true;
       return true;
     }
-    if (role == "receiver") {
+    if (strcmp(role, "receiver") == 0) {
       roleTx = false;
       return true;
     }
     return false;
   }
-  if (mode == "standalone" && role == "none") {
+  if (strcmp(mode, "standalone") == 0 && strcmp(role, "none") == 0) {
     roleTx = true;
     return true;
   }

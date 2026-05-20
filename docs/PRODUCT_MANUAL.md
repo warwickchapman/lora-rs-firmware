@@ -115,9 +115,11 @@ Implemented now:
 - Local DS18B20 reading
 - DS18B20 temperature encoded in LoRa packet and shown as remote telemetry on peer
 - Dry-contact state represented in LoRa sensor fields
+- KIT0139-style 4-20 mA tank level on A0 using the board-calibrated 3553 mV ADC range, 120 ohm sense resistor, and 5000 mm water range
+- Remote dry-contact, temperature, and tank values shown in Flasher Monitor/Fleet and published in the gateway MQTT peer tree
 
 Planned (not yet implemented):
-- Tank level sensor integrations
+- Tank calibration UI and alarm thresholds
 - Flow sensor integrations
 - Additional I2C/analog sensor models
 

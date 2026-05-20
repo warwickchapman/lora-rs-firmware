@@ -8,6 +8,7 @@
 #include "logger.h"
 #include "ota_pull.h"
 #include "admin_config_utils.h"
+#include "sensor_status.h"
 #include "settings_backup.h"
 
 using namespace admin_config_utils;
@@ -155,6 +156,11 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
   doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
   doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
+  doc["sensor_tank_enabled"] = cfg.sensor_tank_enabled;
+  doc["sensor_tank_range_mm"] = cfg.sensor_tank_range_mm;
+  doc["sensor_tank_vref_mv"] = cfg.sensor_tank_vref_mv;
+  doc["sensor_tank_sense_ohms"] = cfg.sensor_tank_sense_ohms;
+  doc["sensor_tank_interval_s"] = cfg.sensor_tank_interval_s;
   doc["fleet_passphrase"] = includeSecrets ? cfg.fleet_passphrase : "";
   doc["fleet_passphrase_set"] = cfg.fleet_passphrase.length() > 0;
   doc["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
@@ -309,6 +315,20 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.sensor_temp_interval_s =
       static_cast<uint16_t>(doc["sensor_temp_interval_s"] |
                             cfg.sensor_temp_interval_s);
+  cfg.sensor_tank_enabled =
+      parseBoolField(doc["sensor_tank_enabled"], cfg.sensor_tank_enabled);
+  cfg.sensor_tank_range_mm =
+      static_cast<uint16_t>(doc["sensor_tank_range_mm"] |
+                            cfg.sensor_tank_range_mm);
+  cfg.sensor_tank_vref_mv =
+      static_cast<uint16_t>(doc["sensor_tank_vref_mv"] |
+                            cfg.sensor_tank_vref_mv);
+  cfg.sensor_tank_sense_ohms =
+      static_cast<uint16_t>(doc["sensor_tank_sense_ohms"] |
+                            cfg.sensor_tank_sense_ohms);
+  cfg.sensor_tank_interval_s =
+      static_cast<uint16_t>(doc["sensor_tank_interval_s"] |
+                            cfg.sensor_tank_interval_s);
   const char *postedFleetPassphrase = doc["fleet_passphrase"] | "";
   const bool hasFleetPassphraseField =
       !doc["fleet_passphrase"].isNull() && postedFleetPassphrase[0] != '\0';
@@ -453,6 +473,16 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.sensor_temp_interval_s = 5;
   if (cfg.sensor_temp_interval_s > 3600)
     cfg.sensor_temp_interval_s = 3600;
+  if (cfg.sensor_tank_range_mm == 0)
+    cfg.sensor_tank_range_mm = 5000;
+  if (cfg.sensor_tank_vref_mv == 0)
+    cfg.sensor_tank_vref_mv = 3553;
+  if (cfg.sensor_tank_sense_ohms == 0)
+    cfg.sensor_tank_sense_ohms = 120;
+  if (cfg.sensor_tank_interval_s < 5)
+    cfg.sensor_tank_interval_s = 5;
+  if (cfg.sensor_tank_interval_s > 3600)
+    cfg.sensor_tank_interval_s = 3600;
 
   networkChanged = (cfg.wifi_sta_ssid != prevStaSsid) ||
                    (cfg.wifi_sta_password != prevStaPassword) ||
@@ -646,6 +676,14 @@ void SerialAdmin::handleStatus(JsonDocument &doc) {
     out["local_temp_valid"] = sm_->localTemperatureValid();
     if (sm_->localTemperatureValid())
       out["local_temp_c"] = sm_->localTemperatureC();
+    out["local_tank_enabled"] = sm_->localTankEnabled();
+    out["local_tank_valid"] = sm_->localTankValid();
+    out["local_tank_status"] = tankSensorStateText(sm_->localTankState());
+    out["local_tank_depth_mm"] = sm_->localTankDepthMm();
+    out["local_tank_current_centi_ma"] = sm_->localTankCurrentCentiMa();
+    out["local_tank_current_ma"] =
+        static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f;
+    out["local_tank_voltage_mv"] = sm_->localTankVoltageMv();
     out["remote_temp_valid"] = sm_->remoteTemperatureValid();
     if (sm_->remoteTemperatureValid())
       out["remote_temp_c"] = sm_->remoteTemperatureC();
@@ -763,6 +801,9 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
   const uint8_t expected =
       clampExpectedRemotes(doc["expected_remotes"] | doc["expected_count"] | 1);
   auto &cfg = config_->settings();
+  const bool preserveTargets = cfg.commissioned && cfg.role_tx &&
+                               cfg.fleet_passphrase.equals(fleetKey) &&
+                               cfg.paired_target_count > 0;
   cfg.commissioned = true;
   cfg.mode = "paired";
   cfg.role = "transmitter";
@@ -773,11 +814,15 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
                           : kGatewayAddress;
   if (cfg.local_address == 0 || cfg.local_address == 255)
     cfg.local_address = kGatewayAddress;
-  cfg.remote_address = kFirstRemoteAddress;
   cfg.fleet_passphrase = fleetKey;
   cfg.fleet_setup_prompt_dismissed = true;
-  clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
-  clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
+  if (preserveTargets) {
+    cfg.remote_address = cfg.paired_target_addresses[0];
+  } else {
+    cfg.remote_address = kFirstRemoteAddress;
+    clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
+    clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
+  }
   clearAddressList(cfg.allowed_controller_addresses,
                    cfg.allowed_controller_count);
   cfg.input_control_paired_lora_enabled =
@@ -798,6 +843,7 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
   out["local_address"] = cfg.local_address;
   out["expected_remotes"] = expected;
   out["paired_target_count"] = cfg.paired_target_count;
+  out["preserved_targets"] = preserveTargets;
   sendOk(out);
 }
 
@@ -1081,7 +1127,19 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
     row["fw_version"] = p.chip_id == 0 ? "" : fwBuf;
     row["uptime_ms"] = p.uptime_ms;
-    row["maintenance_debug_known"] = true;
+    row["relay_state"] = p.relay_state;
+    row["input_state"] = p.input_state;
+    row["temp_valid"] = p.temp_valid;
+    if (p.temp_valid)
+      row["temp_c"] = p.temp_c;
+    row["tank_enabled"] = p.tank_enabled;
+    row["tank_valid"] = p.tank_valid;
+    row["tank_status"] = tankSensorStateText(p.tank_state);
+    row["tank_depth_mm"] = p.tank_depth_mm;
+    row["tank_current_centi_ma"] = p.tank_current_centi_ma;
+    row["tank_current_ma"] = static_cast<float>(p.tank_current_centi_ma) / 100.0f;
+    row["tank_voltage_mv"] = p.tank_voltage_mv;
+    row["maintenance_debug_known"] = p.maintenance_debug_known;
     row["heap_free"] = p.heap_free;
     row["heap_max_block"] = p.heap_max_block;
     row["heap_frag_pct"] = p.heap_frag_pct;
@@ -1416,20 +1474,33 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
       return;
     }
     auto &cfg = config_->settings();
-    clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
-    clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
     bool used[256]{};
     used[0] = true;
     used[255] = true;
     used[cfg.local_address] = true;
+    uint8_t targetAddresses[Settings::kAddressListCap]{};
+    uint8_t targetCount = 0;
     for (JsonVariantConst v : arr) {
       const int raw = v.as<int>();
       if (raw < 1 || raw > 254 || used[raw]) {
         sendError(cmd, "invalid_addresses", id);
         return;
       }
+      if (targetCount >= Settings::kAddressListCap) {
+        sendError(cmd, "too_many_targets", id);
+        return;
+      }
       used[raw] = true;
-      const uint8_t addr = static_cast<uint8_t>(raw);
+      targetAddresses[targetCount++] = static_cast<uint8_t>(raw);
+    }
+    if (targetCount == 0) {
+      sendError(cmd, "invalid_addresses", id);
+      return;
+    }
+    clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
+    clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
+    for (uint8_t i = 0; i < targetCount; ++i) {
+      const uint8_t addr = targetAddresses[i];
       cfg.paired_target_addresses[cfg.paired_target_count++] = addr;
       cfg.known_peer_addresses[cfg.known_peer_count++] = addr;
     }

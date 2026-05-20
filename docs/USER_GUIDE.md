@@ -49,7 +49,7 @@ Use `Settings` in Flasher with a USB-connected device.
 - `General`: role/address and LoRa timing/fail-safe controls.
 - `Network`: WiFi SSID/password, hostname, PHY/TX power, static IP, fallback AP policy.
 - `MQTT`: broker, topic root, MQTT client/control, controller addresses.
-- `Sensors`: DS18B20 reporting enablement.
+- `Sensors`: DS18B20 reporting and 4-20 mA tank level enablement.
 - `System`: save config, reboot, guarded factory reset.
 
 Secret fields are redacted on fetch. Leave password fields blank to preserve the stored value.
@@ -59,14 +59,15 @@ Fleet uses a USB-connected TX/gateway as the source of truth.
 
 - `Scan Fleet` reads the gateway-owned peer cache and sends bounded LoRa probes.
 - The gateway row is separate from remote rows.
-- Remote rows show identity, firmware, role, WiFi/IP, MQTT, uptime, RSSI, age, and OTA eligibility.
+- Remote rows show identity, firmware, role, WiFi/IP, MQTT, sensors, uptime, RSSI, age, and OTA eligibility.
 - `Flash` on a remote row triggers OTA pull over WiFi; firmware bytes are not carried over LoRa.
 
 ## Monitor
 Monitor is for gateway diagnostics over USB serial.
 
 - It requires a TX/gateway USB device.
-- It shows gateway health and the gateway peer cache.
+- It shows gateway health and the gateway peer cache, including remote input,
+  temperature, and tank telemetry when reported.
 - It can start temporary UDP logs for WiFi-connected devices.
 
 ## MQTT
@@ -85,8 +86,16 @@ Per-device topics include:
 - `<root>/lrs-<chipid>/dry_contact`
 - `<root>/lrs-<chipid>/relay`
 - `<root>/lrs-<chipid>/temp_c`
+- `<root>/lrs-<chipid>/tank_status`
+- `<root>/lrs-<chipid>/tank_depth_mm`
+- `<root>/lrs-<chipid>/tank_current_ma`
+- `<root>/lrs-<chipid>/tank_voltage_mv`
 - `<root>/lrs-<chipid>/addr`
 - `<root>/lrs-<chipid>/control`
+
+Gateway peer topics use `<root>/lrs-<tx_chipid>/peer/0xNN/...` with matching
+sensor leaves such as `input`, `dry_contact`, `temp_c`, `tank_status`,
+`tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv`.
 
 ## Recovery
 USB serial is the guaranteed local maintenance path.

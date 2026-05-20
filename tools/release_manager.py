@@ -116,6 +116,18 @@ def ensure_clean_tracked_tree(root: Path) -> None:
         )
 
 
+def run_pre_release_validation(root: Path) -> None:
+    """
+    Mandatory release gate for firmware/helper correctness.
+    Intentionally excludes flasher build checks unless flasher files changed.
+    """
+    print("\nRunning mandatory pre-release validation gate...")
+    run(["pio", "test", "-e", "native"], cwd=root)
+    run(["python3", "tools/test_version_metadata.py"], cwd=root)
+    run(["pio", "run", "-e", "lrs_za"], cwd=root)
+    run(["pio", "run", "-e", "lrs_us"], cwd=root)
+
+
 def parse_platformio_metrics(output: str, env: str) -> BuildMetrics:
     ram_m = re.search(r"RAM:\s+\[[^\]]+\]\s+\d+(?:\.\d+)?%\s+\(used\s+(\d+)\s+bytes\s+from\s+(\d+)\s+bytes\)", output)
     flash_m = re.search(r"Flash:\s+\[[^\]]+\]\s+\d+(?:\.\d+)?%\s+\(used\s+(\d+)\s+bytes\s+from\s+(\d+)\s+bytes\)", output)
@@ -793,6 +805,8 @@ def main() -> int:
 
     if not args.no_clean_check:
         ensure_clean_tracked_tree(root)
+
+    run_pre_release_validation(root)
 
     if args.notes_file:
         if not args.notes_file.exists():

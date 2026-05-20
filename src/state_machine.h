@@ -6,6 +6,7 @@
 
 #include "config_store.h"
 #include "radio_protocol.h"
+#include "sensor_status.h"
 
 #ifndef LRS_PROVISIONING_MAX_DEVICES
 #define LRS_PROVISIONING_MAX_DEVICES 12
@@ -59,6 +60,12 @@ struct PeerStatusSnapshot {
   uint8_t input_state = 0;
   bool temp_valid = false;
   int8_t temp_c = 0;
+  bool tank_enabled = false;
+  bool tank_valid = false;
+  TankSensorState tank_state = TankSensorState::Disabled;
+  uint16_t tank_depth_mm = 0;
+  uint16_t tank_current_centi_ma = 0;
+  uint16_t tank_voltage_mv = 0;
   int uplink_rssi = -127;
   bool downlink_rssi_valid = false;
   int downlink_rssi = -127;
@@ -173,8 +180,17 @@ class NodeStateMachine {
   uint32_t lastPacketMs() const;
   uint32_t lastTxMs() const;
   void setLocalTemperature(bool valid, float celsius);
+  void setLocalTank(bool enabled, bool valid, TankSensorState state,
+                    uint16_t depthMm, uint16_t currentCentiMa,
+                    uint16_t voltageMv);
   bool localTemperatureValid() const;
   float localTemperatureC() const;
+  bool localTankEnabled() const;
+  bool localTankValid() const;
+  TankSensorState localTankState() const;
+  uint16_t localTankDepthMm() const;
+  uint16_t localTankCurrentCentiMa() const;
+  uint16_t localTankVoltageMv() const;
   bool remoteTemperatureValid() const;
   float remoteTemperatureC() const;
   uint32_t remoteTemperatureMs() const;
@@ -288,6 +304,12 @@ class NodeStateMachine {
   bool remote_temp_valid_ = false;
   int8_t remote_temp_c_ = 0;
   uint32_t remote_temp_ms_ = 0;
+  bool local_tank_enabled_ = false;
+  bool local_tank_valid_ = false;
+  TankSensorState local_tank_state_ = TankSensorState::Disabled;
+  uint16_t local_tank_depth_mm_ = 0;
+  uint16_t local_tank_current_centi_ma_ = 0;
+  uint16_t local_tank_voltage_mv_ = 0;
   bool shared_time_valid_ = false;
   bool shared_time_authoritative_ = false;
   uint32_t shared_time_sync_unix_s_ = 0;
@@ -333,6 +355,8 @@ class NodeStateMachine {
   uint32_t last_rx_control_ms_ = 0;
   bool maintenance_debug_pending_ = false;
   uint8_t maintenance_debug_dst_ = 0;
+  bool maintenance_sensor_pending_ = false;
+  uint8_t maintenance_sensor_dst_ = 0;
 
   struct PeerRuntime {
     bool in_use = false;
@@ -341,6 +365,12 @@ class NodeStateMachine {
     uint8_t input_state = 0;
     bool temp_valid = false;
     int8_t temp_c = 0;
+    bool tank_enabled = false;
+    bool tank_valid = false;
+    TankSensorState tank_state = TankSensorState::Disabled;
+    uint16_t tank_depth_mm = 0;
+    uint16_t tank_current_centi_ma = 0;
+    uint16_t tank_voltage_mv = 0;
     int uplink_rssi = -127;
     bool downlink_rssi_valid = false;
     int downlink_rssi = -127;
@@ -562,9 +592,10 @@ class NodeStateMachine {
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceStatus(uint8_t dstAddress);
+  bool sendMaintenanceSensorStatus(uint8_t dstAddress);
   bool sendMaintenanceDebugStatus(uint8_t dstAddress);
   bool handleMaintenanceStatus(const ProtocolMessage &msg);
-  void tickPendingMaintenanceDebug();
+  void tickPendingMaintenancePages();
   PeerRuntime *findOrCreatePeer(uint8_t address);
   PollRuntime *pollStateForIndex(size_t index);
   const PollRuntime *pollStateForIndex(size_t index) const;

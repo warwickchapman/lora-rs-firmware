@@ -114,6 +114,15 @@ interface LoraInventoryDevice {
   relay_feedback?: number;
   input_state?: number;
   input_feedback?: number;
+  temp_valid?: boolean;
+  temp_c?: number;
+  tank_enabled?: boolean;
+  tank_valid?: boolean;
+  tank_status?: string;
+  tank_depth_mm?: number;
+  tank_current_ma?: number;
+  tank_current_centi_ma?: number;
+  tank_voltage_mv?: number;
   debug_uptime_ms?: number;
   rssi?: number;
   downlink_rssi_known?: boolean;
@@ -196,6 +205,13 @@ interface SerialAdminStatus {
   peer_count?: number;
   local_temp_valid?: boolean;
   local_temp_c?: number;
+  local_tank_enabled?: boolean;
+  local_tank_valid?: boolean;
+  local_tank_status?: string;
+  local_tank_depth_mm?: number;
+  local_tank_current_ma?: number;
+  local_tank_current_centi_ma?: number;
+  local_tank_voltage_mv?: number;
 }
 
 interface SerialAdminConfig {
@@ -249,6 +265,11 @@ interface SerialAdminConfig {
   sensor_temp_enabled: boolean;
   sensor_temp_pin: number;
   sensor_temp_interval_s: number;
+  sensor_tank_enabled: boolean;
+  sensor_tank_range_mm: number;
+  sensor_tank_vref_mv: number;
+  sensor_tank_sense_ohms: number;
+  sensor_tank_interval_s: number;
   admin_password?: string;
 }
 
@@ -554,6 +575,7 @@ const monitorContextLabel = computed(() => {
   return parts.join(' on ');
 });
 const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
+const pairDiscoveredDeviceCount = computed(() => pairStatus.value?.devices?.length || 0);
 const fleetGatewayDevice = computed(() => serialDeviceState(fleetSelectedPort.value));
 const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
 const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
@@ -595,6 +617,7 @@ function portGatewayReady(port: string): boolean {
 }
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
 const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
+const pairAdvancedStartDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !provisionSelectedPort.value);
 const activeSerialAdminPasswordValue = computed(() =>
   activeMode.value === 'pair' ? pairPassword() : deviceInfo.value?.password?.trim() || ''
 );
@@ -1369,7 +1392,7 @@ function displayFirmwareVersion(rawVersion: string | undefined | null): string {
 
 function provisionedRemoteChipIds(): Set<string> {
   return new Set((pairStatus.value?.devices || [])
-    .filter(d => d.selected && d.state === 'verified' && d.assigned_address > 0 && d.assigned_address < 255)
+    .filter(d => d.selected && isProvisionedTargetState(d) && d.assigned_address > 0 && d.assigned_address < 255)
     .map(d => normalizeChipId(d.chip_id_hex))
     .filter(Boolean));
 }
@@ -1479,6 +1502,15 @@ function normalizeAddressArray(value: unknown, fallback: number[] = []): number[
     .filter(item => Number.isInteger(item) && item >= 1 && item <= 254);
 }
 
+function uniqueSortedAddresses(values: number[]): number[] {
+  return [...new Set(values.filter(value => Number.isInteger(value) && value >= 1 && value <= 254))]
+    .sort((a, b) => a - b);
+}
+
+function isProvisionedTargetState(device: EasyPairDevice): boolean {
+  return device.state === 'verified' || device.state === 'applied_unconfirmed';
+}
+
 function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | undefined, status: SerialAdminStatus | null): SerialAdminConfig {
   const cfg = raw || {};
   const roleTx = typeof cfg.role_tx === 'boolean' ? cfg.role_tx : !!status?.role_tx;
@@ -1538,6 +1570,11 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     sensor_temp_enabled: boolValue(cfg.sensor_temp_enabled, !!status?.local_temp_valid),
     sensor_temp_pin: numberValue(cfg.sensor_temp_pin, 0),
     sensor_temp_interval_s: numberValue(cfg.sensor_temp_interval_s, 10),
+    sensor_tank_enabled: boolValue(cfg.sensor_tank_enabled, !!status?.local_tank_enabled),
+    sensor_tank_range_mm: numberValue(cfg.sensor_tank_range_mm, 5000),
+    sensor_tank_vref_mv: numberValue(cfg.sensor_tank_vref_mv, 3553),
+    sensor_tank_sense_ohms: numberValue(cfg.sensor_tank_sense_ohms, 120),
+    sensor_tank_interval_s: numberValue(cfg.sensor_tank_interval_s, 5),
     fleet_passphrase: '',
     admin_password: ''
   };
@@ -1674,6 +1711,23 @@ async function refreshLoraInventoryStatus(background = true) {
   await refreshGatewaySnapshot(fleetSelectedPort.value, background, 'fleet');
 }
 
+async function refreshFleetCacheSnapshot() {
+  if (!fleetSelectedPort.value) {
+    notify('Select the USB gateway first');
+    return;
+  }
+  pushNetworkLog('Reloading gateway peer cache snapshot...');
+  const beforeMessage = networkStatusMessage.value;
+  await refreshLoraInventoryStatus(false);
+  const count = loraInventory.value.length;
+  const message = `Gateway cache reloaded: ${count} remote${count === 1 ? '' : 's'} cached.`;
+  if (networkStatusMessage.value === beforeMessage || !networkStatusMessage.value) {
+    networkStatusMessage.value = message;
+  }
+  pushNetworkLog(networkStatusMessage.value || message);
+  notify(message);
+}
+
 function startLoraInventoryPolling() {
   stopLoraInventoryPolling(false);
   networkInventoryPollTimer.value = window.setInterval(() => {
@@ -1732,6 +1786,49 @@ function monitorFragLabel(row: LoraInventoryDevice): string {
 function monitorUptimeLabel(row: LoraInventoryDevice): string {
   const uptime = row.uptime_ms || row.debug_uptime_ms;
   return uptime ? formatUptime(uptime) : (row.maintenance_debug_known ? '0s' : 'waiting');
+}
+
+function remoteInputLabel(row: LoraInventoryDevice): string {
+  const value = row.input_feedback ?? row.input_state;
+  if (value === undefined || value === null) return 'waiting';
+  return Number(value) === 1 ? 'Closed' : 'Open';
+}
+
+function remoteTempLabel(row: LoraInventoryDevice): string {
+  return row.temp_valid && row.temp_c !== undefined && row.temp_c !== null ? `${row.temp_c} °C` : '-';
+}
+
+function tankLabel(row: LoraInventoryDevice): string {
+  if (!row.tank_enabled) return '-';
+  if (row.tank_status === 'fault_low') return 'Fault low';
+  if (row.tank_status === 'overrange') return 'Overrange';
+  if (row.tank_valid && row.tank_depth_mm !== undefined && row.tank_depth_mm !== null) {
+    return `${row.tank_depth_mm} mm`;
+  }
+  return 'waiting';
+}
+
+function tankDetailLabel(row: LoraInventoryDevice): string {
+  if (!row.tank_enabled) return '';
+  const parts: string[] = [];
+  if (row.tank_current_ma !== undefined && row.tank_current_ma !== null) {
+    parts.push(`${Number(row.tank_current_ma).toFixed(2)} mA`);
+  } else if (row.tank_current_centi_ma !== undefined && row.tank_current_centi_ma !== null) {
+    parts.push(`${(Number(row.tank_current_centi_ma) / 100).toFixed(2)} mA`);
+  }
+  if (row.tank_voltage_mv !== undefined && row.tank_voltage_mv !== null) {
+    parts.push(`${row.tank_voltage_mv} mV`);
+  }
+  return parts.join(' / ');
+}
+
+function fleetSensorsLabel(row: LoraInventoryDevice): string {
+  const parts = [`in ${remoteInputLabel(row)}`];
+  const temp = remoteTempLabel(row);
+  if (temp !== '-') parts.push(temp);
+  const tank = tankLabel(row);
+  if (tank !== '-') parts.push(`tank ${tank}`);
+  return parts.join(' · ');
 }
 
 function adoptMonitorMqttFromStatus(st: SerialAdminStatus | null) {
@@ -2477,7 +2574,12 @@ function serialConfigPatch(): Record<string, any> {
     mqtt_topic_root: cfg.mqtt_topic_root || 'lora',
     sensor_temp_enabled: !!cfg.sensor_temp_enabled,
     sensor_temp_pin: Number(cfg.sensor_temp_pin || 0),
-    sensor_temp_interval_s: Number(cfg.sensor_temp_interval_s || 10)
+    sensor_temp_interval_s: Number(cfg.sensor_temp_interval_s || 10),
+    sensor_tank_enabled: !!cfg.sensor_tank_enabled,
+    sensor_tank_range_mm: Number(cfg.sensor_tank_range_mm || 5000),
+    sensor_tank_vref_mv: Number(cfg.sensor_tank_vref_mv || 3553),
+    sensor_tank_sense_ohms: Number(cfg.sensor_tank_sense_ohms || 120),
+    sensor_tank_interval_s: Number(cfg.sensor_tank_interval_s || 5)
   };
   if (cfg.wifi_sta_password) patch.wifi_sta_password = cfg.wifi_sta_password;
   if (cfg.mqtt_password) patch.mqtt_password = cfg.mqtt_password;
@@ -2610,11 +2712,15 @@ async function loadEasyPairGateway() {
 
 async function configureEasyPairGateway() {
   const fleetKey = pairFleetKey.value.trim();
-  const password = pairPassword();
   if (!fleetKey) {
     notify('Enter the fleet key before pairing');
     return;
   }
+  if (!gatewayReady.value) {
+    await loadEasyPairGateway();
+    if (!gatewayReady.value) return;
+  }
+  const password = pairPassword();
   if (!password) {
     notify('Load the gateway factory password first');
     return;
@@ -2687,7 +2793,12 @@ async function refreshEasyPairStatus(log = false) {
     pairStatus.value = await sendPairCommand<EasyPairStatus>('provisioning_status', {}, 5000);
     if (log && pairStatus.value.session) {
       const s = pairStatus.value.session;
-      pushPairLog(`Status: ${s.state}, found ${s.discovered_count}, verified ${s.verified_count}, failed ${s.failed_count}.`);
+      const visibleCount = pairStatus.value.devices?.length ?? s.discovered_count;
+      if (s.state === 'discovering') {
+        pushPairLog(`Status: discovering; ${visibleCount} device${visibleCount === 1 ? '' : 's'} visible so far, waiting for replies.`);
+      } else {
+        pushPairLog(`Status: ${s.state}, found ${visibleCount}, verified ${s.verified_count}, failed ${s.failed_count}.`);
+      }
     }
     if (pairStatus.value?.session?.state === 'complete') {
       await refreshProvisionedSerialDeviceCaches('provisioning');
@@ -2723,15 +2834,26 @@ function stopEasyPairStatusPolling() {
 }
 
 async function startEasyPairDiscovery() {
-  const password = pairPassword();
-  if (!password) {
-    notify('Load the gateway factory password first');
+  const fleetKey = pairFleetKey.value.trim();
+  if (!fleetKey) {
+    notify('Enter the fleet key before scanning');
     return;
   }
   isPairBusy.value = true;
   provisionCacheRefreshedChips.clear();
-  pushPairLog(`Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
   try {
+    if (!gatewayReady.value) {
+      await loadEasyPairGateway();
+      if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    }
+    const password = pairPassword();
+    if (!password) throw new Error('gateway password unavailable');
+    await sendPairCommand('configure_gateway', {
+      admin_password: password,
+      fleet_passphrase: fleetKey,
+      expected_remotes: pairExpectedCount.value
+    }, 10000);
+    pushPairLog(`Gateway prepared. Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
     await sendPairCommand('start_discovery', {
       admin_password: password,
       expected_remotes: pairExpectedCount.value
@@ -2767,23 +2889,29 @@ async function provisionEasyPairDevices() {
   }
 }
 
+async function loadGatewayTargetAddresses(password: string): Promise<number[]> {
+  const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
+    admin_password: password
+  }, 15000);
+  return uniqueSortedAddresses(normalizeAddressArray(out.config?.paired_target_addresses));
+}
+
 async function saveEasyPairTargets() {
   const password = pairPassword();
   const devices = (pairStatus.value?.devices || [])
     .filter(d =>
       d.selected &&
-      !d.address_conflict &&
-      d.state === 'verified' &&
+      isProvisionedTargetState(d) &&
       d.assigned_address > 0 &&
       d.assigned_address < 255
     );
-  const addresses = devices.map(d => d.assigned_address);
-  if (!password || addresses.length === 0) {
+  const deviceAddresses = devices.map(d => d.assigned_address);
+  if (!password || deviceAddresses.length === 0) {
     notify('No provisioned target addresses to save yet');
     return;
   }
   const seen = new Set<number>();
-  const duplicate = addresses.find(addr => {
+  const duplicate = deviceAddresses.find(addr => {
     if (seen.has(addr)) return true;
     seen.add(addr);
     return false;
@@ -2795,11 +2923,25 @@ async function saveEasyPairTargets() {
     notify(`Duplicate target address ${duplicate}; scan/provision again with updated firmware`);
     return;
   }
+  const newAddresses = uniqueSortedAddresses(deviceAddresses);
   isPairBusy.value = true;
   devices.forEach(d => pushPairLog(`Address allocation: addr ${d.assigned_address} chip ${d.chip_id_hex || 'unknown'}`));
-  pushPairLog(`Saving gateway target list: ${addresses.join(', ')}`);
+  const unconfirmed = devices.filter(d => d.state === 'applied_unconfirmed');
+  unconfirmed.forEach(d => pushPairLog(`Address ${d.assigned_address} for ${d.chip_id_hex || 'unknown'} was applied but not verified; keeping it in the gateway target list.`));
   try {
-    await sendPairCommand('set_gateway_targets', { admin_password: password, addresses }, 10000);
+    const existingAddresses = await loadGatewayTargetAddresses(password);
+    const mergedAddresses = uniqueSortedAddresses([...existingAddresses, ...newAddresses]);
+    if (mergedAddresses.length > 12) {
+      throw new Error(`target list would exceed 12 addresses (${mergedAddresses.join(', ')})`);
+    }
+    pushPairLog(`Saving gateway target list: existing ${existingAddresses.join(', ') || 'none'} + new ${newAddresses.join(', ')} -> ${mergedAddresses.join(', ')}`);
+    const out = await sendPairCommand<any>('set_gateway_targets', {
+      admin_password: password,
+      addresses: mergedAddresses
+    }, 10000);
+    if (out.target_count) {
+      pushPairLog(`Gateway target list now has ${out.target_count} address${out.target_count === 1 ? '' : 'es'}.`);
+    }
     pushPairLog('Provisioning complete.');
     await refreshGatewayStatusForPair();
     await refreshEasyPairStatus(false);
@@ -3729,8 +3871,9 @@ function countCrashEvents(entries: string[]): number {
               </div>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Remote count</label>
+              <label class="font-medium text-slate-400">Scan count</label>
               <input v-model.number="pairExpectedCount" class="glass-input h-10" type="number" min="1" max="12" />
+              <div class="text-[10px] text-slate-500">Powered factory/unprovisioned remotes to listen for in this scan.</div>
             </div>
           </div>
 
@@ -3774,8 +3917,8 @@ function countCrashEvents(entries: string[]): number {
           <details class="rounded-md border border-slate-800 bg-slate-900/30 px-2 py-1.5">
             <summary class="cursor-pointer select-none text-xs font-semibold text-slate-500 hover:text-slate-300">Advanced steps</summary>
             <div class="mt-3 grid grid-cols-2 xl:grid-cols-5 gap-3">
-              <button @click="configureEasyPairGateway" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Configure the USB device as gateway">Prepare</button>
-              <button @click="startEasyPairDiscovery" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa">Scan</button>
+              <button @click="configureEasyPairGateway" :disabled="pairAdvancedStartDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Load and configure the USB device as gateway">Prepare</button>
+              <button @click="startEasyPairDiscovery" :disabled="pairAdvancedStartDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Load the gateway, prepare it, then discover powered remotes over LoRa">Scan</button>
               <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Provision All</button>
               <button @click="saveEasyPairTargets" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Save discovered remote addresses on the gateway">Finish</button>
               <button @click="cancelEasyPair" :disabled="!gatewayReady" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Stop the current discovery or provisioning session">Stop</button>
@@ -3860,7 +4003,7 @@ function countCrashEvents(entries: string[]): number {
             </div>
             <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
               <div class="text-slate-500">Found</div>
-              <div class="font-mono text-slate-300">{{ pairStatus.session.discovered_count }} / {{ pairStatus.session.estimated_count }}</div>
+              <div class="font-mono text-slate-300">{{ pairDiscoveredDeviceCount }} / {{ pairStatus.session.estimated_count }}</div>
             </div>
             <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
               <div class="text-slate-500">Verified</div>
@@ -4301,13 +4444,21 @@ function countCrashEvents(entries: string[]): number {
             <div v-if="settingsTab === 'sensors'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
               <template v-if="serialAdminConfig">
                 <div class="col-span-2 rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
-                  This hardware uses the firmware-defined DS18B20 pin and runtime cadence. Settings only exposes whether temperature reporting is enabled.
+                  Sensor wiring is fixed in firmware for this board: DS18B20 uses the configured one-wire pin, and the 4-20 mA tank input uses A0 with the 3553 mV board calibration.
                 </div>
                 <label class="self-center text-right font-semibold text-slate-300">DS18B20</label>
                 <label class="flex items-center gap-2 text-slate-300">
                   <input v-model="serialAdminConfig.sensor_temp_enabled" type="checkbox" />
                   Temperature sensor enabled
                 </label>
+                <label class="self-center text-right font-semibold text-slate-300">Tank level</label>
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input v-model="serialAdminConfig.sensor_tank_enabled" type="checkbox" />
+                  4-20 mA tank sensor enabled
+                </label>
+                <div class="col-start-2 text-slate-500">
+                  5000 mm water range, 120 ohm sense resistor, sampled every {{ serialAdminConfig.sensor_tank_interval_s }}s.
+                </div>
               </template>
             </div>
 
@@ -4499,7 +4650,7 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
-            <table class="w-full min-w-[1280px] border-collapse text-xs">
+            <table class="w-full min-w-[1480px] border-collapse text-xs">
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
                   <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
@@ -4508,6 +4659,9 @@ function countCrashEvents(entries: string[]): number {
                   <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
                   <th class="px-2 py-1.5 text-left font-semibold">IP</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Input</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Temp</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Tank</th>
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
                   <th class="px-2 py-1.5 text-left font-semibold">MQTT</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
@@ -4519,7 +4673,7 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="monitorFleetRows.length === 0">
-                  <td colspan="13" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
+                  <td colspan="16" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
                 </tr>
                 <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
@@ -4530,6 +4684,12 @@ function countCrashEvents(entries: string[]): number {
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ displayFirmwareVersion(device.fw_version) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">ack {{ device.relay_state ?? '-' }} · fb {{ device.relay_feedback ?? '-' }}</td>
+                  <td class="px-2 py-1.5 text-slate-300">{{ remoteInputLabel(device) }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ remoteTempLabel(device) }}</td>
+                  <td class="px-2 py-1.5">
+                    <div class="font-mono text-slate-300">{{ tankLabel(device) }}</div>
+                    <div v-if="tankDetailLabel(device)" class="mt-0.5 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
+                  </td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
@@ -4626,11 +4786,12 @@ function countCrashEvents(entries: string[]): number {
                 {{ isLoraInventoryScanning ? 'Stop scan' : 'Scan Fleet' }}
               </button>
               <button
-                @click="refreshLoraInventoryStatus(false)"
+                @click="refreshFleetCacheSnapshot"
                 :disabled="fleetScanDisabled || isLoraInventoryScanning"
                 class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
+                title="Reload the gateway-owned peer cache without probing remotes"
               >
-                Refresh cache
+                Reload cache
               </button>
               <button
                 @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
@@ -4763,7 +4924,7 @@ function countCrashEvents(entries: string[]): number {
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
-            <table class="w-full min-w-[980px] border-collapse text-xs">
+            <table class="w-full min-w-[1120px] border-collapse text-xs">
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
                   <th class="w-10 px-2 py-1.5 text-left"></th>
@@ -4774,6 +4935,7 @@ function countCrashEvents(entries: string[]): number {
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
                   <th class="px-2 py-1.5 text-left font-semibold">IP</th>
                   <th class="px-2 py-1.5 text-left font-semibold">MQTT</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Age</th>
@@ -4782,7 +4944,7 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or scan the fleet to probe remotes.</td>
+                  <td colspan="13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or scan the fleet to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -4801,6 +4963,10 @@ function countCrashEvents(entries: string[]): number {
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5">
+                    <div class="text-slate-300">{{ fleetSensorsLabel(device) }}</div>
+                    <div v-if="tankDetailLabel(device)" class="mt-1 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
+                  </td>
                   <td class="px-2 py-1.5 font-mono">
                     <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
                     <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']">

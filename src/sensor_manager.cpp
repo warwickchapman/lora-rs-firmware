@@ -7,12 +7,24 @@
 
 namespace {
 constexpr float kInvalidTemp = -127.0f;
+constexpr uint8_t kTankAnalogPin = A0;
+constexpr uint8_t kTankSamples = 8;
+constexpr float kTankZeroMa = 4.0f;
+constexpr float kTankSpanMa = 16.0f;
+constexpr float kTankFaultLowMa = 3.8f;
+constexpr float kTankOverrangeMa = 20.0f;
 
 uint16_t deriveTempIntervalS(uint32_t heartbeatMs) {
   uint32_t sec = heartbeatMs / 2000U;
   if (sec < 2U) sec = 2U;
   if (sec > 300U) sec = 300U;
   return static_cast<uint16_t>(sec);
+}
+
+uint16_t clampU16(float value) {
+  if (value <= 0.0f) return 0;
+  if (value >= 65535.0f) return 65535;
+  return static_cast<uint16_t>(value + 0.5f);
 }
 }
 
@@ -26,6 +38,11 @@ void SensorManager::applyConfig(const Settings &cfg) {
   runtime_.sensor_temp_enabled = cfg.sensor_temp_enabled;
   runtime_.sensor_temp_pin = cfg.sensor_temp_pin;
   runtime_.temp_interval_s = deriveTempIntervalS(cfg.heartbeat_ms);
+  runtime_.sensor_tank_enabled = cfg.sensor_tank_enabled;
+  runtime_.tank_range_mm = cfg.sensor_tank_range_mm == 0 ? 5000 : cfg.sensor_tank_range_mm;
+  runtime_.tank_vref_mv = cfg.sensor_tank_vref_mv == 0 ? 3553 : cfg.sensor_tank_vref_mv;
+  runtime_.tank_sense_ohms = cfg.sensor_tank_sense_ohms == 0 ? 120 : cfg.sensor_tank_sense_ohms;
+  runtime_.tank_interval_s = cfg.sensor_tank_interval_s == 0 ? 5 : cfg.sensor_tank_interval_s;
   temp_.enabled = runtime_.sensor_temp_enabled;
   temp_.pin = runtime_.sensor_temp_pin;
   temp_.interval_s = runtime_.temp_interval_s;
@@ -40,15 +57,35 @@ void SensorManager::applyConfig(const Settings &cfg) {
   temp_conversion_started_ms_ = 0;
   temp_conversion_wait_ms_ = 750;
   has_addr_ = false;
+  tank_.enabled = runtime_.sensor_tank_enabled;
+  tank_.valid = false;
+  tank_.state = tank_.enabled ? TankSensorState::FaultLow : TankSensorState::Disabled;
+  tank_.depth_mm = 0;
+  tank_.voltage_mv = 0;
+  tank_.current_centi_ma = 0;
+  tank_.range_mm = runtime_.tank_range_mm;
+  tank_.vref_mv = runtime_.tank_vref_mv;
+  tank_.sense_ohms = runtime_.tank_sense_ohms;
+  tank_.interval_s = runtime_.tank_interval_s;
+  tank_.raw_adc = 0;
+  tank_.last_read_ms = 0;
+  if (tank_.enabled) {
+    pinMode(kTankAnalogPin, INPUT);
+  }
   setupBus();
 }
 
 void SensorManager::tick() {
+  const uint32_t now = millis();
+  tickTemperature(now);
+  tickTank(now);
+}
+
+void SensorManager::tickTemperature(uint32_t now) {
   if (!temp_.enabled || !ds_ || !has_addr_) {
     return;
   }
 
-  const uint32_t now = millis();
   if (temp_conversion_pending_) {
     if (now - temp_conversion_started_ms_ < temp_conversion_wait_ms_) {
       return;
@@ -93,6 +130,48 @@ void SensorManager::tick() {
 }
 
 const TempSensorStatus &SensorManager::tempStatus() const { return temp_; }
+
+const TankSensorStatus &SensorManager::tankStatus() const { return tank_; }
+
+void SensorManager::tickTank(uint32_t now) {
+  if (!tank_.enabled) {
+    return;
+  }
+  if (tank_.last_read_ms != 0 &&
+      now - tank_.last_read_ms < static_cast<uint32_t>(tank_.interval_s) * 1000UL) {
+    return;
+  }
+
+  uint32_t total = 0;
+  for (uint8_t i = 0; i < kTankSamples; ++i) {
+    total += static_cast<uint16_t>(analogRead(kTankAnalogPin));
+  }
+  const uint16_t raw = static_cast<uint16_t>((total + (kTankSamples / 2U)) / kTankSamples);
+  const float voltageMv = (static_cast<float>(raw) * static_cast<float>(tank_.vref_mv)) / 1024.0f;
+  const float currentMa = voltageMv / static_cast<float>(tank_.sense_ohms);
+  float depthMm = (currentMa - kTankZeroMa) *
+                  (static_cast<float>(tank_.range_mm) / kTankSpanMa);
+  if (depthMm < 0.0f) {
+    depthMm = 0.0f;
+  }
+
+  tank_.raw_adc = raw;
+  tank_.voltage_mv = clampU16(voltageMv);
+  tank_.current_centi_ma = clampU16(currentMa * 100.0f);
+  tank_.depth_mm = clampU16(depthMm);
+  tank_.last_read_ms = now;
+
+  if (currentMa < kTankFaultLowMa) {
+    tank_.valid = false;
+    tank_.state = TankSensorState::FaultLow;
+  } else if (currentMa > kTankOverrangeMa) {
+    tank_.valid = true;
+    tank_.state = TankSensorState::Overrange;
+  } else {
+    tank_.valid = true;
+    tank_.state = TankSensorState::Ok;
+  }
+}
 
 void SensorManager::teardownBus() {
   temp_conversion_pending_ = false;

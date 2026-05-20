@@ -3,6 +3,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from version_metadata import version_parts
+
 Import("env")
 
 
@@ -62,29 +64,8 @@ def _read_repo_version(default):
         return default
 
 
-def _version_parts(version):
-    parts = []
-    value = ""
-    for char in version:
-        if char.isdigit():
-            value += char
-            continue
-        if value:
-            parts.append(min(int(value), 255))
-            value = ""
-            if len(parts) == 3:
-                break
-        if char == "-":
-            break
-    if value and len(parts) < 3:
-        parts.append(min(int(value), 255))
-    while len(parts) < 3:
-        parts.append(0)
-    return parts[:3]
-
-
 fw_version = _read_repo_version(env.GetProjectOption("custom_fw_version", "0.0.0-dev"))
-fw_major, fw_minor, fw_patch = _version_parts(fw_version)
+fw_major, fw_minor, fw_patch = version_parts(fw_version)
 git_sha = _run_git(["rev-parse", "--short", "HEAD"], "nogit")
 git_branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
 dirty = _git_dirty_flag()

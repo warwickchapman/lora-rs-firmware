@@ -84,6 +84,11 @@ constexpr const char *kAllowedFields[] = {
     "sensor_temp_enabled",
     "sensor_temp_pin",
     "sensor_temp_interval_s",
+    "sensor_tank_enabled",
+    "sensor_tank_range_mm",
+    "sensor_tank_vref_mv",
+    "sensor_tank_sense_ohms",
+    "sensor_tank_interval_s",
     "fleet_passphrase",
     "fleet_setup_prompt_dismissed",
     "admin_password",
@@ -353,6 +358,11 @@ bool ConfigStore::begin() {
   cfg_.sensor_temp_enabled = root["sensor_temp_enabled"] | false;
   cfg_.sensor_temp_pin = root["sensor_temp_pin"] | 0;
   cfg_.sensor_temp_interval_s = root["sensor_temp_interval_s"] | 10;
+  cfg_.sensor_tank_enabled = root["sensor_tank_enabled"] | false;
+  cfg_.sensor_tank_range_mm = root["sensor_tank_range_mm"] | 5000;
+  cfg_.sensor_tank_vref_mv = root["sensor_tank_vref_mv"] | 3553;
+  cfg_.sensor_tank_sense_ohms = root["sensor_tank_sense_ohms"] | 120;
+  cfg_.sensor_tank_interval_s = root["sensor_tank_interval_s"] | 5;
 
   cfg_.fleet_passphrase = root["fleet_passphrase"] | "lora-default-passphrase";
   cfg_.fleet_setup_prompt_dismissed = root["fleet_setup_prompt_dismissed"] | false;
@@ -499,6 +509,11 @@ bool ConfigStore::save() {
   doc["sensor_temp_enabled"] = cfg_.sensor_temp_enabled;
   doc["sensor_temp_pin"] = cfg_.sensor_temp_pin;
   doc["sensor_temp_interval_s"] = cfg_.sensor_temp_interval_s;
+  doc["sensor_tank_enabled"] = cfg_.sensor_tank_enabled;
+  doc["sensor_tank_range_mm"] = cfg_.sensor_tank_range_mm;
+  doc["sensor_tank_vref_mv"] = cfg_.sensor_tank_vref_mv;
+  doc["sensor_tank_sense_ohms"] = cfg_.sensor_tank_sense_ohms;
+  doc["sensor_tank_interval_s"] = cfg_.sensor_tank_interval_s;
 
   doc["fleet_passphrase"] = cfg_.fleet_passphrase;
   doc["fleet_setup_prompt_dismissed"] = cfg_.fleet_setup_prompt_dismissed;
@@ -772,6 +787,11 @@ void ConfigStore::setDefaults() {
   cfg_.sensor_temp_enabled = false;
   cfg_.sensor_temp_pin = 0;
   cfg_.sensor_temp_interval_s = 10;
+  cfg_.sensor_tank_enabled = false;
+  cfg_.sensor_tank_range_mm = 5000;
+  cfg_.sensor_tank_vref_mv = 3553;
+  cfg_.sensor_tank_sense_ohms = 120;
+  cfg_.sensor_tank_interval_s = 5;
 
   cfg_.fleet_passphrase = "lora-default-passphrase";
   cfg_.fleet_setup_prompt_dismissed = false;

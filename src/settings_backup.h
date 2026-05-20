@@ -60,6 +60,11 @@ struct SettingsBackup {
   bool sensor_temp_enabled = false;
   uint8_t sensor_temp_pin = 0;
   uint16_t sensor_temp_interval_s = 10;
+  bool sensor_tank_enabled = false;
+  uint16_t sensor_tank_range_mm = 5000;
+  uint16_t sensor_tank_vref_mv = 3553;
+  uint16_t sensor_tank_sense_ohms = 120;
+  uint16_t sensor_tank_interval_s = 5;
   bool commissioned = false;
 };
 
@@ -123,6 +128,11 @@ inline void captureSettingsBackup(const Settings &src, SettingsBackup &dst) {
   dst.sensor_temp_enabled = src.sensor_temp_enabled;
   dst.sensor_temp_pin = src.sensor_temp_pin;
   dst.sensor_temp_interval_s = src.sensor_temp_interval_s;
+  dst.sensor_tank_enabled = src.sensor_tank_enabled;
+  dst.sensor_tank_range_mm = src.sensor_tank_range_mm;
+  dst.sensor_tank_vref_mv = src.sensor_tank_vref_mv;
+  dst.sensor_tank_sense_ohms = src.sensor_tank_sense_ohms;
+  dst.sensor_tank_interval_s = src.sensor_tank_interval_s;
   dst.commissioned = src.commissioned;
 }
 
@@ -186,5 +196,10 @@ inline void restoreSettingsBackup(const SettingsBackup &src, Settings &dst) {
   dst.sensor_temp_enabled = src.sensor_temp_enabled;
   dst.sensor_temp_pin = src.sensor_temp_pin;
   dst.sensor_temp_interval_s = src.sensor_temp_interval_s;
+  dst.sensor_tank_enabled = src.sensor_tank_enabled;
+  dst.sensor_tank_range_mm = src.sensor_tank_range_mm;
+  dst.sensor_tank_vref_mv = src.sensor_tank_vref_mv;
+  dst.sensor_tank_sense_ohms = src.sensor_tank_sense_ohms;
+  dst.sensor_tank_interval_s = src.sensor_tank_interval_s;
   dst.commissioned = src.commissioned;
 }

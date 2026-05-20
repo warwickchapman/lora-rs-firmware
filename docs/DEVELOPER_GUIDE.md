@@ -16,8 +16,12 @@ Defined in `/Users/warwick/Code/LoRa/lora_rs/platformio.ini`:
 - `lrs_us` (915 MHz, `REGION_US`)
 
 Commands:
+- `python3 -m platformio test -e native`
+- `python3 tools/test_version_metadata.py`
 - `python3 -m platformio run -e lrs_za`
 - `python3 -m platformio run -e lrs_us`
+
+Native unit tests intentionally cover only pure firmware helpers that do not need ESP8266 hardware, WiFi, LoRa, SPI, or Arduino mocks. Use firmware builds and bench/soak tests for hardware timing, OTA, WiFi reconnect, LoRa ACK behavior, and Flasher serial workflows.
 
 ## 3. Runtime Modules
 - `src/app.*`: orchestrator (networking, OTA, tick order)
@@ -109,6 +113,10 @@ Published status topics (retained, every 10 s):
 - `relay`
 - `temp_c`
 - `remote_temp_c`
+- `tank_status`
+- `tank_depth_mm`
+- `tank_current_ma`
+- `tank_voltage_mv`
 - `type`
 - `addr`
 - `last_updated`
@@ -119,6 +127,8 @@ Subscribed control topics:
 - `control`: TX-only JSON control for remote LoRa relay send.
 - `control.addr` parsing: JSON number = decimal address, JSON string = hex address.
 - TX publishes per-peer child state under `<root>/lrs-<tx_chipid>/peer/0xNN/...` (canonical path).
+- Peer status leaves include `input`, `dry_contact`, `temp_c`, `tank_status`,
+  `tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv`.
 - TX can be commanded to poll peers via:
   - `<root>/lrs-<tx_chipid>/peer/0xNN/poll_interval_s`
   - `<root>/lrs-<tx_chipid>/peer/0xNN/poll_now`
@@ -169,12 +179,13 @@ CN1:
 Constraints:
 - GPIO0/GPIO2 are boot-sensitive / shared-purpose pins.
 - AIN path is limited and board-conditioned.
-- Advanced analog sensor support remains staged work.
+- Advanced analog calibration UI remains staged work.
 
 ## 11. Current Sensor Support
 - Local DS18B20 read
 - Remote LoRa temperature decode/display
 - Dry-contact status included in sensor digital field
+- 4-20 mA tank level sampled on A0 and sent through maintenance telemetry
 
 Future fields already reserved in payload for additional sensor telemetry.
 
@@ -243,6 +254,23 @@ Deterministic release mode (preferred):
    - macOS asset upload to both repos,
    - full 10-asset contract verification in both repos.
 4. Release notes are deterministic in this mode: the file content is published verbatim.
+
+Mandatory pre-release validation gate:
+- A release is not ready unless all four pass:
+  - `pio test -e native`
+  - `python3 tools/test_version_metadata.py`
+  - `pio run -e lrs_za`
+  - `pio run -e lrs_us`
+- This gate is wired into `tools/release_manager.py` and therefore also enforced by `tools/release_one_shot.py`.
+- Native tests are intentionally scoped to pure firmware helpers (`FixedSettingString`, mode/role parsing, version metadata parsing).
+- Hardware behavior still requires bench/soak validation (LoRa ACK behavior, WiFi reconnect, OTA pull, serial-admin/Flasher workflows, long-running heap stability).
+- Do not add flasher `npm run build` to this specific gate unless `tools/flasher/**` changed in the release.
+
+Release/CI machine bootstrap requirements:
+- PlatformIO CLI installed and available as `pio`.
+- Native test toolchain availability for first run of `pio test -e native` (PlatformIO may install `native` platform dependencies automatically).
+- Python 3 available for `tools/test_version_metadata.py`.
+- Keep generated release metrics (`docs/release_build_metrics.csv`, `docs/release_build_metrics.md`) separate from source commits unless explicitly updating release-history artifacts.
 
 Conditional checklist: when `tools/flasher/**` changed in the release:
 - Rebuild flasher installers from current source for all supported targets (Windows x64 MSI + portable ZIP, Linux x64, macOS arm64/x86_64).
