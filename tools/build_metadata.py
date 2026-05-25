@@ -1,9 +1,10 @@
 import hashlib
+import json
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from version_metadata import version_parts
+from version_metadata import version_dev_build, version_parts
 
 Import("env")
 
@@ -64,14 +65,39 @@ def _read_repo_version(default):
         return default
 
 
+def _guard_unique_dev_build(project_dir, fw_version, build_id):
+    if "~" not in fw_version:
+        return
+    stamp_dir = Path(project_dir) / ".pio"
+    stamp_dir.mkdir(exist_ok=True)
+    stamp_path = stamp_dir / "dev_build_versions.json"
+    try:
+        used = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
+    except Exception:
+        used = {}
+
+    previous = used.get(fw_version)
+    if previous and previous != build_id:
+        raise RuntimeError(
+            f"VERSION {fw_version} was already used for a different build tree. "
+            "Run `python3 tools/bump_dev_build.py` before building changed dev firmware."
+        )
+
+    if previous != build_id:
+        used[fw_version] = build_id
+        stamp_path.write_text(json.dumps(used, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 fw_version = _read_repo_version(env.GetProjectOption("custom_fw_version", "0.0.0-dev"))
 fw_major, fw_minor, fw_patch = version_parts(fw_version)
+fw_dev_build = version_dev_build(fw_version)
 git_sha = _run_git(["rev-parse", "--short", "HEAD"], "nogit")
 git_branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
 dirty = _git_dirty_flag()
 now = datetime.utcnow()
 build_date_short = now.strftime("%y%m%d")
 build_id = _deterministic_tree_id(git_sha, dirty)
+_guard_unique_dev_build(env.subst("$PROJECT_DIR"), fw_version, build_id)
 
 env.Append(
     CPPDEFINES=[
@@ -79,6 +105,7 @@ env.Append(
         ("LRS_FW_MAJOR", fw_major),
         ("LRS_FW_MINOR", fw_minor),
         ("LRS_FW_PATCH", fw_patch),
+        ("LRS_FW_DEV_BUILD", fw_dev_build),
         ("LRS_GIT_SHA", '\\"%s\\"' % git_sha),
         ("LRS_GIT_BRANCH", '\\"%s\\"' % git_branch),
         ("LRS_GIT_DIRTY", dirty),

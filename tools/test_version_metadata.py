@@ -1,11 +1,22 @@
 import unittest
 
-from version_metadata import version_parts
+from version_metadata import version_dev_build, version_parts
 
 
 class VersionMetadataTest(unittest.TestCase):
     def test_semver_with_suffix(self):
         self.assertEqual(version_parts("0.9.2-dev"), [0, 9, 2])
+
+    def test_dev_build_revision_keeps_protocol_parts_stable(self):
+        self.assertEqual(version_parts("0.9.2~7"), [0, 9, 2])
+
+    def test_dev_build_revision_is_parsed_separately(self):
+        self.assertEqual(version_dev_build("0.9.2~7"), 7)
+        self.assertEqual(version_dev_build("v0.9.2~18"), 18)
+        self.assertEqual(version_dev_build("0.9.2-dev"), 0)
+
+    def test_dev_build_revision_is_clamped_to_uint16(self):
+        self.assertEqual(version_dev_build("0.9.2~70000"), 65535)
 
     def test_leading_v(self):
         self.assertEqual(version_parts("v1.2.3"), [1, 2, 3])

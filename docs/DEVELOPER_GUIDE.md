@@ -21,6 +21,10 @@ Commands:
 - `python3 -m platformio run -e lrs_za`
 - `python3 -m platformio run -e lrs_us`
 
+> [!NOTE]
+> All other environments defined in `platformio.ini` (including the `native` test suite and local `_ota` targets) are custom local, deployment-specific, or diagnostic environments. These must be disregarded for general build testing and pre-release validation; standard validation and compilation testing must focus strictly on the core target environments `lrs_za` and `lrs_us`.
+
+
 Native unit tests intentionally cover only pure firmware helpers that do not need ESP8266 hardware, WiFi, LoRa, SPI, or Arduino mocks. Use firmware builds and bench/soak tests for hardware timing, OTA, WiFi reconnect, LoRa ACK behavior, and Flasher serial workflows.
 
 ## 3. Runtime Modules

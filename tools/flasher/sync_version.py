@@ -23,6 +23,18 @@ def read_repo_version(repo_root: Path) -> str:
     return raw[1:] if raw.startswith("v") else raw
 
 
+def package_version_for_release(version: str) -> str:
+    """
+    Repo dev builds use operator-facing X.Y.Z~N strings. npm, Cargo, and Tauri
+    need SemVer-compatible package versions, so map those to X.Y.Z-dev.N.
+    """
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)~(\d+)", version)
+    if match:
+        major, minor, patch, build = match.groups()
+        return f"{major}.{minor}.{patch}-dev.{build}"
+    return version
+
+
 def update_package_json(path: Path, version: str) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
     data["version"] = version
@@ -32,6 +44,17 @@ def update_package_json(path: Path, version: str) -> None:
 def update_tauri_conf(path: Path, version: str) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
     data["version"] = version
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def update_package_lock(path: Path, version: str) -> None:
+    if not path.exists():
+        return
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = version
+    root_package = data.get("packages", {}).get("")
+    if isinstance(root_package, dict):
+        root_package["version"] = version
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
@@ -71,23 +94,23 @@ def read_package_lock_version(path: Path) -> str:
     return str(data.get("version", "")).strip()
 
 
-def check_versions(repo_root: Path, release_version: str, package_version: str) -> int:
+def check_versions(repo_root: Path, display_version: str, package_version: str) -> int:
     flasher_root = repo_root / "tools" / "flasher"
     checks = [
-        ("package.json", read_package_json_version(flasher_root / "package.json"), release_version),
+        ("package.json", read_package_json_version(flasher_root / "package.json"), package_version),
         ("tauri.conf.json", read_tauri_conf_version(flasher_root / "src-tauri" / "tauri.conf.json"), package_version),
         ("Cargo.toml", read_cargo_toml_version(flasher_root / "src-tauri" / "Cargo.toml"), package_version),
     ]
 
     lock_path = flasher_root / "package-lock.json"
     if lock_path.exists():
-        checks.append(("package-lock.json", read_package_lock_version(lock_path), release_version))
+        checks.append(("package-lock.json", read_package_lock_version(lock_path), package_version))
 
     mismatches = [(name, current, expected) for (name, current, expected) in checks if current != expected]
     if not mismatches:
         print(
             "Version sync check passed: "
-            f"release={release_version}, package={package_version}, "
+            f"display={display_version}, package={package_version}, "
             f"lockfile_checked={'yes' if lock_path.exists() else 'no'}"
         )
         return 0
@@ -128,12 +151,18 @@ def main() -> int:
     flasher_root = repo_root / "tools" / "flasher"
 
     release_version = read_repo_version(repo_root)
-    package_version = release_version.split("-", 1)[0] if args.windows_msi_safe else release_version
+    semver_package_version = package_version_for_release(release_version)
+    package_version = (
+        semver_package_version.split("-", 1)[0]
+        if args.windows_msi_safe
+        else semver_package_version
+    )
 
     if args.check:
         return check_versions(repo_root, release_version, package_version)
 
-    update_package_json(flasher_root / "package.json", release_version)
+    update_package_json(flasher_root / "package.json", package_version)
+    update_package_lock(flasher_root / "package-lock.json", package_version)
     update_tauri_conf(flasher_root / "src-tauri" / "tauri.conf.json", package_version)
     update_cargo_toml(flasher_root / "src-tauri" / "Cargo.toml", package_version)
 

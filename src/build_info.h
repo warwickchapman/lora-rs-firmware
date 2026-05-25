@@ -17,6 +17,10 @@
 #define LRS_FW_PATCH 0
 #endif
 
+#ifndef LRS_FW_DEV_BUILD
+#define LRS_FW_DEV_BUILD 0
+#endif
+
 #ifndef LRS_GIT_SHA
 #define LRS_GIT_SHA "nogit"
 #endif

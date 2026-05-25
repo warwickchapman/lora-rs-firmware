@@ -59,6 +59,10 @@ Main project:
 - South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
 - USA (915 MHz): `python3 -m platformio run -e lrs_us`
 
+> [!NOTE]
+> All other environments in `platformio.ini` (such as the `native` test suite and local `_ota` targets) are custom local, deployment-specific, or diagnostic targets. Standard build testing must focus strictly on compiling the core target environments `lrs_za` and `lrs_us`; all other platformio entries are to be disregarded.
+
+
 ## Release Version Source
 - Single source of truth: `/Users/warwick/Code/LoRa/lora_rs/VERSION`
 - Firmware build metadata (`fw_version` reported through serial admin/MQTT), flasher app version label, and factory/release helper scripts all read from this file.

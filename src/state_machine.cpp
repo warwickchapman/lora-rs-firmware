@@ -46,11 +46,13 @@ constexpr uint8_t kMaintenancePayloadVersion = 1;
 constexpr uint8_t kMaintenancePageIdentity = 0;
 constexpr uint8_t kMaintenancePageDebug = 1;
 constexpr uint8_t kMaintenancePageSensors = 2;
+constexpr uint8_t kMaintenancePageVersion = 3;
 constexpr uint8_t kOtaPullControlOpStart = 1;
 constexpr uint8_t kOtaPullControlOpHash = 2;
 constexpr uint8_t kOtaPullControlOpCommit = 3;
 constexpr uint8_t kOtaPullControlHashChunkBytes = 8;
 constexpr uint8_t kOtaPullControlHashChunks = 4;
+constexpr uint32_t kOtaPullControlFrameSpacingMs = 250;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
 constexpr uint8_t kFactoryResetKeepFleetFlag = 0x01;
@@ -69,13 +71,13 @@ constexpr uint8_t kProvRoleTxFlag = 0x01;
 constexpr uint32_t kProvVerifyTimeoutMs = 4000;
 constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 1500;
 constexpr uint32_t kProvDiscoverReplyBaseMs = 2000;
-constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 1600;
-constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 18000;
+constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 2200;
+constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 30000;
 constexpr uint8_t kProvDiscoverBroadcastBurstCount = 2;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
 constexpr uint8_t kProvMaxRetriesPerNode = 1;
 constexpr uint8_t kProvCoordinatorBurstPacketsPerTick = 6;
-constexpr uint8_t kProvAnnounceRepeatCount = 3;
+constexpr uint8_t kProvAnnounceRepeatCount = 2;
 constexpr uint16_t kProvAnnounceRetryBackoffMs = 120;
 constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
@@ -186,6 +188,10 @@ void parseFwVersionPacked(uint8_t &major, uint8_t &minor, uint8_t &patch) {
   major = static_cast<uint8_t>(LRS_FW_MAJOR);
   minor = static_cast<uint8_t>(LRS_FW_MINOR);
   patch = static_cast<uint8_t>(LRS_FW_PATCH);
+}
+
+uint16_t fwDevBuild() {
+  return static_cast<uint16_t>(LRS_FW_DEV_BUILD);
 }
 
 uint32_t fnv1a32(const uint8_t *data, size_t len) {
@@ -312,6 +318,8 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   maintenance_debug_dst_ = 0;
   maintenance_sensor_pending_ = false;
   maintenance_sensor_dst_ = 0;
+  maintenance_version_pending_ = false;
+  maintenance_version_dst_ = 0;
   last_wifi_prov_tx_ms_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
@@ -338,6 +346,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
   ota_pull_pending_ = false;
   ota_pull_pending_host_ = IPAddress();
@@ -402,6 +411,8 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   maintenance_debug_dst_ = 0;
   maintenance_sensor_pending_ = false;
   maintenance_sensor_dst_ = 0;
+  maintenance_version_pending_ = false;
+  maintenance_version_dst_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
     peers_[i] = PeerRuntime{};
@@ -423,6 +434,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   udp_log_control_pending_port_ = 0;
   udp_log_control_pending_ttl_s_ = 0;
   udp_log_control_pending_src_ = 0;
+  ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
   ota_pull_pending_ = false;
   ota_pull_pending_host_ = IPAddress();
@@ -646,6 +658,7 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.fw_major = node.fw_major;
   out.fw_minor = node.fw_minor;
   out.fw_patch = node.fw_patch;
+  out.fw_build = node.fw_build;
   out.uptime_ms = node.uptime_ms;
   out.maintenance_debug_known = node.maintenance_debug_known;
   out.heap_free = node.heap_free;
@@ -1259,56 +1272,77 @@ bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (port == 0 || host == IPAddress()) return false;
   if (radio_ == nullptr) return false;
-  if (!radioTxBudgetAvailable()) return false;
   uint8_t sha256[32]{};
   if (!sha256HexToBytes(sha256Hex, sha256)) return false;
 
   uint8_t transferId = static_cast<uint8_t>((millis() ^ last_counter_ ^ dstAddress) & 0xFFU);
   if (transferId == 0) transferId = 1;
 
+  ota_pull_tx_ = OtaPullTxTransfer{};
+  ota_pull_tx_.active = true;
+  ota_pull_tx_.dst = dstAddress;
+  ota_pull_tx_.transfer_id = transferId;
+  ota_pull_tx_.host = host;
+  ota_pull_tx_.port = port;
+  memcpy(ota_pull_tx_.sha256, sha256, sizeof(ota_pull_tx_.sha256));
+  ota_pull_tx_.next_tx_ms = millis();
+  lrslog::event("ota_pull_control_queued", 0, transferId, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::sendQueuedOtaPullControlFrame() {
+  if (!ota_pull_tx_.active || radio_ == nullptr) return false;
+  if (!radioTxBudgetAvailable()) return false;
+
   uint8_t payload[12]{};
-  payload[0] = kOtaPullControlOpStart;
-  payload[1] = transferId;
-  payload[2] = static_cast<uint8_t>(port & 0xFFU);
-  payload[3] = static_cast<uint8_t>((port >> 8) & 0xFFU);
-  payload[4] = host[0];
-  payload[5] = host[1];
-  payload[6] = host[2];
-  payload[7] = host[3];
-  payload[8] = kOtaPullControlHashChunks;
-
-  last_counter_++;
-  if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
-    return false;
-  }
-
-  for (uint8_t idx = 0; idx < kOtaPullControlHashChunks; ++idx) {
-    memset(payload, 0, sizeof(payload));
+  if (ota_pull_tx_.frame_index == 0) {
+    payload[0] = kOtaPullControlOpStart;
+    payload[1] = ota_pull_tx_.transfer_id;
+    payload[2] = static_cast<uint8_t>(ota_pull_tx_.port & 0xFFU);
+    payload[3] = static_cast<uint8_t>((ota_pull_tx_.port >> 8) & 0xFFU);
+    payload[4] = ota_pull_tx_.host[0];
+    payload[5] = ota_pull_tx_.host[1];
+    payload[6] = ota_pull_tx_.host[2];
+    payload[7] = ota_pull_tx_.host[3];
+    payload[8] = kOtaPullControlHashChunks;
+  } else if (ota_pull_tx_.frame_index <= kOtaPullControlHashChunks) {
+    const uint8_t idx = ota_pull_tx_.frame_index - 1;
     payload[0] = kOtaPullControlOpHash;
-    payload[1] = transferId;
+    payload[1] = ota_pull_tx_.transfer_id;
     payload[2] = idx;
     payload[3] = kOtaPullControlHashChunkBytes;
-    memcpy(payload + 4, sha256 + (idx * kOtaPullControlHashChunkBytes),
+    memcpy(payload + 4, ota_pull_tx_.sha256 + (idx * kOtaPullControlHashChunkBytes),
            kOtaPullControlHashChunkBytes);
-    last_counter_++;
-    if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
-      return false;
-    }
+  } else {
+    payload[0] = kOtaPullControlOpCommit;
+    payload[1] = ota_pull_tx_.transfer_id;
+    payload[2] = kOtaPullControlHashChunks;
   }
 
-  memset(payload, 0, sizeof(payload));
-  payload[0] = kOtaPullControlOpCommit;
-  payload[1] = transferId;
-  payload[2] = kOtaPullControlHashChunks;
   last_counter_++;
-  if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_, runtime_.local_address, dstAddress, payload)) {
+  if (!radio_->sendRaw(MessageType::OtaPullControl, last_counter_,
+                       runtime_.local_address, ota_pull_tx_.dst, payload)) {
     return false;
   }
 
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
-  lrslog::event("ota_pull_control_tx", 0, last_counter_, dstAddress);
+  lrslog::event("ota_pull_control_tx", 0, last_counter_, ota_pull_tx_.dst);
+  ota_pull_tx_.frame_index++;
+  if (ota_pull_tx_.frame_index > kOtaPullControlHashChunks + 1U) {
+    ota_pull_tx_ = OtaPullTxTransfer{};
+  } else {
+    ota_pull_tx_.next_tx_ms = millis() + kOtaPullControlFrameSpacingMs;
+  }
   return true;
+}
+
+void NodeStateMachine::tickPendingOtaPullControl(uint32_t now) {
+  if (!ota_pull_tx_.active) return;
+  if (static_cast<int32_t>(now - ota_pull_tx_.next_tx_ms) < 0) return;
+  if (!sendQueuedOtaPullControlFrame()) {
+    ota_pull_tx_.next_tx_ms = now + kOtaPullControlFrameSpacingMs;
+  }
 }
 
 bool NodeStateMachine::hasPendingWifiControl() const { return wifi_control_pending_; }
@@ -1763,6 +1797,7 @@ bool NodeStateMachine::provisioningDeviceByIndex(size_t index, ProvisioningDevic
   out.fw_major = d.fw_major;
   out.fw_minor = d.fw_minor;
   out.fw_patch = d.fw_patch;
+  out.fw_build = d.fw_build;
   out.rssi = d.rssi;
   out.first_seen_ms = d.first_seen_ms;
   out.last_seen_ms = d.last_seen_ms;
@@ -2165,13 +2200,39 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
-  maintenance_sensor_pending_ = true;
-  maintenance_sensor_dst_ = dstAddress;
-  if (runtime_.maintenance_debug_telemetry_enabled) {
-    maintenance_debug_pending_ = true;
-    maintenance_debug_dst_ = dstAddress;
-  }
   lrslog::event("maint_status_tx", 0, last_counter_, dstAddress);
+  if (fwDevBuild() > 0) {
+    maintenance_version_pending_ = true;
+    maintenance_version_dst_ = dstAddress;
+  }
+  return true;
+}
+
+bool NodeStateMachine::sendMaintenanceVersionStatus(uint8_t dstAddress) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  const uint16_t build = fwDevBuild();
+  if (build == 0) return false;
+  uint8_t major = 0;
+  uint8_t minor = 0;
+  uint8_t patch = 0;
+  parseFwVersionPacked(major, minor, patch);
+  uint8_t payload[12]{};
+  payload[0] = kMaintenancePayloadVersion;
+  payload[1] = kMaintenancePageVersion;
+  payload[2] = major;
+  payload[3] = minor;
+  payload[4] = patch;
+  encodeU16LE(payload + 5, build);
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
+                       runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("maint_version_tx", 0, last_counter_, dstAddress);
   return true;
 }
 
@@ -2235,6 +2296,14 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 }
 
 void NodeStateMachine::tickPendingMaintenancePages() {
+  if (maintenance_version_pending_) {
+    if (sendMaintenanceVersionStatus(maintenance_version_dst_)) {
+      maintenance_version_pending_ = false;
+      maintenance_version_dst_ = 0;
+    }
+    return;
+  }
+
   if (maintenance_sensor_pending_) {
     if (sendMaintenanceSensorStatus(maintenance_sensor_dst_)) {
       maintenance_sensor_pending_ = false;
@@ -2269,9 +2338,15 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->chip_id = static_cast<uint32_t>(p[3]) |
                     (static_cast<uint32_t>(p[4]) << 8) |
                     (static_cast<uint32_t>(p[5]) << 16);
-    node->fw_major = static_cast<uint8_t>((p[6] >> 4) & 0x0FU);
-    node->fw_minor = static_cast<uint8_t>(p[6] & 0x0FU);
-    node->fw_patch = p[7];
+    const uint8_t nextMajor = static_cast<uint8_t>((p[6] >> 4) & 0x0FU);
+    const uint8_t nextMinor = static_cast<uint8_t>(p[6] & 0x0FU);
+    const uint8_t nextPatch = p[7];
+    if (node->fw_major != nextMajor || node->fw_minor != nextMinor || node->fw_patch != nextPatch) {
+      node->fw_build = 0;
+    }
+    node->fw_major = nextMajor;
+    node->fw_minor = nextMinor;
+    node->fw_patch = nextPatch;
     node->wifi_state_known = true;
     node->wifi_enabled = (flags & 0x01U) != 0U;
     node->wifi_connected_known = true;
@@ -2280,6 +2355,12 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->mqtt_enabled = (flags & 0x04U) != 0U;
     node->mqtt_connected = (flags & 0x08U) != 0U;
     memcpy(node->ip, p + 8, sizeof(node->ip));
+  } else if (p[1] == kMaintenancePageVersion) {
+    node->fw_major = p[2];
+    node->fw_minor = p[3];
+    node->fw_patch = p[4];
+    node->fw_build = decodeU16LE(p + 5);
+    lrslog::event("maint_version_rx", msg.rssi, msg.counter, node->address);
   } else if (p[1] == kMaintenancePageSensors) {
     node->input_state = p[2] ? 1 : 0;
     node->input_feedback = node->input_state;
@@ -2547,6 +2628,7 @@ void NodeStateMachine::tickTransmitter() {
     }
   }
 
+  tickPendingOtaPullControl(now);
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
   tickPeerMaintenance(now);

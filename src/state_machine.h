@@ -87,6 +87,7 @@ struct PeerStatusSnapshot {
   uint8_t fw_major = 0;
   uint8_t fw_minor = 0;
   uint8_t fw_patch = 0;
+  uint16_t fw_build = 0;
   uint32_t uptime_ms = 0;
   bool maintenance_debug_known = false;
   uint32_t heap_free = 0;
@@ -154,6 +155,7 @@ struct ProvisioningDeviceSnapshot {
   uint8_t fw_major = 0;
   uint8_t fw_minor = 0;
   uint8_t fw_patch = 0;
+  uint16_t fw_build = 0;
   int rssi = -127;
   uint32_t first_seen_ms = 0;
   uint32_t last_seen_ms = 0;
@@ -357,6 +359,8 @@ class NodeStateMachine {
   uint8_t maintenance_debug_dst_ = 0;
   bool maintenance_sensor_pending_ = false;
   uint8_t maintenance_sensor_dst_ = 0;
+  bool maintenance_version_pending_ = false;
+  uint8_t maintenance_version_dst_ = 0;
 
   struct PeerRuntime {
     bool in_use = false;
@@ -389,6 +393,7 @@ class NodeStateMachine {
     uint8_t fw_major = 0;
     uint8_t fw_minor = 0;
     uint8_t fw_patch = 0;
+    uint16_t fw_build = 0;
     uint32_t uptime_ms = 0;
     bool maintenance_debug_known = false;
     uint32_t heap_free = 0;
@@ -473,6 +478,17 @@ class NodeStateMachine {
     uint32_t received_bitmap = 0;
     uint8_t sha256[32]{};
   };
+  struct OtaPullTxTransfer {
+    bool active = false;
+    uint8_t dst = 0;
+    uint8_t transfer_id = 0;
+    IPAddress host;
+    uint16_t port = 0;
+    uint8_t frame_index = 0;
+    uint32_t next_tx_ms = 0;
+    uint8_t sha256[32]{};
+  };
+  OtaPullTxTransfer ota_pull_tx_{};
   OtaPullRxTransfer ota_pull_rx_{};
   bool ota_pull_pending_ = false;
   IPAddress ota_pull_pending_host_;
@@ -501,6 +517,7 @@ class NodeStateMachine {
     uint8_t fw_major = 0;
     uint8_t fw_minor = 0;
     uint8_t fw_patch = 0;
+    uint16_t fw_build = 0;
     int rssi = -127;
     uint32_t first_seen_ms = 0;
     uint32_t last_seen_ms = 0;
@@ -589,9 +606,12 @@ class NodeStateMachine {
   void tickPeerPolling(uint32_t now);
   void tickPeerMaintenance(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
+  void tickPendingOtaPullControl(uint32_t now);
+  bool sendQueuedOtaPullControlFrame();
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceStatus(uint8_t dstAddress);
+  bool sendMaintenanceVersionStatus(uint8_t dstAddress);
   bool sendMaintenanceSensorStatus(uint8_t dstAddress);
   bool sendMaintenanceDebugStatus(uint8_t dstAddress);
   bool handleMaintenanceStatus(const ProtocolMessage &msg);

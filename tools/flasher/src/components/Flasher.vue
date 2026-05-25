@@ -70,6 +70,7 @@ interface EasyPairDevice {
   fw_major: number;
   fw_minor: number;
   fw_patch: number;
+  fw_build?: number;
   rssi: number;
   selected: boolean;
   address_conflict: boolean;
@@ -96,6 +97,7 @@ interface LoraInventoryDevice {
   address: number;
   chip_id?: string;
   fw_version?: string;
+  fw_build?: number;
   role?: string;
   mode?: string;
   wifi_enabled_known?: boolean;
@@ -350,7 +352,11 @@ const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
 const disconnectedSerialPortSince = ref<Record<string, number>>({});
 const serialAdminPortBusy = ref<Record<string, string>>({});
 const serialAdminPortQueues = new Map<string, Promise<void>>();
-const fleetInitialScanPorts = new Set<string>();
+const FLEET_CACHE_POLL_INTERVAL_MS = 5000;
+const FLEET_SCAN_POLL_INTERVAL_MS = 1200;
+const FLEET_FORCE_SCAN_COOLDOWN_MS = 60000;
+const FLEET_FRESH_MS = 90000;
+const FLEET_STALE_MS = 180000;
 const provisionCacheRefreshedChips = new Set<string>();
 const isLoadingInfo = ref(false);
 const isRefreshingPorts = ref(false);
@@ -371,7 +377,7 @@ const stickLogToBottom = ref(true);
 const networkUdpLogsExpanded = ref(false);
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
-const networkStatusMessage = ref('Ready to scan the fleet.');
+const networkStatusMessage = ref('Select a USB gateway to read its fleet cache.');
 const monitorStatusMessage = ref('Select a USB gateway and refresh monitor data.');
 const monitorTransport = ref<'serial' | 'mqtt'>('serial');
 const monitorMqttHost = ref('venus.local');
@@ -401,6 +407,10 @@ const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const isLoraInventoryScanning = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
+const networkInventoryPollMode = ref<'cache' | 'scan' | null>(null);
+const fleetForceScanCooldownUntilMs = ref(0);
+const fleetClockMs = ref(Date.now());
+const fleetClockTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const fleetOtaFollowupTimers = ref<Record<number, ReturnType<typeof window.setTimeout>>>({});
 const fleetRowHistory = ref<Record<number, { uptimeMs?: number; fwVersion?: string; otaExpectedUntilMs?: number; rowState?: LoraInventoryDevice['row_state']; rowStateUntilMs?: number }>>({});
 const pairExpectedCount = ref(12);
@@ -731,8 +741,17 @@ const fleetGatewaySummary = computed(() => {
 });
 const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
-  !selectedPort.value
+  !selectedPort.value ||
+  (!isLoraInventoryScanning.value && fleetForceScanCooldownRemainingMs.value > 0)
 );
+const fleetForceScanCooldownRemainingMs = computed(() =>
+  Math.max(0, fleetForceScanCooldownUntilMs.value - fleetClockMs.value)
+);
+const fleetForceScanLabel = computed(() => {
+  if (isLoraInventoryScanning.value) return 'Stop scan';
+  const remaining = Math.ceil(fleetForceScanCooldownRemainingMs.value / 1000);
+  return remaining > 0 ? `Force Scan ${remaining}s` : 'Force Scan';
+});
 const gatewayWifiReady = computed(() =>
   !!provisionSelectedPort.value &&
   serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
@@ -777,9 +796,9 @@ const monitorRelayBadgeClass = computed(() => {
   if (monitorRelayOn.value) return 'border-emerald-300/40 bg-emerald-500/20 text-emerald-200 shadow-[0_0_34px_rgba(16,185,129,0.28),inset_0_0_18px_rgba(16,185,129,0.18)]';
   return 'border-slate-700 bg-slate-900/80 text-slate-300 shadow-inner';
 });
-const monitorFleetLiveCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'live').length);
-const monitorFleetStaleCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'stale').length);
-const monitorFleetOfflineCount = computed(() => monitorFleetRows.value.filter(row => monitorRowFreshness(row) === 'offline').length);
+const monitorFleetLiveCount = computed(() => monitorFleetRows.value.filter(row => rowFreshness(row) === 'live').length);
+const monitorFleetStaleCount = computed(() => monitorFleetRows.value.filter(row => rowFreshness(row) === 'stale').length);
+const monitorFleetOfflineCount = computed(() => monitorFleetRows.value.filter(row => rowFreshness(row) === 'offline').length);
 
 let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
@@ -1370,24 +1389,14 @@ function lrsDeviceName(rawChipId: string | undefined | null): string {
   return `lrs-${chip.length < 8 ? chip.padStart(8, '0') : chip}`;
 }
 
-function firmwareVersionCore(version: string): string {
-  const match = String(version || '').trim().replace(/^v/i, '').match(/^(\d+\.\d+\.\d+)/);
-  return match?.[1] || '';
-}
-
 function displayFirmwareVersion(rawVersion: string | undefined | null): string {
   const version = String(rawVersion || '').trim();
-  if (!version) return '-';
-  if (/[+-]/.test(version.replace(/^v/i, '').replace(/^\d+\.\d+\.\d+/, ''))) return version;
+  return version || '-';
+}
 
-  const appVersion = flasherAppVersion.value.trim();
-  const appCore = firmwareVersionCore(appVersion);
-  const rawCore = firmwareVersionCore(version);
-  if (appCore && rawCore && appCore === rawCore) {
-    const suffix = appVersion.replace(/^v/i, '').slice(appCore.length);
-    if (suffix) return `${version}${suffix}`;
-  }
-  return version;
+function compactFirmwareVersion(major: number, minor: number, patch: number, build?: number): string {
+  const core = `${major}.${minor}.${patch}`;
+  return build && build > 0 ? `${core}~${build}` : core;
 }
 
 function provisionedRemoteChipIds(): Set<string> {
@@ -1599,16 +1608,14 @@ async function loadNetworkGateway() {
   isNetworkGatewayLoading.value = true;
   try {
     let state = serialDeviceState(port);
-    if (!state?.deviceInfo?.password?.trim()) {
-      networkStatusMessage.value = `Reading gateway identity on ${port}...`;
-      const info = await readDeviceInfoForPort(port, 'network');
-      if (!info) throw new Error('Unable to read gateway factory details');
-      state = serialDeviceState(port);
-    }
+    networkStatusMessage.value = `Reading gateway identity on ${port}...`;
+    const info = await readDeviceInfoForPort(port, 'network');
+    if (!info) throw new Error('Unable to read gateway factory details');
+    state = serialDeviceState(port);
     const hello = await waitForSerialAdminHello(port, 6000);
     if (state) {
       state.adminSupported = true;
-      state.adminPassword = state.adminPassword || pairAdminPassword.value || state.deviceInfo?.password || '';
+      state.adminPassword = state.deviceInfo?.password || '';
     }
     const status = await ensureFleetGatewayStatus(true);
     if (status && !status.role_tx) {
@@ -1623,13 +1630,9 @@ async function loadNetworkGateway() {
       }
       return;
     }
-    if (!fleetInitialScanPorts.has(port)) {
-      fleetInitialScanPorts.add(port);
-      networkStatusMessage.value = `Gateway loaded on ${port}; starting initial fleet scan.`;
-      await beginLoraInventoryScan(port, false);
-    } else {
-      networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
-    }
+    networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
+    await refreshLoraInventoryStatus(false);
+    startFleetCachePolling();
   } catch (e) {
     networkStatusMessage.value = serialFeatureError('Gateway load', e);
     notify(networkStatusMessage.value);
@@ -1711,48 +1714,51 @@ async function refreshLoraInventoryStatus(background = true) {
   await refreshGatewaySnapshot(fleetSelectedPort.value, background, 'fleet');
 }
 
-async function refreshFleetCacheSnapshot() {
-  if (!fleetSelectedPort.value) {
-    notify('Select the USB gateway first');
-    return;
-  }
-  pushNetworkLog('Reloading gateway peer cache snapshot...');
-  const beforeMessage = networkStatusMessage.value;
-  await refreshLoraInventoryStatus(false);
-  const count = loraInventory.value.length;
-  const message = `Gateway cache reloaded: ${count} remote${count === 1 ? '' : 's'} cached.`;
-  if (networkStatusMessage.value === beforeMessage || !networkStatusMessage.value) {
-    networkStatusMessage.value = message;
-  }
-  pushNetworkLog(networkStatusMessage.value || message);
-  notify(message);
-}
-
 function startLoraInventoryPolling() {
-  stopLoraInventoryPolling(false);
+  stopLoraInventoryPolling(false, false);
+  networkInventoryPollMode.value = 'scan';
   networkInventoryPollTimer.value = window.setInterval(() => {
     refreshLoraInventoryStatus();
-  }, 1200);
+  }, FLEET_SCAN_POLL_INTERVAL_MS);
 }
 
-function stopLoraInventoryPolling(markIdle = true) {
+function startFleetCachePolling() {
+  if (activeMode.value !== 'network' || !fleetSelectedPort.value || isLoraInventoryScanning.value) return;
+  if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
+  stopLoraInventoryPolling(false, false);
+  networkInventoryPollMode.value = 'cache';
+  networkInventoryPollTimer.value = window.setInterval(() => {
+    refreshLoraInventoryStatus(true);
+  }, FLEET_CACHE_POLL_INTERVAL_MS);
+}
+
+function stopLoraInventoryPolling(markIdle = true, clearMode = true) {
   if (networkInventoryPollTimer.value) {
     window.clearInterval(networkInventoryPollTimer.value);
     networkInventoryPollTimer.value = null;
   }
+  if (clearMode) networkInventoryPollMode.value = null;
   if (markIdle) isLoraInventoryScanning.value = false;
 }
 
-function monitorRowFreshness(row: LoraInventoryDevice): 'live' | 'stale' | 'offline' | 'unknown' {
+function rowFreshness(row: LoraInventoryDevice): 'live' | 'stale' | 'offline' | 'unknown' {
   const age = Number(row.age_ms || 0);
   if (!row.age_ms && row.age_ms !== 0) return 'unknown';
-  if (age <= 60000) return 'live';
-  if (age <= 180000) return 'stale';
+  if (age <= FLEET_FRESH_MS) return 'live';
+  if (age <= FLEET_STALE_MS) return 'stale';
   return 'offline';
 }
 
+function fleetFreshnessClass(row: LoraInventoryDevice): string {
+  const state = rowFreshness(row);
+  if (state === 'live') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  if (state === 'stale') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  if (state === 'offline') return 'border-slate-600 bg-slate-800/50 text-slate-400';
+  return 'border-slate-800 bg-slate-900/50 text-slate-500';
+}
+
 function monitorFreshnessClass(row: LoraInventoryDevice): string {
-  const state = monitorRowFreshness(row);
+  const state = rowFreshness(row);
   if (state === 'live') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (state === 'stale') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   if (state === 'offline') return 'border-rose-500/30 bg-rose-500/10 text-rose-300';
@@ -1760,7 +1766,7 @@ function monitorFreshnessClass(row: LoraInventoryDevice): string {
 }
 
 function monitorFreshnessLabel(row: LoraInventoryDevice): string {
-  const state = monitorRowFreshness(row);
+  const state = rowFreshness(row);
   if (state === 'unknown') return 'Unknown';
   const label = state.charAt(0).toUpperCase() + state.slice(1);
   if (row.age_ms === undefined || row.age_ms === null) return label;
@@ -1915,7 +1921,10 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       mergeLoraInventoryRows(inventory.devices || []);
       isLoraInventoryScanning.value = !!inventory.scan?.active;
       networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
-      if (!inventory.scan?.active) stopLoraInventoryPolling(false);
+      if (!inventory.scan?.active && networkInventoryPollMode.value === 'scan') {
+        stopLoraInventoryPolling(false);
+        startFleetCachePolling();
+      }
     }
     if (port === monitorSelectedPort.value) {
       mergeMonitorPeerRows(inventory.devices || []);
@@ -1925,7 +1934,6 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
     if (serialBackgroundSkipped(e)) return;
     if (source === 'fleet') {
       networkStatusMessage.value = serialFeatureError('Fleet status', e);
-      stopLoraInventoryPolling(false);
       return;
     }
     throw e;
@@ -1943,6 +1951,9 @@ async function withGatewayForeground<T>(port: string, work: () => Promise<T>): P
     gatewaySnapshotPauseCount.value = Math.max(0, gatewaySnapshotPauseCount.value - 1);
     if (resumeMonitorLoop && monitorAutoRefresh.value && monitorSelectedPort.value === port) {
       startMonitorPolling();
+    }
+    if (activeMode.value === 'network' && fleetSelectedPort.value === port && !isLoraInventoryScanning.value) {
+      startFleetCachePolling();
     }
   }
 }
@@ -2037,6 +2048,11 @@ async function startLoraInventoryScan() {
     notify('Select the USB gateway first');
     return;
   }
+  const remaining = fleetForceScanCooldownRemainingMs.value;
+  if (remaining > 0) {
+    notify(`Force Scan available in ${Math.ceil(remaining / 1000)}s`);
+    return;
+  }
   await beginLoraInventoryScan(port, true);
 }
 
@@ -2058,6 +2074,7 @@ async function beginLoraInventoryScan(port: string, showErrors = true) {
     }
     try {
       isLoraInventoryScanning.value = true;
+      fleetForceScanCooldownUntilMs.value = Math.max(fleetForceScanCooldownUntilMs.value, Date.now() + FLEET_FORCE_SCAN_COOLDOWN_MS);
       await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
         admin_password: password,
         start_address: 1,
@@ -2088,6 +2105,7 @@ async function cancelLoraInventoryScan() {
       stopLoraInventoryPolling();
       await refreshLoraInventoryStatus(false);
     });
+    startFleetCachePolling();
   } catch (e) {
     notify(serialFeatureError('Cancel LoRa inventory', e));
   }
@@ -2685,10 +2703,6 @@ async function factoryResetSerialDevice() {
 async function loadEasyPairGateway() {
   const port = provisionSelectedPort.value;
   if (!port) return;
-  if (gatewayReady.value) {
-    pushPairLog(`Gateway already ready on ${port}.`);
-    return;
-  }
   isGatewayLoading.value = true;
   pushPairLog('Reading USB gateway identity...');
   try {
@@ -2716,10 +2730,8 @@ async function configureEasyPairGateway() {
     notify('Enter the fleet key before pairing');
     return;
   }
-  if (!gatewayReady.value) {
-    await loadEasyPairGateway();
-    if (!gatewayReady.value) return;
-  }
+  await loadEasyPairGateway();
+  if (!gatewayReady.value) return;
   const password = pairPassword();
   if (!password) {
     notify('Load the gateway factory password first');
@@ -3260,9 +3272,7 @@ async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'netw
     const state = serialDeviceState(port);
     if (state) {
       state.deviceInfo = info;
-      if (!state.adminPassword.trim()) {
-        state.adminPassword = info.password || '';
-      }
+      state.adminPassword = info.password || '';
     }
     pushSerialLog('Device info read successfully');
     if (ownerMode === 'serial') {
@@ -3302,6 +3312,22 @@ async function refreshFlashPortStatus(port: string): Promise<void> {
   }
 }
 
+async function refreshFlashPortAfterFirmwareUpdate(port: string): Promise<void> {
+  const state = serialDeviceState(port);
+  if (state) {
+    state.status = null;
+    state.config = null;
+    state.deviceInfo = null;
+    state.adminSupported = false;
+    state.adminPassword = '';
+  }
+  pushSerialLog('Waiting for flashed device to restart...');
+  await waitForSerialAdminHello(port, 18000);
+  pushSerialLog('Reloading device information after firmware update...');
+  const loaded = await readDeviceInfoForPort(port, 'serial');
+  if (!loaded) throw new Error('Unable to reload device information after flashing');
+}
+
 async function startFlash() {
   if (flashDisabled.value) return;
   if (!selectedPort.value || !selectedVersion.value) return;
@@ -3330,6 +3356,7 @@ async function startFlash() {
       eraseFirst: eraseBeforeFlash.value
     });
     pushSerialLog(result as string);
+    await refreshFlashPortAfterFirmwareUpdate(flashPort);
 
     if (monitorAfterFlash.value) {
       await startSerialMonitor(flashPort, false);
@@ -3444,7 +3471,11 @@ watch(activeMode, (mode) => {
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
   } else if (selectedPort.value) {
-    loadNetworkGateway().then(() => refreshLoraInventoryStatus(false));
+    if (portGatewayReady(fleetSelectedPort.value)) {
+      refreshLoraInventoryStatus(false).finally(() => startFleetCachePolling());
+    } else {
+      loadNetworkGateway();
+    }
   }
 });
 
@@ -3464,10 +3495,6 @@ watch(selectedPort, (port) => {
   if (activeMode.value === 'monitor') {
     monitorFleetRows.value = [];
     stopMonitorPolling();
-  } else if (activeMode.value === 'network') {
-    loraInventory.value = [];
-    loraInventoryScan.value = null;
-    loadNetworkGateway().then(() => refreshLoraInventoryStatus(false));
   }
 });
 
@@ -3477,12 +3504,24 @@ watch(provisionSelectedPort, () => {
 
 watch(flashSelectedPort, port => saveTabPort('serial', port));
 watch(provisionSelectedPort, port => saveTabPort('pair', port));
-watch(fleetSelectedPort, port => saveTabPort('network', port));
+watch(fleetSelectedPort, port => {
+  saveTabPort('network', port);
+  loraInventory.value = [];
+  loraInventoryScan.value = null;
+  isLoraInventoryScanning.value = false;
+  stopLoraInventoryPolling(false);
+  if (activeMode.value === 'network' && port) {
+    loadNetworkGateway();
+  }
+});
 watch(monitorSelectedPort, port => saveTabPort('monitor', port));
 watch(settingsSelectedPort, port => saveTabPort('settings', port));
 
 onMounted(async () => {
   generatePairFleetKey(false);
+  fleetClockTimer.value = window.setInterval(() => {
+    fleetClockMs.value = Date.now();
+  }, 1000);
   loadSavedTabPorts();
   try {
     flasherAppVersion.value = await invoke<string>('get_app_version');
@@ -3609,6 +3648,7 @@ onUnmounted(() => {
   stopEasyPairStatusPolling();
   stopLoraInventoryPolling();
   stopMonitorPolling();
+  if (fleetClockTimer.value) window.clearInterval(fleetClockTimer.value);
   Object.values(fleetOtaFollowupTimers.value).forEach(timer => window.clearTimeout(timer));
   fleetOtaFollowupTimers.value = {};
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
@@ -4040,7 +4080,7 @@ function countCrashEvents(entries: string[]): number {
                 </div>
                 <div>
                   <div class="text-slate-500">Firmware</div>
-                  <div class="font-mono text-slate-300">{{ device.fw_major }}.{{ device.fw_minor }}.{{ device.fw_patch }}</div>
+                  <div class="font-mono text-slate-300">{{ compactFirmwareVersion(device.fw_major, device.fw_minor, device.fw_patch, device.fw_build) }}</div>
                 </div>
                 <div class="text-right">
                   <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.address_conflict ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800/40 text-slate-300']">
@@ -4783,15 +4823,7 @@ function countCrashEvents(entries: string[]): number {
                 :disabled="fleetScanDisabled"
                 class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
-                {{ isLoraInventoryScanning ? 'Stop scan' : 'Scan Fleet' }}
-              </button>
-              <button
-                @click="refreshFleetCacheSnapshot"
-                :disabled="fleetScanDisabled || isLoraInventoryScanning"
-                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-                title="Reload the gateway-owned peer cache without probing remotes"
-              >
-                Reload cache
+                {{ fleetForceScanLabel }}
               </button>
               <button
                 @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
@@ -4917,7 +4949,7 @@ function countCrashEvents(entries: string[]): number {
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="text-lg font-bold text-slate-300">Remotes</h2>
-              <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Scan Fleet asks the gateway to refresh LoRa state.</div>
+              <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Force Scan asks the gateway to refresh LoRa state.</div>
             </div>
             <div class="flex items-center gap-3">
               <div class="text-xs text-slate-500">{{ loraInventory.length }} remote{{ loraInventory.length === 1 ? '' : 's' }} cached · {{ selectedLoraInventoryCount }} selected</div>
@@ -4944,7 +4976,7 @@ function countCrashEvents(entries: string[]): number {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or scan the fleet to probe remotes.</td>
+                  <td colspan="13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -4952,17 +4984,21 @@ function countCrashEvents(entries: string[]): number {
                   :class="['border-b border-slate-900/80 hover:bg-white/5 transition-colors', fleetRowClass(device)]"
                 >
                   <td class="px-2 py-1.5"><input v-model="device.selected" type="checkbox" /></td>
-                  <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
+                  <td class="px-2 py-1.5 font-mono">
+                    <span :class="['inline-flex min-w-8 items-center justify-center rounded border px-2 py-1 text-[10px] font-bold', fleetFreshnessClass(device)]">
+                      {{ device.address }}
+                    </span>
+                  </td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id ? lrsDeviceName(device.chip_id) : '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : '-' }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
-                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_enabled_known ? (device.wifi_enabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300') : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                      {{ device.wifi_enabled_known ? (device.wifi_enabled ? 'Enabled' : 'Disabled') : 'Unknown' }}
+                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_connected_known ? (device.wifi_connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-600 bg-slate-800/50 text-slate-400') : 'border-slate-800 bg-slate-900/50 text-slate-500']">
+                      {{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : '-' }}
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : '-' }}</td>
                   <td class="px-2 py-1.5">
                     <div class="text-slate-300">{{ fleetSensorsLabel(device) }}</div>
                     <div v-if="tankDetailLabel(device)" class="mt-1 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>

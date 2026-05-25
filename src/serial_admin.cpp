@@ -616,6 +616,8 @@ void SerialAdmin::buildProvisioningStatus(JsonDocument &doc) {
     o["fw_major"] = d.fw_major;
     o["fw_minor"] = d.fw_minor;
     o["fw_patch"] = d.fw_patch;
+    if (d.fw_build > 0)
+      o["fw_build"] = d.fw_build;
     o["rssi"] = d.rssi;
     o["selected"] = d.selected;
     o["address_conflict"] = d.address_conflict;
@@ -1114,50 +1116,81 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     row["wifi_enabled"] = p.wifi_enabled;
     row["wifi_connected_known"] = p.wifi_connected_known;
     row["wifi_connected"] = p.wifi_connected;
-    char ipBuf[16];
-    snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
-    row["ip"] = p.wifi_connected ? ipBuf : "";
+    if (p.wifi_connected && p.ip[0] != 0) {
+      char ipBuf[16];
+      snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
+      row["ip"] = ipBuf;
+    } else {
+      row["ip"] = "";
+    }
     row["mqtt_known"] = p.mqtt_state_known;
     row["mqtt_enabled"] = p.mqtt_enabled;
     row["mqtt_connected"] = p.mqtt_connected;
-    char chipBuf[9];
-    snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
-    row["chip_id"] = p.chip_id == 0 ? "" : chipBuf;
-    char fwBuf[16];
-    snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
-    row["fw_version"] = p.chip_id == 0 ? "" : fwBuf;
-    row["uptime_ms"] = p.uptime_ms;
-    row["relay_state"] = p.relay_state;
-    row["input_state"] = p.input_state;
-    row["temp_valid"] = p.temp_valid;
-    if (p.temp_valid)
+    if (p.chip_id != 0) {
+      char chipBuf[9];
+      snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
+      row["chip_id"] = chipBuf;
+      char fwBuf[24];
+      if (p.fw_build > 0) {
+        snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
+        row["fw_build"] = p.fw_build;
+      } else {
+        snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
+      }
+      row["fw_version"] = fwBuf;
+    } else {
+      row["chip_id"] = "";
+      row["fw_version"] = "";
+    }
+    if (p.uptime_ms > 0)
+      row["uptime_ms"] = p.uptime_ms;
+    if (p.relay_state)
+      row["relay_state"] = p.relay_state;
+    if (p.input_state)
+      row["input_state"] = p.input_state;
+    if (p.temp_valid) {
+      row["temp_valid"] = true;
       row["temp_c"] = p.temp_c;
-    row["tank_enabled"] = p.tank_enabled;
-    row["tank_valid"] = p.tank_valid;
-    row["tank_status"] = tankSensorStateText(p.tank_state);
-    row["tank_depth_mm"] = p.tank_depth_mm;
-    row["tank_current_centi_ma"] = p.tank_current_centi_ma;
-    row["tank_current_ma"] = static_cast<float>(p.tank_current_centi_ma) / 100.0f;
-    row["tank_voltage_mv"] = p.tank_voltage_mv;
-    row["maintenance_debug_known"] = p.maintenance_debug_known;
-    row["heap_free"] = p.heap_free;
-    row["heap_max_block"] = p.heap_max_block;
-    row["heap_frag_pct"] = p.heap_frag_pct;
-    row["relay_feedback"] = p.relay_feedback;
-    row["input_feedback"] = p.input_feedback;
-    row["debug_uptime_ms"] = p.debug_uptime_ms;
+    }
+    if (p.tank_enabled) {
+      row["tank_enabled"] = true;
+      row["tank_valid"] = p.tank_valid;
+      row["tank_status"] = tankSensorStateText(p.tank_state);
+      if (p.tank_valid) {
+        row["tank_depth_mm"] = p.tank_depth_mm;
+        row["tank_current_centi_ma"] = p.tank_current_centi_ma;
+        row["tank_current_ma"] = static_cast<float>(p.tank_current_centi_ma) / 100.0f;
+        row["tank_voltage_mv"] = p.tank_voltage_mv;
+      }
+    }
+    if (p.maintenance_debug_known) {
+      row["maintenance_debug_known"] = true;
+      row["heap_free"] = p.heap_free;
+      row["heap_max_block"] = p.heap_max_block;
+      row["heap_frag_pct"] = p.heap_frag_pct;
+      row["relay_feedback"] = p.relay_feedback;
+      row["input_feedback"] = p.input_feedback;
+      row["debug_uptime_ms"] = p.debug_uptime_ms;
+    }
     row["rssi"] = p.uplink_rssi;
-    row["downlink_rssi_known"] = p.downlink_rssi_valid;
-    row["downlink_rssi"] = p.downlink_rssi;
+    if (p.downlink_rssi_valid) {
+      row["downlink_rssi_known"] = true;
+      row["downlink_rssi"] = p.downlink_rssi;
+    }
     row["last_seen_ms"] = p.last_seen_ms;
     row["age_ms"] = p.last_seen_ms == 0 ? 0 : now - p.last_seen_ms;
-    row["poll_pending"] = p.poll_pending;
+    if (p.poll_pending)
+      row["poll_pending"] = true;
     const bool otaEligible = p.wifi_connected_known && p.wifi_connected &&
                              p.ip[0] != 0;
     row["ota_eligible"] = otaEligible;
-    row["ota_reason"] = otaEligible ? "ready" :
-        (!p.wifi_connected_known ? "wifi_status_unknown" :
-         (!p.wifi_connected ? "wifi_offline" : "ip_missing"));
+    if (otaEligible) {
+      row["ota_reason"] = "ready";
+    } else if (p.wifi_connected_known) {
+      row["ota_reason"] = p.wifi_connected ? "ip_missing" : "wifi_offline";
+    } else {
+      row["ota_reason"] = "wifi_status_unknown";
+    }
   }
   sendOk(out);
 }
