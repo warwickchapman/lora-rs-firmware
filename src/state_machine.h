@@ -659,7 +659,7 @@ class NodeStateMachine {
   bool sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase);
   void finishTxGroupSuccess();
   void finishTxGroupPartial();
-  void updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState);
+  void updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi = -127);
   uint8_t pairedAckRankForLocalAddress() const;
   void scheduleDeferredAck(uint8_t dst, uint8_t relayState, uint8_t inputState, uint32_t commandId);
   void tickDeferredAck(uint32_t now);

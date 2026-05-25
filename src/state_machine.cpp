@@ -921,7 +921,7 @@ void NodeStateMachine::finishTxGroupPartial() {
   resetTxGroupState();
 }
 
-void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState) {
+void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi) {
   PeerRuntime *node = findOrCreatePeer(src);
   if (node == nullptr) return;
   node->relay_state = relayState ? 1 : 0;
@@ -929,6 +929,9 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint
   node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
+  if (rssi != -127) {
+    node->uplink_rssi = rssi;
+  }
 }
 
 uint8_t NodeStateMachine::pairedAckRankForLocalAddress() const {
@@ -2727,11 +2730,10 @@ void NodeStateMachine::tickReceive() {
     const bool mqttStatus = (msg.type == MessageType::MqttStatus);
     const bool pollResponse = (msg.type == MessageType::PollResponse);
     const bool wifiStatus = (msg.type == MessageType::WifiControl && msg.relay_state == kWifiControlOpStatus);
-    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !fromPaired) {
-      lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
-      return;
-    }
-    if (msg.type == MessageType::Ack && !fromPaired) {
+    const bool heartbeat = (msg.type == MessageType::Heartbeat);
+    const bool change = (msg.type == MessageType::Change);
+    const bool isAck = (msg.type == MessageType::Ack);
+    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !heartbeat && !change && !isAck && !fromPaired) {
       lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
@@ -2801,6 +2803,37 @@ void NodeStateMachine::tickReceive() {
   }
 
   if (runtime_.role_tx) {
+    PeerRuntime *node = findOrCreatePeer(msg.src);
+    if (node != nullptr) {
+      node->relay_state = msg.relay_state ? 1 : 0;
+      node->uplink_rssi = msg.rssi;
+      node->last_seen_ms = millis();
+      
+      // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
+      const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
+      if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
+        node->input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
+      } else {
+        node->input_state = msg.input_state ? 1 : 0;
+      }
+      
+      if (msg.temp_code != 0xFF) {
+        node->temp_valid = true;
+        node->temp_c = static_cast<int8_t>(msg.temp_code);
+      }
+      
+      if ((msg.sensor_mask & 0x04U) != 0U) {
+        node->downlink_rssi_valid = true;
+        node->downlink_rssi = static_cast<int>(static_cast<int16_t>(msg.sensor_analog0));
+      }
+      
+      if ((msg.sensor_mask & 0x08U) != 0U && msg.sensor_digital0 != 0xFFU) {
+        node->wifi_state_known = true;
+        node->wifi_enabled = (msg.sensor_digital0 != 0U);
+        node->wifi_last_confirm_ms = millis();
+      }
+    }
+
     if (msg.type == MessageType::Ack) {
       if (!ackMatchesPendingCommand(msg)) {
         if (!tx_command_pending_) {
@@ -2818,7 +2851,7 @@ void NodeStateMachine::tickReceive() {
         }
         return;
       }
-      updatePeerAckStatus(msg.src, msg.relay_state, msg.input_state, PeerAckState::Ok);
+      updatePeerAckStatus(msg.src, msg.relay_state, msg.input_state, PeerAckState::Ok, msg.rssi);
       const uint8_t idx = txGroupTargetIndexForAddress(msg.src);
       if (idx != 0xFF) {
         tx_group_acked_bitmap_ |= (1UL << idx);
