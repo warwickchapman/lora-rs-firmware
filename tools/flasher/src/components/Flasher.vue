@@ -8,7 +8,7 @@ type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 
-type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'system';
+type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type SerialJobPriority = 'user' | 'background';
 type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed';
 
@@ -301,6 +301,7 @@ const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'mqtt', label: 'MQTT' },
   { key: 'sensors', label: 'Sensors' },
   { key: 'system', label: 'System' },
+  { key: 'remote', label: 'Reference' },
 ];
 
 const ports = ref<SerialPort[]>([]);
@@ -401,6 +402,7 @@ const monitorAutoRefresh = ref(true);
 const gatewaySnapshotPauseCount = ref(0);
 const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const settingsTab = ref<SettingsTab>('general');
+const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
@@ -676,6 +678,9 @@ const serialAdminIsFactoryDefault = computed(() => {
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
 });
 const settingsEmptyMessage = computed(() => {
+  if (settingsTab.value === 'remote') {
+    return '';
+  }
   if (!hasActiveDeviceInfo.value) {
     return 'Select a USB device, then read identity or fetch settings.';
   }
@@ -4327,11 +4332,11 @@ function countCrashEvents(entries: string[]): number {
           </div>
 
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar p-3">
-            <div v-if="serialAdminIsFactoryDefault" class="mb-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-100">
+            <div v-if="serialAdminIsFactoryDefault && settingsTab !== 'remote'" class="mb-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-100">
               Factory default: this device is not commissioned yet. Use Provision before treating it as an operational transmitter or receiver.
             </div>
 
-            <div v-if="!hasActiveDeviceInfo" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
+            <div v-if="!hasActiveDeviceInfo && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
               Select a USB device and read device info before loading or saving settings.
             </div>
 
@@ -4538,9 +4543,344 @@ function countCrashEvents(entries: string[]): number {
               </div>
             </div>
 
-            <p v-if="!serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading" class="mt-3 text-xs text-slate-500">
+            <!-- Remote Config Help Reference Tab -->
+            <div v-if="settingsTab === 'remote'" class="flex flex-col gap-4 text-xs select-text">
+              <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 shadow-[inset_0_1px_0_rgba(6,182,212,0.15)]">
+                <div class="font-semibold text-sm mb-1 text-cyan-100 flex items-center gap-2">
+                  <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                  Operator Reference: Remote Configuration & Telemetry Protocol
+                </div>
+                This pane maps the firmware's multi-interface parameters. Use the tabs below to explore the Serial, MQTT, and LoRa capabilities built into your fleet devices.
+              </div>
+
+              <!-- Sub-Tab Selector -->
+              <div class="flex border-b border-slate-800 bg-slate-900/20 p-0.5 rounded-t-lg">
+                <button
+                  @click="remoteSubTab = 'serial'"
+                  type="button"
+                  :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', remoteSubTab === 'serial' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
+                >
+                  <span class="font-mono text-[10px]">🔌</span> Serial Admin API
+                </button>
+                <button
+                  @click="remoteSubTab = 'mqtt'"
+                  type="button"
+                  :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', remoteSubTab === 'mqtt' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
+                >
+                  <span class="font-mono text-[10px]">🌐</span> MQTT Bridge
+                </button>
+                <button
+                  @click="remoteSubTab = 'lora'"
+                  type="button"
+                  :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', remoteSubTab === 'lora' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
+                >
+                  <span class="font-mono text-[10px]">📡</span> LoRa OTA Protocol
+                </button>
+              </div>
+
+              <!-- Content Cards -->
+              <div class="flex flex-col gap-4">
+                
+                <!-- ================== SERIAL PANEL ================== -->
+                <div v-if="remoteSubTab === 'serial'" class="flex flex-col gap-3">
+                  <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
+                    <div class="font-semibold text-slate-100 mb-1">🔌 Local USB Admin Interface</div>
+                    Devices running this firmware listen on the hardware USB UART (**115200 Baud, 8N1**). All commands are JSON payloads transmitted on lines prefixed with <code class="font-mono text-cyan-400 font-bold bg-slate-950/50 px-1 rounded">LRS:</code> and terminated with a newline (<code class="font-mono text-slate-400">\n</code>).
+                  </div>
+
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <!-- Read-Only & Telemetry Commands -->
+                    <div class="glass-card p-3 flex flex-col gap-2">
+                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
+                        <span>Read-Only & Telemetry Commands</span>
+                        <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">NO PASSWORD REQUIRED</span>
+                      </div>
+                      
+                      <div class="flex flex-col gap-2.5">
+                        <div class="flex flex-col gap-1">
+                          <div class="flex justify-between items-center">
+                            <span class="font-mono font-bold text-cyan-300">"hello"</span>
+                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;hello\&quot;}', 'hello command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
+                          </div>
+                          <span class="text-slate-400">Verifies serial communications and fetches API limits.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <div class="flex justify-between items-center">
+                            <span class="font-mono font-bold text-cyan-300">"identity"</span>
+                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;identity\&quot;}', 'identity command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
+                          </div>
+                          <span class="text-slate-400">Returns core device hardware serial, MAC, assigned Addresses, mode, and active firmware version.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <div class="flex justify-between items-center">
+                            <span class="font-mono font-bold text-cyan-300">"status"</span>
+                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;status\&quot;}', 'status command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
+                          </div>
+                          <span class="text-slate-400">Fetches live state telemetry: free heap blocks, WiFi connection parameters, MQTT status, signal RSSI/downlink level, temperature, and analog tank level details.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Protected Admin Settings Commands -->
+                    <div class="glass-card p-3 flex flex-col gap-2">
+                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
+                        <span>Protected Admin Settings</span>
+                        <span class="text-[9px] bg-red-950/30 text-rose-300 px-1.5 py-0.5 rounded font-mono">REQUIRES PASSWORD</span>
+                      </div>
+
+                      <div class="flex flex-col gap-2.5">
+                        <div class="flex flex-col gap-1">
+                          <div class="flex justify-between items-center">
+                            <span class="font-mono font-bold text-cyan-300">"get_config"</span>
+                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;get_config\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;include_secrets\&quot;:true}', 'get_config command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
+                          </div>
+                          <span class="text-slate-400">Reads currently stored configuration store. Set <code class="font-mono text-[10px] text-slate-300">include_secrets</code> to true to request raw WiFi credentials and keys.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <div class="flex justify-between items-center">
+                            <span class="font-mono font-bold text-cyan-300">"set_config"</span>
+                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;set_config\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;config\&quot;:{\&quot;wifi_sta_ssid\&quot;:\&quot;YourSSID\&quot;,\&quot;wifi_sta_password\&quot;:\&quot;Password\&quot;}}', 'set_config command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
+                          </div>
+                          <span class="text-slate-400">Applies a configuration patch. Supports changing WiFi client setups, MQTT properties, sensor configs, timing parameters, and addresses.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <div class="flex justify-between items-center">
+                            <span class="font-mono font-bold text-cyan-300">"configure_gateway"</span>
+                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;configure_gateway\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;fleet_passphrase\&quot;:\&quot;YourKey\&quot;}', 'configure_gateway command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
+                          </div>
+                          <span class="text-slate-400">Provisions a factory default node into an operational Gateway, updating security key material and starting administration mode.</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Fleet Coordination Commands Card -->
+                  <div class="glass-card p-3 flex flex-col gap-2">
+                    <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📡 Gateway-Only Fleet Coordination Commands</div>
+                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-1 text-slate-400">
+                      <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
+                        <div class="flex justify-between items-center">
+                          <span class="font-mono text-cyan-300 font-semibold">LoRa Inventory Scan</span>
+                          <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;start_lora_inventory\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;start_addr\&quot;:1,\&quot;end_addr\&quot;:12}', 'start_lora_inventory')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
+                        </div>
+                        Commands gateway to query remote nodes via LoRa:
+                        <code class="text-[10px] text-slate-500 mt-1">cmd: "start_lora_inventory"<br>cmd: "lora_inventory_status"</code>
+                      </div>
+
+                      <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
+                        <div class="flex justify-between items-center">
+                          <span class="font-mono text-cyan-300 font-semibold">Remote UDP Diagnostic Logs</span>
+                          <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;remote_udp_log_control\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;addr\&quot;:1,\&quot;enabled\&quot;:true,\&quot;host\&quot;:\&quot;192.168.1.50\&quot;,\&quot;port\&quot;:5514}', 'remote_udp_log_control')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
+                        </div>
+                        Instructs a remote node over LoRa to redirect its diagnostic event logging to a specified local UDP server.
+                      </div>
+
+                      <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
+                        <div class="flex justify-between items-center">
+                          <span class="font-mono text-cyan-300 font-semibold">Remote OTA Firmware Pull</span>
+                          <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;remote_ota_pull\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;addr\&quot;:1,\&quot;url\&quot;:\&quot;http://192.168.1.100/fw.bin\&quot;,\&quot;sha256\&quot;:\&quot;YOUR_SHA256_HEX\&quot;}', 'remote_ota_pull')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
+                        </div>
+                        Signals a remote node over LoRa carrying an HTTP URL and SHA256 checksum to trigger it to download a firmware update over WiFi.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ================== MQTT PANEL ================== -->
+                <div v-if="remoteSubTab === 'mqtt'" class="flex flex-col gap-3">
+                  <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
+                    <div class="font-semibold text-slate-100 mb-1">🌐 MQTT Bridge Protocol</div>
+                    Operational gateways with <code class="font-mono bg-slate-950/50 px-1 rounded text-cyan-400">mqtt_client_enabled</code> configured will publish live local telemetry and all received LoRa remote reports, while listening on local and peer-specific control channels.
+                  </div>
+
+                  <!-- MQTT Topic Structure Details -->
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div class="glass-card p-3 flex flex-col gap-2">
+                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
+                        <span>Gateway MQTT Topics (Subscriptions)</span>
+                        <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">WRITE CONTROL</span>
+                      </div>
+                      
+                      <div class="flex flex-col gap-3 mt-1">
+                        <div class="flex flex-col gap-1">
+                          <span class="font-semibold text-slate-300">Toggle Local Relay</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/relay</code>
+                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF).</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300">Control Remote Node Relay</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/control</code>
+                          <span class="text-slate-400">Gateway accepts JSON payload to trigger OTA command to a remote:</span>
+                          <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
+                            <code class="font-mono text-cyan-400 text-[10px]">{"addr": 1, "relay": 1}</code>
+                            <button @click="copyToClipboard('{\&quot;addr\&quot;: 1, \&quot;relay\&quot;: 1}', 'MQTT control payload')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
+                          </div>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300">Trigger Gateway OTA Update</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/ota_pull</code>
+                          <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
+                            <code class="font-mono text-cyan-400 text-[10px]">{"url": "...", "sha256": "..."}</code>
+                            <button @click="copyToClipboard('{\&quot;url\&quot;: \&quot;http://192.168.1.100/fw.bin\&quot;, \&quot;sha256\&quot;: \&quot;\&quot;}', 'MQTT OTA pull')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="glass-card p-3 flex flex-col gap-2">
+                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
+                        <span>Peer MQTT Downlinks (Secured LoRa Forwarding)</span>
+                        <span class="text-[9px] bg-sky-950/30 text-sky-300 px-1.5 py-0.5 rounded font-mono">FORWARDED OVER LORA</span>
+                      </div>
+                      
+                      <div class="flex flex-col gap-3 mt-1">
+                        <div class="flex flex-col gap-1">
+                          <span class="font-semibold text-slate-300">Peer Polling Interval (in seconds)</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/poll_interval_s</code>
+                          <span class="text-slate-400">Payload: integer seconds (e.g. <code class="text-slate-200">300</code>). Set 0 to disable regular telemetry polling.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300">Force Peer Polling (Immediate)</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/poll_now</code>
+                          <span class="text-slate-400">Payload: any. Forces the gateway to emit a secured LoRa status query reports probe.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300">Peer WiFi Hardware Power Setup</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/wifi</code>
+                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (Enable WiFi chip) or <code class="text-slate-200">0</code> (Power off WiFi to conserve energy).</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300">Peer Remote Diagnostics Control</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/udp_log_control</code>
+                          <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
+                            <code class="font-mono text-cyan-400 text-[10px]">{"enabled": true, "host": "...", "port": 5514}</code>
+                            <button @click="copyToClipboard('{\&quot;enabled\&quot;:true,\&quot;host\&quot;:\&quot;192.168.1.50\&quot;,\&quot;port\&quot;:5514,\&quot;ttl_s\&quot;:300}', 'Peer UDP config')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Telemetry Publishing Details -->
+                  <div class="glass-card p-3 flex flex-col gap-2">
+                    <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Telemetry & Status Publishing Map</div>
+                    <span class="text-slate-400">The gateway automatically publishes status reports to these topics when updates are heard over LoRa or changed locally. Telemetry values are published as **retained** plain-text strings:</span>
+                    <div class="grid gap-4 sm:grid-cols-2 mt-1">
+                      <div>
+                        <div class="font-bold text-slate-300 text-[11px] mb-1">Local Gateway Status Topics:</div>
+                        <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/input</span> (or <span class="text-slate-300">/dry_contact</span>): Dry contact state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay_feedback</span>: Live physical relay feedback sense state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/temp_c</span> / <span class="text-slate-300">/remote_temp_c</span>: DS18B20 temperatures</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/tank_depth_mm</span>: Calibrated water level measurement</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/heap_free</span> / <span class="text-slate-300">/heap_frag_pct</span>: Controller health</li>
+                        </ul>
+                      </div>
+                      <div>
+                        <div class="font-bold text-slate-300 text-[11px] mb-1">Remote Peer Telemetry (Forwarded):</div>
+                        <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/relay</span>: Remote unit relay feedback</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/input</span>: Remote unit dry contact state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/tank_status</span>: Tank telemetry state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/tank_depth_mm</span>: Tank depth level</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ================== LORA PANEL ================== -->
+                <div v-if="remoteSubTab === 'lora'" class="flex flex-col gap-3">
+                  <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
+                    <div class="font-semibold text-slate-100 mb-1">📡 LoRa Over-the-Air Secured Protocol</div>
+                    Devices communicate over the air using highly robust, low-bandwidth sub-GHz LoRa modulation. All payloads are encrypted and signed using dynamic session keys derived from the shared <code class="font-mono bg-slate-950/50 px-1 rounded text-cyan-400">fleet_passphrase</code> via **AES-128 and SHA-256**, protecting the network against spoofing and replay attacks.
+                  </div>
+
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <!-- Diagnostic Reports (Uplink) -->
+                    <div class="glass-card p-3 flex flex-col gap-2">
+                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Secured Diagnostic Reports (Uplink)</div>
+                      <div class="flex flex-col gap-3 mt-1 text-slate-400">
+                        <div>
+                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::Heartbeat / PollResponse</span>
+                          <p class="mt-0.5">Emitted by remote receivers periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and receiver-side diagnostics.</p>
+                        </div>
+                        <div class="border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::MaintenanceStatus</span>
+                          <p class="mt-0.5">Delivered in high-density segmented paging packets, pulling deep operational metrics to the gateway:</p>
+                          <ul class="list-disc pl-4 mt-1 space-y-1 text-slate-400 font-mono text-[10px]">
+                            <li><span class="text-slate-300">Version Page:</span> Major, minor, patch, and build version code</li>
+                            <li><span class="text-slate-300">Sensors Page:</span> 4-20mA current (mA), voltage (mV), and calibrated water level measurement (mm)</li>
+                            <li><span class="text-slate-300">Debug Page:</span> Node uptime in minutes, free heap memory blocks, and free block fragmentation percentage</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Remote Control Downlinks -->
+                    <div class="glass-card p-3 flex flex-col gap-2">
+                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">⚙️ Secured Remote Configuration (Downlink)</div>
+                      <div class="flex flex-col gap-3 mt-1 text-slate-400">
+                        <div>
+                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiProvision</span>
+                          <p class="mt-0.5">The gateway broadcasts chunked network credentials packets over the air. Receivers assemble the chunks in memory, verify the full string FNV-1a hash, and permanently commit the SSID & Password configuration store.</p>
+                        </div>
+                        <div class="border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiControl</span>
+                          <p class="mt-0.5">Directly manages remote WiFi chip state. Allows toggling WiFi on or off to optimize deep sleep profiles or query current client connection IP and RSSI levels.</p>
+                        </div>
+                        <div class="border-t border-slate-800/50 pt-2">
+                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::OtaPullControl</span>
+                          <p class="mt-0.5">Tails remote nodes to fetch new firmware binaries from a local staging web server over WiFi. Payload contains the temporary update URL and SHA-256 file signature for local validation.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p v-if="!serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading && settingsTab !== 'remote'" class="mt-3 text-xs text-slate-500">
               {{ settingsEmptyMessage }}
             </p>
+          </div>
+
+          <!-- Sticky action footer for saving settings globally -->
+          <div v-if="serialAdminConfig && settingsTab !== 'remote'" class="flex shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900/60 p-3 text-xs">
+            <span class="text-slate-400">
+              💡 Changes must be saved to apply to the device.
+            </span>
+            <div class="flex items-center gap-2">
+              <button
+                @click="saveSerialAdminConfig"
+                :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig"
+                class="primary-btn m-0 h-9 px-4 text-xs font-bold disabled:opacity-60 flex items-center justify-center gap-1.5"
+              >
+                <svg v-if="isSerialAdminSaving" class="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>{{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}</span>
+              </button>
+              <button
+                @click="rebootSerialDevice"
+                :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig"
+                class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
+              >
+                Reboot
+              </button>
+            </div>
           </div>
         </div>
       </div>

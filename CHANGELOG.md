@@ -19,6 +19,7 @@ All notable changes to this pre-release project are documented here in current o
 - Flasher now clears stale Flash-tab device status after a successful firmware write, waits for serial admin to return, and rereads device identity/status before showing the running firmware version or starting the serial monitor.
 - Native PlatformIO unit tests now cover pure firmware helpers for fixed settings strings and mode/role parsing, with Python tests for build-version parsing.
 - Flasher Settings provides local USB status, identity, settings fetch/save, WiFi scan, identify, reboot, and guarded factory reset workflows.
+- Flasher Settings features a sticky, globally-accessible action footer with "Save config" and "Reboot" buttons, making saving settings visible from any settings sub-tab (including Sensors, MQTT, and Network) and improving operator UX.
 - Flasher Fleet uses a selected USB gateway to read the gateway-owned peer cache, run explicit bounded LoRa inventory scans, trigger remote identify, enable temporary UDP logs, and start OTA-pull actions for WiFi-connected remotes.
 - Flasher Monitor provides serial-gateway diagnostics and rejects non-gateway device selections.
 - Firmware serial admin supports local status/config actions, WiFi scan, WiFi provisioning, Fleet inventory, UDP log control, OTA pull, identify, reboot, and guarded factory reset commands.
