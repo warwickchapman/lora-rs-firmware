@@ -64,3 +64,4 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway protects active remote OTA pull sequences by returning a `gateway_busy` error when another OTA trigger is sent during an ongoing LoRa frame sequence.
 - Flasher Fleet clears `otaExpectedUntilMs` from device history once the device transitions to `ota_updated` status, preventing the UI status from reverting to "Waiting for reboot" after the 30-second update banner expires.
 - Standard build target documentation in `README.md` and `docs/DEVELOPER_GUIDE.md` has been highly emphasized with explicit `[!IMPORTANT]` boxes to ensure development and automation tools focus only on `lrs_za`, `lrs_us`, and native tests.
+- Flasher Fleet and Monitor listings display `-` under the MQTT column by default, and only show `Online` or `Offline` when MQTT is explicitly enabled on the device.

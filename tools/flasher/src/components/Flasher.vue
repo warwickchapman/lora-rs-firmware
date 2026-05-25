@@ -4739,7 +4739,7 @@ function countCrashEvents(entries: string[]): number {
                     <div v-if="tankDetailLabel(device)" class="mt-0.5 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
                   </td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known && device.mqtt_enabled ? (device.mqtt_connected ? 'Online' : 'Offline') : '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorHeapLabel(device) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorFragLabel(device) }}</td>
@@ -5006,7 +5006,7 @@ function countCrashEvents(entries: string[]): number {
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known ? (device.mqtt_connected ? 'Connected' : 'Offline') : '-' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known && device.mqtt_enabled ? (device.mqtt_connected ? 'Online' : 'Offline') : '-' }}</td>
                   <td class="px-2 py-1.5">
                     <div class="text-slate-300">{{ fleetSensorsLabel(device) }}</div>
                     <div v-if="tankDetailLabel(device)" class="mt-1 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
