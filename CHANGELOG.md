@@ -33,6 +33,8 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Remote firmware checks the target destination address of `MessageType::MaintenanceRequest` packets before responding, preventing concurrent reply packet collisions when the gateway performs sequential fleet scans.
+- Remote firmware packs the dynamic dev build number into the provisioning announce/verify packet revision bytes, allowing the Flasher's Provisioning tab to display the full beta version string (e.g. `0.9.2~11` or higher) during discovery.
 - Flasher Fleet now treats the gateway peer cache as the primary view: it refreshes automatically, preserves cached rows across tab changes, removes the manual cache reload button, and rate-limits explicit LoRa Force Scan requests.
 - Firmware version packet fields now use build-generated numeric macros instead of parsing `LRS_FW_VERSION` at runtime.
 - Firmware avoids several transient heap-string helpers in WiFi static IP setup, hostname normalization, DS18B20 address formatting, and MQTT client ID creation.

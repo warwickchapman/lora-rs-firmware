@@ -2961,7 +2961,9 @@ void NodeStateMachine::tickReceive() {
     return;
   }
   if (msg.type == MessageType::MaintenanceRequest) {
-    sendMaintenanceStatus(msg.src);
+    if (msg.dst == runtime_.local_address) {
+      sendMaintenanceStatus(msg.src);
+    }
     return;
   }
 
