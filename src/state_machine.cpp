@@ -2038,7 +2038,7 @@ bool NodeStateMachine::sendProvisioningAnnounce(uint16_t sessionNonce) {
   encodeU32LE(payload + 3, ESP.getChipId());
   payload[7] = runtime_.local_address;
   payload[8] = (runtime_.role_tx ? kProvRoleTxFlag : 0) | ((kProvHwModelLrs & 0x0F) << 4);
-  payload[9] = kProvHwRevA1;
+  payload[9] = static_cast<uint8_t>(fwDevBuild() & 0xFFU);
   uint8_t maj = 0, min = 0, patch = 0;
   parseFwVersionPacked(maj, min, patch);
   payload[10] = static_cast<uint8_t>(((maj & 0x0F) << 4) | (min & 0x0F));
@@ -2063,7 +2063,7 @@ bool NodeStateMachine::sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8
   encodeU32LE(payload + 3, ESP.getChipId());
   payload[7] = assignedAddress;
   payload[8] = (runtime_.role_tx ? kProvRoleTxFlag : 0) | ((kProvHwModelLrs & 0x0F) << 4);
-  payload[9] = kProvHwRevA1;
+  payload[9] = static_cast<uint8_t>(fwDevBuild() & 0xFFU);
   uint8_t maj = 0, min = 0, patch = 0;
   parseFwVersionPacked(maj, min, patch);
   payload[10] = static_cast<uint8_t>(((maj & 0x0F) << 4) | (min & 0x0F));
@@ -3610,7 +3610,8 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       d->current_address = payload[7];
       d->role_tx = (payload[8] & kProvRoleTxFlag) != 0U;
       d->hw_model = static_cast<uint8_t>((payload[8] >> 4) & 0x0FU);
-      d->hw_rev = payload[9];
+      d->hw_rev = kProvHwRevA1;
+      d->fw_build = payload[9];
       d->fw_major = static_cast<uint8_t>((payload[10] >> 4) & 0x0FU);
       d->fw_minor = static_cast<uint8_t>(payload[10] & 0x0FU);
       d->fw_patch = payload[11];
@@ -3632,7 +3633,8 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       d->assigned_address = payload[7];
       d->role_tx = (payload[8] & kProvRoleTxFlag) != 0U;
       d->hw_model = static_cast<uint8_t>((payload[8] >> 4) & 0x0FU);
-      d->hw_rev = payload[9];
+      d->hw_rev = kProvHwRevA1;
+      d->fw_build = payload[9];
       d->fw_major = static_cast<uint8_t>((payload[10] >> 4) & 0x0FU);
       d->fw_minor = static_cast<uint8_t>(payload[10] & 0x0FU);
       d->fw_patch = payload[11];
