@@ -11,18 +11,16 @@ Repo:
 - `/Users/warwick/Code/LoRa/lora_rs`
 
 ## 2. Build Targets
-Defined in `/Users/warwick/Code/LoRa/lora_rs/platformio.ini`:
-- `lrs_za` (433 MHz, `REGION_ZA`)
-- `lrs_us` (915 MHz, `REGION_US`)
 
-Commands:
-- `python3 -m platformio test -e native`
-- `python3 tools/test_version_metadata.py`
-- `python3 -m platformio run -e lrs_za`
-- `python3 -m platformio run -e lrs_us`
-
-> [!NOTE]
-> All other environments defined in `platformio.ini` (including the `native` test suite and local `_ota` targets) are custom local, deployment-specific, or diagnostic environments. These must be disregarded for general build testing and pre-release validation; standard validation and compilation testing must focus strictly on the core target environments `lrs_za` and `lrs_us`.
+> [!IMPORTANT]
+> **We ONLY build `lrs_za` (South Africa), `lrs_us` (USA), and run the native tests (`native`).**
+> Any new automated process, compilation test, or developer must focus strictly on these core commands:
+> - South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
+> - USA (915 MHz): `python3 -m platformio run -e lrs_us`
+> - Unit Test Suite: `python3 -m platformio test -e native`
+> - Version Metadata Verification: `python3 tools/test_version_metadata.py`
+>
+> All other environments defined in `platformio.ini` (such as the local `_ota` targets) are custom local, deployment-specific, or diagnostic environments. They are not part of the standard build or test pipeline and must be disregarded.
 
 
 Native unit tests intentionally cover only pure firmware helpers that do not need ESP8266 hardware, WiFi, LoRa, SPI, or Arduino mocks. Use firmware builds and bench/soak tests for hardware timing, OTA, WiFi reconnect, LoRa ACK behavior, and Flasher serial workflows.

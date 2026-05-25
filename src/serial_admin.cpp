@@ -1326,6 +1326,11 @@ void SerialAdmin::handleRemoteOtaPull(JsonDocument &doc) {
     return;
   }
 
+  if (sm_->isOtaPullTxActive()) {
+    sendError("remote_ota_pull", "gateway_busy", id);
+    return;
+  }
+
   if (!sm_->sendPeerOtaPullControl(static_cast<uint8_t>(rawAddr), host, port, sha256)) {
     sendError("remote_ota_pull", "send_failed", id);
     return;

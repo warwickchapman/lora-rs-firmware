@@ -211,6 +211,7 @@ class NodeStateMachine {
   bool mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS);
   bool sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,
                               const char *sha256Hex);
+  bool isOtaPullTxActive() const { return ota_pull_tx_.active; }
   bool sendBroadcastWifiDisable();
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);

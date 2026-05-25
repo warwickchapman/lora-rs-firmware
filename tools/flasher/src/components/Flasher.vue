@@ -1647,7 +1647,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   let rowStateUntilMs = history.rowStateUntilMs;
   const uptime = Number(row.uptime_ms || 0);
   const previousUptime = Number(history.uptimeMs || 0);
-  const otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
+  let otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
 
   if (previousUptime > 0 && uptime > 0 && uptime + 30000 < previousUptime) {
     rowState = otaExpected ? 'ota_rebooted' : 'unexpected_reboot';
@@ -1657,11 +1657,18 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     rowState = 'ota_updated';
     rowStateUntilMs = now + 30000;
   }
+
+  let otaExpectedUntilMs = history.otaExpectedUntilMs;
+  if (rowState === 'ota_updated') {
+    otaExpectedUntilMs = undefined;
+    otaExpected = false;
+  }
+
   if (rowStateUntilMs && rowStateUntilMs <= now) {
     rowState = otaExpected ? 'ota_pending' : undefined;
-    rowStateUntilMs = otaExpected ? history.otaExpectedUntilMs : undefined;
+    rowStateUntilMs = otaExpected ? otaExpectedUntilMs : undefined;
   }
-  if (history.otaExpectedUntilMs && history.otaExpectedUntilMs <= now && rowState === 'ota_pending') {
+  if (otaExpectedUntilMs && otaExpectedUntilMs <= now && rowState === 'ota_pending') {
     rowState = 'ota_no_reboot';
     rowStateUntilMs = now + 60000;
   }
@@ -1671,7 +1678,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     uptimeMs: uptime || history.uptimeMs,
     fwVersion: row.fw_version || history.fwVersion,
     rowState,
-    rowStateUntilMs
+    rowStateUntilMs,
+    otaExpectedUntilMs
   };
   return { ...row, row_state: rowState, row_state_until_ms: rowStateUntilMs };
 }

@@ -1275,6 +1275,7 @@ bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (port == 0 || host == IPAddress()) return false;
   if (radio_ == nullptr) return false;
+  if (ota_pull_tx_.active) return false;
   uint8_t sha256[32]{};
   if (!sha256HexToBytes(sha256Hex, sha256)) return false;
 

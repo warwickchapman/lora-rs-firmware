@@ -56,11 +56,15 @@ Main project:
 - Deferred scope TODO list: `/Users/warwick/Code/LoRa/lora_rs/docs/TODO.md`
 
 ## Build Targets
-- South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
-- USA (915 MHz): `python3 -m platformio run -e lrs_us`
 
-> [!NOTE]
-> All other environments in `platformio.ini` (such as the `native` test suite and local `_ota` targets) are custom local, deployment-specific, or diagnostic targets. Standard build testing must focus strictly on compiling the core target environments `lrs_za` and `lrs_us`; all other platformio entries are to be disregarded.
+> [!IMPORTANT]
+> **We ONLY build `lrs_za` (South Africa), `lrs_us` (USA), and run the native tests (`native`).**
+> Any new automated process, compilation test, or developer must focus strictly on these core commands:
+> - South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
+> - USA (915 MHz): `python3 -m platformio run -e lrs_us`
+> - Unit Test Suite: `python3 -m platformio test -e native`
+>
+> All other environments defined in `platformio.ini` (such as the local `_ota` targets) are custom local, deployment-specific, or diagnostic environments. They are not part of the standard build or test pipeline and must be disregarded.
 
 
 ## Release Version Source

@@ -61,3 +61,6 @@ All notable changes to this pre-release project are documented here in current o
 - Provisioning address allocation starts remotes at LoRa address `1`, logs chip IDs, and avoids stale serial cache where possible.
 - Fleet scan defaults are bounded to the supported LRS remote range and refresh incomplete cached rows with focused LoRa probes.
 - UDP logging in Flasher follows the latest line and includes copy plus expand/collapse controls.
+- Gateway protects active remote OTA pull sequences by returning a `gateway_busy` error when another OTA trigger is sent during an ongoing LoRa frame sequence.
+- Flasher Fleet clears `otaExpectedUntilMs` from device history once the device transitions to `ota_updated` status, preventing the UI status from reverting to "Waiting for reboot" after the 30-second update banner expires.
+- Standard build target documentation in `README.md` and `docs/DEVELOPER_GUIDE.md` has been highly emphasized with explicit `[!IMPORTANT]` boxes to ensure development and automation tools focus only on `lrs_za`, `lrs_us`, and native tests.
