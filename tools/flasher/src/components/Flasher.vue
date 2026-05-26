@@ -366,6 +366,28 @@ const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
 const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
+const activeDropdownAddress = ref<number | null>(null);
+
+interface WifiModalState {
+  device: LoraInventoryDevice;
+  ssid: string;
+  password_value: string;
+}
+const wifiTargetModal = ref<WifiModalState | null>(null);
+
+interface SensorsModalState {
+  device: LoraInventoryDevice;
+  sensor_temp_enabled: boolean;
+  sensor_tank_enabled: boolean;
+}
+const sensorsTargetModal = ref<SensorsModalState | null>(null);
+
+interface FactoryResetModalState {
+  device: LoraInventoryDevice;
+  keep_shared_fleet_key: boolean;
+  keep_wifi_credentials: boolean;
+}
+const factoryResetTargetModal = ref<FactoryResetModalState | null>(null);
 const logContainer = ref<HTMLElement | null>(null);
 const networkUdpLogContainer = ref<HTMLElement | null>(null);
 const deviceInfoReadSeqByPort = ref<Record<string, number>>({});
@@ -2312,6 +2334,138 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
   }
 }
 
+function toggleFleetDropdown(address: number) {
+  if (activeDropdownAddress.value === address) {
+    activeDropdownAddress.value = null;
+  } else {
+    activeDropdownAddress.value = address;
+  }
+}
+
+
+function openWifiModal(device: LoraInventoryDevice) {
+  activeDropdownAddress.value = null;
+  wifiTargetModal.value = {
+    device,
+    ssid: pairWifiSsid.value || '',
+    password_value: pairAdminPassword.value || ''
+  };
+}
+
+async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, password_value: string) {
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  try {
+    notify(`Sending WiFi details to remote ${device.address}...`);
+    await sendEasyPairCommandOnPort(port, 'provision_fleet_wifi', {
+      admin_password: password,
+      target_address: device.address,
+      ssid: ssid,
+      password_value: password_value
+    }, 15000);
+    notify(`WiFi credentials sent successfully to remote ${device.address}`);
+    wifiTargetModal.value = null;
+  } catch (e) {
+    const msg = serialFeatureError(`Remote WiFi`, e);
+    notify(msg);
+  }
+}
+
+function openSensorsModal(device: LoraInventoryDevice) {
+  activeDropdownAddress.value = null;
+  sensorsTargetModal.value = {
+    device,
+    sensor_temp_enabled: !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
+    sensor_tank_enabled: !!device.tank_enabled
+  };
+}
+
+async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean) {
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  try {
+    notify(`Updating sensors configuration on remote ${device.address}...`);
+    await sendEasyPairCommandOnPort(port, 'remote_sensor_config', {
+      admin_password: password,
+      target_address: device.address,
+      sensor_temp_enabled: tempEnabled,
+      sensor_tank_enabled: tankEnabled
+    }, 8000);
+    notify(`Sensors updated successfully on remote ${device.address}`);
+    sensorsTargetModal.value = null;
+  } catch (e) {
+    const msg = serialFeatureError(`Remote sensors update`, e);
+    notify(msg);
+  }
+}
+
+async function executeRemoteReboot(device: LoraInventoryDevice) {
+  activeDropdownAddress.value = null;
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  if (!await confirmOperatorAction(`Reboot remote device ${device.address}?`, { confirmText: 'Reboot remote', danger: true })) {
+    return;
+  }
+  try {
+    notify(`Sending reboot command to remote ${device.address}...`);
+    await sendEasyPairCommandOnPort(port, 'remote_reboot', {
+      admin_password: password,
+      target_address: device.address
+    }, 8000);
+    notify(`Reboot command sent to remote ${device.address}`);
+  } catch (e) {
+    const msg = serialFeatureError(`Remote reboot`, e);
+    notify(msg);
+  }
+}
+
+function openFactoryResetModal(device: LoraInventoryDevice) {
+  activeDropdownAddress.value = null;
+  factoryResetTargetModal.value = {
+    device,
+    keep_shared_fleet_key: true,
+    keep_wifi_credentials: true
+  };
+}
+
+async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet: boolean, keepWifi: boolean) {
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  if (!await confirmOperatorAction(`Factory reset remote device ${device.address}? This cannot be undone!`, { confirmText: 'Factory reset', danger: true })) {
+    return;
+  }
+  try {
+    notify(`Triggering factory reset on remote ${device.address}...`);
+    await sendEasyPairCommandOnPort(port, 'remote_factory_reset', {
+      admin_password: password,
+      target_address: device.address,
+      keep_shared_fleet_key: keepFleet,
+      keep_wifi_credentials: keepWifi
+    }, 8000);
+    notify(`Factory reset triggered on remote ${device.address}. Device is rebooting.`);
+    factoryResetTargetModal.value = null;
+  } catch (e) {
+    const msg = serialFeatureError(`Remote factory reset`, e);
+    notify(msg);
+  }
+}
+
 function fleetGatewayFlashUnavailableReason(): string {
   if (!fleetSelectedPort.value) return 'Select a USB gateway first';
   if (isFlashing.value) return 'Another flash is already running';
@@ -3232,14 +3386,10 @@ async function connectGatewayWifi() {
 }
 
 async function sendWifiToRemotes() {
-  const password = pairPassword();
-  const ssid = pairWifiSsid.value.trim();
-  if (!password || !ssid) {
-    notify('Select a WiFi network and load the gateway password first');
-    return;
-  }
-  if (!gatewayWifiReady.value) {
-    notify('Connect the gateway to WiFi first');
+  const ssid = pairWifiSsid.value;
+  const password = pairAdminPassword.value;
+  if (!ssid) {
+    notify('Select a WiFi network to send first');
     return;
   }
   isFleetWifiSending.value = true;
@@ -3530,7 +3680,12 @@ watch(fleetSelectedPort, port => {
 watch(monitorSelectedPort, port => saveTabPort('monitor', port));
 watch(settingsSelectedPort, port => saveTabPort('settings', port));
 
+const handleWindowClick = () => {
+  activeDropdownAddress.value = null;
+};
+
 onMounted(async () => {
+  window.addEventListener('click', handleWindowClick);
   generatePairFleetKey(false);
   fleetClockTimer.value = window.setInterval(() => {
     fleetClockMs.value = Date.now();
@@ -3658,6 +3813,7 @@ watch(monitorAutoRefresh, (enabled) => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('click', handleWindowClick);
   stopEasyPairStatusPolling();
   stopLoraInventoryPolling();
   stopMonitorPolling();
@@ -4464,33 +4620,54 @@ function countCrashEvents(entries: string[]): number {
               </template>
             </div>
 
-            <div v-if="settingsTab === 'mqtt'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+            <div v-if="settingsTab === 'mqtt'" class="flex flex-col gap-3 text-xs">
               <template v-if="serialAdminConfig">
-                <label class="self-center text-right font-semibold text-slate-300">MQTT host</label>
-                <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-9" placeholder="venus.local" />
-                <label class="self-center text-right font-semibold text-slate-300">MQTT port</label>
-                <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
-                <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
-                  Enabled
-                </label>
-                <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
-                  Enabled
-                </label>
-                <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
-                <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
-                <div class="flex gap-2">
-                  <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
-                  <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                <!-- If it's a remote/receiver unit -->
+                <div v-if="!serialAdminConfig.role_tx" class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
+                  <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></span>
+                    🌐 Remote MQTT Routing Bridge Active
+                  </div>
+                  This device is configured with the <span class="font-bold text-cyan-100">Remote / Receiver</span> role.
+                  <p class="mt-2 text-slate-300">
+                    Remote units do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
+                  </p>
+                  <p class="mt-2 text-slate-300">
+                    The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote node.
+                  </p>
+                  <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
+                    💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
+                  </p>
                 </div>
-                <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
-                <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
+
+                <!-- If it's a gateway/transmitter unit -->
+                <div v-else class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
+                  <label class="self-center text-right font-semibold text-slate-300">MQTT host</label>
+                  <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-9" placeholder="venus.local" />
+                  <label class="self-center text-right font-semibold text-slate-300">MQTT port</label>
+                  <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-9" />
+                  <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
+                  <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-9" />
+                  <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
+                  <label class="flex items-center gap-2 text-slate-300">
+                    <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
+                    Enabled
+                  </label>
+                  <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
+                  <label class="flex items-center gap-2 text-slate-300">
+                    <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
+                    Enabled
+                  </label>
+                  <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
+                  <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
+                  <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
+                  <div class="flex gap-2">
+                    <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
+                    <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                  </div>
+                  <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
+                  <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
+                </div>
               </template>
             </div>
 
@@ -5359,24 +5536,63 @@ function countCrashEvents(entries: string[]): number {
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
-                  <td class="px-2 py-1.5">
-                    <div class="flex items-center gap-2">
-                    <button
-                      @click="flashLoraRemote(device)"
-                      :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting || !fleetFlashAvailable(device)"
-                      class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold disabled:opacity-50"
-                      :title="fleetFlashUnavailableReason(device)"
-                    >
-                      {{ remoteOtaBusyAddress === device.address ? 'Flashing...' : 'Flash' }}
-                    </button>
-                    <button
-                      @click="startFleetUdpLogs(device)"
-                      :disabled="remoteUdpBusyAddress !== null || !fleetLogsAvailable(device)"
-                      class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold disabled:opacity-50"
-                      :title="fleetLogsAvailable(device) ? 'Enable and show UDP logs' : 'Needs confirmed WiFi connection and IP from fleet status'"
-                    >
-                      {{ remoteUdpBusyAddress === device.address ? 'Starting...' : 'Logs' }}
-                    </button>
+                  <td class="px-2 py-1.5 overflow-visible">
+                    <div class="relative inline-block text-left">
+                      <button
+                        @click.stop="toggleFleetDropdown(device.address)"
+                        class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center gap-1 select-none"
+                      >
+                        Actions
+                        <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+
+                      <div
+                        v-if="activeDropdownAddress === device.address"
+                        class="absolute right-0 mt-1 w-40 z-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium"
+                      >
+                        <button
+                          @click="flashLoraRemote(device); activeDropdownAddress = null"
+                          :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting || !fleetFlashAvailable(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
+                          :title="fleetFlashUnavailableReason(device)"
+                        >
+                          ⚡ Flash
+                        </button>
+                        <button
+                          @click="startFleetUdpLogs(device); activeDropdownAddress = null"
+                          :disabled="remoteUdpBusyAddress !== null || !fleetLogsAvailable(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
+                        >
+                          📋 Logs
+                        </button>
+                        <button
+                          @click="openWifiModal(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
+                        >
+                          📶 WiFi
+                        </button>
+                        <button
+                          @click="openSensorsModal(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
+                        >
+                          🛠️ Sensors
+                        </button>
+                        <button
+                          @click="executeRemoteReboot(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
+                        >
+                          🔄 Reboot
+                        </button>
+                        <div class="h-[1px] bg-slate-800/80 my-1"></div>
+                        <button
+                          @click="openFactoryResetModal(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
+                        >
+                          ⚠️ Factory Reset
+                        </button>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -5438,6 +5654,132 @@ function countCrashEvents(entries: string[]): number {
       <div v-if="showToast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 glass-card px-3 py-2 border border-cyan-500/50 text-xs font-medium text-slate-200 flex items-center gap-3">
         <span class="w-2 h-2 rounded-full bg-cyan-500"></span>
         {{ toastMessage }}
+      </div>
+    </Transition>
+
+    <!-- Targeted WiFi Provisioning Dialog -->
+    <Transition name="toast">
+      <div v-if="wifiTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
+          <div>
+            <h3 class="text-base font-bold text-slate-200">📶 Provision WiFi to Node {{ wifiTargetModal.device.address }}</h3>
+            <p class="mt-1 text-xs text-slate-500">Securely transmit targeted WiFi credentials over LoRa to this specific receiver node.</p>
+          </div>
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-col gap-1">
+              <label class="text-[11px] font-semibold text-slate-400">SSID</label>
+              <input v-model="wifiTargetModal.ssid" type="text" class="glass-input h-9 px-3 text-xs w-full" placeholder="WiFi Network Name" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="text-[11px] font-semibold text-slate-400">STA Password</label>
+              <input v-model="wifiTargetModal.password_value" type="password" class="glass-input h-9 px-3 text-xs w-full" placeholder="Leave blank to clear credentials" />
+            </div>
+          </div>
+          <div class="mt-2 flex justify-end gap-2">
+            <button
+              @click="wifiTargetModal = null"
+              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
+            >
+              Cancel
+            </button>
+            <button
+              @click="executeRemoteWifi(wifiTargetModal.device, wifiTargetModal.ssid, wifiTargetModal.password_value)"
+              class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
+            >
+              Send Credentials
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Targeted Sensors Configuration Dialog -->
+    <Transition name="toast">
+      <div v-if="sensorsTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
+          <div>
+            <h3 class="text-base font-bold text-slate-200">🛠️ Configure Sensors on Node {{ sensorsTargetModal.device.address }}</h3>
+            <p class="mt-1 text-xs text-slate-500">Enable or disable hardware sensors over LoRa. Changes persist to remote device flash memory.</p>
+          </div>
+          <div class="flex flex-col gap-3 py-1">
+            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+              <input v-model="sensorsTargetModal.sensor_temp_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+              <div>
+                <div class="font-semibold text-slate-200">DS18B20 Temperature Sensor</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">Enables digital temperature probes on the device.</div>
+              </div>
+            </label>
+            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+              <input v-model="sensorsTargetModal.sensor_tank_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+              <div>
+                <div class="font-semibold text-slate-200">4-20mA Pressure Tank Level Sensor</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">Enables analog pressure sensor mappings for tank level tracking.</div>
+              </div>
+            </label>
+          </div>
+          <div class="mt-2 flex justify-end gap-2">
+            <button
+              @click="sensorsTargetModal = null"
+              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
+            >
+              Cancel
+            </button>
+            <button
+              @click="executeRemoteSensors(sensorsTargetModal.device, sensorsTargetModal.sensor_temp_enabled, sensorsTargetModal.sensor_tank_enabled)"
+              class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
+            >
+              Apply Config
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Targeted Factory Reset Dialog -->
+    <Transition name="toast">
+      <div v-if="factoryResetTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
+          <div>
+            <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Node {{ factoryResetTargetModal.device.address }}</h3>
+            <p class="mt-1 text-xs text-slate-500">Decommissions the receiver node over LoRa, formatting its state and triggering a reboot.</p>
+          </div>
+          
+          <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
+            💡 Select which parts of the remote configuration to preserve during reset. Clearing both options returns the node to uncommissioned factory-default state.
+          </div>
+
+          <div class="flex flex-col gap-3 py-1">
+            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-2.5 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+              <input v-model="factoryResetTargetModal.keep_shared_fleet_key" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-0 focus:ring-offset-0" />
+              <div>
+                <div class="font-semibold text-slate-200">Keep Fleet Key</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">Preserves pairing encryption keys to stay in this gateway's secure fleet.</div>
+              </div>
+            </label>
+            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-2.5 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+              <input v-model="factoryResetTargetModal.keep_wifi_credentials" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-0 focus:ring-offset-0" />
+              <div>
+                <div class="font-semibold text-slate-200">Keep WiFi Credentials</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">Preserves local WiFi SSID and password settings.</div>
+              </div>
+            </label>
+          </div>
+          
+          <div class="mt-2 flex justify-end gap-2">
+            <button
+              @click="factoryResetTargetModal = null"
+              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
+            >
+              Cancel
+            </button>
+            <button
+              @click="executeRemoteFactoryReset(factoryResetTargetModal.device, factoryResetTargetModal.keep_shared_fleet_key, factoryResetTargetModal.keep_wifi_credentials)"
+              class="m-0 h-9 rounded-md border border-rose-500/40 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30 px-4 text-xs font-bold transition-colors"
+            >
+              Factory Reset Node
+            </button>
+          </div>
+        </div>
       </div>
     </Transition>
   </div>

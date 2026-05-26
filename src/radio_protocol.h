@@ -20,6 +20,8 @@ enum class MessageType : uint8_t {
   OtaPullControl = 'O',
   FactoryReset = 'X',
   Provisioning = 'V',
+  Reboot = 'B',
+  SensorConfig = 'K',
 };
 
 struct ProtocolMessage {

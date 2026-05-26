@@ -1372,6 +1372,108 @@ void SerialAdmin::handleOtaPull(JsonDocument &doc) {
   ESP.restart();
 }
 
+void SerialAdmin::handleRemoteReboot(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_reboot", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_reboot", "runtime_unavailable", id);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_reboot", "invalid_address", id);
+    return;
+  }
+
+  if (!sm_->sendPeerReboot(static_cast<uint8_t>(rawAddr))) {
+    sendError("remote_reboot", "send_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_reboot";
+  const char *reqId = requestId(doc);
+  if (reqId[0] != '\0') out["id"] = reqId;
+  out["target_address"] = rawAddr;
+  sendOk(out);
+}
+
+void SerialAdmin::handleRemoteSensorConfig(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_sensor_config", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_sensor_config", "runtime_unavailable", id);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_sensor_config", "invalid_address", id);
+    return;
+  }
+
+  if (doc["sensor_temp_enabled"].isNull() || doc["sensor_tank_enabled"].isNull()) {
+    sendError("remote_sensor_config", "missing_parameters", id);
+    return;
+  }
+
+  const bool tempEnabled = doc["sensor_temp_enabled"] | false;
+  const bool tankEnabled = doc["sensor_tank_enabled"] | false;
+
+  if (!sm_->sendPeerSensorConfig(static_cast<uint8_t>(rawAddr), tempEnabled, tankEnabled)) {
+    sendError("remote_sensor_config", "send_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_sensor_config";
+  const char *reqId = requestId(doc);
+  if (reqId[0] != '\0') out["id"] = reqId;
+  out["target_address"] = rawAddr;
+  out["sensor_temp_enabled"] = tempEnabled;
+  out["sensor_tank_enabled"] = tankEnabled;
+  sendOk(out);
+}
+
+void SerialAdmin::handleRemoteFactoryReset(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_factory_reset", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_factory_reset", "runtime_unavailable", id);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_factory_reset", "invalid_address", id);
+    return;
+  }
+
+  const bool keepFleetKey = doc["keep_shared_fleet_key"] | doc["keep_fleet_key"] | false;
+  const bool keepWifi = doc["keep_wifi_credentials"] | doc["keep_wifi"] | false;
+
+  if (!sm_->sendPeerFactoryReset(static_cast<uint8_t>(rawAddr), keepFleetKey, keepWifi)) {
+    sendError("remote_factory_reset", "send_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_factory_reset";
+  const char *reqId = requestId(doc);
+  if (reqId[0] != '\0') out["id"] = reqId;
+  out["target_address"] = rawAddr;
+  out["keep_shared_fleet_key"] = keepFleetKey;
+  out["keep_wifi_credentials"] = keepWifi;
+  sendOk(out);
+}
+
 void SerialAdmin::handleCommand(JsonDocument &doc) {
   const char *cmd = cmdName(doc);
   const char *id = requestId(doc);
@@ -1488,6 +1590,21 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
 
   if (strcmp(cmd, "remote_ota_pull") == 0) {
     handleRemoteOtaPull(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_reboot") == 0) {
+    handleRemoteReboot(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_sensor_config") == 0) {
+    handleRemoteSensorConfig(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_factory_reset") == 0) {
+    handleRemoteFactoryReset(doc);
     return;
   }
 

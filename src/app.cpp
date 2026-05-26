@@ -292,17 +292,47 @@ void App::tick() {
   }
   {
     bool keepFleetKey = true;
+    bool keepWifi = false;
     uint8_t resetSrc = 0;
-    if (sm_.consumePendingFactoryReset(keepFleetKey, resetSrc)) {
+    if (sm_.consumePendingFactoryReset(keepFleetKey, keepWifi, resetSrc)) {
       lrslog::event(keepFleetKey ? "factory_reset_exec_keep"
                                  : "factory_reset_exec_full",
                     0, resetSrc, 0);
-      if (config_.factoryReset(keepFleetKey)) {
+      if (config_.factoryReset(keepFleetKey, keepWifi)) {
         delay(100);
         ESP.restart();
         return;
       }
       lrslog::event("factory_reset_exec_save_fail", 0, resetSrc, 0);
+    }
+  }
+  {
+    if (sm_.consumePendingReboot()) {
+      lrslog::event("reboot_exec", 0, 0, 0);
+      delay(100);
+      ESP.restart();
+      return;
+    }
+  }
+  {
+    bool sensorTempEnabled = false;
+    bool sensorTankEnabled = false;
+    if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled)) {
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.sensor_temp_enabled != sensorTempEnabled) ||
+                           (cfg.sensor_tank_enabled != sensorTankEnabled);
+      if (changed) {
+        cfg.sensor_temp_enabled = sensorTempEnabled;
+        cfg.sensor_tank_enabled = sensorTankEnabled;
+        if (config_.save()) {
+          applyUpdatedConfig(false, false);
+          lrslog::event("sensor_config_exec_success", 0, 0, 0);
+        } else {
+          lrslog::event("sensor_config_exec_failed", 0, 0, 0);
+        }
+      } else {
+        lrslog::event("sensor_config_exec_no_change", 0, 0, 0);
+      }
     }
   }
   {

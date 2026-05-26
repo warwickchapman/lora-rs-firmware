@@ -227,8 +227,14 @@ class NodeStateMachine {
   bool hasPendingWifiProvision() const;
   bool consumePendingWifiProvision(String &ssid, String &password, uint8_t &src);
   uint32_t fleetWifiProvisionCooldownRemainingMs() const;
-  bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey);
-  bool consumePendingFactoryReset(bool &keepSharedFleetKey, uint8_t &src);
+  bool sendPeerReboot(uint8_t dstAddress);
+  bool hasPendingReboot() const { return reboot_pending_; }
+  bool consumePendingReboot();
+  bool sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled);
+  bool hasPendingSensorConfig() const { return sensor_config_pending_; }
+  bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled);
+  bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials);
+  bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
   bool provisioningStartDiscovery(uint16_t estimatedCount);
   bool provisioningStartProvisionAll();
   void provisioningCancel();
@@ -498,7 +504,12 @@ class NodeStateMachine {
   uint8_t ota_pull_pending_src_ = 0;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;
+  bool factory_reset_keep_wifi_pending_ = false;
   uint8_t factory_reset_pending_src_ = 0;
+  bool reboot_pending_ = false;
+  bool sensor_config_pending_ = false;
+  bool sensor_config_temp_enabled_ = false;
+  bool sensor_config_tank_enabled_ = false;
   bool fleet_prov_apply_pending_ = false;
   uint16_t fleet_prov_apply_session_nonce_ = 0;
   uint8_t fleet_prov_apply_address_ = 0;
@@ -628,6 +639,8 @@ class NodeStateMachine {
   bool handleUdpLogControlFrame(const ProtocolMessage &msg);
   bool handleOtaPullControlFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
+  bool handleRebootFrame(const ProtocolMessage &msg);
+  bool handleSensorConfigFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
   bool isAuthorizedMqttController(uint8_t src) const;
   bool isAuthorizedPairedSource(uint8_t src) const;

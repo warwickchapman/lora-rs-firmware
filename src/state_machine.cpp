@@ -56,6 +56,11 @@ constexpr uint32_t kOtaPullControlFrameSpacingMs = 250;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
 constexpr uint8_t kFactoryResetKeepFleetFlag = 0x01;
+constexpr uint8_t kFactoryResetKeepWifiFlag = 0x02;
+constexpr uint8_t kRebootMagic0 = 0xB5;
+constexpr uint8_t kRebootMagic1 = 0x5B;
+constexpr uint8_t kSensorConfigMagic0 = 0xC5;
+constexpr uint8_t kSensorConfigMagic1 = 0x5C;
 constexpr uint32_t kWifiProvisionCooldownMs = 60000;
 constexpr uint8_t kProvOpDiscoverStart = 1;
 constexpr uint8_t kProvOpAnnounce = 2;
@@ -1575,7 +1580,66 @@ uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
   return kWifiProvisionCooldownMs - elapsed;
 }
 
-bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey) {
+bool NodeStateMachine::sendPeerReboot(uint8_t dstAddress) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (!runtime_.role_tx) return false;
+  if (radio_ == nullptr) return false;
+  if (dstAddress == 0 || dstAddress == 255) return false;
+
+  uint8_t payload[12]{};
+  payload[0] = kRebootMagic0;
+  payload[1] = kRebootMagic1;
+  payload[2] = 0;
+  payload[3] = static_cast<uint8_t>(runtime_.local_address);
+  payload[4] = static_cast<uint8_t>(millis() & 0xFFU);
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::Reboot, last_counter_, runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("reboot_peer_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::consumePendingReboot() {
+  if (!reboot_pending_) return false;
+  reboot_pending_ = false;
+  return true;
+}
+
+bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (!runtime_.role_tx) return false;
+  if (radio_ == nullptr) return false;
+  if (dstAddress == 0 || dstAddress == 255) return false;
+
+  uint8_t payload[12]{};
+  payload[0] = kSensorConfigMagic0;
+  payload[1] = kSensorConfigMagic1;
+  payload[2] = tempEnabled ? 1 : 0;
+  payload[3] = tankEnabled ? 1 : 0;
+  payload[4] = static_cast<uint8_t>(runtime_.local_address);
+  payload[5] = static_cast<uint8_t>(millis() & 0xFFU);
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::SensorConfig, last_counter_, runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("sensor_config_peer_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
+bool NodeStateMachine::consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled) {
+  if (!sensor_config_pending_) return false;
+  tempEnabled = sensor_config_temp_enabled_;
+  tankEnabled = sensor_config_tank_enabled_;
+  sensor_config_pending_ = false;
+  return true;
+}
+
+bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials) {
   if (!radioTxBudgetAvailable()) return false;
   if (!runtime_.role_tx) return false;
   if (radio_ == nullptr) return false;
@@ -1584,7 +1648,8 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
   uint8_t payload[12]{};
   payload[0] = kFactoryResetMagic0;
   payload[1] = kFactoryResetMagic1;
-  payload[2] = keepSharedFleetKey ? kFactoryResetKeepFleetFlag : 0;
+  payload[2] = (keepSharedFleetKey ? kFactoryResetKeepFleetFlag : 0) |
+               (keepWifiCredentials ? kFactoryResetKeepWifiFlag : 0);
   payload[3] = static_cast<uint8_t>(runtime_.local_address);
   payload[4] = static_cast<uint8_t>(millis() & 0xFFU);
   last_counter_++;
@@ -1604,12 +1669,14 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
   return true;
 }
 
-bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, uint8_t &src) {
+bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src) {
   if (!factory_reset_pending_) return false;
   keepSharedFleetKey = factory_reset_keep_fleet_pending_;
+  keepWifiCredentials = factory_reset_keep_wifi_pending_;
   src = factory_reset_pending_src_;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
+  factory_reset_keep_wifi_pending_ = false;
   factory_reset_pending_src_ = 0;
   return true;
 }
@@ -2721,7 +2788,9 @@ void NodeStateMachine::tickReceive() {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
-  if ((isUdpLogControl || isOtaPullControl) && msg.dst != runtime_.local_address) {
+  const bool isReboot = (msg.type == MessageType::Reboot);
+  const bool isSensorConfig = (msg.type == MessageType::SensorConfig);
+  if ((isUdpLogControl || isOtaPullControl || isFactoryReset || isReboot || isSensorConfig) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -2761,6 +2830,12 @@ void NodeStateMachine::tickReceive() {
     } else if (msg.type == MessageType::OtaPullControl) {
       // Targeted same-key OTA pull only carries the temporary firmware server
       // endpoint; the device still downloads the binary over WiFi.
+    } else if (msg.type == MessageType::FactoryReset) {
+      // Same-key factory reset is allowed.
+    } else if (msg.type == MessageType::Reboot) {
+      // Same-key remote reboot.
+    } else if (msg.type == MessageType::SensorConfig) {
+      // Same-key remote sensor config.
     } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;
@@ -2768,7 +2843,8 @@ void NodeStateMachine::tickReceive() {
   }
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
-                                                                  isOtaPullControl || isFactoryReset || isMaintenance);
+                                                                  isOtaPullControl || isFactoryReset || isMaintenance ||
+                                                                  isReboot || isSensorConfig);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -2792,6 +2868,14 @@ void NodeStateMachine::tickReceive() {
   }
   if (isFactoryReset) {
     handleFactoryResetFrame(msg);
+    return;
+  }
+  if (isReboot) {
+    handleRebootFrame(msg);
+    return;
+  }
+  if (isSensorConfig) {
+    handleSensorConfigFrame(msg);
     return;
   }
   if (msg.type == MessageType::MaintenanceStatus) {
@@ -3279,12 +3363,35 @@ bool NodeStateMachine::handleFactoryResetFrame(const ProtocolMessage &msg) {
     return false;
   }
   factory_reset_keep_fleet_pending_ = (msg.flags & kFactoryResetKeepFleetFlag) != 0U;
+  factory_reset_keep_wifi_pending_ = (msg.flags & kFactoryResetKeepWifiFlag) != 0U;
   factory_reset_pending_src_ = msg.src;
   factory_reset_pending_ = true;
   {
     lrslog::event(factory_reset_keep_fleet_pending_ ? "factory_reset_rx_keep" : "factory_reset_rx_full",
                msg.rssi, msg.counter, msg.src);
   }
+  return true;
+}
+
+bool NodeStateMachine::handleRebootFrame(const ProtocolMessage &msg) {
+  if (msg.relay_state != kRebootMagic0 || msg.input_state != kRebootMagic1) {
+    lrslog::event("reboot_rx_bad", msg.rssi, msg.counter, 0);
+    return false;
+  }
+  reboot_pending_ = true;
+  lrslog::event("reboot_rx", msg.rssi, msg.counter, msg.src);
+  return true;
+}
+
+bool NodeStateMachine::handleSensorConfigFrame(const ProtocolMessage &msg) {
+  if (msg.relay_state != kSensorConfigMagic0 || msg.input_state != kSensorConfigMagic1) {
+    lrslog::event("sensor_config_rx_bad", msg.rssi, msg.counter, 0);
+    return false;
+  }
+  sensor_config_temp_enabled_ = (msg.flags == 1);
+  sensor_config_tank_enabled_ = (msg.temp_code == 1);
+  sensor_config_pending_ = true;
+  lrslog::event("sensor_config_rx", msg.rssi, msg.counter, msg.src);
   return true;
 }
 

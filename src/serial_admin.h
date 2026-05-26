@@ -40,5 +40,8 @@ private:
   void handleUdpLogControl(JsonDocument &doc);
   void handleRemoteUdpLogControl(JsonDocument &doc);
   void handleRemoteOtaPull(JsonDocument &doc);
+  void handleRemoteReboot(JsonDocument &doc);
+  void handleRemoteSensorConfig(JsonDocument &doc);
+  void handleRemoteFactoryReset(JsonDocument &doc);
   void handleOtaPull(JsonDocument &doc);
 };
