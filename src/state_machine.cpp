@@ -90,7 +90,6 @@ constexpr size_t kProvChunkBitmapMax = 31;
 constexpr uint8_t kProvAddressMin = 1;
 constexpr uint8_t kProvAddressMax = Settings::kAddressListCap;
 constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
-constexpr uint32_t kPeerMaintenanceProbeSpacingMs = 5000;
 constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
 
@@ -471,6 +470,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.local_address = cfg.local_address;
   runtime_.remote_address = cfg.remote_address;
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
+  runtime_.peer_maintenance_interval_ms = cfg.peer_maintenance_interval_s * 1000UL;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
@@ -2588,14 +2588,22 @@ void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
   }
   if (targetCount == 0) return;
 
+  // 2. Dynamically calculate staggering spacing over the full configured cycle
+  uint32_t spacingMs = runtime_.peer_maintenance_interval_ms / targetCount;
+  if (spacingMs < 2000UL) {
+    spacingMs = 2000UL; // Safe lower bound to prevent radio flooding
+  }
+
+  // 3. Query the next peer in round-robin fashion
   if (peer_maintenance_cursor_ >= targetCount) peer_maintenance_cursor_ = 0;
   const uint8_t dst = targets[peer_maintenance_cursor_++];
   uint32_t sentCounter = 0;
   if (sendMaintenanceRequest(dst, &sentCounter)) {
     lrslog::event("peer_maint_probe", 0, sentCounter, dst);
-    next_peer_maintenance_ms_ = now + kPeerMaintenanceProbeSpacingMs;
+    next_peer_maintenance_ms_ = now + spacingMs;
   } else {
-    next_peer_maintenance_ms_ = now + 1000U;
+    // If radio fails, retry in 2 seconds
+    next_peer_maintenance_ms_ = now + 2000UL;
   }
 }
 

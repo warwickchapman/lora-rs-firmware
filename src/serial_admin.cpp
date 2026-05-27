@@ -113,6 +113,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["lora_bandwidth_hz"] = cfg.lora_bandwidth_hz;
   doc["lora_coding_rate"] = cfg.lora_coding_rate;
   doc["heartbeat_ms"] = cfg.heartbeat_ms;
+  doc["peer_maintenance_interval_s"] = cfg.peer_maintenance_interval_s;
   doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
   doc["mqtt_remote_retry_timeout_ms"] = cfg.mqtt_remote_retry_timeout_ms;
   doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
@@ -243,6 +244,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.lora_coding_rate =
       static_cast<uint8_t>(doc["lora_coding_rate"] | cfg.lora_coding_rate);
   cfg.heartbeat_ms = doc["heartbeat_ms"] | cfg.heartbeat_ms;
+  cfg.peer_maintenance_interval_s = doc["peer_maintenance_interval_s"] | cfg.peer_maintenance_interval_s;
   cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
   cfg.mqtt_remote_retry_timeout_ms =
       doc["mqtt_remote_retry_timeout_ms"] | cfg.mqtt_remote_retry_timeout_ms;
@@ -398,6 +400,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   } else {
     cfg.heartbeat_ms = 60000UL;
   }
+  if (cfg.peer_maintenance_interval_s < 10UL)
+    cfg.peer_maintenance_interval_s = 10UL;
+  if (cfg.peer_maintenance_interval_s > 86400UL)
+    cfg.peer_maintenance_interval_s = 86400UL;
   if (cfg.ack_timeout_ms < kMinAckTimeoutMs)
     cfg.ack_timeout_ms = kMinAckTimeoutMs;
   if (cfg.ack_timeout_ms > kMaxAckTimeoutMs)

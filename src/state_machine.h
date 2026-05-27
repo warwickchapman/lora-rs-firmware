@@ -260,6 +260,7 @@ class NodeStateMachine {
     uint8_t local_address = 0;
     uint8_t remote_address = 0;
     uint32_t heartbeat_ms = 60000;
+    uint32_t peer_maintenance_interval_ms = 5000;
     uint32_t ack_timeout_ms = 5000;
     uint32_t mqtt_remote_retry_timeout_ms = 5000;
     bool tx_mqtt_remote_polling_enabled = false;

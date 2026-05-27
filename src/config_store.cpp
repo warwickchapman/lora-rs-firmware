@@ -48,6 +48,7 @@ constexpr const char *kAllowedFields[] = {
     "lora_bandwidth_hz",
     "lora_coding_rate",
     "heartbeat_ms",
+    "peer_maintenance_interval_s",
     "ack_timeout_ms",
     "mqtt_remote_retry_timeout_ms",
     "tx_mqtt_remote_polling_enabled",
@@ -321,6 +322,7 @@ bool ConfigStore::begin() {
   cfg_.lora_coding_rate = root["lora_coding_rate"] | 5;
 
   cfg_.heartbeat_ms = root["heartbeat_ms"] | 60000;
+  cfg_.peer_maintenance_interval_s = root["peer_maintenance_interval_s"] | 600;
   cfg_.ack_timeout_ms = root["ack_timeout_ms"] | 5000;
   cfg_.mqtt_remote_retry_timeout_ms = root["mqtt_remote_retry_timeout_ms"] | 300000;
   cfg_.tx_mqtt_remote_polling_enabled = root["tx_mqtt_remote_polling_enabled"] | false;
@@ -404,6 +406,8 @@ bool ConfigStore::begin() {
     // Heartbeat is only meaningful for paired-mode input-driven LoRa control.
     cfg_.heartbeat_ms = 60000UL;
   }
+  if (cfg_.peer_maintenance_interval_s < 10UL) cfg_.peer_maintenance_interval_s = 10UL;
+  if (cfg_.peer_maintenance_interval_s > 86400UL) cfg_.peer_maintenance_interval_s = 86400UL;
   if (cfg_.tx_command_retry_timeout_ms < 5000UL) cfg_.tx_command_retry_timeout_ms = 5000UL;
   if (cfg_.tx_command_retry_timeout_ms > 3600000UL) cfg_.tx_command_retry_timeout_ms = 3600000UL;
   cfg_.rx_failsafe_mode.trim();
@@ -472,6 +476,7 @@ bool ConfigStore::save() {
   doc["lora_coding_rate"] = cfg_.lora_coding_rate;
 
   doc["heartbeat_ms"] = cfg_.heartbeat_ms;
+  doc["peer_maintenance_interval_s"] = cfg_.peer_maintenance_interval_s;
   doc["ack_timeout_ms"] = cfg_.ack_timeout_ms;
   doc["mqtt_remote_retry_timeout_ms"] = cfg_.mqtt_remote_retry_timeout_ms;
   doc["tx_mqtt_remote_polling_enabled"] = cfg_.tx_mqtt_remote_polling_enabled;
@@ -750,6 +755,7 @@ void ConfigStore::setDefaults() {
   cfg_.lora_coding_rate = 5;
 
   cfg_.heartbeat_ms = 60000;
+  cfg_.peer_maintenance_interval_s = 600;
   cfg_.ack_timeout_ms = 5000;
   cfg_.mqtt_remote_retry_timeout_ms = 300000;
   cfg_.tx_mqtt_remote_polling_enabled = false;
