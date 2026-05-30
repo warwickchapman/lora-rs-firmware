@@ -470,7 +470,6 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.local_address = cfg.local_address;
   runtime_.remote_address = cfg.remote_address;
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
-  runtime_.peer_maintenance_interval_ms = cfg.peer_maintenance_interval_s * 1000UL;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
@@ -2589,7 +2588,7 @@ void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
   if (targetCount == 0) return;
 
   // 2. Dynamically calculate staggering spacing over the full configured cycle
-  uint32_t spacingMs = runtime_.peer_maintenance_interval_ms / targetCount;
+  uint32_t spacingMs = runtime_.heartbeat_ms / targetCount;
   if (spacingMs < 2000UL) {
     spacingMs = 2000UL; // Safe lower bound to prevent radio flooding
   }

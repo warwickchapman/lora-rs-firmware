@@ -28,7 +28,6 @@ struct Settings {
   uint8_t lora_coding_rate;
 
   uint32_t heartbeat_ms;
-  uint32_t peer_maintenance_interval_s;
   uint32_t ack_timeout_ms;
   uint32_t mqtt_remote_retry_timeout_ms;
   bool tx_mqtt_remote_polling_enabled;
