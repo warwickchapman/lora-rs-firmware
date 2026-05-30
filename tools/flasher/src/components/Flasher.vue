@@ -1165,6 +1165,13 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
         state.adminPassword = '';
         state.status = null;
         state.config = null;
+        // Clear flash/reset operational state so old results don't carry to a new device
+        state.isFlashing = false;
+        state.flashProgress = 0;
+        state.flashStatus = 'Idle';
+        state.flashLogs = [];
+        state.isResetting = false;
+        state.resetStatus = 'Idle';
       }
     }
     for (const known of Object.keys(portSeenSequence.value)) {
