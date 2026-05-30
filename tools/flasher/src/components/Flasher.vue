@@ -2729,8 +2729,16 @@ async function flashFleetGateway() {
   const firmwareOptions = networkOtaFirmwareOptions();
   if (!firmwareOptions) return;
   const label = fleetGatewayIdentity.value?.ssid || fleetGatewayIdentity.value?.serial || port;
+  const currentFw = fleetGatewayStatus.value?.fw_version || 'unknown';
+  const targetFw = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
+    ? `${flasherAppVersion.value} (local build)`
+    : selectedVersion.value;
+
   const confirmed = await confirmOperatorAction(
-    `Upgrade the USB gateway ${label} on ${port}?\n\nThis will reboot the gateway and pause Fleet operations while upgrading.`,
+    `Upgrade the USB gateway ${label} on ${port}?\n\n` +
+    `• Current version: ${currentFw}\n` +
+    `• Upgrade version: ${targetFw}\n\n` +
+    `This will reboot the gateway and pause Fleet operations while upgrading.`,
     { confirmText: 'Upgrade gateway', danger: true }
   );
   if (!confirmed) {
