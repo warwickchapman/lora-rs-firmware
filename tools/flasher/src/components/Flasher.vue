@@ -1834,7 +1834,16 @@ async function loadNetworkGateway() {
   try {
     let state = serialDeviceState(port);
     networkStatusMessage.value = `Reading gateway identity on ${port}...`;
-    const info = await readDeviceInfoForPort(port, 'network');
+    // Retry with delay — the serial port may not be ready immediately on app startup
+    let info = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      info = await readDeviceInfoForPort(port, 'network');
+      if (info) break;
+      if (attempt < 3) {
+        networkStatusMessage.value = `Waiting for ${port} to become ready (attempt ${attempt}/3)...`;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
     if (!info) throw new Error('Unable to read gateway factory details');
     state = serialDeviceState(port);
     const hello = await waitForSerialAdminHello(port, 6000);
@@ -3147,7 +3156,16 @@ async function loadEasyPairGateway(isAuto = false) {
   isGatewayLoading.value = true;
   pushPairLog('Reading USB gateway identity...');
   try {
-    const ok = await readDeviceInfoForPort(port, 'pair');
+    // Retry with delay — the serial port may not be ready immediately on app startup
+    let ok = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      ok = await readDeviceInfoForPort(port, 'pair');
+      if (ok) break;
+      if (attempt < 3) {
+        pushPairLog(`Waiting for ${port} to become ready (attempt ${attempt}/3)...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
     const state = serialDeviceState(port);
     if (!ok || !state?.deviceInfo) throw new Error('Unable to read gateway factory details');
     state.adminPassword = state.deviceInfo.password || '';
