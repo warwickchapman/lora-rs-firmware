@@ -167,6 +167,7 @@ struct ProvisioningDeviceSnapshot {
 class NodeStateMachine {
  public:
   static constexpr uint32_t kIdentifyLedDurationMs = 6000;
+  static constexpr uint32_t kMaintenancePageGapMs = 200;
 
   bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);
@@ -368,6 +369,7 @@ class NodeStateMachine {
   uint8_t maintenance_sensor_dst_ = 0;
   bool maintenance_version_pending_ = false;
   uint8_t maintenance_version_dst_ = 0;
+  uint32_t last_maint_page_tx_ms_ = 0;
 
   struct PeerRuntime {
     bool in_use = false;

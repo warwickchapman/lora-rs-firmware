@@ -324,6 +324,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   maintenance_sensor_dst_ = 0;
   maintenance_version_pending_ = false;
   maintenance_version_dst_ = 0;
+  last_maint_page_tx_ms_ = 0;
   last_wifi_prov_tx_ms_ = 0;
   peer_count_ = 0;
   for (size_t i = 0; i < kMaxPeers; ++i) {
@@ -384,6 +385,32 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
            static_cast<unsigned>(kMaxPeers),
            static_cast<unsigned>(kReplayTrackedSources),
            static_cast<unsigned>(kMaxProvisioningDevices));
+
+  if (runtime_.role_tx) {
+    bool populated = false;
+    if (settings_->known_peer_count > 0) {
+      for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+        uint8_t addr = settings_->known_peer_addresses[i];
+        if (addr >= 1 && addr <= 254 && addr != runtime_.local_address) {
+          findOrCreatePeer(addr);
+          populated = true;
+        }
+      }
+    }
+    if (!populated && settings_->paired_target_count > 0) {
+      for (size_t i = 0; i < settings_->paired_target_count && i < Settings::kAddressListCap; ++i) {
+        uint8_t addr = settings_->paired_target_addresses[i];
+        if (addr >= 1 && addr <= 254 && addr != runtime_.local_address) {
+          findOrCreatePeer(addr);
+          populated = true;
+        }
+      }
+    }
+    if (!populated && settings_->remote_address >= 1 && settings_->remote_address <= 254 && settings_->remote_address != runtime_.local_address) {
+      findOrCreatePeer(settings_->remote_address);
+    }
+  }
+
   return true;
 }
 
@@ -2269,6 +2296,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
     return false;
   }
   last_tx_ms_ = millis();
+  last_maint_page_tx_ms_ = last_tx_ms_;
   markRadioTxSentThisTick();
   lrslog::event("maint_status_tx", 0, last_counter_, dstAddress);
   if (fwDevBuild() > 0) {
@@ -2301,6 +2329,7 @@ bool NodeStateMachine::sendMaintenanceVersionStatus(uint8_t dstAddress) {
     return false;
   }
   last_tx_ms_ = millis();
+  last_maint_page_tx_ms_ = last_tx_ms_;
   markRadioTxSentThisTick();
   lrslog::event("maint_version_tx", 0, last_counter_, dstAddress);
   return true;
@@ -2326,6 +2355,7 @@ bool NodeStateMachine::sendMaintenanceSensorStatus(uint8_t dstAddress) {
     return false;
   }
   last_tx_ms_ = millis();
+  last_maint_page_tx_ms_ = last_tx_ms_;
   markRadioTxSentThisTick();
   lrslog::event("maint_sensor_status_tx", 0, last_counter_, dstAddress);
   return true;
@@ -2360,6 +2390,7 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
     return false;
   }
   last_tx_ms_ = millis();
+  last_maint_page_tx_ms_ = last_tx_ms_;
   markRadioTxSentThisTick();
   lrslog::event("maint_debug_status_tx", 0, last_counter_, dstAddress);
   return true;
@@ -2367,17 +2398,21 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 
 void NodeStateMachine::tickPendingMaintenancePages() {
   if (maintenance_version_pending_) {
-    if (sendMaintenanceVersionStatus(maintenance_version_dst_)) {
-      maintenance_version_pending_ = false;
-      maintenance_version_dst_ = 0;
+    if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
+      if (sendMaintenanceVersionStatus(maintenance_version_dst_)) {
+        maintenance_version_pending_ = false;
+        maintenance_version_dst_ = 0;
+      }
     }
     return;
   }
 
   if (maintenance_sensor_pending_) {
-    if (sendMaintenanceSensorStatus(maintenance_sensor_dst_)) {
-      maintenance_sensor_pending_ = false;
-      maintenance_sensor_dst_ = 0;
+    if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
+      if (sendMaintenanceSensorStatus(maintenance_sensor_dst_)) {
+        maintenance_sensor_pending_ = false;
+        maintenance_sensor_dst_ = 0;
+      }
     }
     return;
   }
@@ -2388,9 +2423,11 @@ void NodeStateMachine::tickPendingMaintenancePages() {
     maintenance_debug_dst_ = 0;
     return;
   }
-  if (sendMaintenanceDebugStatus(maintenance_debug_dst_)) {
-    maintenance_debug_pending_ = false;
-    maintenance_debug_dst_ = 0;
+  if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
+    if (sendMaintenanceDebugStatus(maintenance_debug_dst_)) {
+      maintenance_debug_pending_ = false;
+      maintenance_debug_dst_ = 0;
+    }
   }
 }
 
