@@ -290,6 +290,13 @@ interface SerialDeviceState {
   gatewayWifiReadyIp: string;
   flashLogs: string[];
   monitorLogs: string[];
+
+  // Phase 2 Operational State Fields
+  isFlashing: boolean;
+  flashProgress: number;
+  flashStatus: string;
+  isResetting: boolean;
+  resetStatus: string;
 }
 
 type RegionCode = 'ZA' | 'EU' | 'US';
@@ -342,6 +349,11 @@ const selectedLocalPath = ref('');
 const flasherAppVersion = ref('');
 const region = ref<RegionCode>('ZA');
 const isFlashing = ref(false);
+const isBulkFlashing = ref(false);
+const isBulkResetting = ref(false);
+const bulkSelectedPorts = ref<string[]>([]);
+const bulkMode = ref(false);
+const bulkShowLogsByPort = ref<Record<string, boolean>>({});
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
 const isFirmwareServerStarting = ref(false);
@@ -535,7 +547,12 @@ function newSerialDeviceState(): SerialDeviceState {
     gatewayWifiReadySsid: '',
     gatewayWifiReadyIp: '',
     flashLogs: [],
-    monitorLogs: []
+    monitorLogs: [],
+    isFlashing: false,
+    flashProgress: 0,
+    flashStatus: 'Idle',
+    isResetting: false,
+    resetStatus: 'Idle'
   };
 }
 
@@ -877,6 +894,12 @@ function pushSerialLogForPort(port: string, line: string) {
     state.flashLogs.push(line);
     if (state.flashLogs.length > 2000) {
       state.flashLogs = state.flashLogs.slice(-2000);
+    }
+    
+    // Parse progress percentage from esptool logs (e.g. "Writing at 0x... (23 %)")
+    const match = line.match(/(\d+)\s*%/);
+    if (match) {
+      state.flashProgress = parseInt(match[1], 10);
     }
   }
   if (port === selectedPort.value) {
