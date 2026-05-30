@@ -103,6 +103,50 @@ def wait_for_ci_runs(repo: str, tag: str, started_after_epoch: float) -> None:
         run(["gh", "run", "watch", str(rid), "--repo", repo, "--exit-status"])
 
 
+def prune_old_workflow_runs(repo: str, workflow: str, keep_last: int) -> None:
+    """
+    Keep only the most recent N runs for the target workflow.
+    Deletes older runs only when status is completed.
+    """
+    if keep_last <= 0:
+        print("Skipping workflow run pruning (keep_last <= 0).")
+        return
+
+    raw = run(
+        [
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            repo,
+            "--workflow",
+            workflow,
+            "--limit",
+            "200",
+            "--json",
+            "databaseId,status,createdAt",
+        ],
+        capture=True,
+    )
+    rows = json.loads(raw)
+    rows_sorted = sorted(rows, key=lambda r: r.get("createdAt", ""), reverse=True)
+    to_consider = rows_sorted[keep_last:]
+    deleted = 0
+
+    for row in to_consider:
+        run_id = row.get("databaseId")
+        status = row.get("status")
+        if not run_id or status != "completed":
+            continue
+        run(["gh", "run", "delete", str(run_id), "--repo", repo])
+        deleted += 1
+
+    print(
+        f"Workflow run pruning complete for {workflow}: "
+        f"kept latest {keep_last}, deleted {deleted} older completed runs."
+    )
+
+
 def build_local_macos_portables(root: Path, tag: str) -> tuple[Path, Path]:
     run(["git", "fetch", "origin", "--tags"], cwd=root)
     tmp_wt = Path(tempfile.mkdtemp(prefix="lrs-rel-macos-"))
@@ -172,6 +216,12 @@ def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="One-shot deterministic release runner.")
     ap.add_argument("--notes-file", required=True, type=Path, help="Exact release notes Markdown file to publish.")
     ap.add_argument("--title", required=True, help="Exact release title (e.g. 'v0.9.0-beta Flex').")
+    ap.add_argument(
+        "--keep-workflow-runs",
+        type=int,
+        default=10,
+        help="Keep only this many latest GitHub Actions runs for package_flasher.yml (default: 10, 0 disables pruning).",
+    )
     return ap.parse_args()
 
 
@@ -223,6 +273,7 @@ def main() -> int:
     )
 
     run(["python3", "tools/release_flasher_assets.py", "verify", "--tag", tag], cwd=root)
+    prune_old_workflow_runs(REPO, WORKFLOW, args.keep_workflow_runs)
 
     print("\nDeterministic release completed successfully.")
     print(f"- tag: {tag}")

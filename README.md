@@ -173,8 +173,10 @@ python3 tools/release_one_shot.py \
   - flasher Windows/Linux CI dispatch from the release tag and wait-for-success,
   - local macOS portable ZIP builds from the release tag,
   - macOS upload to both repos,
-  - full 10-asset verification in both repos.
+  - full 10-asset verification in both repos,
+  - GitHub Actions run cleanup for `package_flasher.yml` (keeps latest 10 completed runs by default).
 - Release notes are used exactly as provided (no auto-generated summary/highlights).
+- Optional: `--keep-workflow-runs N` (default `10`, set `0` to disable pruning for that run).
 
 Example:
 ```bash

@@ -254,8 +254,10 @@ Deterministic release mode (preferred):
    - Windows/Linux flasher CI release dispatch from the release tag and completion wait,
    - local macOS arm64/x86_64 portable ZIP builds from the release tag,
    - macOS asset upload to both repos,
-   - full 10-asset contract verification in both repos.
+   - full 10-asset contract verification in both repos,
+   - workflow run pruning for `package_flasher.yml` (keeps latest 10 completed runs by default).
 4. Release notes are deterministic in this mode: the file content is published verbatim.
+5. Optional pruning control: `--keep-workflow-runs <N>` (default `10`; use `0` to disable for a specific run).
 
 Mandatory pre-release validation gate:
 - A release is not ready unless all four pass:

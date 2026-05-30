@@ -737,7 +737,7 @@ function portGatewayReady(port: string): boolean {
   const state = serialDeviceState(port);
   return !!port && !!state?.deviceInfo && !!state.adminSupported && !!adminPasswordForPort(port);
 }
-const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
+const pairPrimaryDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
 const activeSerialAdminPasswordValue = computed(() =>
   activeMode.value === 'pair' ? pairPassword() : deviceInfo.value?.password?.trim() || ''
 );
