@@ -971,7 +971,7 @@ function pushSerialLogForPort(port: string, line: string) {
     // Parse progress percentage from esptool logs and map into weighted segments:
     // With erase:    erase=0-30%, write=30-90%, verify=90-100%
     // Without erase: write=0-90%, verify=90-100%
-    const match = line.match(/(\d+)\s*%/);
+    const match = line.match(/(\d+)(?:\.\d+)?\s*%/);
     if (match) {
       const raw = parseInt(match[1], 10);
       const withErase = eraseBeforeFlash.value;
