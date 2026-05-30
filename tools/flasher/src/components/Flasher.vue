@@ -1631,7 +1631,10 @@ function displayFirmwareVersion(rawVersion: string | undefined | null): string {
 
 function compactFirmwareVersion(major: number, minor: number, patch: number, build?: number): string {
   const core = `${major}.${minor}.${patch}`;
-  return build && build > 0 ? `${core}~${build}` : core;
+  // The ~N dev build convention was introduced in 0.9.2; earlier firmware has
+  // unrelated data in the build byte, so suppress it to avoid e.g. "0.9.1~161".
+  const supportsDevBuild = major > 0 || minor > 9 || (minor === 9 && patch >= 2);
+  return supportsDevBuild && build && build > 0 ? `${core}~${build}` : core;
 }
 
 function provisionedRemoteChipIds(): Set<string> {
