@@ -1054,7 +1054,7 @@ void SerialAdmin::handleStartLoraInventory(JsonDocument &doc) {
   }
   int start = doc["start_address"] | 1;
   int end = doc["end_address"] | Settings::kAddressListCap;
-  uint16_t intervalMs = static_cast<uint16_t>(doc["interval_ms"] | 250);
+  uint16_t intervalMs = static_cast<uint16_t>(doc["interval_ms"] | 1500);
   if (start < 1)
     start = 1;
   if (end > 254)

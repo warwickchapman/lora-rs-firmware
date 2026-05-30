@@ -339,7 +339,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   fleet_scan_start_address_ = 1;
   fleet_scan_end_address_ = 32;
   fleet_scan_next_address_ = 1;
-  fleet_scan_interval_ms_ = 120;
+  fleet_scan_interval_ms_ = 1500;
   fleet_scan_next_ms_ = 0;
   fleet_scan_started_ms_ = 0;
   fleet_scan_last_tx_ms_ = 0;

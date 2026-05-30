@@ -2313,7 +2313,7 @@ async function beginLoraInventoryScan(port: string, showErrors = true) {
         admin_password: password,
         start_address: 1,
         end_address: LRS_REMOTE_SCAN_CAP,
-        interval_ms: 250
+        interval_ms: 1500
       }, 8000);
       networkStatusMessage.value = 'LoRa inventory scan started.';
       await refreshLoraInventoryStatus(false);

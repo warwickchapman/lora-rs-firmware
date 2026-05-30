@@ -449,7 +449,7 @@ class NodeStateMachine {
   uint8_t fleet_scan_start_address_ = 1;
   uint8_t fleet_scan_end_address_ = 80;
   uint8_t fleet_scan_next_address_ = 1;
-  uint16_t fleet_scan_interval_ms_ = 120;
+  uint16_t fleet_scan_interval_ms_ = 1500;
   uint32_t fleet_scan_next_ms_ = 0;
   uint32_t fleet_scan_started_ms_ = 0;
   uint32_t fleet_scan_last_tx_ms_ = 0;
