@@ -3071,6 +3071,7 @@ async function factoryResetSerialDevice() {
 }
 
 async function loadEasyPairGateway(isAuto = false) {
+  if (activeMode.value !== 'pair') return;
   const port = provisionSelectedPort.value;
   if (!port) return;
   isGatewayLoading.value = true;
@@ -4033,7 +4034,7 @@ watch(activeMode, (mode) => {
     nextTick(() => scrollNetworkUdpToBottom());
   }
   syncDeviceInfoForSelectedPort();
-  if (selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
+  if (selectedPort.value && mode !== 'pair' && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
     readDeviceInfo();
   }
   if (mode === 'pair' && provisionSelectedPort.value) {
@@ -4061,7 +4062,7 @@ watch(selectedPort, (port) => {
   isLoadingInfo.value = false;
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
-  if (port && !isSelectedPortMonitoring.value && !hasActiveDeviceInfo.value) {
+  if (port && activeMode.value !== 'pair' && !isSelectedPortMonitoring.value && !hasActiveDeviceInfo.value) {
     readDeviceInfo();
   }
   if (activeMode.value === 'monitor') {
@@ -4073,7 +4074,7 @@ watch(selectedPort, (port) => {
 watch(provisionSelectedPort, (port) => {
   pairStatus.value = null;
   saveTabPort('pair', port);
-  if (port) {
+  if (port && activeMode.value === 'pair') {
     loadEasyPairGateway(true);
   }
 });
