@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
 
@@ -53,6 +54,16 @@ def main() -> int:
 
     version_path.write_text(f"{next_version}\n", encoding="utf-8")
     print(f"VERSION: {current} -> {next_version}")
+
+    # Propagate to flasher package manifests (package.json, Cargo.toml, tauri.conf.json)
+    sync_script = repo_root / "tools" / "flasher" / "sync_version.py"
+    if sync_script.exists():
+        import subprocess
+        subprocess.check_call(
+            [sys.executable, str(sync_script), "--repo-root", str(repo_root)],
+            cwd=str(repo_root),
+        )
+
     return 0
 
 
