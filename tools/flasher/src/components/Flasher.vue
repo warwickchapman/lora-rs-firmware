@@ -499,6 +499,29 @@ const TAB_PORT_STORAGE_KEYS = {
 const REGION_CONFIDENT_MIN_SCORE = 5;
 const REGION_CONFIDENT_MIN_GAP = 2;
 
+const WIFI_CREDENTIALS_CACHE_KEY = 'lrs_wifi_credentials_cache';
+
+function getCachedWifiPassword(ssid: string): string {
+  if (!ssid) return '';
+  try {
+    const cache = JSON.parse(localStorage.getItem(WIFI_CREDENTIALS_CACHE_KEY) || '{}');
+    return cache[ssid] || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function saveCachedWifiPassword(ssid: string, password_value: string) {
+  if (!ssid) return;
+  try {
+    const cache = JSON.parse(localStorage.getItem(WIFI_CREDENTIALS_CACHE_KEY) || '{}');
+    cache[ssid] = password_value;
+    localStorage.setItem(WIFI_CREDENTIALS_CACHE_KEY, JSON.stringify(cache));
+  } catch (e) {
+    // Ignore
+  }
+}
+
 function newSerialDeviceState(): SerialDeviceState {
   return {
     deviceInfo: null,
@@ -1616,7 +1639,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     rx_failsafe_mode: stringValue(cfg.rx_failsafe_mode, 'hold_last'),
     rx_failsafe_timeout_ms: numberValue(cfg.rx_failsafe_timeout_ms, 180000),
     wifi_sta_ssid: stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || ''),
-    wifi_sta_password: '',
+    wifi_sta_password: getCachedWifiPassword(stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || '')),
     lan_hostname: stringValue(cfg.lan_hostname, ''),
     ap_always_on: boolValue(cfg.ap_always_on, false),
     wifi_phy_mode: stringValue(cfg.wifi_phy_mode, '11b'),
@@ -2379,10 +2402,11 @@ function toggleFleetDropdown(address: number) {
 
 function openWifiModal(device: LoraInventoryDevice) {
   activeDropdownAddress.value = null;
+  const ssid = pairWifiSsid.value || '';
   wifiTargetModal.value = {
     device,
-    ssid: pairWifiSsid.value || '',
-    password_value: pairAdminPassword.value || ''
+    ssid,
+    password_value: getCachedWifiPassword(ssid) || pairAdminPassword.value || ''
   };
 }
 
@@ -3653,6 +3677,52 @@ watch(networkLogs, () => {
 watch([pairWifiSsid, pairWifiPassword], ([nextSsid, nextPassword], [prevSsid, prevPassword]) => {
   if (nextSsid === prevSsid && nextPassword === prevPassword) return;
   cancelGatewayWifiConnect('WiFi credentials changed');
+});
+
+watch(pairWifiSsid, (nextSsid) => {
+  if (nextSsid) {
+    const cached = getCachedWifiPassword(nextSsid);
+    if (cached) {
+      pairWifiPassword.value = cached;
+    }
+  }
+});
+
+watch(pairWifiPassword, (nextPassword) => {
+  const ssid = pairWifiSsid.value;
+  if (ssid) {
+    saveCachedWifiPassword(ssid, nextPassword);
+  }
+});
+
+watch(() => wifiTargetModal.value?.ssid, (nextSsid) => {
+  if (nextSsid && wifiTargetModal.value) {
+    const cached = getCachedWifiPassword(nextSsid);
+    if (cached) {
+      wifiTargetModal.value.password_value = cached;
+    }
+  }
+});
+
+watch(() => wifiTargetModal.value?.password_value, (nextPassword) => {
+  if (wifiTargetModal.value && wifiTargetModal.value.ssid) {
+    saveCachedWifiPassword(wifiTargetModal.value.ssid, nextPassword || '');
+  }
+});
+
+watch(() => serialAdminConfig.value?.wifi_sta_ssid, (nextSsid) => {
+  if (nextSsid && serialAdminConfig.value) {
+    const cached = getCachedWifiPassword(nextSsid);
+    if (cached) {
+      serialAdminConfig.value.wifi_sta_password = cached;
+    }
+  }
+});
+
+watch(() => serialAdminConfig.value?.wifi_sta_password, (nextPassword) => {
+  if (serialAdminConfig.value && serialAdminConfig.value.wifi_sta_ssid) {
+    saveCachedWifiPassword(serialAdminConfig.value.wifi_sta_ssid, nextPassword || '');
+  }
 });
 
 watch(activeMode, (mode) => {

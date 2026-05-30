@@ -11,6 +11,7 @@ All notable changes to this pre-release project are documented here in current o
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
 
 ### Added
+- Flasher caches entered WiFi passwords per SSID in local storage, automatically pre-populating and updating passwords in Provision mode, Settings configuration, and Remote WiFi provisioning dialogs.
 - Dev builds now use unique operator-visible build revisions such as `0.9.2~1`; use `python3 tools/bump_dev_build.py` before flashing or sharing a new development build.
 - Firmware build metadata now rejects reusing the same `~DEVBUILD` version after the source tree changes, preventing accidental duplicate dev firmware versions.
 - LoRa maintenance inventory now carries the compact dev-build revision separately from major/minor/patch, allowing Fleet and Monitor to show versions such as `0.9.2~1` instead of only `0.9.2`.
