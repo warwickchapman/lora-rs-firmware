@@ -2973,6 +2973,25 @@ async function loadEasyPairGateway() {
     const hello = await waitForSerialAdminHello(port);
     pushPairLog(`Gateway ready on ${port}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
     await refreshGatewayStatusForPair();
+    const password = pairPassword();
+    if (password) {
+      pushPairLog('Fetching gateway configuration...');
+      try {
+        const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
+          admin_password: password,
+          include_secrets: true
+        }, 15000);
+        const retrievedKey = out.config?.fleet_passphrase?.trim() || '';
+        if (retrievedKey && retrievedKey !== 'lora-default-passphrase' && (out.config as any)?.fleet_passphrase_default === false) {
+          pairFleetKey.value = retrievedKey;
+          pushPairLog(`Retrieved commissioned fleet key from gateway.`);
+        } else {
+          pushPairLog('Gateway has default or unconfigured fleet key.');
+        }
+      } catch (configErr) {
+        pushPairLog('Gateway config fetch failed: ' + configErr);
+      }
+    }
   } catch (e) {
     const state = serialDeviceState(port);
     if (state) state.adminPassword = '';
