@@ -208,6 +208,8 @@ class NodeStateMachine {
   bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
   bool mqttPollPeerNow(uint8_t dstAddress);
   bool mqttForgetPeer(uint8_t dstAddress);
+  uint32_t resolveChipIdForAddress(uint8_t address) const;
+  uint32_t activePeerChipIdForAddress(uint8_t address) const;
   bool mqttSetPeerWifi(uint8_t dstAddress, bool enabled);
   bool mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS);
   bool sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,

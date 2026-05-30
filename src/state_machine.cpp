@@ -1455,6 +1455,25 @@ bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
   return true;
 }
 
+uint32_t NodeStateMachine::resolveChipIdForAddress(uint8_t address) const {
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    const ProvisionedAddressEntry &e = provisioned_addrs_[i];
+    if (e.in_use && e.assigned_address == address) {
+      return e.chip_id;
+    }
+  }
+  return 0;
+}
+
+uint32_t NodeStateMachine::activePeerChipIdForAddress(uint8_t address) const {
+  for (size_t i = 0; i < peer_count_; ++i) {
+    if (peers_[i].in_use && peers_[i].address == address) {
+      return peers_[i].chip_id;
+    }
+  }
+  return 0;
+}
+
 bool NodeStateMachine::fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs) {
   if (!runtime_.role_tx) return false;
   if (startAddress == 0 || startAddress == 255 || endAddress == 0 || endAddress == 255) return false;
@@ -2309,6 +2328,16 @@ NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t addres
     if (e.in_use && e.assigned_address == address && e.chip_id != 0) {
       node.chip_id = e.chip_id;
       break;
+    }
+  }
+
+  // Also check if there's a chip ID persisted in Settings!
+  if (node.chip_id == 0 && settings_ != nullptr) {
+    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+      if (settings_->known_peer_addresses[i] == address) {
+        node.chip_id = settings_->known_peer_chip_ids[i];
+        break;
+      }
     }
   }
 

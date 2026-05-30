@@ -2664,6 +2664,34 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
   }
 }
 
+async function executeForgetRemote(device: LoraInventoryDevice) {
+  const port = gatewaySelectedPort.value;
+  const password = adminPasswordForPort(port);
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
+  const confirmed = await confirmOperatorAction(
+    `Forget remote device ${deviceName}?\n\nThis will permanently delete its address and name pairing from the gateway configuration.`,
+    { confirmText: 'Forget device', danger: true }
+  );
+  if (!confirmed) return;
+
+  notify(`Forgetting remote ${deviceName}...`);
+  try {
+    await sendEasyPairCommandOnPort(port, 'forget_gateway_target', {
+      admin_password: password,
+      address: device.address
+    });
+    notify(`Successfully forgot remote ${deviceName}`);
+    refreshLoraInventoryStatus(false);
+  } catch (e) {
+    const msg = serialFeatureError(`Forget remote`, e);
+    notify(msg);
+  }
+}
+
 
 async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: string) {
   const port = gatewaySelectedPort.value;
@@ -6282,6 +6310,12 @@ function toggleSelectAllBulkPorts() {
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                         >
                           🔄 Reboot
+                        </button>
+                        <button
+                          @click="executeForgetRemote(device); activeDropdownAddress = null"
+                          class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
+                        >
+                          🗑️ Forget Device
                         </button>
                         <div class="h-[1px] bg-slate-800/80 my-1"></div>
                         <button

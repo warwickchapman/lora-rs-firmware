@@ -1709,10 +1709,17 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
     }
     clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
     clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
+    memset(cfg.known_peer_chip_ids, 0, sizeof(cfg.known_peer_chip_ids));
     for (uint8_t i = 0; i < targetCount; ++i) {
       const uint8_t addr = targetAddresses[i];
       cfg.paired_target_addresses[cfg.paired_target_count++] = addr;
       cfg.known_peer_addresses[cfg.known_peer_count++] = addr;
+      
+      uint32_t resolvedChipId = sm_->resolveChipIdForAddress(addr);
+      if (resolvedChipId == 0) {
+        resolvedChipId = sm_->activePeerChipIdForAddress(addr);
+      }
+      cfg.known_peer_chip_ids[cfg.known_peer_count - 1] = resolvedChipId;
     }
     cfg.remote_address = cfg.paired_target_addresses[0];
     if (!config_->save()) {
@@ -1725,6 +1732,79 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
     out["cmd"] = cmd;
     if (id[0] != '\0')
       out["id"] = id;
+    out["target_count"] = cfg.paired_target_count;
+    sendOk(out);
+    return;
+  }
+
+  if (strcmp(cmd, "forget_gateway_target") == 0) {
+    if (!requireAdmin(doc)) {
+      sendError(cmd, "auth_failed", id);
+      return;
+    }
+    if (config_ == nullptr || sm_ == nullptr) {
+      sendError(cmd, "runtime_unavailable", id);
+      return;
+    }
+    int rawAddr = doc["address"] | 0;
+    if (rawAddr < 1 || rawAddr > 254) {
+      sendError(cmd, "invalid_address", id);
+      return;
+    }
+    const uint8_t addr = static_cast<uint8_t>(rawAddr);
+    auto &cfg = config_->settings();
+    bool found = false;
+
+    // Remove from paired_target_addresses
+    for (uint8_t i = 0; i < cfg.paired_target_count; ++i) {
+      if (cfg.paired_target_addresses[i] == addr) {
+        for (uint8_t j = i; j + 1 < cfg.paired_target_count; ++j) {
+          cfg.paired_target_addresses[j] = cfg.paired_target_addresses[j + 1];
+        }
+        cfg.paired_target_addresses[--cfg.paired_target_count] = 0;
+        found = true;
+        break;
+      }
+    }
+
+    // Remove from known_peer_addresses and known_peer_chip_ids
+    for (uint8_t i = 0; i < cfg.known_peer_count; ++i) {
+      if (cfg.known_peer_addresses[i] == addr) {
+        for (uint8_t j = i; j + 1 < cfg.known_peer_count; ++j) {
+          cfg.known_peer_addresses[j] = cfg.known_peer_addresses[j + 1];
+          cfg.known_peer_chip_ids[j] = cfg.known_peer_chip_ids[j + 1];
+        }
+        cfg.known_peer_addresses[--cfg.known_peer_count] = 0;
+        cfg.known_peer_chip_ids[cfg.known_peer_count] = 0;
+        found = true;
+        break;
+      }
+    }
+
+    // Tell state machine to forget it from volatile peers
+    sm_->mqttForgetPeer(addr);
+
+    // Update remote_address if needed
+    if (cfg.paired_target_count > 0) {
+      cfg.remote_address = cfg.paired_target_addresses[0];
+    } else {
+      cfg.remote_address = 0;
+    }
+
+    if (found) {
+      if (!config_->save()) {
+        sendError(cmd, "save_failed", id);
+        return;
+      }
+      if (on_apply_)
+        on_apply_(false, false);
+    }
+
+    JsonDocument out;
+    out["cmd"] = cmd;
+    if (id[0] != '\0')
+      out["id"] = id;
+    out["forgotten"] = found;
     out["target_count"] = cfg.paired_target_count;
     sendOk(out);
     return;

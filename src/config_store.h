@@ -20,6 +20,7 @@ struct Settings {
   uint8_t allowed_controller_addresses[kAddressListCap];
   uint8_t known_peer_count;
   uint8_t known_peer_addresses[kAddressListCap];
+  uint32_t known_peer_chip_ids[kAddressListCap];
 
   long lora_frequency_hz;
   uint8_t lora_tx_power;

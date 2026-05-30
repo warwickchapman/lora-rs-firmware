@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Stored remote device address-to-chip ID pairings persistently in gateway config store, pre-populating runtime caches on boot to instantly preserve remote names (`lrs-XXXXXXXX`) across gateway power cycles or Flasher re-connections.
 - Fixed remote maintenance sensor telemetry reporting by scheduling the cascading sequence of all maintenance pages (`kMaintenancePageSensors` and `kMaintenancePageDebug`) on every gateway maintenance request, restoring DS18B20 temperature and 4-20 mA tank level reporting.
 - Improved serial admin peer serialization to unconditionally report input and relay state values when a remote node has checked in (so the frontend receives active `0` values and correctly displays `"Open"` instead of `"waiting"`).
 - Refined Flasher UI fleet listing to omit age, last-seen, and sensor fields for unseen remote devices, rendering clean `"-"` placeholders instead of misleading `"0s"` ages, `"live"` statuses, or `"waiting"` labels.
@@ -14,6 +15,8 @@ All notable changes to this pre-release project are documented here in current o
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
 
 ### Added
+- Added `"forget_gateway_target"` serial admin command enabling permanent remote deletion, updating settings and clearing volatile peers in one step.
+- Added a `🗑️ Forget Device` action in the Flasher Fleet Actions dropdown with safety confirmation to cleanly remove outdated or replaced nodes.
 - Flasher settings pane displays the decrypted Fleet Key with hide/show toggle, enabling direct local credential updates over USB serial admin.
 - Firmware supports targeted, same-key encrypted LoRa key rollover commands (`MessageType::FleetKeyControl`), enabling secure over-the-air Fleet Key updates to remote nodes via gateway.
 - Flasher Fleet table features a "Fleet Key" remote action modal with a stark operational warning banner and explicit safety checkbox confirmation to prevent remote node orphaning.

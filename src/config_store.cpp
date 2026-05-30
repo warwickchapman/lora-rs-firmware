@@ -42,6 +42,7 @@ constexpr const char *kAllowedFields[] = {
     "paired_target_addresses",
     "allowed_controller_addresses",
     "known_peer_addresses",
+    "known_peer_chip_ids",
     "lora_frequency_hz",
     "lora_tx_power",
     "lora_spreading_factor",
@@ -312,6 +313,15 @@ bool ConfigStore::begin() {
   cfg_.allowed_controller_count =
       parseAddressList(root["allowed_controller_addresses"], cfg_.allowed_controller_addresses, Settings::kAddressListCap);
   cfg_.known_peer_count = parseAddressList(root["known_peer_addresses"], cfg_.known_peer_addresses, Settings::kAddressListCap);
+  memset(cfg_.known_peer_chip_ids, 0, sizeof(cfg_.known_peer_chip_ids));
+  if (root.containsKey("known_peer_chip_ids")) {
+    JsonArrayConst arr = root["known_peer_chip_ids"].as<JsonArrayConst>();
+    size_t idx = 0;
+    for (JsonVariantConst v : arr) {
+      if (idx >= Settings::kAddressListCap) break;
+      cfg_.known_peer_chip_ids[idx++] = v.as<uint32_t>();
+    }
+  }
 
   cfg_.lora_frequency_hz = root["lora_frequency_hz"] | kLockedLoraFrequencyHz;
   cfg_.lora_frequency_hz = kLockedLoraFrequencyHz;
@@ -464,6 +474,10 @@ bool ConfigStore::save() {
   writeAddressList(doc, "allowed_controller_addresses", cfg_.allowed_controller_addresses, cfg_.allowed_controller_count,
                    Settings::kAddressListCap);
   writeAddressList(doc, "known_peer_addresses", cfg_.known_peer_addresses, cfg_.known_peer_count, Settings::kAddressListCap);
+  JsonArray chipIdsArr = doc["known_peer_chip_ids"].to<JsonArray>();
+  for (uint8_t i = 0; i < cfg_.known_peer_count; ++i) {
+    chipIdsArr.add(cfg_.known_peer_chip_ids[i]);
+  }
 
   doc["lora_frequency_hz"] = cfg_.lora_frequency_hz;
   doc["lora_tx_power"] = cfg_.lora_tx_power;
@@ -742,6 +756,7 @@ void ConfigStore::setDefaults() {
   cfg_.allowed_controller_addresses[0] = kGatewayAddress;
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
+  memset(cfg_.known_peer_chip_ids, 0, sizeof(cfg_.known_peer_chip_ids));
 
   cfg_.lora_frequency_hz = kLockedLoraFrequencyHz;
   cfg_.lora_tx_power = 17;
@@ -817,6 +832,7 @@ void ConfigStore::ensureProvisionedDefaults() {
   cfg_.allowed_controller_addresses[0] = kGatewayAddress;
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
+  memset(cfg_.known_peer_chip_ids, 0, sizeof(cfg_.known_peer_chip_ids));
 
   cfg_.lora_frequency_hz = kLockedLoraFrequencyHz;
 
