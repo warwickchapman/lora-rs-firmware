@@ -1196,6 +1196,12 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
 
     reconcileTabPortSelections(currentNames, newPorts, allowPortChangeAutoSwitch && !hasActiveOperation);
 
+    // Remove disconnected ports from bulk selection so completed/unplugged devices vanish from the status grid
+    if (bulkSelectedPorts.value.length > 0) {
+      const connectedSet = new Set(currentNames);
+      bulkSelectedPorts.value = bulkSelectedPorts.value.filter(p => connectedSet.has(p));
+    }
+
     lastPortSnapshot.value = currentNames;
     syncDeviceInfoForSelectedPort();
 
