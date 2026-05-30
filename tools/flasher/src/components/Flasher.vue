@@ -384,19 +384,21 @@ const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
 const activeDropdownAddress = ref<number | null>(null);
 
-interface WifiModalState {
+interface SettingsModalState {
   device: LoraInventoryDevice;
-  ssid: string;
-  password_value: string;
-}
-const wifiTargetModal = ref<WifiModalState | null>(null);
-
-interface SensorsModalState {
-  device: LoraInventoryDevice;
+  activeTab: 'wifi' | 'sensors' | 'security';
+  // WiFi tab
+  wifi_ssid: string;
+  wifi_password: string;
+  // Sensors tab
   sensor_temp_enabled: boolean;
   sensor_tank_enabled: boolean;
+  // Security tab
+  fleet_key: string;
+  fleet_key_confirmed: boolean;
+  show_fleet_key: boolean;
 }
-const sensorsTargetModal = ref<SensorsModalState | null>(null);
+const settingsDeviceModal = ref<SettingsModalState | null>(null);
 
 interface FactoryResetModalState {
   device: LoraInventoryDevice;
@@ -404,14 +406,6 @@ interface FactoryResetModalState {
   keep_wifi_credentials: boolean;
 }
 const factoryResetTargetModal = ref<FactoryResetModalState | null>(null);
-
-interface FleetKeyModalState {
-  device: LoraInventoryDevice;
-  new_fleet_key: string;
-  confirmed: boolean;
-}
-const fleetKeyTargetModal = ref<FleetKeyModalState | null>(null);
-const showRemoteFleetKey = ref(false);
 
 const logContainer = ref<HTMLElement | null>(null);
 const networkUdpLogContainer = ref<HTMLElement | null>(null);
@@ -2507,13 +2501,19 @@ function toggleFleetDropdown(address: number) {
 }
 
 
-function openWifiModal(device: LoraInventoryDevice) {
+function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState['activeTab'] = 'wifi') {
   activeDropdownAddress.value = null;
   const ssid = pairWifiSsid.value || '';
-  wifiTargetModal.value = {
+  settingsDeviceModal.value = {
     device,
-    ssid,
-    password_value: getCachedWifiPassword(ssid) || pairAdminPassword.value || ''
+    activeTab: tab,
+    wifi_ssid: ssid,
+    wifi_password: getCachedWifiPassword(ssid) || pairAdminPassword.value || '',
+    sensor_temp_enabled: !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
+    sensor_tank_enabled: !!device.tank_enabled,
+    fleet_key: '',
+    fleet_key_confirmed: false,
+    show_fleet_key: false
   };
 }
 
@@ -2533,21 +2533,14 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
       password_value: password_value
     }, 15000);
     notify(`WiFi credentials sent successfully to remote ${device.address}`);
-    wifiTargetModal.value = null;
+    settingsDeviceModal.value = null;
   } catch (e) {
     const msg = serialFeatureError(`Remote WiFi`, e);
     notify(msg);
   }
 }
 
-function openSensorsModal(device: LoraInventoryDevice) {
-  activeDropdownAddress.value = null;
-  sensorsTargetModal.value = {
-    device,
-    sensor_temp_enabled: !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
-    sensor_tank_enabled: !!device.tank_enabled
-  };
-}
+// openSensorsModal removed – use openSettingsModal(device, 'sensors')
 
 async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean) {
   const port = fleetSelectedPort.value;
@@ -2565,7 +2558,7 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       sensor_tank_enabled: tankEnabled
     }, 8000);
     notify(`Sensors updated successfully on remote ${device.address}`);
-    sensorsTargetModal.value = null;
+    settingsDeviceModal.value = null;
   } catch (e) {
     const msg = serialFeatureError(`Remote sensors update`, e);
     notify(msg);
@@ -2631,15 +2624,7 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
   }
 }
 
-function openFleetKeyModal(device: LoraInventoryDevice) {
-  activeDropdownAddress.value = null;
-  fleetKeyTargetModal.value = {
-    device,
-    new_fleet_key: '',
-    confirmed: false
-  };
-  showRemoteFleetKey.value = false;
-}
+// openFleetKeyModal removed – use openSettingsModal(device, 'security')
 
 async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: string) {
   const port = fleetSelectedPort.value;
@@ -2665,7 +2650,7 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
       new_fleet_passphrase: newKey
     }, 15000);
     notify(`Remote fleet key change sequence transmitted. Remote ${device.address} is applying and rebooting.`);
-    fleetKeyTargetModal.value = null;
+    settingsDeviceModal.value = null;
   } catch (e) {
     const msg = serialFeatureError(`Remote fleet key change`, e);
     notify(msg);
