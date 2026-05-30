@@ -1130,14 +1130,18 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
       char chipBuf[9];
       snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
       row["chip_id"] = chipBuf;
-      char fwBuf[24];
-      if (p.fw_build > 0) {
-        snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
-        row["fw_build"] = p.fw_build;
+      if (p.fw_major != 0 || p.fw_minor != 0 || p.fw_patch != 0) {
+        char fwBuf[24];
+        if (p.fw_build > 0) {
+          snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
+          row["fw_build"] = p.fw_build;
+        } else {
+          snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
+        }
+        row["fw_version"] = fwBuf;
       } else {
-        snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
+        row["fw_version"] = "";
       }
-      row["fw_version"] = fwBuf;
     } else {
       row["chip_id"] = "";
       row["fw_version"] = "";

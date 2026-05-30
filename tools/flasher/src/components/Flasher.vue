@@ -1563,6 +1563,7 @@ function lrsDeviceName(rawChipId: string | undefined | null): string {
 
 function displayFirmwareVersion(rawVersion: string | undefined | null): string {
   const version = String(rawVersion || '').trim();
+  if (version === '0.0.0') return '-';
   return version || '-';
 }
 
