@@ -92,7 +92,7 @@ constexpr uint8_t kProvKeyChunkBytes = 3;
 constexpr uint8_t kProvBroadcastAddress = 255;
 constexpr size_t kProvChunkBitmapMax = 31;
 constexpr uint8_t kProvAddressMin = 1;
-constexpr uint8_t kProvAddressMax = 254;
+constexpr uint8_t kProvAddressMax = Settings::kAddressListCap;
 constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
 constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
@@ -2135,6 +2135,20 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
       if (!d.in_use) continue;
       if (d.current_address == address) return true;
       if (d.assigned_address == address) return true;
+    }
+    // Check persistent chip→address mapping: if this address's stored
+    // chip_id matches a discovered provisioning device, the address
+    // belongs to that device (e.g. factory-reset device reclaiming its
+    // old slot).
+    if (settings_ != nullptr) {
+      for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+        if (settings_->known_peer_addresses[i] != address) continue;
+        const uint32_t chipId = settings_->known_peer_chip_ids[i];
+        if (chipId == 0) continue;
+        for (size_t j = 0; j < prov_device_count_; ++j) {
+          if (prov_devices_[j].in_use && prov_devices_[j].chip_id == chipId) return true;
+        }
+      }
     }
     return false;
   };
