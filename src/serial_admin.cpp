@@ -113,6 +113,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["lora_bandwidth_hz"] = cfg.lora_bandwidth_hz;
   doc["lora_coding_rate"] = cfg.lora_coding_rate;
   doc["heartbeat_ms"] = cfg.heartbeat_ms;
+  doc["heartbeat_enabled"] = cfg.heartbeat_enabled;
   doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
   doc["mqtt_remote_retry_timeout_ms"] = cfg.mqtt_remote_retry_timeout_ms;
   doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
@@ -243,6 +244,9 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.lora_coding_rate =
       static_cast<uint8_t>(doc["lora_coding_rate"] | cfg.lora_coding_rate);
   cfg.heartbeat_ms = doc["heartbeat_ms"] | cfg.heartbeat_ms;
+  cfg.heartbeat_enabled = parseBoolField(
+      doc["heartbeat_enabled"],
+      cfg.heartbeat_enabled);
   cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
   cfg.mqtt_remote_retry_timeout_ms =
       doc["mqtt_remote_retry_timeout_ms"] | cfg.mqtt_remote_retry_timeout_ms;
@@ -390,14 +394,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
 
   // Frequency is intentionally region-locked by the firmware build.
   cfg.lora_frequency_hz = kDefaultFrequencyHz;
-  if (cfg.mode == "paired") {
-    if (cfg.heartbeat_ms < kMinHeartbeatMs)
-      cfg.heartbeat_ms = kMinHeartbeatMs;
-    if (cfg.heartbeat_ms > kMaxHeartbeatMs)
-      cfg.heartbeat_ms = kMaxHeartbeatMs;
-  } else {
-    cfg.heartbeat_ms = 60000UL;
-  }
+  if (cfg.heartbeat_ms < kMinHeartbeatMs)
+    cfg.heartbeat_ms = kMinHeartbeatMs;
+  if (cfg.heartbeat_ms > kMaxHeartbeatMs)
+    cfg.heartbeat_ms = kMaxHeartbeatMs;
   if (cfg.ack_timeout_ms < kMinAckTimeoutMs)
     cfg.ack_timeout_ms = kMinAckTimeoutMs;
   if (cfg.ack_timeout_ms > kMaxAckTimeoutMs)

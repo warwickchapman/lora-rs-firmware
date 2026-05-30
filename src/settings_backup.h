@@ -22,6 +22,7 @@ struct SettingsBackup {
   long lora_bandwidth_hz = 0;
   uint8_t lora_coding_rate = 0;
   uint32_t heartbeat_ms = 0;
+  bool heartbeat_enabled = true;
   uint32_t ack_timeout_ms = 0;
   uint32_t mqtt_remote_retry_timeout_ms = 0;
   bool tx_mqtt_remote_polling_enabled = false;
@@ -89,6 +90,7 @@ inline void captureSettingsBackup(const Settings &src, SettingsBackup &dst) {
   dst.lora_bandwidth_hz = src.lora_bandwidth_hz;
   dst.lora_coding_rate = src.lora_coding_rate;
   dst.heartbeat_ms = src.heartbeat_ms;
+  dst.heartbeat_enabled = src.heartbeat_enabled;
   dst.ack_timeout_ms = src.ack_timeout_ms;
   dst.mqtt_remote_retry_timeout_ms = src.mqtt_remote_retry_timeout_ms;
   dst.tx_mqtt_remote_polling_enabled = src.tx_mqtt_remote_polling_enabled;
@@ -157,6 +159,7 @@ inline void restoreSettingsBackup(const SettingsBackup &src, Settings &dst) {
   dst.lora_bandwidth_hz = src.lora_bandwidth_hz;
   dst.lora_coding_rate = src.lora_coding_rate;
   dst.heartbeat_ms = src.heartbeat_ms;
+  dst.heartbeat_enabled = src.heartbeat_enabled;
   dst.ack_timeout_ms = src.ack_timeout_ms;
   dst.mqtt_remote_retry_timeout_ms = src.mqtt_remote_retry_timeout_ms;
   dst.tx_mqtt_remote_polling_enabled = src.tx_mqtt_remote_polling_enabled;

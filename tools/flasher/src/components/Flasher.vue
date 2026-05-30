@@ -232,6 +232,7 @@ interface SerialAdminConfig {
   lora_bandwidth_hz?: number;
   lora_coding_rate?: number;
   heartbeat_ms?: number;
+  heartbeat_enabled?: boolean;
   ack_timeout_ms?: number;
   mqtt_remote_retry_timeout_ms?: number;
   tx_mqtt_remote_polling_enabled?: boolean;
@@ -1768,6 +1769,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     lora_bandwidth_hz: numberValue(cfg.lora_bandwidth_hz, 125000),
     lora_coding_rate: numberValue(cfg.lora_coding_rate, 5),
     heartbeat_ms: numberValue(cfg.heartbeat_ms, 60000),
+    heartbeat_enabled: boolValue(cfg.heartbeat_enabled, true),
     ack_timeout_ms: numberValue(cfg.ack_timeout_ms, 3000),
     mqtt_remote_retry_timeout_ms: numberValue(cfg.mqtt_remote_retry_timeout_ms, 180000),
     tx_mqtt_remote_polling_enabled: boolValue(cfg.tx_mqtt_remote_polling_enabled, false),
@@ -3004,6 +3006,7 @@ function serialConfigPatch(): Record<string, any> {
     lora_bandwidth_hz: Number(cfg.lora_bandwidth_hz || 125000),
     lora_coding_rate: Number(cfg.lora_coding_rate || 5),
     heartbeat_ms: Number(cfg.heartbeat_ms || 60000),
+    heartbeat_enabled: cfg.heartbeat_enabled !== false,
     ack_timeout_ms: Number(cfg.ack_timeout_ms || 3000),
     mqtt_remote_retry_timeout_ms: Number(cfg.mqtt_remote_retry_timeout_ms || 180000),
     tx_mqtt_remote_polling_enabled: !!cfg.tx_mqtt_remote_polling_enabled,
@@ -5260,7 +5263,13 @@ function toggleSelectAllBulkPorts() {
                   </button>
                 </div>
                 <label class="self-center text-right font-semibold text-slate-300">Heartbeat sec</label>
-                <input :value="Math.round((serialAdminConfig.heartbeat_ms || 60000) / 1000)" @input="serialAdminConfig.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9" />
+                <div class="flex items-center gap-2">
+                  <input :value="Math.round((serialAdminConfig.heartbeat_ms || 60000) / 1000)" @input="serialAdminConfig.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9 flex-1" :disabled="!serialAdminConfig.heartbeat_enabled" />
+                  <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap">
+                    <input v-model="serialAdminConfig.heartbeat_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                    Enabled
+                  </label>
+                </div>
                 <label class="self-center text-right font-semibold text-slate-300">Retry sec</label>
                 <input :value="Math.round((serialAdminConfig.tx_command_retry_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.tx_command_retry_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">RX failsafe</label>

@@ -479,6 +479,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.local_address = cfg.local_address;
   runtime_.remote_address = cfg.remote_address;
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
+  runtime_.heartbeat_enabled = cfg.heartbeat_enabled;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
@@ -2874,7 +2875,7 @@ void NodeStateMachine::tickTransmitter() {
     return;
   }
 
-  if (runtime_.input_control_paired_lora_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
+  if (runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
     if (!radioTxBudgetAvailable()) {
       return;
     }
