@@ -3112,10 +3112,14 @@ async function factoryResetSerialDevice() {
   }
 }
 
+let loadGatewayInFlight = false;
 async function loadEasyPairGateway(isAuto = false) {
   if (activeMode.value !== 'pair') return;
   const port = provisionSelectedPort.value;
   if (!port) return;
+  // Prevent concurrent calls from multiple watchers firing on startup
+  if (loadGatewayInFlight) return;
+  loadGatewayInFlight = true;
   isGatewayLoading.value = true;
   pushPairLog('Reading USB gateway identity...');
   try {
@@ -3160,6 +3164,7 @@ async function loadEasyPairGateway(isAuto = false) {
       notify('Gateway check failed: ' + e);
     }
   } finally {
+    loadGatewayInFlight = false;
     isGatewayLoading.value = false;
   }
 }
