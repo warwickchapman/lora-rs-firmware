@@ -720,6 +720,17 @@ const flashDisabled = computed(() =>
   !selectedPort.value ||
   !selectedVersion.value
 );
+const bulkFlashDisabled = computed(() =>
+  isBulkFlashing.value ||
+  isBulkResetting.value ||
+  bulkSelectedPorts.value.length === 0 ||
+  !selectedVersion.value
+);
+const bulkResetDisabled = computed(() =>
+  isBulkFlashing.value ||
+  isBulkResetting.value ||
+  bulkSelectedPorts.value.length === 0
+);
 const serialAdminPassword = computed(() => deviceInfo.value?.password?.trim() || '');
 const serialAdminBusy = computed(() => isSerialAdminLoading.value || isSerialAdminSaving.value || isSerialSystemAction.value);
 const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isSelectedPortMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
@@ -3613,6 +3624,139 @@ async function startFlash() {
   }
 }
 
+async function startBulkFlash() {
+  if (isBulkFlashing.value) return;
+  if (bulkSelectedPorts.value.length === 0) {
+    notify('Select at least one USB port to flash.');
+    return;
+  }
+  if (!selectedVersion.value) {
+    notify('Select a firmware version to flash.');
+    return;
+  }
+
+  isBulkFlashing.value = true;
+  const selectedPorts = [...bulkSelectedPorts.value];
+  const isLocal = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX);
+  const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
+
+  if (isLocal && !firmwarePath) {
+    notify('Local file path missing.');
+    isBulkFlashing.value = false;
+    return;
+  }
+
+  try {
+    await Promise.all(
+      selectedPorts.map(async (port) => {
+        const state = serialDeviceState(port);
+        if (!state) return;
+
+        state.isFlashing = true;
+        state.flashProgress = 0;
+        state.flashStatus = 'Queued';
+        state.flashLogs = [];
+
+        try {
+          noteMonitorReleasedForPort(port, 'firmware flash needs this port');
+
+          state.flashStatus = 'Reading Info...';
+          if (!state.deviceInfo) {
+            await readDeviceInfoForPort(port, 'serial');
+          }
+
+          state.flashStatus = 'Flashing...';
+          const result = await invoke<string>('flash_firmware', {
+            port,
+            firmwarePath,
+            region: isLocal ? null : region.value,
+            eraseFirst: eraseBeforeFlash.value
+          });
+
+          state.flashStatus = 'Completed';
+          state.flashProgress = 100;
+          state.flashLogs.push(result);
+          
+          await refreshFlashPortAfterFirmwareUpdate(port);
+
+          if (monitorAfterFlash.value) {
+            await startSerialMonitor(port, false);
+          }
+        } catch (e) {
+          state.flashStatus = 'Failed';
+          state.flashLogs.push(`Flash failed: ${e}`);
+        } finally {
+          state.isFlashing = false;
+        }
+      })
+    );
+  } finally {
+    isBulkFlashing.value = false;
+  }
+}
+
+async function startBulkFactoryReset() {
+  if (isBulkResetting.value) return;
+  if (bulkSelectedPorts.value.length === 0) {
+    notify('Select at least one USB port to factory reset.');
+    return;
+  }
+
+  const confirmed = await confirmOperatorAction(
+    `Factory reset all ${bulkSelectedPorts.value.length} selected USB devices?\n\nThis will restore factory defaults and reboot them.`,
+    { confirmText: 'Factory Reset All', danger: true }
+  );
+  if (!confirmed) return;
+
+  isBulkResetting.value = true;
+  const selectedPorts = [...bulkSelectedPorts.value];
+
+  try {
+    await Promise.all(
+      selectedPorts.map(async (port) => {
+        const state = serialDeviceState(port);
+        if (!state) return;
+
+        state.isResetting = true;
+        state.resetStatus = 'Reading Info...';
+
+        try {
+          noteMonitorReleasedForPort(port, 'factory reset needs this port');
+          
+          if (!state.deviceInfo) {
+            await readDeviceInfoForPort(port, 'serial');
+          }
+
+          const password = state.adminPassword || state.deviceInfo?.password || '';
+          if (!password) throw new Error('derived password unavailable');
+
+          state.resetStatus = 'Resetting...';
+          await invoke('serial_admin_command', {
+            port,
+            request: {
+              cmd: 'factory_reset',
+              admin_password: password,
+              keep_shared_fleet_key: serialFactoryKeepFleet.value,
+              keep_wifi_credentials: serialFactoryKeepWifi.value
+            },
+            timeoutMs: 8000
+          });
+
+          state.resetStatus = 'Success';
+          state.status = null;
+          state.config = null;
+        } catch (e) {
+          state.resetStatus = 'Failed';
+        } finally {
+          state.isResetting = false;
+        }
+      })
+    );
+  } finally {
+    isBulkResetting.value = false;
+  }
+}
+
 async function startSerialMonitor(port: string, readInfoFirst = true) {
   if (readInfoFirst && !hasActiveDeviceInfo.value) {
     await readDeviceInfo();
@@ -4005,6 +4149,14 @@ function countCrashEvents(entries: string[]): number {
   }
   return count;
 }
+
+function toggleSelectAllBulkPorts() {
+  if (bulkSelectedPorts.value.length === ports.value.length) {
+    bulkSelectedPorts.value = [];
+  } else {
+    bulkSelectedPorts.value = ports.value.map(p => p.port_name);
+  }
+}
 </script>
 
 <template>
@@ -4012,131 +4164,203 @@ function countCrashEvents(entries: string[]): number {
     <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
       <div v-if="activeMode !== 'network' && activeMode !== 'monitor'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
-        <div class="flex items-center justify-between border-b border-slate-700/80 pb-2">
-          <div class="flex flex-col gap-1">
+        <!-- New Bulk Operations Status Grid -->
+        <div v-if="activeMode === 'serial' && bulkMode" class="flex flex-col gap-3 h-full min-h-0 overflow-hidden">
+          <div class="flex items-center justify-between border-b border-slate-700/80 pb-2">
             <h2 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
-              <span :class="['w-2 h-2 rounded-full', activityBusy ? 'bg-cyan-600 animate-pulse' : 'bg-slate-600']"></span>
-              Activity log
+              <span :class="['w-2 h-2 rounded-full', isBulkFlashing || isBulkResetting ? 'bg-cyan-500 animate-pulse' : 'bg-slate-600']"></span>
+              Bulk Operations Status
             </h2>
-            <div
-              v-if="activeMode === 'serial' && isMonitoring"
-              class="flex items-center gap-1 pl-4 text-xs text-slate-500"
-            >
-              <span>Monitoring</span>
-              <span class="font-mono text-slate-300">{{ monitorDeviceLabel }}</span>
-              <span class="text-slate-500">on</span>
-              <span class="font-mono text-slate-400">{{ activeMonitorPort || selectedPort }}</span>
-              <template v-if="serialUptimeLabel">
-                <span class="text-slate-600">·</span>
-                <span>Uptime</span>
-                <span class="font-mono text-slate-400">{{ serialUptimeLabel }}</span>
-              </template>
+            <div class="text-xs text-slate-500 font-mono">
+              Selected: {{ bulkSelectedPorts.length }} ports
             </div>
           </div>
-          <div class="flex items-center gap-2">
-            <div
-              v-if="crashCount > 0"
-              class="flex h-7 items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 text-xs font-semibold text-amber-300"
-              title="Crash signatures detected in the current log"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-              </svg>
-              <span>{{ crashCount }}</span>
+          
+          <div class="flex-1 overflow-auto custom-scrollbar pr-1 space-y-3">
+            <div v-for="port in bulkSelectedPorts" :key="port" class="glass-card p-3 flex flex-col gap-2 border border-slate-800 bg-slate-900/40 hover:border-slate-700 transition-all rounded-lg text-left">
+              <div class="flex items-center justify-between gap-3 text-xs">
+                <span class="font-bold text-slate-200 font-mono">{{ port }}</span>
+                <div class="flex items-center gap-2">
+                  <span v-if="serialDeviceState(port)?.deviceInfo?.ssid" class="font-mono text-[10px] text-slate-500">
+                    SSID: {{ serialDeviceState(port)?.deviceInfo?.ssid }}
+                  </span>
+                  <span :class="[
+                    'px-2 py-0.5 rounded-[4px] text-[10px] font-bold border uppercase',
+                    serialDeviceState(port)?.isFlashing ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300' :
+                    serialDeviceState(port)?.isResetting ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' :
+                    serialDeviceState(port)?.flashStatus === 'Completed' || serialDeviceState(port)?.resetStatus === 'Success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' :
+                    serialDeviceState(port)?.flashStatus === 'Failed' || serialDeviceState(port)?.resetStatus === 'Failed' ? 'bg-red-500/10 border-red-500/30 text-red-300' :
+                    'bg-slate-800 border-slate-700 text-slate-400'
+                  ]">
+                    {{ serialDeviceState(port)?.isFlashing ? serialDeviceState(port)?.flashStatus :
+                       serialDeviceState(port)?.isResetting ? serialDeviceState(port)?.resetStatus :
+                       serialDeviceState(port)?.flashStatus !== 'Idle' ? serialDeviceState(port)?.flashStatus :
+                       serialDeviceState(port)?.resetStatus !== 'Idle' ? serialDeviceState(port)?.resetStatus : 'Queued' }}
+                  </span>
+                </div>
+              </div>
+              
+              <!-- Progress bar -->
+              <div v-if="serialDeviceState(port)?.isFlashing || serialDeviceState(port)?.flashStatus === 'Completed' || serialDeviceState(port)?.flashStatus === 'Failed'" class="w-full flex items-center gap-3 mt-1">
+                <div class="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden border border-slate-700/50">
+                  <div :style="{ width: `${serialDeviceState(port)?.flashProgress || 0}%` }" class="h-full bg-cyan-500 rounded-full transition-all duration-300"></div>
+                </div>
+                <span class="text-[10px] font-bold text-slate-400 font-mono">{{ serialDeviceState(port)?.flashProgress || 0 }}%</span>
+              </div>
+
+              <!-- Log toggle button -->
+              <div class="flex justify-end mt-1">
+                <button @click="bulkShowLogsByPort[port] = !bulkShowLogsByPort[port]" class="text-[10px] text-slate-500 hover:text-cyan-300 font-semibold transition-colors flex items-center gap-1 shadow-none bg-transparent hover:bg-transparent border-0 p-0 m-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform shrink-0" :class="{ 'rotate-90': bulkShowLogsByPort[port] }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
+                  <span>{{ bulkShowLogsByPort[port] ? 'Hide console output' : 'Show console output' }}</span>
+                </button>
+              </div>
+
+              <!-- Expandable console terminal drawer -->
+              <div v-if="bulkShowLogsByPort[port]" class="mt-1 bg-slate-950/60 border border-slate-800 rounded p-2 max-h-36 overflow-auto font-mono text-[9px] text-slate-400 custom-scrollbar leading-tight whitespace-pre pr-2">
+                <div v-for="(log, idx) in serialDeviceState(port)?.flashLogs" :key="idx" class="border-l border-slate-800 pl-1.5 py-0.5">
+                  {{ log }}
+                </div>
+                <div v-if="!serialDeviceState(port)?.flashLogs?.length" class="text-slate-600 italic text-center">
+                  No console output yet.
+                </div>
+              </div>
             </div>
-            <button
-              @click="copyActivityLog"
-              :disabled="activeLogs.length === 0"
-              :class="[
-                'p-1 rounded border transition-all',
-                activeLogs.length > 0
-                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-              ]"
-              title="Copy activity log"
-              aria-label="Copy activity log"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
-            <button
-              v-if="activeMode === 'serial' && identifyAvailable"
-              @click="triggerIdentify"
-              :disabled="identifyDisabled"
-              :class="[
-                'p-1 rounded border transition-all disabled:opacity-50 disabled:cursor-not-allowed',
-                isIdentifying
-                  ? 'identify-led-active border-cyan-500 bg-cyan-500/20 text-cyan-300'
-                  : 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-              ]"
-              title="Identify USB device"
-              aria-label="Identify USB device"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
-                <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
-              </svg>
-            </button>
-            <button
-              v-if="activeMode === 'serial' && isMonitoring"
-              @click="copyActivePassword"
-              :disabled="!hasActiveDeviceInfo"
-              :class="[
-                'p-1 rounded border transition-all',
-                hasActiveDeviceInfo
-                  ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-                  : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
-              ]"
-              title="Copy active device password"
-              aria-label="Copy active device password"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="7.5" cy="15.5" r="3.5"></circle>
-                <path d="m10.5 13 8-8"></path>
-                <path d="m16 5 3 3"></path>
-                <path d="m14 7 3 3"></path>
-              </svg>
-            </button>
-            <button
-              v-if="activeMode === 'serial'"
-              @click="toggleMonitor"
-              :class="[
-                'rounded border transition-all',
-                isMonitoring
-                  ? 'p-1 border-cyan-500 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100'
-                  : 'p-1 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
-              ]"
-              :title="isMonitoring ? 'Stop monitor' : 'Start monitor'"
-              :aria-label="isMonitoring ? 'Stop monitor' : 'Start monitor'"
-            >
-              <svg v-if="isMonitoring" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
-              </svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a4 4 0 0 1 4-4z"></path>
-                <path d="M16 2v4h4"></path>
-                <path d="M8 9h5"></path>
-                <path d="M8 13h4"></path>
-                <path d="M8 17h3"></path>
-                <path d="m14 14 4 2.5-4 2.5z"></path>
-              </svg>
-            </button>
-            <button @click="clearActivityLog" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
+
+            <div v-if="bulkSelectedPorts.length === 0" class="h-full flex items-center justify-center text-slate-600 italic text-xs">
+              Select target USB devices from the control panel to view progress.
+            </div>
           </div>
         </div>
 
-        <div ref="logContainer" @scroll="handleLogScroll" class="flex-1 overflow-auto font-mono text-[9px] sm:text-[10px] pr-2 custom-scrollbar space-y-0.5 leading-tight tracking-tight whitespace-pre">
-          <div v-for="(log, i) in activeLogs" :key="i" class="text-slate-400 border-l border-slate-700/50 pl-2 opacity-90">
-            {{ log }}
+        <!-- Existing Single Activity Log -->
+        <div v-else class="flex flex-col gap-2 h-full min-h-0 overflow-hidden">
+          <div class="flex items-center justify-between border-b border-slate-700/80 pb-2">
+            <div class="flex flex-col gap-1">
+              <h2 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <span :class="['w-2 h-2 rounded-full', activityBusy ? 'bg-cyan-600 animate-pulse' : 'bg-slate-600']"></span>
+                Activity log
+              </h2>
+              <div
+                v-if="activeMode === 'serial' && isMonitoring"
+                class="flex items-center gap-1 pl-4 text-xs text-slate-500"
+              >
+                <span>Monitoring</span>
+                <span class="font-mono text-slate-300">{{ monitorDeviceLabel }}</span>
+                <span class="text-slate-500">on</span>
+                <span class="font-mono text-slate-400">{{ activeMonitorPort || selectedPort }}</span>
+                <template v-if="serialUptimeLabel">
+                  <span class="text-slate-600">·</span>
+                  <span>Uptime</span>
+                  <span class="font-mono text-slate-400">{{ serialUptimeLabel }}</span>
+                </template>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div
+                v-if="crashCount > 0"
+                class="flex h-7 items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 text-xs font-semibold text-amber-300"
+                title="Crash signatures detected in the current log"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <span>{{ crashCount }}</span>
+              </div>
+              <button
+                @click="copyActivityLog"
+                :disabled="activeLogs.length === 0"
+                :class="[
+                  'p-1 rounded border transition-all',
+                  activeLogs.length > 0
+                    ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                    : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
+                ]"
+                title="Copy activity log"
+                aria-label="Copy activity log"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+              <button
+                v-if="activeMode === 'serial' && identifyAvailable"
+                @click="triggerIdentify"
+                :disabled="identifyDisabled"
+                :class="[
+                  'p-1 rounded border transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                  isIdentifying
+                    ? 'identify-led-active border-cyan-500 bg-cyan-500/20 text-cyan-300'
+                    : 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                ]"
+                title="Identify USB device"
+                aria-label="Identify USB device"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
+                </svg>
+              </button>
+              <button
+                v-if="activeMode === 'serial' && isMonitoring"
+                @click="copyActivePassword"
+                :disabled="!hasActiveDeviceInfo"
+                :class="[
+                  'p-1 rounded border transition-all',
+                  hasActiveDeviceInfo
+                    ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                    : 'border-slate-800 text-slate-600 opacity-50 cursor-not-allowed'
+                ]"
+                title="Copy active device password"
+                aria-label="Copy active device password"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="7.5" cy="15.5" r="3.5"></circle>
+                  <path d="m10.5 13 8-8"></path>
+                  <path d="m16 5 3 3"></path>
+                  <path d="m14 7 3 3"></path>
+                </svg>
+              </button>
+              <button
+                v-if="activeMode === 'serial'"
+                @click="toggleMonitor"
+                :class="[
+                  'rounded border transition-all',
+                  isMonitoring
+                    ? 'p-1 border-cyan-500 bg-cyan-500/20 text-cyan-300 hover:text-cyan-100'
+                    : 'p-1 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                ]"
+                :title="isMonitoring ? 'Stop monitor' : 'Start monitor'"
+                :aria-label="isMonitoring ? 'Stop monitor' : 'Start monitor'"
+              >
+                <svg v-if="isMonitoring" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"></rect>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a4 4 0 0 1 4-4z"></path>
+                  <path d="M16 2v4h4"></path>
+                  <path d="M8 9h5"></path>
+                  <path d="M8 13h4"></path>
+                  <path d="M8 17h3"></path>
+                  <path d="m14 14 4 2.5-4 2.5z"></path>
+                </svg>
+              </button>
+              <button @click="clearActivityLog" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
+            </div>
           </div>
-          <div v-if="activeLogs.length === 0" class="h-full flex items-center justify-center text-slate-600 italic text-xs">
-            No activity logs to show
+
+          <div ref="logContainer" @scroll="handleLogScroll" class="flex-1 overflow-auto font-mono text-[9px] sm:text-[10px] pr-2 custom-scrollbar space-y-0.5 leading-tight tracking-tight whitespace-pre">
+            <div v-for="(log, i) in activeLogs" :key="i" class="text-slate-400 border-l border-slate-700/50 pl-2 opacity-90">
+              {{ log }}
+            </div>
+            <div v-if="activeLogs.length === 0" class="h-full flex items-center justify-center text-slate-600 italic text-xs">
+              No activity logs to show
+            </div>
           </div>
         </div>
       </div>
@@ -4392,90 +4616,243 @@ function countCrashEvents(entries: string[]): number {
       </div>
 
       <!-- Right Panel (Controls + Details) - Hidden in Monitor Mode -->
-      <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-6 h-full min-h-0 overflow-auto custom-scrollbar pr-1 transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
-        <!-- Device Configuration Panel -->
-        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
-          <div class="flex items-start justify-between gap-3">
-            <h2 class="text-base font-bold text-cyan-300">
-              Device configuration
-            </h2>
-            <button
-              v-if="identifyAvailable"
-              @click="triggerIdentify"
-              :disabled="identifyDisabled"
-              :class="['glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
-              title="Identify USB device"
-              aria-label="Identify USB device"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
-                <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
-              </svg>
-            </button>
-          </div>
+      <div v-if="activeMode === 'serial' && !isMonitoring" class="flex flex-col gap-4 h-full min-h-0 overflow-auto custom-scrollbar pr-1 transition-opacity duration-300" :class="{ 'opacity-0 pointer-events-none': isMonitoring }">
+        <!-- Segment Control (Single vs Bulk) -->
+        <div class="grid grid-cols-2 rounded-lg border border-slate-800 bg-slate-950/40 p-1 text-xs font-bold shrink-0">
+          <button
+            @click="bulkMode = false"
+            :class="['m-0 h-9 rounded-md px-3 transition-all flex items-center justify-center gap-1.5 shadow-none border-0', !bulkMode ? 'bg-cyan-600/80 text-white shadow-lg shadow-cyan-500/10' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+            <span>Single Device</span>
+          </button>
+          <button
+            @click="bulkMode = true"
+            :class="['m-0 h-9 rounded-md px-3 transition-all flex items-center justify-center gap-1.5 shadow-none border-0', bulkMode ? 'bg-cyan-600/80 text-white shadow-lg shadow-cyan-500/10' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="9" rx="1"></rect>
+              <rect x="14" y="3" width="7" height="5" rx="1"></rect>
+              <rect x="14" y="12" width="7" height="9" rx="1"></rect>
+              <rect x="3" y="16" width="7" height="5" rx="1"></rect>
+            </svg>
+            <span>Bulk Operations</span>
+          </button>
+        </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Region</label>
-              <select v-model="region" class="glass-input h-10 appearance-none">
-                <option v-for="r in ['ZA', 'EU', 'US']" :key="r" :value="r">{{ r }}</option>
-              </select>
+        <!-- Mode A: Single Flash Configuration & Details -->
+        <template v-if="!bulkMode">
+          <!-- Device Configuration Panel -->
+          <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+            <div class="flex items-start justify-between gap-3">
+              <h2 class="text-base font-bold text-cyan-300">
+                Device configuration
+              </h2>
+              <button
+                v-if="identifyAvailable"
+                @click="triggerIdentify"
+                :disabled="identifyDisabled"
+                :class="['glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
+                title="Identify USB device"
+                aria-label="Identify USB device"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
+                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
+                </svg>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div class="flex flex-col gap-1.5 text-xs">
+                <label class="font-medium text-slate-400">Region</label>
+                <select v-model="region" class="glass-input h-10 appearance-none">
+                  <option v-for="r in ['ZA', 'EU', 'US']" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </div>
+
+              <div class="flex flex-col gap-1.5 text-xs">
+                <label class="font-medium text-slate-400">Serial port</label>
+                <div class="flex gap-2">
+                  <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+                    <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
+                      {{ port.port_name }}
+                    </option>
+                    <option v-if="ports.length === 0" disabled>Scanning...</option>
+                  </select>
+                  <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
+                    <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div :class="['rounded-md border p-3', flashRunningFirmware ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/30']">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Running firmware</div>
+                  <div :class="['mt-1 font-mono text-xl font-bold', flashRunningFirmware ? 'text-cyan-100' : 'text-slate-500']">
+                    {{ flashRunningFirmware || '-' }}
+                  </div>
+                </div>
+                <div class="text-xs text-slate-400 sm:text-right">
+                  {{ flashRunningFirmwareSummary }}
+                </div>
+              </div>
             </div>
 
             <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Serial port</label>
+              <label class="font-medium text-slate-400">Firmware version</label>
               <div class="flex gap-2">
-                <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
-                  <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
-                    {{ port.port_name }}
+                <select v-model="selectedVersion" class="glass-input h-10 flex-1 appearance-none">
+                  <option v-for="v in firmwareVersions" :key="v" :value="v">
+                    {{ v === LOCAL_OPTION ? 'Choose a file' : v }}
                   </option>
-                  <option v-if="ports.length === 0" disabled>Scanning...</option>
+                  <option v-if="firmwareVersions.length === 0" disabled>Loading...</option>
                 </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
                 </button>
               </div>
             </div>
-          </div>
 
-          <div :class="['rounded-md border p-3', flashRunningFirmware ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/30']">
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Running firmware</div>
-                <div :class="['mt-1 font-mono text-xl font-bold', flashRunningFirmware ? 'text-cyan-100' : 'text-slate-500']">
-                  {{ flashRunningFirmware || '-' }}
+            <div class="grid grid-cols-2 gap-3 mt-2">
+              <div class="flex flex-col gap-3">
+                <button @click="startFlash" :disabled="flashDisabled" class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold w-full active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+                  <span>{{ isFlashing ? 'Flashing...' : 'Flash firmware' }}</span>
+                </button>
+                <div class="flex flex-wrap items-center gap-3 px-1">
+                  <label class="flex items-center gap-2 cursor-pointer group">
+                    <div class="relative flex items-center">
+                      <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
+                      <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-amber-500 peer-checked:border-amber-500 transition-all"></div>
+                      <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </div>
+                    <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Erase flash before write</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer group">
+                    <div class="relative flex items-center">
+                      <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
+                      <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                      <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </div>
+                    <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
+                  </label>
                 </div>
               </div>
-              <div class="text-xs text-slate-400 sm:text-right">
-                {{ flashRunningFirmwareSummary }}
+              <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input h-9 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs transition-all active:scale-95">
+                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400', { 'animate-spin text-cyan-300': isLoadingInfo }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+                <span>{{ isLoadingInfo ? 'Reading...' : 'Get device info' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Device Details Panel -->
+          <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-bold text-slate-300">
+                Device details
+              </h2>
+              <button v-if="deviceInfo" @click="copyAllDeviceInfo" class="text-slate-500 hover:text-cyan-300 transition-colors" title="Copy all">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
+
+            <div class="space-y-1">
+              <div v-for="[key, val] in orderedDeviceInfoEntries" :key="key" class="group flex items-center justify-between text-xs border-b border-white/5 py-1.5 hover:bg-white/5 px-2 -mx-2 rounded transition-colors">
+                <span class="text-slate-500">{{ formatLabel(key) }}</span>
+                <div class="flex items-center gap-3">
+                  <span class="font-mono text-slate-300">{{ val }}</span>
+                  <button @click="copyToClipboard(val.toString(), formatLabel(key).toLowerCase())" class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-cyan-300 transition-all">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
+                </div>
+              </div>
+              <div v-if="!deviceInfo && !isLoadingInfo" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
+                Connect a device and click <br/> "Get device info"
+              </div>
+              <div v-if="isLoadingInfo" class="h-32 flex flex-col items-center justify-center text-cyan-300 italic text-sm gap-2">
+                <span class="animate-spin text-2xl">◌</span>
+                Reading device descriptors...
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Mode B: Bulk Operations Configuration & Controls -->
+        <template v-else>
+          <!-- Target Ports Checklist -->
+          <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h2 class="text-sm font-bold text-cyan-300">Target USB devices</h2>
+              <div class="flex items-center gap-2">
+                <button @click="toggleSelectAllBulkPorts" class="text-xs text-slate-400 hover:text-slate-200 shadow-none bg-transparent border border-slate-700 rounded px-2 py-0.5 transition-all">
+                  {{ bulkSelectedPorts.length === ports.length ? 'Deselect All' : 'Select All' }}
+                </button>
+                <button @click="refreshPorts" :disabled="isRefreshingPorts" class="glass-input m-0 h-7 w-7 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Ports checklist -->
+            <div class="flex flex-col gap-2 max-h-48 overflow-auto pr-1 custom-scrollbar">
+              <div v-for="port in ports" :key="port.port_name" class="flex items-center justify-between p-2 rounded-md border border-slate-800 bg-slate-900/30 hover:border-slate-700/80 transition-all">
+                <label class="flex items-center gap-3 cursor-pointer group flex-1">
+                  <div class="relative flex items-center">
+                    <input type="checkbox" :value="port.port_name" v-model="bulkSelectedPorts" class="peer hidden" />
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <span class="text-xs font-semibold font-mono text-slate-300 group-hover:text-cyan-300 transition-colors">{{ port.port_name }}</span>
+                </label>
+                <span v-if="serialDeviceState(port.port_name)?.deviceInfo?.chip_id" class="text-[10px] font-mono text-slate-500 bg-slate-800/60 px-1.5 py-0.5 rounded border border-slate-700/40">
+                  {{ serialDeviceState(port.port_name)?.deviceInfo?.chip_id }}
+                </span>
+              </div>
+              <div v-if="ports.length === 0" class="h-16 flex items-center justify-center text-slate-500 italic text-xs">
+                No USB devices detected. Check connections.
               </div>
             </div>
           </div>
 
-          <div class="flex flex-col gap-1.5 text-xs">
-            <label class="font-medium text-slate-400">Firmware version</label>
-            <div class="flex gap-2">
-              <select v-model="selectedVersion" class="glass-input h-10 flex-1 appearance-none">
-                <option v-for="v in firmwareVersions" :key="v" :value="v">
-                  {{ v === LOCAL_OPTION ? 'Choose a file' : v }}
-                </option>
-                <option v-if="firmwareVersions.length === 0" disabled>Loading...</option>
-              </select>
-              <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
-              </button>
-            </div>
-          </div>
+          <!-- Global Configuration Panel -->
+          <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+            <h2 class="text-sm font-bold text-cyan-300 border-b border-slate-800 pb-2">Global configuration</h2>
 
-          <div class="grid grid-cols-2 gap-3 mt-2">
-            <div class="flex flex-col gap-3">
-              <button @click="startFlash" :disabled="flashDisabled" class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold w-full active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
-                <span>{{ isFlashing ? 'Flashing...' : 'Flash firmware' }}</span>
-              </button>
-              <div class="flex flex-wrap items-center gap-3 px-1">
+            <div class="grid grid-cols-2 gap-3">
+              <div class="flex flex-col gap-1.5 text-xs">
+                <label class="font-medium text-slate-400">Region</label>
+                <select v-model="region" class="glass-input h-10 appearance-none">
+                  <option v-for="r in ['ZA', 'EU', 'US']" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </div>
+              <div class="flex flex-col gap-1.5 text-xs">
+                <label class="font-medium text-slate-400">Firmware version</label>
+                <div class="flex gap-2">
+                  <select v-model="selectedVersion" class="glass-input h-10 flex-1 appearance-none">
+                    <option v-for="v in firmwareVersions" :key="v" :value="v">
+                      {{ v === LOCAL_OPTION ? 'Choose a file' : v }}
+                    </option>
+                    <option v-if="firmwareVersions.length === 0" disabled>Loading...</option>
+                  </select>
+                  <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input h-10 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Settings checkboxes -->
+            <div class="flex flex-col gap-2 mt-1">
+              <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Flash options</div>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <label class="flex items-center gap-2 cursor-pointer group">
                   <div class="relative flex items-center">
                     <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
@@ -4490,47 +4867,52 @@ function countCrashEvents(entries: string[]): number {
                     <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
                     <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
-                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor when flash complete</span>
+                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor after flash</span>
+                </label>
+              </div>
+
+              <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2 mb-0.5">Factory reset options</div>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <div class="relative flex items-center">
+                    <input type="checkbox" v-model="serialFactoryKeepFleet" class="peer hidden" />
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Keep shared fleet key</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer group">
+                  <div class="relative flex items-center">
+                    <input type="checkbox" v-model="serialFactoryKeepWifi" class="peer hidden" />
+                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Keep WiFi credentials</span>
                 </label>
               </div>
             </div>
-            <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input h-9 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs transition-all active:scale-95">
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400', { 'animate-spin text-cyan-300': isLoadingInfo }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
-              <span>{{ isLoadingInfo ? 'Reading...' : 'Get device info' }}</span>
-            </button>
-          </div>
-        </div>
 
-        <!-- Device Details Panel -->
-        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-bold text-slate-300">
-              Device details
-            </h2>
-            <button v-if="deviceInfo" @click="copyAllDeviceInfo" class="text-slate-500 hover:text-cyan-300 transition-colors" title="Copy all">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            </button>
-          </div>
-
-          <div class="space-y-1">
-            <div v-for="[key, val] in orderedDeviceInfoEntries" :key="key" class="group flex items-center justify-between text-xs border-b border-white/5 py-1.5 hover:bg-white/5 px-2 -mx-2 rounded transition-colors">
-              <span class="text-slate-500">{{ formatLabel(key) }}</span>
-              <div class="flex items-center gap-3">
-                <span class="font-mono text-slate-300">{{ val }}</span>
-                <button @click="copyToClipboard(val.toString(), formatLabel(key).toLowerCase())" class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-cyan-300 transition-all">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                </button>
-              </div>
-            </div>
-            <div v-if="!deviceInfo && !isLoadingInfo" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
-              Connect a device and click <br/> "Get device info"
-            </div>
-            <div v-if="isLoadingInfo" class="h-32 flex flex-col items-center justify-center text-cyan-300 italic text-sm gap-2">
-              <span class="animate-spin text-2xl">◌</span>
-              Reading device descriptors...
+            <!-- Action execution CTAs -->
+            <div class="grid grid-cols-2 gap-3 mt-3 pt-2 border-t border-slate-800">
+              <button
+                @click="startBulkFlash"
+                :disabled="bulkFlashDisabled"
+                class="primary-btn h-10 flex items-center justify-center gap-2 text-xs font-bold w-full active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isBulkFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+                <span>{{ isBulkFlashing ? 'Flashing...' : '⚡ Bulk Flash' }}</span>
+              </button>
+              <button
+                @click="startBulkFactoryReset"
+                :disabled="bulkResetDisabled"
+                class="glass-input m-0 h-10 hover:bg-slate-700/70 border-amber-500/30 hover:border-amber-500/60 bg-amber-500/5 text-amber-300 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/10"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isBulkResetting }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                <span>{{ isBulkResetting ? 'Resetting...' : '🔄 Bulk Reset' }}</span>
+              </button>
             </div>
           </div>
-        </div>
+        </template>
       </div>
 
       <div v-if="activeMode === 'settings'" class="flex flex-col h-full min-h-0 overflow-hidden gap-3 text-left">
