@@ -5,16 +5,17 @@ use tokio::sync::Mutex;
 use std::io::{BufRead, BufReader};
 use serde::{Deserialize, Serialize};
 use crate::services::serial_port_coordinator::SerialPortCoordinator;
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MonitorEvent {
+    pub port: String,
     pub line: String,
 }
 
 #[derive(Default)]
 pub struct MonitorStatus {
-    pub running: bool,
-    pub port: Option<String>,
+    pub active_ports: HashSet<String>,
 }
 
 pub struct MonitorState {
@@ -23,9 +24,7 @@ pub struct MonitorState {
 
 pub async fn request_stop_for_port(state: &MonitorState, port: &str) {
     let mut status = state.status.lock().await;
-    if status.running && status.port.as_deref() == Some(port) {
-        status.running = false;
-    }
+    status.active_ports.remove(port);
 }
 
 #[tauri::command]
@@ -40,14 +39,8 @@ pub async fn toggle_serial_monitor(
     if enable {
         {
             let status = state.status.lock().await;
-            if status.running {
-                if status.port.as_deref() == Some(&port) {
-                    return Ok(());
-                }
-                return Err(format!(
-                    "Serial monitor is already running on {}",
-                    status.port.as_deref().unwrap_or("another port")
-                ));
+            if status.active_ports.contains(&port) {
+                return Ok(()); // Already running on this port
             }
         }
 
@@ -57,26 +50,20 @@ pub async fn toggle_serial_monitor(
 
         {
             let mut status = state.status.lock().await;
-            if status.running {
+            if status.active_ports.contains(&port) {
                 drop(guard);
-                if status.port.as_deref() == Some(&port) {
-                    return Ok(());
-                }
-                return Err(format!(
-                    "Serial monitor is already running on {}",
-                    status.port.as_deref().unwrap_or("another port")
-                ));
+                return Ok(());
             }
-            status.running = true;
-            status.port = Some(port.clone());
+            status.active_ports.insert(port.clone());
         }
 
         let status_clone = state.status.clone();
         let app_handle = app.clone();
+        let port_clone = port.clone();
 
         tokio::task::spawn_blocking(move || {
             let _guard = guard;
-            let builder = serialport::new(&port, baud)
+            let builder = serialport::new(&port_clone, baud)
                 .timeout(Duration::from_millis(100));
 
             match builder.open() {
@@ -85,11 +72,14 @@ pub async fn toggle_serial_monitor(
                     loop {
                         let mut line = String::new();
                         if reader.read_line(&mut line).is_ok() && !line.is_empty() {
-                            let _ = app_handle.emit("monitor-log", MonitorEvent { line });
+                            let _ = app_handle.emit("monitor-log", MonitorEvent {
+                                port: port_clone.clone(),
+                                line,
+                            });
                         }
 
                         if let Ok(status) = status_clone.try_lock() {
-                            if !status.running || status.port.as_deref() != Some(&port) {
+                            if !status.active_ports.contains(&port_clone) {
                                 break;
                             }
                         }
@@ -97,26 +87,19 @@ pub async fn toggle_serial_monitor(
                 }
                 Err(e) => {
                     let _ = app_handle.emit("monitor-log", MonitorEvent {
-                        line: format!("Error opening port: {}", e)
+                        port: port_clone.clone(),
+                        line: format!("Error opening port: {}", e),
                     });
                 }
             }
 
             if let Ok(mut status) = status_clone.try_lock() {
-                if status.port.as_deref() == Some(&port) {
-                    status.running = false;
-                    status.port = None;
-                }
+                status.active_ports.remove(&port_clone);
             }
         });
     } else {
         let mut status = state.status.lock().await;
-        if !status.running {
-            return Ok(());
-        }
-        if status.port.as_deref() == Some(&port) || status.port.is_none() {
-            status.running = false;
-        }
+        status.active_ports.remove(&port);
     }
     
     Ok(())

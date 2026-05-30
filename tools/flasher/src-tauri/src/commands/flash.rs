@@ -9,6 +9,7 @@ use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LogEvent {
+    pub port: String,
     pub message: String,
 }
 
@@ -27,9 +28,10 @@ pub async fn flash_firmware(
         .acquire(&port, "flashing firmware", Duration::from_secs(8))
         .await?;
 
+    let port_clone = port.clone();
     let app_clone = app.clone();
     let log = move |msg: String| {
-        let _ = app_clone.emit("flash-log", LogEvent { message: msg });
+        let _ = app_clone.emit("flash-log", LogEvent { port: port_clone.clone(), message: msg });
     };
 
     let local_path = std::path::PathBuf::from(&firmware_path);
@@ -81,7 +83,7 @@ pub async fn flash_firmware(
 
     if erase_first.unwrap_or(false) {
         log(format!("Erasing flash on {} before write...", port));
-        run_esptool_and_stream(&app, &["--port", &port, erase_op.as_str()]).await?;
+        run_esptool_and_stream(&app, &port, &["--port", &port, erase_op.as_str()]).await?;
         log("Erase complete.".into());
     }
 
@@ -89,6 +91,7 @@ pub async fn flash_firmware(
     log(format!("Invoking esptool sidecar on {}...", port));
     run_esptool_and_stream(
         &app,
+        &port,
         &[
             "--port",
             &port,
@@ -136,7 +139,7 @@ async fn detect_flash_ops(app: &AppHandle) -> Result<(String, String), String> {
     Ok(("erase_flash".to_string(), "write_flash".to_string()))
 }
 
-async fn run_esptool_and_stream(app: &AppHandle, args: &[&str]) -> Result<(), String> {
+async fn run_esptool_and_stream(app: &AppHandle, port: &str, args: &[&str]) -> Result<(), String> {
     let shell = app.shell();
     let sidecar = shell.sidecar("esptool")
         .map_err(|e| format!("Failed to find sidecar: {}", e))?;
@@ -149,8 +152,8 @@ async fn run_esptool_and_stream(app: &AppHandle, args: &[&str]) -> Result<(), St
 
     while let Some(event) = rx.recv().await {
         match event {
-            CommandEvent::Stdout(line) => emit_log_line(app, &line),
-            CommandEvent::Stderr(line) => emit_log_line(app, &line),
+            CommandEvent::Stdout(line) => emit_log_line(app, port, &line),
+            CommandEvent::Stderr(line) => emit_log_line(app, port, &line),
             CommandEvent::Terminated(payload) => {
                 if payload.code == Some(0) {
                     return Ok(());
@@ -165,11 +168,11 @@ async fn run_esptool_and_stream(app: &AppHandle, args: &[&str]) -> Result<(), St
     Err("esptool process terminated unexpectedly".into())
 }
 
-fn emit_log_line(app: &AppHandle, line: &[u8]) {
+fn emit_log_line(app: &AppHandle, port: &str, line: &[u8]) {
     let msg = String::from_utf8_lossy(line).to_string();
     let clean_msg = strip_ansi(&msg);
     if !clean_msg.is_empty() {
-        let _ = app.emit("flash-log", LogEvent { message: clean_msg });
+        let _ = app.emit("flash-log", LogEvent { port: port.to_string(), message: clean_msg });
     }
 }
 

@@ -33,10 +33,12 @@ interface SerialPort {
 }
 
 interface LogEvent {
+  port: string;
   message: string;
 }
 
 interface MonitorEvent {
+  port: string;
   line: string;
 }
 
@@ -286,6 +288,8 @@ interface SerialDeviceState {
   wifiSsid: string;
   gatewayWifiReadySsid: string;
   gatewayWifiReadyIp: string;
+  flashLogs: string[];
+  monitorLogs: string[];
 }
 
 type RegionCode = 'ZA' | 'EU' | 'US';
@@ -506,7 +510,9 @@ function newSerialDeviceState(): SerialDeviceState {
     wifiScanned: false,
     wifiSsid: '',
     gatewayWifiReadySsid: '',
-    gatewayWifiReadyIp: ''
+    gatewayWifiReadyIp: '',
+    flashLogs: [],
+    monitorLogs: []
   };
 }
 
@@ -838,6 +844,34 @@ function pushSerialLog(line: string) {
   updateUptimeFromLog(line, serialUptimeMs);
   if (serialLogs.value.length > 2000) {
     serialLogs.value = serialLogs.value.slice(-2000);
+  }
+}
+
+function pushSerialLogForPort(port: string, line: string) {
+  if (!line || !port) return;
+  const state = serialDeviceState(port);
+  if (state) {
+    state.flashLogs.push(line);
+    if (state.flashLogs.length > 2000) {
+      state.flashLogs = state.flashLogs.slice(-2000);
+    }
+  }
+  if (port === selectedPort.value) {
+    pushSerialLog(line);
+  }
+}
+
+function pushMonitorLogForPort(port: string, line: string) {
+  if (!line || !port) return;
+  const state = serialDeviceState(port);
+  if (state) {
+    state.monitorLogs.push(line);
+    if (state.monitorLogs.length > 2000) {
+      state.monitorLogs = state.monitorLogs.slice(-2000);
+    }
+  }
+  if (port === selectedPort.value) {
+    pushSerialLog(line);
   }
 }
 
@@ -3627,7 +3661,7 @@ watch(activeMode, (mode) => {
     nextTick(() => scrollNetworkUdpToBottom());
   }
   syncDeviceInfoForSelectedPort();
-  if (mode === 'serial' && selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
+  if (selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
     readDeviceInfo();
   }
   if (mode !== 'monitor') stopMonitorPolling();
@@ -3652,7 +3686,7 @@ watch(selectedPort, (port) => {
   isLoadingInfo.value = false;
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
-  if (port && activeMode.value === 'serial' && !isSelectedPortMonitoring.value && !hasActiveDeviceInfo.value) {
+  if (port && !isSelectedPortMonitoring.value && !hasActiveDeviceInfo.value) {
     readDeviceInfo();
   }
   if (activeMode.value === 'monitor') {
@@ -3739,21 +3773,23 @@ onMounted(async () => {
 
   unlistenFlash = await listen<LogEvent>('flash-log', (event) => {
     const rawMsg = event.payload.message;
+    const port = event.payload.port;
     // Split on both newlines and carriage returns to ensure progress updates
     // from esptool appear as fresh lines in our Activity Log.
     const lines = rawMsg.split(/[\r\n]+/);
     lines.forEach(line => {
       const trimmed = line.trim();
-      if (trimmed) pushSerialLog(trimmed);
+      if (trimmed) pushSerialLogForPort(port, trimmed);
     });
   });
 
   unlistenMonitor = await listen<MonitorEvent>('monitor-log', (event) => {
     const rawLine = event.payload.line;
+    const port = event.payload.port;
     const lines = rawLine.split(/[\r\n]+/);
     lines.forEach(line => {
       const trimmed = line.trim();
-       if (trimmed) pushSerialLog(trimmed);
+       if (trimmed) pushMonitorLogForPort(port, trimmed);
     });
   });
 
