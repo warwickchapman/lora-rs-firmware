@@ -1116,6 +1116,15 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
     for (const portName of newPorts) {
       portSeenCounter.value += 1;
       portSeenSequence.value[portName] = portSeenCounter.value;
+
+      // Clear cached credentials, status, and configuration for recycled ports
+      const state = serialDeviceState(portName);
+      if (state) {
+        state.deviceInfo = null;
+        state.adminPassword = '';
+        state.status = null;
+        state.config = null;
+      }
     }
     for (const known of Object.keys(portSeenSequence.value)) {
       if (!currentNames.includes(known)) {
@@ -1142,6 +1151,14 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
 
     lastPortSnapshot.value = currentNames;
     syncDeviceInfoForSelectedPort();
+
+    // Auto-probe the selected port immediately if it was just connected/re-connected
+    if (selectedPort.value && newPorts.includes(selectedPort.value)) {
+      if (!isSelectedPortMonitoring.value) {
+        readDeviceInfo();
+      }
+    }
+
     // Artificial delay to ensure the spin is satisfyingly visible
     await new Promise(resolve => setTimeout(resolve, 300));
   } finally {
@@ -4385,6 +4402,16 @@ function toggleSelectAllBulkPorts() {
       </div>
 
       <div v-if="activeMode === 'pair'" class="flex flex-col gap-3 h-full overflow-hidden">
+        <!-- Gateway Device Validation Warning Callout -->
+        <div v-if="provisionSelectedPort && serialDeviceState(provisionSelectedPort)?.status && !serialDeviceState(provisionSelectedPort)?.status?.role_tx" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <span class="font-bold">Gateway Device Required:</span> The device currently connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ provisionSelectedPort }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Please connect a gateway device instead.
+          </div>
+        </div>
+
         <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
           <div class="flex items-start justify-between gap-3">
             <div>
@@ -5593,6 +5620,18 @@ function toggleSelectAllBulkPorts() {
       </div>
 
       <div v-if="activeMode === 'monitor'" class="flex flex-col h-full overflow-hidden gap-3">
+        <!-- Gateway Device Validation Warning Callout -->
+        <div v-if="monitorSelectedPort && serialDeviceState(monitorSelectedPort)?.status && !serialDeviceState(monitorSelectedPort)?.status?.role_tx" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <div>
+            <span class="font-bold">Gateway Device Required:</span> Monitor requires a TX/gateway USB device. The selected serial port is a remote; choose the gateway port.
+          </div>
+        </div>
+
         <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
@@ -5859,6 +5898,18 @@ function toggleSelectAllBulkPorts() {
       </div>
 
       <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-3">
+        <!-- Gateway Device Validation Warning Callout -->
+        <div v-if="fleetSelectedPort && serialDeviceState(fleetSelectedPort)?.status && !serialDeviceState(fleetSelectedPort)?.status?.role_tx" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <div>
+            <span class="font-bold">Gateway Device Required:</span> Fleet requires a TX/gateway USB device. The selected serial port is a remote; choose the gateway port.
+          </div>
+        </div>
+
         <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
