@@ -404,6 +404,15 @@ interface FactoryResetModalState {
   keep_wifi_credentials: boolean;
 }
 const factoryResetTargetModal = ref<FactoryResetModalState | null>(null);
+
+interface FleetKeyModalState {
+  device: LoraInventoryDevice;
+  new_fleet_key: string;
+  confirmed: boolean;
+}
+const fleetKeyTargetModal = ref<FleetKeyModalState | null>(null);
+const showRemoteFleetKey = ref(false);
+
 const logContainer = ref<HTMLElement | null>(null);
 const networkUdpLogContainer = ref<HTMLElement | null>(null);
 const deviceInfoReadSeqByPort = ref<Record<string, number>>({});
@@ -2613,6 +2622,49 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
   } catch (e) {
     const msg = serialFeatureError(`Remote factory reset`, e);
     notify(msg);
+  }
+}
+
+function openFleetKeyModal(device: LoraInventoryDevice) {
+  activeDropdownAddress.value = null;
+  fleetKeyTargetModal.value = {
+    device,
+    new_fleet_key: '',
+    confirmed: false
+  };
+  showRemoteFleetKey.value = false;
+}
+
+async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: string) {
+  const port = fleetSelectedPort.value;
+  const password = adminPasswordForPort(port);
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  if (!newKey || newKey.length < 8) {
+    notify('Enter a fleet key of at least 8 characters');
+    return;
+  }
+  if (newKey.length > 64) {
+    notify('Enter a fleet key of under 64 characters');
+    return;
+  }
+  isSerialAdminSaving.value = true;
+  try {
+    notify(`Triggering remote fleet key change on remote ${device.address}...`);
+    await sendEasyPairCommandOnPort(port, 'remote_fleet_key_change', {
+      admin_password: password,
+      target_address: device.address,
+      new_fleet_passphrase: newKey
+    }, 15000);
+    notify(`Remote fleet key change sequence transmitted. Remote ${device.address} is applying and rebooting.`);
+    fleetKeyTargetModal.value = null;
+  } catch (e) {
+    const msg = serialFeatureError(`Remote fleet key change`, e);
+    notify(msg);
+  } finally {
+    isSerialAdminSaving.value = false;
   }
 }
 
@@ -6239,6 +6291,12 @@ function toggleSelectAllBulkPorts() {
                         >
                           🔄 Reboot
                         </button>
+                        <button
+                          @click="openFleetKeyModal(device)"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
+                        >
+                          🔑 Fleet Key
+                        </button>
                         <div class="h-[1px] bg-slate-800/80 my-1"></div>
                         <button
                           @click="openFactoryResetModal(device)"
@@ -6431,6 +6489,72 @@ function toggleSelectAllBulkPorts() {
               class="m-0 h-9 rounded-md border border-rose-500/40 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30 px-4 text-xs font-bold transition-colors"
             >
               Factory Reset Node
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Targeted Remote Fleet Key Change Dialog -->
+    <Transition name="toast">
+      <div v-if="fleetKeyTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
+          <div>
+            <h3 class="text-base font-bold text-cyan-300">🔑 Change Fleet Key on Node {{ fleetKeyTargetModal.device.address }}</h3>
+            <p class="mt-1 text-xs text-slate-500">Transmits a secure command over LoRa to update the node's shared fleet passphrase.</p>
+          </div>
+          
+          <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex flex-col gap-1.5 select-text leading-relaxed">
+            <div class="flex items-center gap-1.5 font-bold">
+              <span class="text-sm">⚠️</span> CRITICAL OPERATIONAL WARNING
+            </div>
+            <div>
+              Changing the remote's Fleet Key will make it <span class="font-bold text-rose-200">immediately unreachable</span> by this Gateway once the remote reboots.
+              You must update this Gateway's Fleet Key to match, or the remote node will be permanently orphaned until manually retrieved!
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3.5 py-1">
+            <label class="flex items-center gap-3 text-xs text-slate-300 cursor-pointer select-none">
+              <input v-model="fleetKeyTargetModal.confirmed" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-600 focus:ring-0 focus:ring-offset-0" />
+              <span class="font-semibold text-slate-200">I understand that the node will become unreachable until Gateway keys are matched.</span>
+            </label>
+
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-semibold text-slate-300">New Fleet Passphrase</label>
+              <div class="flex gap-2">
+                <input
+                  v-model="fleetKeyTargetModal.new_fleet_key"
+                  :type="showRemoteFleetKey ? 'text' : 'password'"
+                  class="glass-input h-9 flex-1"
+                  placeholder="Minimum 8 characters"
+                  :disabled="!fleetKeyTargetModal.confirmed"
+                />
+                <button
+                  @click="showRemoteFleetKey = !showRemoteFleetKey"
+                  class="glass-input h-9 px-3 hover:bg-slate-700/70"
+                  type="button"
+                  :disabled="!fleetKeyTargetModal.confirmed"
+                >
+                  {{ showRemoteFleetKey ? 'Hide' : 'Show' }}
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mt-2 flex justify-end gap-2">
+            <button
+              @click="fleetKeyTargetModal = null"
+              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
+            >
+              Cancel
+            </button>
+            <button
+              @click="executeRemoteFleetKeyChange(fleetKeyTargetModal.device, fleetKeyTargetModal.new_fleet_key)"
+              :disabled="!fleetKeyTargetModal.confirmed || !fleetKeyTargetModal.new_fleet_key || fleetKeyTargetModal.new_fleet_key.length < 8"
+              class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Update Key over LoRa
             </button>
           </div>
         </div>

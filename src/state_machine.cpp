@@ -8,6 +8,7 @@
 
 #include "build_info.h"
 #include "logger.h"
+#include "admin_config_utils.h"
 
 namespace {
 constexpr uint8_t kInputPin = 4;
@@ -62,6 +63,9 @@ constexpr uint8_t kRebootMagic1 = 0x5B;
 constexpr uint8_t kSensorConfigMagic0 = 0xC5;
 constexpr uint8_t kSensorConfigMagic1 = 0x5C;
 constexpr uint32_t kWifiProvisionCooldownMs = 60000;
+constexpr uint8_t kFleetKeyControlOpStart = 1;
+constexpr uint8_t kFleetKeyControlOpData = 2;
+constexpr uint8_t kFleetKeyControlOpCommit = 3;
 constexpr uint8_t kProvOpDiscoverStart = 1;
 constexpr uint8_t kProvOpAnnounce = 2;
 constexpr uint8_t kProvOpAssign = 3;
@@ -1586,7 +1590,7 @@ uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
 
 bool NodeStateMachine::sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey) {
   const size_t totalLen = static_cast<size_t>(newFleetKey.length());
-  if (totalLen < kMinDeploymentKeyLen || totalLen > 64) return false;
+  if (totalLen < admin_config_utils::kMinDeploymentKeyLen || totalLen > 64) return false;
 
   constexpr uint8_t kFleetKeyChunkDataBytes = 7;
   const uint8_t totalChunks =
@@ -3351,7 +3355,7 @@ bool NodeStateMachine::handleFleetKeyControlFrame(const ProtocolMessage &msg) {
     constexpr uint8_t kFleetKeyChunkDataBytes = 7;
     const uint8_t expectedChunks =
         static_cast<uint8_t>((keyLen + (kFleetKeyChunkDataBytes - 1U)) / kFleetKeyChunkDataBytes);
-    if (transferId == 0 || keyLen < kMinDeploymentKeyLen || keyLen > 64 ||
+    if (transferId == 0 || keyLen < admin_config_utils::kMinDeploymentKeyLen || keyLen > 64 ||
         totalChunks == 0 || totalChunks > 31 || totalChunks != expectedChunks) {
       fleet_key_rx_ = FleetKeyControlRxTransfer{};
       lrslog::event("fleet_key_rx_bad_start", msg.rssi, msg.counter, op);
