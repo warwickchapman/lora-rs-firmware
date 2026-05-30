@@ -386,30 +386,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
            static_cast<unsigned>(kReplayTrackedSources),
            static_cast<unsigned>(kMaxProvisioningDevices));
 
-  if (runtime_.role_tx) {
-    bool populated = false;
-    if (settings_->known_peer_count > 0) {
-      for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
-        uint8_t addr = settings_->known_peer_addresses[i];
-        if (addr >= 1 && addr <= 254 && addr != runtime_.local_address) {
-          findOrCreatePeer(addr);
-          populated = true;
-        }
-      }
-    }
-    if (!populated && settings_->paired_target_count > 0) {
-      for (size_t i = 0; i < settings_->paired_target_count && i < Settings::kAddressListCap; ++i) {
-        uint8_t addr = settings_->paired_target_addresses[i];
-        if (addr >= 1 && addr <= 254 && addr != runtime_.local_address) {
-          findOrCreatePeer(addr);
-          populated = true;
-        }
-      }
-    }
-    if (!populated && settings_->remote_address >= 1 && settings_->remote_address <= 254 && settings_->remote_address != runtime_.local_address) {
-      findOrCreatePeer(settings_->remote_address);
-    }
-  }
+  prePopulateGatewayPeerCache();
 
   return true;
 }
@@ -490,6 +467,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   replay_table_stale_evictions_ = 0;
   replay_table_full_drops_ = 0;
   replay_table_peak_used_ = 0;
+  prePopulateGatewayPeerCache();
 }
 
 void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
@@ -1999,6 +1977,41 @@ void NodeStateMachine::rememberProvisionedAddress(uint32_t chipId, uint8_t assig
   provisioned_addrs_[idx].updated_ms = now;
 }
 
+void NodeStateMachine::prePopulateGatewayPeerCache() {
+  if (!runtime_.role_tx || settings_ == nullptr) return;
+
+  uint8_t targets[Settings::kAddressListCap]{};
+  uint8_t targetCount = 0;
+
+  // Compiler-friendly lambda for deduplicated, safe target insertion
+  auto addTarget = [&](uint8_t addr) {
+    if (addr >= 1 && addr <= 254 && addr != runtime_.local_address && targetCount < Settings::kAddressListCap) {
+      for (uint8_t i = 0; i < targetCount; ++i) {
+        if (targets[i] == addr) return;
+      }
+      targets[targetCount++] = addr;
+    }
+  };
+
+  if (settings_->known_peer_count > 0) {
+    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+      addTarget(settings_->known_peer_addresses[i]);
+    }
+  }
+  if (targetCount == 0 && settings_->paired_target_count > 0) {
+    for (size_t i = 0; i < settings_->paired_target_count && i < Settings::kAddressListCap; ++i) {
+      addTarget(settings_->paired_target_addresses[i]);
+    }
+  }
+  if (targetCount == 0 && settings_->remote_address != 0) {
+    addTarget(settings_->remote_address);
+  }
+
+  for (uint8_t i = 0; i < targetCount; ++i) {
+    findOrCreatePeer(targets[i]);
+  }
+}
+
 void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   bool used[256]{};
   used[0] = true;
@@ -2207,6 +2220,16 @@ NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t addres
   node = PeerRuntime{};
   node.in_use = true;
   node.address = address;
+
+  // Resolve chip ID from recently provisioned address cache if available
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    const ProvisionedAddressEntry &e = provisioned_addrs_[i];
+    if (e.in_use && e.assigned_address == address && e.chip_id != 0) {
+      node.chip_id = e.chip_id;
+      break;
+    }
+  }
+
   uint32_t interval = runtime_.tx_mqtt_remote_default_poll_interval_ms;
   if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
   if (interval > kMaxRemotePollIntervalMs) interval = kMaxRemotePollIntervalMs;

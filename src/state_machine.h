@@ -631,6 +631,7 @@ class NodeStateMachine {
   bool handleMaintenanceStatus(const ProtocolMessage &msg);
   void tickPendingMaintenancePages();
   PeerRuntime *findOrCreatePeer(uint8_t address);
+  void prePopulateGatewayPeerCache();
   PollRuntime *pollStateForIndex(size_t index);
   const PollRuntime *pollStateForIndex(size_t index) const;
   bool ensurePollStorage();
