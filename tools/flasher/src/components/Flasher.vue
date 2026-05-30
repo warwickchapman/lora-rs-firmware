@@ -659,6 +659,43 @@ const pairDiscoveredDeviceCount = computed(() => pairStatus.value?.devices?.leng
 const fleetGatewayDevice = computed(() => serialDeviceState(fleetSelectedPort.value));
 const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
 const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
+
+function parseVersion(v: string) {
+  const clean = v.replace(/^Local:\s*/i, '').trim();
+  const match = clean.match(/^(\d+)\.(\d+)\.(\d+)(?:~(\d+))?/);
+  if (match) {
+    return {
+      major: parseInt(match[1], 10),
+      minor: parseInt(match[2], 10),
+      patch: parseInt(match[3], 10),
+      dev: match[4] ? parseInt(match[4], 10) : 0
+    };
+  }
+  return null;
+}
+
+const isGatewayUpgradeAvailable = computed(() => {
+  const currentFw = fleetGatewayStatus.value?.fw_version;
+  if (!currentFw || !selectedVersion.value) return false;
+
+  // Verify firmware selection is present/valid
+  if (selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX) && !selectedLocalPath.value) {
+    return false;
+  }
+
+  const candidateStr = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
+    ? flasherAppVersion.value
+    : selectedVersion.value;
+
+  const p1 = parseVersion(candidateStr);
+  const p2 = parseVersion(currentFw);
+  if (!p1 || !p2) return false;
+
+  if (p1.major !== p2.major) return p1.major > p2.major;
+  if (p1.minor !== p2.minor) return p1.minor > p2.minor;
+  if (p1.patch !== p2.patch) return p1.patch > p2.patch;
+  return p1.dev > p2.dev;
+});
 const fleetGatewayReady = computed(() =>
   !!fleetSelectedPort.value &&
   !!fleetGatewayIdentity.value &&
@@ -2583,7 +2620,7 @@ function fleetGatewayFlashUnavailableReason(): string {
   if (remoteOtaBusyAddress.value !== null) return 'Wait for the remote flash command to finish';
   if (isFirmwareServerStarting.value) return 'Firmware server is starting';
   if (isPairBusy.value) return 'Provisioning is active';
-  return 'Flash the selected USB gateway';
+  return 'Upgrade the selected USB gateway';
 }
 
 async function flashFleetGateway() {
@@ -2600,8 +2637,8 @@ async function flashFleetGateway() {
   if (!firmwareOptions) return;
   const label = fleetGatewayIdentity.value?.ssid || fleetGatewayIdentity.value?.serial || port;
   const confirmed = await confirmOperatorAction(
-    `Flash the USB gateway ${label} on ${port}?\n\nThis will reboot the gateway and pause Fleet operations while flashing.`,
-    { confirmText: 'Flash gateway', danger: true }
+    `Upgrade the USB gateway ${label} on ${port}?\n\nThis will reboot the gateway and pause Fleet operations while upgrading.`,
+    { confirmText: 'Upgrade gateway', danger: true }
   );
   if (!confirmed) {
     return;
@@ -6010,12 +6047,13 @@ function toggleSelectAllBulkPorts() {
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
               </button>
               <button
+                v-if="isGatewayUpgradeAvailable || isFlashing"
                 @click="flashFleetGateway"
                 :disabled="fleetGatewayFlashDisabled"
                 :title="fleetGatewayFlashUnavailableReason()"
                 class="primary-btn m-0 h-9 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
               >
-                {{ isFlashing ? 'Flashing...' : 'Flash gateway' }}
+                {{ isFlashing ? 'Flashing...' : 'Upgrade gateway' }}
               </button>
             </div>
           </div>
