@@ -377,7 +377,8 @@ const FLEET_FORCE_SCAN_COOLDOWN_MS = 60000;
 const FLEET_FRESH_MS = 90000;
 const FLEET_STALE_MS = 180000;
 const provisionCacheRefreshedChips = new Set<string>();
-const isLoadingInfo = ref(false);
+const portsReadingDeviceInfo = ref<Set<string>>(new Set());
+const isLoadingInfo = computed(() => portsReadingDeviceInfo.value.has(selectedPort.value));
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
 const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
@@ -1253,8 +1254,6 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
     if (selectedPort.value && newPorts.includes(selectedPort.value)) {
       if (activeMode.value === 'pair') {
         loadEasyPairGateway(true);
-      } else if (!isSelectedPortMonitoring.value) {
-        readDeviceInfo();
       }
     }
 
@@ -3686,18 +3685,21 @@ async function sendWifiToRemotes() {
 
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
-  if (isLoadingInfo.value) return; // Prevent concurrent reads
+  if (isLoadingInfo.value) return; // Prevent concurrent reads on the active port
   const port = selectedPort.value;
   return await readDeviceInfoForPort(port, activeMode.value || 'serial');
 }
 
 async function readDeviceInfoForPort(port: string, _ownerMode: ActiveMode | 'network'): Promise<boolean> {
+  // Per-port re-entrancy guard — only one read per port at a time
+  if (portsReadingDeviceInfo.value.has(port)) return false;
+  portsReadingDeviceInfo.value = new Set([...portsReadingDeviceInfo.value, port]);
+
   const seq = (deviceInfoReadSeqByPort.value[port] || 0) + 1;
   deviceInfoReadSeqByPort.value = { ...deviceInfoReadSeqByPort.value, [port]: seq };
-  isLoadingInfo.value = true;
   if (isMonitoring.value && activeMonitorPort.value === port) {
     pushSerialLog(`Skipped device info read for ${port}: serial monitor owns this port.`);
-    isLoadingInfo.value = false;
+    const s1 = new Set(portsReadingDeviceInfo.value); s1.delete(port); portsReadingDeviceInfo.value = s1;
     return false;
   }
   pushSerialLog(`Reading device information from ${port}...`);
@@ -3725,9 +3727,7 @@ async function readDeviceInfoForPort(port: string, _ownerMode: ActiveMode | 'net
     pushSerialLog('Failed to read device info: ' + e);
     return false;
   } finally {
-    if (deviceInfoReadSeqByPort.value[port] === seq) {
-      isLoadingInfo.value = false;
-    }
+    const s = new Set(portsReadingDeviceInfo.value); s.delete(port); portsReadingDeviceInfo.value = s;
   }
 }
 
@@ -4088,9 +4088,8 @@ watch(activeMode, (mode) => {
     nextTick(() => scrollNetworkUdpToBottom());
   }
   syncDeviceInfoForSelectedPort();
-  if (selectedPort.value && mode !== 'pair' && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
-    readDeviceInfo();
-  }
+  // Note: readDeviceInfo() is NOT called here — the watch(selectedPort) watcher handles it
+  // when the computed selectedPort changes due to the mode switch.
   if (mode === 'pair' && provisionSelectedPort.value) {
     loadEasyPairGateway(true);
   }
@@ -4113,7 +4112,6 @@ watch(selectedPort, (port) => {
       [port]: (deviceInfoReadSeqByPort.value[port] || 0) + 1
     };
   }
-  isLoadingInfo.value = false;
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
   if (port && activeMode.value !== 'pair' && !isSelectedPortMonitoring.value && !hasActiveDeviceInfo.value) {
