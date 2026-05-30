@@ -2540,7 +2540,6 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
   }
 }
 
-// openSensorsModal removed – use openSettingsModal(device, 'sensors')
 
 async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean) {
   const port = fleetSelectedPort.value;
@@ -2624,7 +2623,6 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
   }
 }
 
-// openFleetKeyModal removed – use openSettingsModal(device, 'security')
 
 async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: string) {
   const port = fleetSelectedPort.value;
@@ -3990,18 +3988,18 @@ watch(pairWifiPassword, (nextPassword) => {
   }
 });
 
-watch(() => wifiTargetModal.value?.ssid, (nextSsid) => {
-  if (nextSsid && wifiTargetModal.value) {
+watch(() => settingsDeviceModal.value?.wifi_ssid, (nextSsid) => {
+  if (nextSsid && settingsDeviceModal.value) {
     const cached = getCachedWifiPassword(nextSsid);
     if (cached) {
-      wifiTargetModal.value.password_value = cached;
+      settingsDeviceModal.value.wifi_password = cached;
     }
   }
 });
 
-watch(() => wifiTargetModal.value?.password_value, (nextPassword) => {
-  if (wifiTargetModal.value && wifiTargetModal.value.ssid) {
-    saveCachedWifiPassword(wifiTargetModal.value.ssid, nextPassword || '');
+watch(() => settingsDeviceModal.value?.wifi_password, (nextPassword) => {
+  if (settingsDeviceModal.value && settingsDeviceModal.value.wifi_ssid) {
+    saveCachedWifiPassword(settingsDeviceModal.value.wifi_ssid, nextPassword || '');
   }
 });
 
@@ -6267,28 +6265,16 @@ function toggleSelectAllBulkPorts() {
                           📋 Logs
                         </button>
                         <button
-                          @click="openWifiModal(device)"
+                          @click="openSettingsModal(device)"
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                         >
-                          📶 WiFi
-                        </button>
-                        <button
-                          @click="openSensorsModal(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
-                        >
-                          🛠️ Sensors
+                          ⚙️ Settings
                         </button>
                         <button
                           @click="executeRemoteReboot(device)"
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                         >
                           🔄 Reboot
-                        </button>
-                        <button
-                          @click="openFleetKeyModal(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
-                        >
-                          🔑 Fleet Key
                         </button>
                         <div class="h-[1px] bg-slate-800/80 my-1"></div>
                         <button
@@ -6362,84 +6348,6 @@ function toggleSelectAllBulkPorts() {
       </div>
     </Transition>
 
-    <!-- Targeted WiFi Provisioning Dialog -->
-    <Transition name="toast">
-      <div v-if="wifiTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
-          <div>
-            <h3 class="text-base font-bold text-slate-200">📶 Provision WiFi to Node {{ wifiTargetModal.device.address }}</h3>
-            <p class="mt-1 text-xs text-slate-500">Securely transmit targeted WiFi credentials over LoRa to this specific receiver node.</p>
-          </div>
-          <div class="flex flex-col gap-3">
-            <div class="flex flex-col gap-1">
-              <label class="text-[11px] font-semibold text-slate-400">SSID</label>
-              <input v-model="wifiTargetModal.ssid" type="text" class="glass-input h-9 px-3 text-xs w-full" placeholder="WiFi Network Name" />
-            </div>
-            <div class="flex flex-col gap-1">
-              <label class="text-[11px] font-semibold text-slate-400">STA Password</label>
-              <input v-model="wifiTargetModal.password_value" type="password" class="glass-input h-9 px-3 text-xs w-full" placeholder="Leave blank to clear credentials" />
-            </div>
-          </div>
-          <div class="mt-2 flex justify-end gap-2">
-            <button
-              @click="wifiTargetModal = null"
-              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
-            >
-              Cancel
-            </button>
-            <button
-              @click="executeRemoteWifi(wifiTargetModal.device, wifiTargetModal.ssid, wifiTargetModal.password_value)"
-              class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
-            >
-              Send Credentials
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- Targeted Sensors Configuration Dialog -->
-    <Transition name="toast">
-      <div v-if="sensorsTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
-          <div>
-            <h3 class="text-base font-bold text-slate-200">🛠️ Configure Sensors on Node {{ sensorsTargetModal.device.address }}</h3>
-            <p class="mt-1 text-xs text-slate-500">Enable or disable hardware sensors over LoRa. Changes persist to remote device flash memory.</p>
-          </div>
-          <div class="flex flex-col gap-3 py-1">
-            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-              <input v-model="sensorsTargetModal.sensor_temp_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-              <div>
-                <div class="font-semibold text-slate-200">DS18B20 Temperature Sensor</div>
-                <div class="text-[10px] text-slate-500 mt-0.5">Enables digital temperature probes on the device.</div>
-              </div>
-            </label>
-            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-              <input v-model="sensorsTargetModal.sensor_tank_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-              <div>
-                <div class="font-semibold text-slate-200">4-20mA Pressure Tank Level Sensor</div>
-                <div class="text-[10px] text-slate-500 mt-0.5">Enables analog pressure sensor mappings for tank level tracking.</div>
-              </div>
-            </label>
-          </div>
-          <div class="mt-2 flex justify-end gap-2">
-            <button
-              @click="sensorsTargetModal = null"
-              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
-            >
-              Cancel
-            </button>
-            <button
-              @click="executeRemoteSensors(sensorsTargetModal.device, sensorsTargetModal.sensor_temp_enabled, sensorsTargetModal.sensor_tank_enabled)"
-              class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
-            >
-              Apply Config
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
     <!-- Targeted Factory Reset Dialog -->
     <Transition name="toast">
       <div v-if="factoryResetTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
@@ -6488,67 +6396,135 @@ function toggleSelectAllBulkPorts() {
       </div>
     </Transition>
 
-    <!-- Targeted Remote Fleet Key Change Dialog -->
+    <!-- Device Settings Modal -->
     <Transition name="toast">
-      <div v-if="fleetKeyTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
+      <div v-if="settingsDeviceModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+        <div class="w-full max-w-lg rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
+          <!-- Header with device info -->
           <div>
-            <h3 class="text-base font-bold text-cyan-300">🔑 Change Fleet Key on Node {{ fleetKeyTargetModal.device.address }}</h3>
-            <p class="mt-1 text-xs text-slate-500">Transmits a secure command over LoRa to update the node's shared fleet passphrase.</p>
+            <h3 class="text-base font-bold text-slate-200">⚙️ Settings — Node {{ settingsDeviceModal.device.address }}</h3>
+            <p class="mt-1 text-xs text-slate-500">
+              <span v-if="settingsDeviceModal.device.chip_id">{{ settingsDeviceModal.device.chip_id }}</span>
+              <span v-if="settingsDeviceModal.device.fw_version"> · v{{ settingsDeviceModal.device.fw_version }}</span>
+              <span v-if="settingsDeviceModal.device.role"> · {{ settingsDeviceModal.device.role }}</span>
+            </p>
           </div>
-          
-          <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex flex-col gap-1.5 select-text leading-relaxed">
-            <div class="flex items-center gap-1.5 font-bold">
-              <span class="text-sm">⚠️</span> CRITICAL OPERATIONAL WARNING
+
+          <!-- Tab bar -->
+          <div class="flex gap-0 border-b border-slate-800">
+            <button
+              v-for="tab in ([{key:'wifi',label:'📶 WiFi'},{key:'sensors',label:'🛠️ Sensors'},{key:'security',label:'🔑 Security'}] as const)"
+              :key="tab.key"
+              @click="settingsDeviceModal.activeTab = tab.key"
+              class="px-4 py-2 text-[11px] font-bold transition-colors"
+              :class="settingsDeviceModal.activeTab === tab.key
+                ? 'text-cyan-300 border-b-2 border-cyan-400 -mb-px'
+                : 'text-slate-500 hover:text-slate-300'"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+
+          <!-- WiFi tab content -->
+          <div v-if="settingsDeviceModal.activeTab === 'wifi'" class="flex flex-col gap-3">
+            <p class="text-xs text-slate-500">Securely transmit targeted WiFi credentials over LoRa.</p>
+            <div class="flex flex-col gap-1">
+              <label class="text-[11px] font-semibold text-slate-400">SSID</label>
+              <input v-model="settingsDeviceModal.wifi_ssid" type="text" class="glass-input h-9 px-3 text-xs w-full" placeholder="WiFi Network Name" />
             </div>
-            <div>
-              Changing the remote's Fleet Key will make it <span class="font-bold text-rose-200">immediately unreachable</span> by this Gateway once the remote reboots.
-              You must update this Gateway's Fleet Key to match, or the remote node will be permanently orphaned until manually retrieved!
+            <div class="flex flex-col gap-1">
+              <label class="text-[11px] font-semibold text-slate-400">STA Password</label>
+              <input v-model="settingsDeviceModal.wifi_password" type="password" class="glass-input h-9 px-3 text-xs w-full" placeholder="Leave blank to clear credentials" />
+            </div>
+            <div class="mt-2 flex justify-end gap-2">
+              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+              <button
+                @click="executeRemoteWifi(settingsDeviceModal.device, settingsDeviceModal.wifi_ssid, settingsDeviceModal.wifi_password)"
+                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
+              >
+                Send Credentials
+              </button>
             </div>
           </div>
 
-          <div class="flex flex-col gap-3.5 py-1">
-            <label class="flex items-center gap-3 text-xs text-slate-300 cursor-pointer select-none">
-              <input v-model="fleetKeyTargetModal.confirmed" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-600 focus:ring-0 focus:ring-offset-0" />
-              <span class="font-semibold text-slate-200">I understand that the node will become unreachable until Gateway keys are matched.</span>
-            </label>
+          <!-- Sensors tab content -->
+          <div v-if="settingsDeviceModal.activeTab === 'sensors'" class="flex flex-col gap-3">
+            <p class="text-xs text-slate-500">Enable or disable hardware sensors over LoRa. Changes persist to remote device flash memory.</p>
+            <div class="flex flex-col gap-3 py-1">
+              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                <input v-model="settingsDeviceModal.sensor_temp_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <div>
+                  <div class="font-semibold text-slate-200">DS18B20 Temperature Sensor</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Enables digital temperature probes on the device.</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                <input v-model="settingsDeviceModal.sensor_tank_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <div>
+                  <div class="font-semibold text-slate-200">4-20mA Pressure Tank Level Sensor</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Enables analog pressure sensor mappings for tank level tracking.</div>
+                </div>
+              </label>
+            </div>
+            <div class="mt-2 flex justify-end gap-2">
+              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+              <button
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled)"
+                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
+              >
+                Apply Config
+              </button>
+            </div>
+          </div>
 
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-semibold text-slate-300">New Fleet Passphrase</label>
-              <div class="flex gap-2">
-                <input
-                  v-model="fleetKeyTargetModal.new_fleet_key"
-                  :type="showRemoteFleetKey ? 'text' : 'password'"
-                  class="glass-input h-9 flex-1"
-                  placeholder="Minimum 8 characters"
-                  :disabled="!fleetKeyTargetModal.confirmed"
-                />
-                <button
-                  @click="showRemoteFleetKey = !showRemoteFleetKey"
-                  class="glass-input h-9 px-3 hover:bg-slate-700/70"
-                  type="button"
-                  :disabled="!fleetKeyTargetModal.confirmed"
-                >
-                  {{ showRemoteFleetKey ? 'Hide' : 'Show' }}
-                </button>
+          <!-- Security tab content -->
+          <div v-if="settingsDeviceModal.activeTab === 'security'" class="flex flex-col gap-3">
+            <p class="text-xs text-slate-500">Update the node's shared fleet passphrase over LoRa.</p>
+            <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex flex-col gap-1.5 select-text leading-relaxed">
+              <div class="flex items-center gap-1.5 font-bold">
+                <span class="text-sm">⚠️</span> CRITICAL OPERATIONAL WARNING
+              </div>
+              <div>
+                Changing the remote's Fleet Key will make it <span class="font-bold text-rose-200">immediately unreachable</span> by this Gateway once the remote reboots.
+                You must update this Gateway's Fleet Key to match, or the remote node will be permanently orphaned until manually retrieved!
               </div>
             </div>
-          </div>
-          
-          <div class="mt-2 flex justify-end gap-2">
-            <button
-              @click="fleetKeyTargetModal = null"
-              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
-            >
-              Cancel
-            </button>
-            <button
-              @click="executeRemoteFleetKeyChange(fleetKeyTargetModal.device, fleetKeyTargetModal.new_fleet_key)"
-              :disabled="!fleetKeyTargetModal.confirmed || !fleetKeyTargetModal.new_fleet_key || fleetKeyTargetModal.new_fleet_key.length < 8"
-              class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              Update Key over LoRa
-            </button>
+            <div class="flex flex-col gap-3.5 py-1">
+              <label class="flex items-center gap-3 text-xs text-slate-300 cursor-pointer select-none">
+                <input v-model="settingsDeviceModal.fleet_key_confirmed" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-600 focus:ring-0 focus:ring-offset-0" />
+                <span class="font-semibold text-slate-200">I understand that the node will become unreachable until Gateway keys are matched.</span>
+              </label>
+              <div class="flex flex-col gap-1.5 text-xs">
+                <label class="font-semibold text-slate-300">New Fleet Passphrase</label>
+                <div class="flex gap-2">
+                  <input
+                    v-model="settingsDeviceModal.fleet_key"
+                    :type="settingsDeviceModal.show_fleet_key ? 'text' : 'password'"
+                    class="glass-input h-9 flex-1"
+                    placeholder="Minimum 8 characters"
+                    :disabled="!settingsDeviceModal.fleet_key_confirmed"
+                  />
+                  <button
+                    @click="settingsDeviceModal.show_fleet_key = !settingsDeviceModal.show_fleet_key"
+                    class="glass-input h-9 px-3 hover:bg-slate-700/70"
+                    type="button"
+                    :disabled="!settingsDeviceModal.fleet_key_confirmed"
+                  >
+                    {{ settingsDeviceModal.show_fleet_key ? 'Hide' : 'Show' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="mt-2 flex justify-end gap-2">
+              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+              <button
+                @click="executeRemoteFleetKeyChange(settingsDeviceModal.device, settingsDeviceModal.fleet_key)"
+                :disabled="!settingsDeviceModal.fleet_key_confirmed || !settingsDeviceModal.fleet_key || settingsDeviceModal.fleet_key.length < 8"
+                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Update Key over LoRa
+              </button>
+            </div>
           </div>
         </div>
       </div>

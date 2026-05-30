@@ -14,6 +14,7 @@ All notable changes to this pre-release project are documented here in current o
 - Flasher settings pane displays the decrypted Fleet Key with hide/show toggle, enabling direct local credential updates over USB serial admin.
 - Firmware supports targeted, same-key encrypted LoRa key rollover commands (`MessageType::FleetKeyControl`), enabling secure over-the-air Fleet Key updates to remote nodes via gateway.
 - Flasher Fleet table features a "Fleet Key" remote action modal with a stark operational warning banner and explicit safety checkbox confirmation to prevent remote node orphaning.
+- Flasher Fleet Actions dropdown consolidates WiFi provisioning, Sensor configuration, and Fleet Key change into a single tabbed ⚙️ Settings modal with device info header, reducing the dropdown from 7 to 5 items (Flash, Logs, Settings, Reboot, Factory Reset).
 - Flasher caches entered WiFi passwords per SSID in local storage, automatically pre-populating and updating passwords in Provision mode, Settings configuration, and Remote WiFi provisioning dialogs.
 - Dev builds now use unique operator-visible build revisions such as `0.9.2~1`; use `python3 tools/bump_dev_build.py` before flashing or sharing a new development build.
 - Firmware build metadata now rejects reusing the same `~DEVBUILD` version after the source tree changes, preventing accidental duplicate dev firmware versions.
