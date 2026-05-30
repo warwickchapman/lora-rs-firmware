@@ -4933,67 +4933,67 @@ function toggleSelectAllBulkPorts() {
               </div>
             </div>
 
-            <!-- Action Settings checkboxes -->
-            <div class="flex flex-col gap-2 mt-1">
-              <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Flash options</div>
-              <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <label class="flex items-center gap-2 cursor-pointer group">
-                  <div class="relative flex items-center">
-                    <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
-                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-amber-500 peer-checked:border-amber-500 transition-all"></div>
-                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  </div>
-                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Erase flash before write</span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer group">
-                  <div class="relative flex items-center">
-                    <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
-                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
-                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  </div>
-                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor after flash</span>
-                </label>
+            <!-- Action execution CTAs & Options -->
+            <div class="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-slate-800">
+              <!-- Flash CTA & Options -->
+              <div class="flex flex-col gap-3">
+                <button
+                  @click="startBulkFlash"
+                  :disabled="bulkFlashDisabled"
+                  class="primary-btn h-10 flex items-center justify-center gap-2 text-xs font-bold w-full active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isBulkFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+                  <span>{{ isBulkFlashing ? 'Flashing...' : 'Bulk Flash' }}</span>
+                </button>
+                <div class="flex flex-col gap-2 px-1">
+                  <label class="flex items-center gap-2 cursor-pointer group">
+                    <div class="relative flex items-center">
+                      <input type="checkbox" v-model="eraseBeforeFlash" class="peer hidden" />
+                      <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-amber-500 peer-checked:border-amber-500 transition-all"></div>
+                      <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </div>
+                    <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Erase flash before write</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer group">
+                    <div class="relative flex items-center">
+                      <input type="checkbox" v-model="monitorAfterFlash" class="peer hidden" />
+                      <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                      <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </div>
+                    <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Start monitor after flash</span>
+                  </label>
+                </div>
               </div>
 
-              <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2 mb-0.5">Factory reset options</div>
-              <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <label class="flex items-center gap-2 cursor-pointer group">
-                  <div class="relative flex items-center">
-                    <input type="checkbox" v-model="serialFactoryKeepFleet" class="peer hidden" />
-                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
-                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  </div>
-                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Keep shared fleet key</span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer group">
-                  <div class="relative flex items-center">
-                    <input type="checkbox" v-model="serialFactoryKeepWifi" class="peer hidden" />
-                    <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
-                    <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  </div>
-                  <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Keep WiFi credentials</span>
-                </label>
+              <!-- Reset CTA & Options -->
+              <div class="flex flex-col gap-3">
+                <button
+                  @click="startBulkFactoryReset"
+                  :disabled="bulkResetDisabled"
+                  class="glass-input m-0 h-10 hover:bg-slate-700/70 border-amber-500/30 hover:border-amber-500/60 bg-amber-500/5 text-amber-300 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/10 w-full"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isBulkResetting }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                  <span>{{ isBulkResetting ? 'Resetting...' : 'Bulk Reset' }}</span>
+                </button>
+                <div class="flex flex-col gap-2 px-1">
+                  <label class="flex items-center gap-2 cursor-pointer group">
+                    <div class="relative flex items-center">
+                      <input type="checkbox" v-model="serialFactoryKeepFleet" class="peer hidden" />
+                      <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                      <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </div>
+                    <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Keep shared fleet key</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer group">
+                    <div class="relative flex items-center">
+                      <input type="checkbox" v-model="serialFactoryKeepWifi" class="peer hidden" />
+                      <div class="w-4 h-4 border border-slate-600 rounded bg-slate-800/50 peer-checked:bg-cyan-600 peer-checked:border-cyan-500 transition-all"></div>
+                      <svg class="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 left-0.5 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </div>
+                    <span class="text-[10px] text-slate-400 group-hover:text-slate-300 transition-colors">Keep WiFi credentials</span>
+                  </label>
+                </div>
               </div>
-            </div>
-
-            <!-- Action execution CTAs -->
-            <div class="grid grid-cols-2 gap-3 mt-3 pt-2 border-t border-slate-800">
-              <button
-                @click="startBulkFlash"
-                :disabled="bulkFlashDisabled"
-                class="primary-btn h-10 flex items-center justify-center gap-2 text-xs font-bold w-full active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isBulkFlashing }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
-                <span>{{ isBulkFlashing ? 'Flashing...' : '⚡ Bulk Flash' }}</span>
-              </button>
-              <button
-                @click="startBulkFactoryReset"
-                :disabled="bulkResetDisabled"
-                class="glass-input m-0 h-10 hover:bg-slate-700/70 border-amber-500/30 hover:border-amber-500/60 bg-amber-500/5 text-amber-300 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/10"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin': isBulkResetting }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                <span>{{ isBulkResetting ? 'Resetting...' : '🔄 Bulk Reset' }}</span>
-              </button>
             </div>
           </div>
         </template>
