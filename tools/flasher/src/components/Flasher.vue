@@ -1644,7 +1644,7 @@ function provisionedRemoteChipIds(): Set<string> {
     .filter(Boolean));
 }
 
-async function refreshProvisionedSerialDeviceCaches(reason: string) {
+async function refreshProvisionedSerialDeviceCaches() {
   const chips = provisionedRemoteChipIds();
   if (chips.size === 0) return;
   const pendingChips = [...chips].filter(chip => !provisionCacheRefreshedChips.has(chip));
@@ -1661,19 +1661,14 @@ async function refreshProvisionedSerialDeviceCaches(reason: string) {
     provisionCacheRefreshedChips.add(chip);
 
     if (isMonitoring.value && activeMonitorPort.value === port) {
-      pushPairLog(`Invalidated cached serial details for ${port} chip ${chip} after ${reason}; serial monitor owns the port.`);
       continue;
     }
     if (serialAdminBusyForPort(port)) {
-      pushPairLog(`Invalidated cached serial details for ${port} chip ${chip} after ${reason}; port is busy.`);
       continue;
     }
 
     pushPairLog(`Refreshing serial details for provisioned remote on ${port} chip ${chip}...`);
-    const ok = await readDeviceInfoForPort(port, 'serial');
-    if (!ok) {
-      pushPairLog(`Cached serial details for ${port} chip ${chip} were cleared; refresh manually when the port is available.`);
-    }
+    await readDeviceInfoForPort(port, 'serial');
   }
 }
 
@@ -3207,9 +3202,11 @@ async function runEasyPair() {
   provisionCacheRefreshedChips.clear();
   pushPairLog('--- EasyPair ---');
   try {
-    // Always load gateway status/config before provisioning to ensure fleet key is fetched or generated correctly
-    await loadEasyPairGateway();
-    if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    // Reload gateway only if not already loaded (avoids duplicate "uncommissioned" messages)
+    if (!gatewayReady.value) {
+      await loadEasyPairGateway();
+      if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    }
     
     const fleetKey = pairFleetKey.value.trim();
     if (!fleetKey) {
@@ -3257,7 +3254,7 @@ async function refreshEasyPairStatus(log = false) {
       }
     }
     if (pairStatus.value?.session?.state === 'complete') {
-      await refreshProvisionedSerialDeviceCaches('provisioning');
+      await refreshProvisionedSerialDeviceCaches();
     }
   } catch (e) {
     if (log) pushPairLog('Status refresh failed: ' + e);
@@ -3400,7 +3397,7 @@ async function saveEasyPairTargets() {
     pushPairLog('Provisioning complete.');
     await refreshGatewayStatusForPair();
     await refreshEasyPairStatus(false);
-    await refreshProvisionedSerialDeviceCaches('target save');
+    await refreshProvisionedSerialDeviceCaches();
   } catch (e) {
     pushPairLog('Saving target list failed: ' + e);
     notify('Saving target list failed: ' + e);
