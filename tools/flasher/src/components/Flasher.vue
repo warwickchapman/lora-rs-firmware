@@ -713,7 +713,7 @@ const fleetGatewayIsFactoryDefault = computed(() => {
 });
 const fleetGatewayFlashDisabled = computed(() =>
   !gatewaySelectedPort.value ||
-  isFlashing.value ||
+  fleetGatewayFlashPhase.value !== 'idle' ||
   isNetworkGatewayLoading.value ||
   isLoraInventoryScanning.value ||
   remoteOtaBusyAddress.value !== null ||
@@ -2728,7 +2728,7 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
 
 function fleetGatewayFlashUnavailableReason(): string {
   if (!gatewaySelectedPort.value) return 'Select a USB gateway first';
-  if (isFlashing.value) return 'Another flash is already running';
+  if (fleetGatewayFlashPhase.value !== 'idle') return 'Gateway flash is already running';
   if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
   if (isLoraInventoryScanning.value) return 'Stop the fleet scan before flashing the gateway';
   if (remoteOtaBusyAddress.value !== null) return 'Wait for the remote flash command to finish';
