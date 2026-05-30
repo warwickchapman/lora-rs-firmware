@@ -2030,11 +2030,21 @@ NodeStateMachine::ProvisioningDevice *NodeStateMachine::upsertProvisioningDevice
 
 uint8_t NodeStateMachine::preferredProvisionedAddressForChip(uint32_t chipId) const {
   if (chipId == 0) return 0;
+  // Check volatile in-memory cache first (populated during current session)
   for (size_t i = 0; i < kMaxPeers; ++i) {
     const ProvisionedAddressEntry &e = provisioned_addrs_[i];
     if (!e.in_use || e.chip_id != chipId) continue;
     if (e.assigned_address < kProvAddressMin || e.assigned_address > kProvAddressMax) return 0;
     return e.assigned_address;
+  }
+  // Fall back to persistent chip→address mapping from Settings
+  if (settings_ != nullptr) {
+    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+      if (settings_->known_peer_chip_ids[i] == chipId) {
+        const uint8_t addr = settings_->known_peer_addresses[i];
+        if (addr >= kProvAddressMin && addr <= kProvAddressMax) return addr;
+      }
+    }
   }
   return 0;
 }
