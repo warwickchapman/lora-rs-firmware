@@ -1444,6 +1444,50 @@ void SerialAdmin::handleRemoteSensorConfig(JsonDocument &doc) {
   sendOk(out);
 }
 
+void SerialAdmin::handleRemoteFleetKeyChange(JsonDocument &doc) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_fleet_key_change", "auth_failed", id);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_fleet_key_change", "runtime_unavailable", id);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_fleet_key_change", "invalid_address", id);
+    return;
+  }
+
+  const char *newKey = doc["fleet_passphrase"] | doc["new_fleet_passphrase"] | doc["fleet_key"] | "";
+  const size_t keyLen = strlen(newKey);
+  if (keyLen < kMinDeploymentKeyLen) {
+    sendError("remote_fleet_key_change", "fleet_passphrase_too_short", id);
+    return;
+  }
+  if (keyLen > 64) {
+    sendError("remote_fleet_key_change", "fleet_passphrase_too_long", id);
+    return;
+  }
+  if (isDefaultDeploymentKey(newKey)) {
+    sendError("remote_fleet_key_change", "fleet_passphrase_default_blocked", id);
+    return;
+  }
+
+  if (!sm_->sendPeerFleetKeyChange(static_cast<uint8_t>(rawAddr), String(newKey))) {
+    sendError("remote_fleet_key_change", "send_failed", id);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_fleet_key_change";
+  const char *reqId = requestId(doc);
+  if (reqId[0] != '\0') out["id"] = reqId;
+  out["target_address"] = rawAddr;
+  sendOk(out);
+}
+
 void SerialAdmin::handleRemoteFactoryReset(JsonDocument &doc) {
   const char *id = requestId(doc);
   if (!requireAdmin(doc)) {
@@ -1604,6 +1648,11 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
 
   if (strcmp(cmd, "remote_sensor_config") == 0) {
     handleRemoteSensorConfig(doc);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_fleet_key_change") == 0) {
+    handleRemoteFleetKeyChange(doc);
     return;
   }
 

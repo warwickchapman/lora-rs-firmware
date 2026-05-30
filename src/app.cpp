@@ -380,6 +380,28 @@ void App::tick() {
       }
     }
   }
+  {
+    String newFleetKey;
+    uint8_t keySrc = 0;
+    if (sm_.consumePendingFleetKeyChange(newFleetKey, keySrc)) {
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.fleet_passphrase != newFleetKey);
+      if (changed) {
+        cfg.fleet_passphrase = newFleetKey;
+        cfg.fleet_setup_prompt_dismissed = true;
+        if (config_.save()) {
+          lrslog::event("fleet_key_remote_exec_success", 0, keySrc, 0);
+          delay(200);
+          ESP.restart();
+          return;
+        } else {
+          lrslog::event("fleet_key_remote_exec_failed", 0, keySrc, 0);
+        }
+      } else {
+        lrslog::event("fleet_key_remote_exec_no_change", 0, keySrc, 0);
+      }
+    }
+  }
   const bool startupDeferNonEssential =
       !WiFi.isConnected() && (millis() < kStartupNonEssentialDeferralMs);
   if (startupDeferNonEssential) {

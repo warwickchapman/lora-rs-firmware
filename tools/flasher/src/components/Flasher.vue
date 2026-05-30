@@ -475,6 +475,7 @@ const isSerialAdminSaving = ref(false);
 const isSerialSystemAction = ref(false);
 const showSerialWifiPassword = ref(false);
 const showSerialMqttPassword = ref(false);
+const showSerialFleetKey = ref(false);
 const serialFactoryKeepFleet = ref(true);
 const serialFactoryKeepWifi = ref(true);
 
@@ -1191,7 +1192,9 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
 
     // Auto-probe the selected port immediately if it was just connected/re-connected
     if (selectedPort.value && newPorts.includes(selectedPort.value)) {
-      if (!isSelectedPortMonitoring.value) {
+      if (activeMode.value === 'pair') {
+        loadEasyPairGateway(true);
+      } else if (!isSelectedPortMonitoring.value) {
         readDeviceInfo();
       }
     }
@@ -2828,7 +2831,8 @@ async function loadSerialAdminConfig() {
       await probeSerialAdminSupport(port);
     }
     const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
-      admin_password: password
+      admin_password: password,
+      include_secrets: true
     }, 15000, { label: 'Fetch settings' });
     const state = serialDeviceState(port);
     if (state) {
@@ -3014,7 +3018,7 @@ async function factoryResetSerialDevice() {
   }
 }
 
-async function loadEasyPairGateway() {
+async function loadEasyPairGateway(isAuto = false) {
   const port = provisionSelectedPort.value;
   if (!port) return;
   isGatewayLoading.value = true;
@@ -3037,9 +3041,15 @@ async function loadEasyPairGateway() {
           include_secrets: true
         }, 15000);
         const retrievedKey = out.config?.fleet_passphrase?.trim() || '';
-        if (retrievedKey && retrievedKey !== 'lora-default-passphrase' && (out.config as any)?.fleet_passphrase_default === false) {
+        const isCommissioned = serialDeviceState(port)?.status?.commissioned;
+        const isDefaultKey = serialDeviceState(port)?.status?.fleet_passphrase_default;
+        
+        if (isCommissioned && retrievedKey && retrievedKey !== 'lora-default-passphrase' && isDefaultKey === false) {
           pairFleetKey.value = retrievedKey;
           pushPairLog(`Retrieved commissioned fleet key from gateway.`);
+        } else if (!isCommissioned || isDefaultKey === true) {
+          generatePairFleetKey(true);
+          pushPairLog('Gateway is uncommissioned; generated a new random fleet key.');
         } else {
           pushPairLog('Gateway has default or unconfigured fleet key.');
         }
@@ -3051,7 +3061,9 @@ async function loadEasyPairGateway() {
     const state = serialDeviceState(port);
     if (state) state.adminPassword = '';
     pushPairLog('Gateway check failed: ' + e);
-    notify('Gateway check failed: ' + e);
+    if (!isAuto) {
+      notify('Gateway check failed: ' + e);
+    }
   } finally {
     isGatewayLoading.value = false;
   }
@@ -3091,18 +3103,17 @@ async function configureEasyPairGateway() {
 async function runEasyPair() {
   const expected = Math.max(1, Math.min(12, Number(pairExpectedCount.value) || 12));
   pairExpectedCount.value = expected;
-  const fleetKey = pairFleetKey.value.trim();
-  if (!fleetKey) {
-    notify('Enter the fleet key before pairing');
-    return;
-  }
   isPairBusy.value = true;
   provisionCacheRefreshedChips.clear();
   pushPairLog('--- EasyPair ---');
   try {
-    if (!gatewayReady.value) {
-      await loadEasyPairGateway();
-      if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    // Always load gateway status/config before provisioning to ensure fleet key is fetched or generated correctly
+    await loadEasyPairGateway();
+    if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    
+    const fleetKey = pairFleetKey.value.trim();
+    if (!fleetKey) {
+      throw new Error('Fleet key is empty');
     }
     const password = pairPassword();
     await sendPairCommand('configure_gateway', {
@@ -3179,17 +3190,16 @@ function stopEasyPairStatusPolling() {
 }
 
 async function startEasyPairDiscovery() {
-  const fleetKey = pairFleetKey.value.trim();
-  if (!fleetKey) {
-    notify('Enter the fleet key before scanning');
-    return;
-  }
   isPairBusy.value = true;
   provisionCacheRefreshedChips.clear();
   try {
-    if (!gatewayReady.value) {
-      await loadEasyPairGateway();
-      if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    // Always load gateway status/config before discovery to ensure fleet key is fetched or generated correctly
+    await loadEasyPairGateway();
+    if (!gatewayReady.value) throw new Error('Unable to load gateway');
+    
+    const fleetKey = pairFleetKey.value.trim();
+    if (!fleetKey) {
+      throw new Error('Fleet key is empty');
     }
     const password = pairPassword();
     if (!password) throw new Error('gateway password unavailable');
@@ -3582,7 +3592,7 @@ async function readDeviceInfo() {
   return await readDeviceInfoForPort(port, activeMode.value || 'serial');
 }
 
-async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'network'): Promise<boolean> {
+async function readDeviceInfoForPort(port: string, _ownerMode: ActiveMode | 'network'): Promise<boolean> {
   const seq = (deviceInfoReadSeqByPort.value[port] || 0) + 1;
   deviceInfoReadSeqByPort.value = { ...deviceInfoReadSeqByPort.value, [port]: seq };
   isLoadingInfo.value = true;
@@ -3604,10 +3614,9 @@ async function readDeviceInfoForPort(port: string, ownerMode: ActiveMode | 'netw
       state.adminPassword = info.password || '';
     }
     pushSerialLog('Device info read successfully');
-    if (ownerMode === 'serial') {
-      await probeSerialAdminSupport(port);
-      await refreshFlashPortStatus(port);
-    }
+    // Probe serial admin support and refresh running status for all modes to ensure correct warnings are immediately shown on tabs
+    await probeSerialAdminSupport(port);
+    await refreshFlashPortStatus(port);
     return true;
   } catch (e) {
     if (deviceInfoReadSeqByPort.value[port] !== seq) {
@@ -3975,6 +3984,9 @@ watch(activeMode, (mode) => {
   if (selectedPort.value && !hasActiveDeviceInfo.value && !isSelectedPortMonitoring.value) {
     readDeviceInfo();
   }
+  if (mode === 'pair' && provisionSelectedPort.value) {
+    loadEasyPairGateway(true);
+  }
   if (mode !== 'monitor') stopMonitorPolling();
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
@@ -4006,12 +4018,15 @@ watch(selectedPort, (port) => {
   }
 });
 
-watch(provisionSelectedPort, () => {
+watch(provisionSelectedPort, (port) => {
   pairStatus.value = null;
+  saveTabPort('pair', port);
+  if (port) {
+    loadEasyPairGateway(true);
+  }
 });
 
 watch(flashSelectedPort, port => saveTabPort('serial', port));
-watch(provisionSelectedPort, port => saveTabPort('pair', port));
 watch(fleetSelectedPort, port => {
   saveTabPort('network', port);
   loraInventory.value = [];
@@ -4450,6 +4465,18 @@ function toggleSelectAllBulkPorts() {
           </div>
         </div>
 
+        <!-- Gateway Uncommissioned/Factory State Warning Callout -->
+        <div v-if="provisionSelectedPort && serialDeviceState(provisionSelectedPort)?.status && serialDeviceState(provisionSelectedPort)?.status?.role_tx && (!serialDeviceState(provisionSelectedPort)?.status?.commissioned || serialDeviceState(provisionSelectedPort)?.status?.fleet_passphrase_default)" class="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-cyan-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-cyan-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <div>
+            <span class="font-bold">Uncommissioned Gateway:</span> The gateway connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ provisionSelectedPort }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
+          </div>
+        </div>
+
         <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
           <div class="flex items-start justify-between gap-3">
             <div>
@@ -4475,7 +4502,7 @@ function toggleSelectAllBulkPorts() {
                 </svg>
               </button>
               <button
-                @click="loadEasyPairGateway"
+                @click="() => loadEasyPairGateway(false)"
                 :disabled="isGatewayLoading || isPairBusy || !selectedPort"
                 class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
               >
@@ -5125,6 +5152,13 @@ function toggleSelectAllBulkPorts() {
                 <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">Remote addr</label>
                 <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-9" />
+                <label class="self-center text-right font-semibold text-slate-300">Fleet key</label>
+                <div class="flex gap-2">
+                  <input v-model="serialAdminConfig.fleet_passphrase" :type="showSerialFleetKey ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Fleet key passphrase" />
+                  <button @click="showSerialFleetKey = !showSerialFleetKey" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
+                    {{ showSerialFleetKey ? 'Hide' : 'Show' }}
+                  </button>
+                </div>
                 <label class="self-center text-right font-semibold text-slate-300">Heartbeat sec</label>
                 <input :value="Math.round((serialAdminConfig.heartbeat_ms || 60000) / 1000)" @input="serialAdminConfig.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">Retry sec</label>

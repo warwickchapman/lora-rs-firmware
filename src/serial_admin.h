@@ -42,6 +42,7 @@ private:
   void handleRemoteOtaPull(JsonDocument &doc);
   void handleRemoteReboot(JsonDocument &doc);
   void handleRemoteSensorConfig(JsonDocument &doc);
+  void handleRemoteFleetKeyChange(JsonDocument &doc);
   void handleRemoteFactoryReset(JsonDocument &doc);
   void handleOtaPull(JsonDocument &doc);
 };

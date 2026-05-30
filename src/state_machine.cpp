@@ -1584,6 +1584,84 @@ uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
   return kWifiProvisionCooldownMs - elapsed;
 }
 
+bool NodeStateMachine::sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey) {
+  const size_t totalLen = static_cast<size_t>(newFleetKey.length());
+  if (totalLen < kMinDeploymentKeyLen || totalLen > 64) return false;
+
+  constexpr uint8_t kFleetKeyChunkDataBytes = 7;
+  const uint8_t totalChunks =
+      static_cast<uint8_t>((totalLen + (kFleetKeyChunkDataBytes - 1U)) / kFleetKeyChunkDataBytes);
+  if (totalChunks == 0 || totalChunks > 31U) return false;
+
+  uint8_t data[64]{};
+  for (size_t i = 0; i < totalLen; ++i) data[i] = static_cast<uint8_t>(newFleetKey[i]);
+  const uint32_t hash = fnv1a32(data, totalLen);
+
+  uint8_t transferId = static_cast<uint8_t>((millis() ^ last_counter_ ^ runtime_.local_address) & 0xFFU);
+  if (transferId == 0) transferId = 1;
+
+  uint8_t payload[12]{};
+  payload[0] = kFleetKeyControlOpStart;
+  payload[1] = transferId;
+  payload[3] = totalChunks;
+  payload[4] = static_cast<uint8_t>(totalLen);
+  payload[6] = static_cast<uint8_t>(hash & 0xFFU);
+  payload[7] = static_cast<uint8_t>((hash >> 8) & 0xFFU);
+  payload[8] = static_cast<uint8_t>((hash >> 16) & 0xFFU);
+  payload[9] = static_cast<uint8_t>((hash >> 24) & 0xFFU);
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::FleetKeyControl, last_counter_, runtime_.local_address, targetAddress, payload)) {
+    return false;
+  }
+
+  for (uint8_t idx = 0; idx < totalChunks; ++idx) {
+    memset(payload, 0, sizeof(payload));
+    payload[0] = kFleetKeyControlOpData;
+    payload[1] = transferId;
+    payload[2] = idx;
+    payload[3] = totalChunks;
+    const size_t offset = static_cast<size_t>(idx) * kFleetKeyChunkDataBytes;
+    size_t chunkLen = totalLen - offset;
+    if (chunkLen > kFleetKeyChunkDataBytes) chunkLen = kFleetKeyChunkDataBytes;
+    payload[4] = static_cast<uint8_t>(chunkLen);
+    memcpy(payload + 5, data + offset, chunkLen);
+
+    last_counter_++;
+    if (!radio_->sendRaw(MessageType::FleetKeyControl, last_counter_, runtime_.local_address, targetAddress, payload)) {
+      return false;
+    }
+  }
+
+  memset(payload, 0, sizeof(payload));
+  payload[0] = kFleetKeyControlOpCommit;
+  payload[1] = transferId;
+  payload[3] = totalChunks;
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::FleetKeyControl, last_counter_, runtime_.local_address, targetAddress, payload)) {
+    return false;
+  }
+
+  const uint32_t sentAt = millis();
+  last_tx_ms_ = sentAt;
+  markRadioTxSentThisTick();
+  lrslog::event("fleet_key_tx", 0, last_counter_, totalChunks);
+  return true;
+}
+
+bool NodeStateMachine::hasPendingFleetKeyChange() const { return fleet_key_pending_; }
+
+bool NodeStateMachine::consumePendingFleetKeyChange(String &newKey, uint8_t &src) {
+  if (!fleet_key_pending_) return false;
+  newKey = fleet_key_pending_key_;
+  src = fleet_key_pending_src_;
+  fleet_key_pending_ = false;
+  fleet_key_pending_key_ = "";
+  fleet_key_pending_src_ = 0;
+  return true;
+}
+
 bool NodeStateMachine::sendPeerReboot(uint8_t dstAddress) {
   if (!radioTxBudgetAvailable()) return false;
   if (!runtime_.role_tx) return false;
@@ -2857,12 +2935,13 @@ void NodeStateMachine::tickReceive() {
   }
   const bool isReboot = (msg.type == MessageType::Reboot);
   const bool isSensorConfig = (msg.type == MessageType::SensorConfig);
-  if ((isUdpLogControl || isOtaPullControl || isFactoryReset || isReboot || isSensorConfig) && msg.dst != runtime_.local_address) {
+  const bool isFleetKeyControl = (msg.type == MessageType::FleetKeyControl);
+  if ((isUdpLogControl || isOtaPullControl || isFactoryReset || isReboot || isSensorConfig || isFleetKeyControl) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
 
-  if (!isWifiProvision && !isUdpLogControl && !isOtaPullControl && runtime_.role_tx) {
+  if (!isWifiProvision && !isUdpLogControl && !isOtaPullControl && !isFleetKeyControl && runtime_.role_tx) {
     const bool fromPaired = isPairedTargetAddress(msg.src);
     const bool mqttStatus = (msg.type == MessageType::MqttStatus);
     const bool pollResponse = (msg.type == MessageType::PollResponse);
@@ -2903,6 +2982,8 @@ void NodeStateMachine::tickReceive() {
       // Same-key remote reboot.
     } else if (msg.type == MessageType::SensorConfig) {
       // Same-key remote sensor config.
+    } else if (msg.type == MessageType::FleetKeyControl) {
+      // Same-key targeted Fleet Key Control.
     } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;
@@ -2911,7 +2992,7 @@ void NodeStateMachine::tickReceive() {
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
                                                                   isOtaPullControl || isFactoryReset || isMaintenance ||
-                                                                  isReboot || isSensorConfig);
+                                                                  isReboot || isSensorConfig || isFleetKeyControl);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -2943,6 +3024,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isSensorConfig) {
     handleSensorConfigFrame(msg);
+    return;
+  }
+  if (isFleetKeyControl) {
+    handleFleetKeyControlFrame(msg);
     return;
   }
   if (msg.type == MessageType::MaintenanceStatus) {
@@ -3247,6 +3332,88 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
   }
 
   lrslog::event("wifi_prov_rx_unknown", msg.rssi, msg.counter, op);
+  return false;
+}
+
+bool NodeStateMachine::handleFleetKeyControlFrame(const ProtocolMessage &msg) {
+  const uint8_t op = msg.relay_state;
+  const uint8_t transferId = msg.input_state;
+  const uint8_t chunkIndex = msg.flags;
+  const uint8_t totalChunks = msg.temp_code;
+  const uint8_t valueLen = msg.sensor_mask;
+  uint8_t bytes[7]{};
+  fillProvisionPayloadBytes(msg, bytes);
+
+  if (op == kFleetKeyControlOpStart) {
+    const uint8_t keyLen = valueLen;
+    const uint32_t expectedHash = static_cast<uint32_t>(bytes[1]) | (static_cast<uint32_t>(bytes[2]) << 8) |
+                                  (static_cast<uint32_t>(bytes[3]) << 16) | (static_cast<uint32_t>(bytes[4]) << 24);
+    constexpr uint8_t kFleetKeyChunkDataBytes = 7;
+    const uint8_t expectedChunks =
+        static_cast<uint8_t>((keyLen + (kFleetKeyChunkDataBytes - 1U)) / kFleetKeyChunkDataBytes);
+    if (transferId == 0 || keyLen < kMinDeploymentKeyLen || keyLen > 64 ||
+        totalChunks == 0 || totalChunks > 31 || totalChunks != expectedChunks) {
+      fleet_key_rx_ = FleetKeyControlRxTransfer{};
+      lrslog::event("fleet_key_rx_bad_start", msg.rssi, msg.counter, op);
+      return false;
+    }
+    fleet_key_rx_ = FleetKeyControlRxTransfer{};
+    fleet_key_rx_.active = true;
+    fleet_key_rx_.src = msg.src;
+    fleet_key_rx_.transfer_id = transferId;
+    fleet_key_rx_.total_chunks = totalChunks;
+    fleet_key_rx_.key_len = keyLen;
+    fleet_key_rx_.expected_hash = expectedHash;
+    lrslog::event("fleet_key_rx_start", msg.rssi, msg.counter, totalChunks);
+    return true;
+  }
+
+  if (!fleet_key_rx_.active || fleet_key_rx_.src != msg.src || fleet_key_rx_.transfer_id != transferId ||
+      fleet_key_rx_.total_chunks != totalChunks) {
+    lrslog::event("fleet_key_rx_orphan", msg.rssi, msg.counter, op);
+    return false;
+  }
+
+  if (op == kFleetKeyControlOpData) {
+    constexpr uint8_t kFleetKeyChunkDataBytes = 7;
+    if (chunkIndex >= fleet_key_rx_.total_chunks || valueLen > kFleetKeyChunkDataBytes) {
+      lrslog::event("fleet_key_rx_bad_chunk", msg.rssi, msg.counter, chunkIndex);
+      return false;
+    }
+    const size_t offset = static_cast<size_t>(chunkIndex) * kFleetKeyChunkDataBytes;
+    if (offset >= fleet_key_rx_.key_len || (offset + valueLen) > fleet_key_rx_.key_len) {
+      lrslog::event("fleet_key_rx_bad_chunk", msg.rssi, msg.counter, chunkIndex);
+      return false;
+    }
+    memcpy(fleet_key_rx_.data + offset, bytes, valueLen);
+    fleet_key_rx_.received_bitmap |= (1UL << chunkIndex);
+    return true;
+  }
+
+  if (op == kFleetKeyControlOpCommit) {
+    const uint32_t wantBitmap = (1UL << fleet_key_rx_.total_chunks) - 1UL;
+    if ((fleet_key_rx_.received_bitmap & wantBitmap) != wantBitmap) {
+      lrslog::event("fleet_key_rx_incomplete", msg.rssi, msg.counter, fleet_key_rx_.total_chunks);
+      fleet_key_rx_ = FleetKeyControlRxTransfer{};
+      return false;
+    }
+    const uint32_t gotHash = fnv1a32(fleet_key_rx_.data, fleet_key_rx_.key_len);
+    if (gotHash != fleet_key_rx_.expected_hash) {
+      lrslog::event("fleet_key_rx_hash_fail", msg.rssi, msg.counter, 0);
+      fleet_key_rx_ = FleetKeyControlRxTransfer{};
+      return false;
+    }
+    char keyBuf[65]{};
+    memcpy(keyBuf, fleet_key_rx_.data, fleet_key_rx_.key_len);
+    fleet_key_pending_key_ = String(keyBuf);
+    fleet_key_pending_src_ = fleet_key_rx_.src;
+    fleet_key_pending_ = (fleet_key_pending_key_.length() > 0);
+    lrslog::event("fleet_key_rx_ready", msg.rssi, msg.counter, fleet_key_rx_.total_chunks);
+    fleet_key_rx_ = FleetKeyControlRxTransfer{};
+    return fleet_key_pending_;
+  }
+
+  lrslog::event("fleet_key_rx_unknown", msg.rssi, msg.counter, op);
   return false;
 }
 

@@ -22,6 +22,7 @@ enum class MessageType : uint8_t {
   Provisioning = 'V',
   Reboot = 'B',
   SensorConfig = 'K',
+  FleetKeyControl = 'Z',
 };
 
 struct ProtocolMessage {

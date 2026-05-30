@@ -236,6 +236,9 @@ class NodeStateMachine {
   bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled);
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials);
   bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
+  bool sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey);
+  bool hasPendingFleetKeyChange() const;
+  bool consumePendingFleetKeyChange(String &newKey, uint8_t &src);
   bool provisioningStartDiscovery(uint16_t estimatedCount);
   bool provisioningStartProvisionAll();
   void provisioningCancel();
@@ -468,6 +471,21 @@ class NodeStateMachine {
   String wifi_prov_pending_ssid_;
   String wifi_prov_pending_password_;
   uint8_t wifi_prov_pending_src_ = 0;
+
+  struct FleetKeyControlRxTransfer {
+    bool active = false;
+    uint8_t src = 0;
+    uint8_t transfer_id = 0;
+    uint8_t total_chunks = 0;
+    uint8_t key_len = 0;
+    uint32_t expected_hash = 0;
+    uint32_t received_bitmap = 0;
+    uint8_t data[64]{};
+  };
+  FleetKeyControlRxTransfer fleet_key_rx_{};
+  bool fleet_key_pending_ = false;
+  String fleet_key_pending_key_;
+  uint8_t fleet_key_pending_src_ = 0;
   bool wifi_control_pending_ = false;
   bool wifi_control_pending_enabled_ = true;
   uint8_t wifi_control_pending_src_ = 0;
@@ -644,6 +662,7 @@ class NodeStateMachine {
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleRebootFrame(const ProtocolMessage &msg);
   bool handleSensorConfigFrame(const ProtocolMessage &msg);
+  bool handleFleetKeyControlFrame(const ProtocolMessage &msg);
   bool handleProvisioningFrame(const ProtocolMessage &msg);
   bool isAuthorizedMqttController(uint8_t src) const;
   bool isAuthorizedPairedSource(uint8_t src) const;
