@@ -1769,7 +1769,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     sensor_tank_vref_mv: numberValue(cfg.sensor_tank_vref_mv, 3553),
     sensor_tank_sense_ohms: numberValue(cfg.sensor_tank_sense_ohms, 120),
     sensor_tank_interval_s: numberValue(cfg.sensor_tank_interval_s, 5),
-    fleet_passphrase: '',
+    fleet_passphrase: stringValue(cfg.fleet_passphrase, ''),
     admin_password: ''
   };
 }
@@ -3641,6 +3641,7 @@ async function sendWifiToRemotes() {
 
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
+  if (isLoadingInfo.value) return; // Prevent concurrent reads
   const port = selectedPort.value;
   return await readDeviceInfoForPort(port, activeMode.value || 'serial');
 }
