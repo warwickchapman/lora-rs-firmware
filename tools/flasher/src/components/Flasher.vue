@@ -355,6 +355,7 @@ const isBulkResetting = ref(false);
 const bulkSelectedPorts = ref<string[]>([]);
 const bulkMode = ref(false);
 const bulkShowLogsByPort = ref<Record<string, boolean>>({});
+const bulkLogRefs = ref<Record<string, HTMLElement>>({});
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
 const isFirmwareServerStarting = ref(false);
@@ -988,6 +989,12 @@ function pushSerialLogForPort(port: string, line: string) {
         state.flashProgress = mapped;
       }
     }
+
+    // Auto-scroll the bulk console drawer to the latest line
+    nextTick(() => {
+      const el = bulkLogRefs.value[port];
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }
   if (port === selectedPort.value) {
     pushSerialLog(line);
@@ -4400,7 +4407,7 @@ function toggleSelectAllBulkPorts() {
               </div>
 
               <!-- Expandable console terminal drawer -->
-              <div v-if="bulkShowLogsByPort[port]" class="mt-1 bg-slate-950/60 border border-slate-800 rounded p-2 max-h-36 overflow-auto font-mono text-[9px] text-slate-400 custom-scrollbar leading-tight whitespace-pre pr-2">
+              <div v-if="bulkShowLogsByPort[port]" :ref="(el: any) => { if (el) bulkLogRefs[port] = el as HTMLElement }" class="mt-1 bg-slate-950/60 border border-slate-800 rounded p-2 max-h-36 overflow-auto font-mono text-[9px] text-slate-400 custom-scrollbar leading-tight whitespace-pre pr-2">
                 <div v-for="(log, idx) in serialDeviceState(port)?.flashLogs" :key="idx" class="border-l border-slate-800 pl-1.5 py-0.5">
                   {{ log }}
                 </div>
