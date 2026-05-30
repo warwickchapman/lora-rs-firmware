@@ -318,23 +318,20 @@ const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
 
 const ports = ref<SerialPort[]>([]);
 const flashSelectedPort = ref('');
-const provisionSelectedPort = ref('');
-const fleetSelectedPort = ref('');
+const gatewaySelectedPort = ref('');
 const monitorSelectedPort = ref('');
 const settingsSelectedPort = ref('');
 const selectedPort = computed<string>({
   get() {
-    if (activeMode.value === 'pair') return provisionSelectedPort.value;
-    if (activeMode.value === 'network') return fleetSelectedPort.value;
+    if (activeMode.value === 'pair') return gatewaySelectedPort.value;
+    if (activeMode.value === 'network') return gatewaySelectedPort.value;
     if (activeMode.value === 'monitor') return monitorSelectedPort.value;
     if (activeMode.value === 'settings') return settingsSelectedPort.value;
     return flashSelectedPort.value;
   },
   set(port) {
-    if (activeMode.value === 'pair') {
-      provisionSelectedPort.value = port;
-    } else if (activeMode.value === 'network') {
-      fleetSelectedPort.value = port;
+    if (activeMode.value === 'pair' || activeMode.value === 'network') {
+      gatewaySelectedPort.value = port;
     } else if (activeMode.value === 'monitor') {
       monitorSelectedPort.value = port;
     } else if (activeMode.value === 'settings') {
@@ -582,18 +579,18 @@ const deviceInfo = computed<DeviceInfo | null>({
 });
 const pairAdminPassword = computed<string>({
   get: () => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(gatewaySelectedPort.value);
     return state?.adminPassword || state?.deviceInfo?.password?.trim() || '';
   },
   set: (password) => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(gatewaySelectedPort.value);
     if (state) state.adminPassword = password;
   }
 });
 const wifiNetworks = computed<WifiNetwork[]>({
-  get: () => serialDeviceState(provisionSelectedPort.value)?.wifiNetworks || [],
+  get: () => serialDeviceState(gatewaySelectedPort.value)?.wifiNetworks || [],
   set: (networks) => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(gatewaySelectedPort.value);
     if (state) state.wifiNetworks = networks;
   }
 });
@@ -605,9 +602,9 @@ const settingsWifiNetworks = computed<WifiNetwork[]>({
   }
 });
 const pairWifiSsid = computed<string>({
-  get: () => serialDeviceState(provisionSelectedPort.value)?.wifiSsid || '',
+  get: () => serialDeviceState(gatewaySelectedPort.value)?.wifiSsid || '',
   set: (ssid) => {
-    const state = serialDeviceState(provisionSelectedPort.value);
+    const state = serialDeviceState(gatewaySelectedPort.value);
     if (state) state.wifiSsid = ssid;
   }
 });
@@ -664,7 +661,7 @@ const monitorContextLabel = computed(() => {
 });
 const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
 const pairDiscoveredDeviceCount = computed(() => pairStatus.value?.devices?.length || 0);
-const fleetGatewayDevice = computed(() => serialDeviceState(fleetSelectedPort.value));
+const fleetGatewayDevice = computed(() => serialDeviceState(gatewaySelectedPort.value));
 const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
 const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
 
@@ -705,17 +702,17 @@ const isGatewayUpgradeAvailable = computed(() => {
   return p1.dev > p2.dev;
 });
 const fleetGatewayReady = computed(() =>
-  !!fleetSelectedPort.value &&
+  !!gatewaySelectedPort.value &&
   !!fleetGatewayIdentity.value &&
   !!fleetGatewayDevice.value?.adminSupported &&
-  !!adminPasswordForPort(fleetSelectedPort.value)
+  !!adminPasswordForPort(gatewaySelectedPort.value)
 );
 const fleetGatewayIsFactoryDefault = computed(() => {
   const st = fleetGatewayStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
 });
 const fleetGatewayFlashDisabled = computed(() =>
-  !fleetSelectedPort.value ||
+  !gatewaySelectedPort.value ||
   isFlashing.value ||
   isNetworkGatewayLoading.value ||
   isLoraInventoryScanning.value ||
@@ -731,9 +728,9 @@ const loraInventoryProgressLabel = computed(() => {
   return `Scanning ${next}-${scan.end_address || LRS_REMOTE_SCAN_CAP}, ${scan.sent || 0} probes sent`;
 });
 const gatewayReady = computed(() =>
-  !!provisionSelectedPort.value &&
-  !!serialDeviceState(provisionSelectedPort.value)?.deviceInfo &&
-  !!serialDeviceState(provisionSelectedPort.value)?.adminSupported &&
+  !!gatewaySelectedPort.value &&
+  !!serialDeviceState(gatewaySelectedPort.value)?.deviceInfo &&
+  !!serialDeviceState(gatewaySelectedPort.value)?.adminSupported &&
   !!pairPassword()
 );
 function portGatewayReady(port: string): boolean {
@@ -742,7 +739,7 @@ function portGatewayReady(port: string): boolean {
 }
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
 const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
-const pairAdvancedStartDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !provisionSelectedPort.value);
+const pairAdvancedStartDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewaySelectedPort.value);
 const activeSerialAdminPasswordValue = computed(() =>
   activeMode.value === 'pair' ? pairPassword() : deviceInfo.value?.password?.trim() || ''
 );
@@ -882,16 +879,16 @@ const fleetForceScanLabel = computed(() => {
   return remaining > 0 ? `Force Scan ${remaining}s` : 'Force Scan';
 });
 const gatewayWifiReady = computed(() =>
-  !!provisionSelectedPort.value &&
-  serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
-  !!serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadyIp
+  !!gatewaySelectedPort.value &&
+  serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
+  !!serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadyIp
 );
 const pairWifiSsidInScan = computed(() =>
   !!pairWifiSsid.value.trim() &&
   wifiNetworks.value.some(n => n.ssid === pairWifiSsid.value.trim())
 );
 const gatewayWifiStatusText = computed(() => {
-  if (gatewayWifiReady.value) return `Gateway connected at ${serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadyIp}`;
+  if (gatewayWifiReady.value) return `Gateway connected at ${serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadyIp}`;
   return 'Connect the gateway before sending credentials to remotes.';
 });
 const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkUdpMonitoring.value || isFirmwareServerStarting.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
@@ -1277,8 +1274,8 @@ function reconcileTabPortSelections(currentNames: string[], newPorts: string[], 
   };
 
   flashSelectedPort.value = ensureSelection(flashSelectedPort.value, activeMode.value === 'serial');
-  provisionSelectedPort.value = ensureSelection(provisionSelectedPort.value, activeMode.value === 'pair');
-  fleetSelectedPort.value = ensureSelection(fleetSelectedPort.value, activeMode.value === 'network');
+  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'pair');
+  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'network');
   monitorSelectedPort.value = ensureSelection(monitorSelectedPort.value, activeMode.value === 'monitor');
   settingsSelectedPort.value = ensureSelection(settingsSelectedPort.value, activeMode.value === 'settings');
 }
@@ -1329,8 +1326,8 @@ function chooseDefaultPort(portNames: string[]): string {
 function loadSavedTabPorts() {
   try {
     flashSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.serial) || flashSelectedPort.value;
-    provisionSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || provisionSelectedPort.value;
-    fleetSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || fleetSelectedPort.value;
+    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || gatewaySelectedPort.value;
+    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || gatewaySelectedPort.value;
     monitorSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.monitor) || monitorSelectedPort.value;
     settingsSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.settings) || settingsSelectedPort.value;
   } catch {
@@ -1602,7 +1599,7 @@ async function stopFirmwareServer() {
 }
 
 function pairPassword(): string {
-  return adminPasswordForPort(provisionSelectedPort.value);
+  return adminPasswordForPort(gatewaySelectedPort.value);
 }
 
 function adminPasswordForPort(port: string): string {
@@ -1650,7 +1647,7 @@ async function refreshProvisionedSerialDeviceCaches() {
   if (pendingChips.length === 0) return;
 
   for (const [port, state] of Object.entries(serialDevicesByPort.value)) {
-    if (port === provisionSelectedPort.value) continue;
+    if (port === gatewaySelectedPort.value) continue;
     const chip = normalizeChipId(state.deviceInfo?.chip_id || state.status?.chip_id);
     if (!chip || !pendingChips.includes(chip)) continue;
 
@@ -1672,7 +1669,7 @@ async function refreshProvisionedSerialDeviceCaches() {
 }
 
 async function sendPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
-  return sendEasyPairCommandOnPort<T>(provisionSelectedPort.value, cmd, payload, timeoutMs, options);
+  return sendEasyPairCommandOnPort<T>(gatewaySelectedPort.value, cmd, payload, timeoutMs, options);
 }
 
 function noteMonitorReleasedForPort(port: string, reason: string) {
@@ -1835,7 +1832,7 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
 }
 
 async function loadNetworkGateway() {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   if (!port || isNetworkGatewayLoading.value) return;
   isNetworkGatewayLoading.value = true;
   try {
@@ -1857,8 +1854,8 @@ async function loadNetworkGateway() {
       loraInventory.value = [];
       loraInventoryScan.value = null;
       isLoraInventoryScanning.value = false;
-      if (fleetSelectedPort.value === port) {
-        fleetSelectedPort.value = '';
+      if (gatewaySelectedPort.value === port) {
+        gatewaySelectedPort.value = '';
       }
       return;
     }
@@ -1945,13 +1942,13 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
     .slice()
     .sort((a, b) => a.address - b.address)
     .map(row => classifyFleetRow({ ...row, selected: selected.has(row.address) }, now));
-  if (fleetSelectedPort.value && fleetSelectedPort.value === monitorSelectedPort.value) {
+  if (gatewaySelectedPort.value && gatewaySelectedPort.value === monitorSelectedPort.value) {
     mergeMonitorPeerRows(rows);
   }
 }
 
 async function refreshLoraInventoryStatus(background = true) {
-  await refreshGatewaySnapshot(fleetSelectedPort.value, background, 'fleet');
+  await refreshGatewaySnapshot(gatewaySelectedPort.value, background, 'fleet');
 }
 
 function startLoraInventoryPolling() {
@@ -1963,7 +1960,7 @@ function startLoraInventoryPolling() {
 }
 
 function startFleetCachePolling() {
-  if (activeMode.value !== 'network' || !fleetSelectedPort.value || isLoraInventoryScanning.value) return;
+  if (activeMode.value !== 'network' || !gatewaySelectedPort.value || isLoraInventoryScanning.value) return;
   if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
   stopLoraInventoryPolling(false, false);
   networkInventoryPollMode.value = 'cache';
@@ -2134,8 +2131,8 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
         loraInventoryScan.value = null;
         isLoraInventoryScanning.value = false;
         stopLoraInventoryPolling(false);
-        if (fleetSelectedPort.value === port) {
-          fleetSelectedPort.value = '';
+        if (gatewaySelectedPort.value === port) {
+          gatewaySelectedPort.value = '';
         }
       } else {
         monitorStatusMessage.value = gatewayRequiredMessage('Monitor');
@@ -2157,7 +2154,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       { label: 'Gateway peer cache snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
 
-    if (port === fleetSelectedPort.value) {
+    if (port === gatewaySelectedPort.value) {
       loraInventoryScan.value = inventory.scan || null;
       mergeLoraInventoryRows(inventory.devices || []);
       isLoraInventoryScanning.value = !!inventory.scan?.active;
@@ -2193,7 +2190,7 @@ async function withGatewayForeground<T>(port: string, work: () => Promise<T>): P
     if (resumeMonitorLoop && monitorAutoRefresh.value && monitorSelectedPort.value === port) {
       startMonitorPolling();
     }
-    if (activeMode.value === 'network' && fleetSelectedPort.value === port && !isLoraInventoryScanning.value) {
+    if (activeMode.value === 'network' && gatewaySelectedPort.value === port && !isLoraInventoryScanning.value) {
       startFleetCachePolling();
     }
   }
@@ -2243,7 +2240,7 @@ function toggleMonitorMqttConnection() {
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const state = serialDeviceState(port);
   if (!force && state?.status) return state.status;
   try {
@@ -2284,7 +2281,7 @@ function fleetScanErrorMessage(err: unknown): string {
 }
 
 async function startLoraInventoryScan() {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   if (!port) {
     notify('Select the USB gateway first');
     return;
@@ -2334,7 +2331,7 @@ async function beginLoraInventoryScan(port: string, showErrors = true) {
 }
 
 async function cancelLoraInventoryScan() {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2424,7 +2421,7 @@ async function refreshFleetOtaFollowup(address: number) {
     return;
   }
   try {
-    const port = fleetSelectedPort.value;
+    const port = gatewaySelectedPort.value;
     const password = adminPasswordForPort(port);
     if (!password) throw new Error('missing gateway password');
     await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
@@ -2460,7 +2457,7 @@ function startFleetOtaFollowup(device: LoraInventoryDevice) {
 
 async function startFleetUdpLogs(device: LoraInventoryDevice) {
   if (remoteUdpBusyAddress.value != null) return;
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2503,7 +2500,7 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
 
 async function flashLoraRemote(device: LoraInventoryDevice) {
   if (remoteOtaBusyAddress.value != null) return;
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2566,7 +2563,7 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
 }
 
 async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, password_value: string) {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2590,7 +2587,7 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
 
 
 async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean) {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2614,7 +2611,7 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
 
 async function executeRemoteReboot(device: LoraInventoryDevice) {
   activeDropdownAddress.value = null;
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2646,7 +2643,7 @@ function openFactoryResetModal(device: LoraInventoryDevice) {
 }
 
 async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet: boolean, keepWifi: boolean) {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2673,7 +2670,7 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
 
 
 async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: string) {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
     notify('Enter the gateway admin password');
@@ -2706,7 +2703,7 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
 }
 
 function fleetGatewayFlashUnavailableReason(): string {
-  if (!fleetSelectedPort.value) return 'Select a USB gateway first';
+  if (!gatewaySelectedPort.value) return 'Select a USB gateway first';
   if (isFlashing.value) return 'Another flash is already running';
   if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
   if (isLoraInventoryScanning.value) return 'Stop the fleet scan before flashing the gateway';
@@ -2717,7 +2714,7 @@ function fleetGatewayFlashUnavailableReason(): string {
 }
 
 async function flashFleetGateway() {
-  const port = fleetSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   if (!port) {
     notify('Select a USB gateway first');
     return;
@@ -3118,7 +3115,7 @@ async function factoryResetSerialDevice() {
 let loadGatewayInFlight = false;
 async function loadEasyPairGateway(isAuto = false) {
   if (activeMode.value !== 'pair') return;
-  const port = provisionSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   if (!port) return;
   // Prevent concurrent calls from multiple watchers firing on startup
   if (loadGatewayInFlight) return;
@@ -3517,13 +3514,13 @@ async function scanSettingsWifi() {
 
 async function openPairWifiTab() {
   pairPanelTab.value = 'wifi';
-  if (!provisionSelectedPort.value || isGatewayLoading.value || isWifiScanning.value) {
+  if (!gatewaySelectedPort.value || isGatewayLoading.value || isWifiScanning.value) {
     return;
   }
   if (gatewayWifiReady.value) {
     return;
   }
-  if (serialDeviceState(provisionSelectedPort.value)?.wifiScanned && wifiNetworks.value.length > 0) {
+  if (serialDeviceState(gatewaySelectedPort.value)?.wifiScanned && wifiNetworks.value.length > 0) {
     return;
   }
   if (gatewayReady.value && await refreshGatewayStatusForPair()) {
@@ -3533,7 +3530,7 @@ async function openPairWifiTab() {
 }
 
 function clearGatewayWifiReady() {
-  const state = serialDeviceState(provisionSelectedPort.value);
+  const state = serialDeviceState(gatewaySelectedPort.value);
   if (!state) return;
   state.gatewayWifiReadySsid = '';
   state.gatewayWifiReadyIp = '';
@@ -3564,7 +3561,7 @@ function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.
     return false;
   }
 
-  if (port === provisionSelectedPort.value) pairWifiSsid.value = ssid;
+  if (port === gatewaySelectedPort.value) pairWifiSsid.value = ssid;
   const state = serialDeviceState(port);
   if (!state) return false;
   state.gatewayWifiReadySsid = ssid;
@@ -3573,7 +3570,7 @@ function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.
 }
 
 async function refreshGatewayStatusForPair(): Promise<boolean> {
-  const port = provisionSelectedPort.value;
+  const port = gatewaySelectedPort.value;
   if (!port) return false;
   try {
     const status = await sendPairCommand<SerialAdminStatus>('status', {}, 5000);
@@ -3615,7 +3612,7 @@ async function waitForGatewayWifiConnection(ssid: string, attemptId: number, tim
     const wifiIp = wifi?.ip?.trim() || '';
     const wifiSsid = wifi?.sta_ssid?.trim() || '';
     if ((wifi?.sta_connected || wifiStatus === 'connected') && wifiSsid === ssid && wifiIp && wifiIp !== '0.0.0.0') {
-      applySerialAdminStatus(out, provisionSelectedPort.value);
+      applySerialAdminStatus(out, gatewaySelectedPort.value);
       return out;
     }
     const label = wifi?.status || 'connecting';
@@ -3653,7 +3650,7 @@ async function connectGatewayWifi() {
       state.gatewayWifiReadySsid = ssid;
       state.gatewayWifiReadyIp = status.wifi?.ip || '';
     }
-    pushPairLog(`Gateway connected to ${ssid} at ${serialDeviceState(provisionSelectedPort.value)?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
+    pushPairLog(`Gateway connected to ${ssid} at ${serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
   } catch (e) {
     if (String(e).includes('gateway_wifi_cancelled')) return;
     const msg = serialFeatureError('WiFi save', e);
@@ -4098,14 +4095,14 @@ watch(activeMode, (mode) => {
   syncDeviceInfoForSelectedPort();
   // Note: readDeviceInfo() is NOT called here — the watch(selectedPort) watcher handles it
   // when the computed selectedPort changes due to the mode switch.
-  if (mode === 'pair' && provisionSelectedPort.value) {
+  if (mode === 'pair' && gatewaySelectedPort.value) {
     loadEasyPairGateway(true);
   }
   if (mode !== 'monitor') stopMonitorPolling();
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
   } else if (selectedPort.value) {
-    if (portGatewayReady(fleetSelectedPort.value)) {
+    if (portGatewayReady(gatewaySelectedPort.value)) {
       refreshLoraInventoryStatus(false).finally(() => startFleetCachePolling());
     } else {
       loadNetworkGateway();
@@ -4131,7 +4128,7 @@ watch(selectedPort, (port) => {
   }
 });
 
-watch(provisionSelectedPort, (port) => {
+watch(gatewaySelectedPort, (port) => {
   pairStatus.value = null;
   saveTabPort('pair', port);
   if (port && activeMode.value === 'pair') {
@@ -4140,7 +4137,7 @@ watch(provisionSelectedPort, (port) => {
 });
 
 watch(flashSelectedPort, port => saveTabPort('serial', port));
-watch(fleetSelectedPort, port => {
+watch(gatewaySelectedPort, port => {
   saveTabPort('network', port);
   loraInventory.value = [];
   loraInventoryScan.value = null;
@@ -4569,24 +4566,24 @@ function toggleSelectAllBulkPorts() {
 
       <div v-if="activeMode === 'pair'" class="flex flex-col gap-3 h-full overflow-hidden">
         <!-- Gateway Device Validation Warning Callout -->
-        <div v-if="provisionSelectedPort && serialDeviceState(provisionSelectedPort)?.status && !serialDeviceState(provisionSelectedPort)?.status?.role_tx" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+        <div v-if="gatewaySelectedPort && serialDeviceState(gatewaySelectedPort)?.status && !serialDeviceState(gatewaySelectedPort)?.status?.role_tx" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
           <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div>
-            <span class="font-bold">Gateway Device Required:</span> The device currently connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ provisionSelectedPort }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Please connect a gateway device instead.
+            <span class="font-bold">Gateway Device Required:</span> The device currently connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewaySelectedPort }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Please connect a gateway device instead.
           </div>
         </div>
 
         <!-- Gateway Uncommissioned/Factory State Warning Callout -->
-        <div v-if="provisionSelectedPort && serialDeviceState(provisionSelectedPort)?.status && serialDeviceState(provisionSelectedPort)?.status?.role_tx && (!serialDeviceState(provisionSelectedPort)?.status?.commissioned || serialDeviceState(provisionSelectedPort)?.status?.fleet_passphrase_default)" class="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-cyan-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+        <div v-if="gatewaySelectedPort && serialDeviceState(gatewaySelectedPort)?.status && serialDeviceState(gatewaySelectedPort)?.status?.role_tx && (!serialDeviceState(gatewaySelectedPort)?.status?.commissioned || serialDeviceState(gatewaySelectedPort)?.status?.fleet_passphrase_default)" class="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-cyan-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
           <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-cyan-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
           <div>
-            <span class="font-bold">Uncommissioned Gateway:</span> The gateway connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ provisionSelectedPort }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
+            <span class="font-bold">Uncommissioned Gateway:</span> The gateway connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewaySelectedPort }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
           </div>
         </div>
 
@@ -5982,7 +5979,6 @@ function toggleSelectAllBulkPorts() {
                   <th class="px-2 py-1.5 text-left font-semibold">Temp</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Tank</th>
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">MQTT</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Heap</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Frag</th>
@@ -5992,7 +5988,7 @@ function toggleSelectAllBulkPorts() {
               </thead>
               <tbody>
                 <tr v-if="monitorFleetRows.length === 0">
-                  <td colspan="16" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
+                  <td colspan="15" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
                 </tr>
                 <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
@@ -6010,7 +6006,6 @@ function toggleSelectAllBulkPorts() {
                     <div v-if="tankDetailLabel(device)" class="mt-0.5 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
                   </td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known && device.mqtt_enabled ? (device.mqtt_connected ? 'Online' : 'Offline') : '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorHeapLabel(device) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorFragLabel(device) }}</td>
@@ -6084,7 +6079,7 @@ function toggleSelectAllBulkPorts() {
 
       <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-3">
         <!-- Gateway Device Validation Warning Callout -->
-        <div v-if="fleetSelectedPort && serialDeviceState(fleetSelectedPort)?.status && !serialDeviceState(fleetSelectedPort)?.status?.role_tx" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+        <div v-if="gatewaySelectedPort && serialDeviceState(gatewaySelectedPort)?.status && !serialDeviceState(gatewaySelectedPort)?.status?.role_tx" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
           <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
@@ -6258,7 +6253,6 @@ function toggleSelectAllBulkPorts() {
                   <th class="px-2 py-1.5 text-left font-semibold">Role</th>
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
                   <th class="px-2 py-1.5 text-left font-semibold">IP</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">MQTT</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
@@ -6268,7 +6262,7 @@ function toggleSelectAllBulkPorts() {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
+                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -6290,7 +6284,6 @@ function toggleSelectAllBulkPorts() {
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.mqtt_known && device.mqtt_enabled ? (device.mqtt_connected ? 'Online' : 'Offline') : '-' }}</td>
                   <td class="px-2 py-1.5">
                     <div class="text-slate-300">{{ fleetSensorsLabel(device) }}</div>
                     <div v-if="tankDetailLabel(device)" class="mt-1 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
