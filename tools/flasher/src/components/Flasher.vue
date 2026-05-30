@@ -738,8 +738,6 @@ function portGatewayReady(port: string): boolean {
   return !!port && !!state?.deviceInfo && !!state.adminSupported && !!adminPasswordForPort(port);
 }
 const pairPrimaryDisabled = computed(() => isPairBusy.value || !selectedPort.value);
-const pairControlsDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewayReady.value);
-const pairAdvancedStartDisabled = computed(() => isPairBusy.value || isGatewayLoading.value || !gatewaySelectedPort.value);
 const activeSerialAdminPasswordValue = computed(() =>
   activeMode.value === 'pair' ? pairPassword() : deviceInfo.value?.password?.trim() || ''
 );
@@ -1274,8 +1272,7 @@ function reconcileTabPortSelections(currentNames: string[], newPorts: string[], 
   };
 
   flashSelectedPort.value = ensureSelection(flashSelectedPort.value, activeMode.value === 'serial');
-  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'pair');
-  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'network');
+  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'pair' || activeMode.value === 'network');
   monitorSelectedPort.value = ensureSelection(monitorSelectedPort.value, activeMode.value === 'monitor');
   settingsSelectedPort.value = ensureSelection(settingsSelectedPort.value, activeMode.value === 'settings');
 }
@@ -1326,8 +1323,7 @@ function chooseDefaultPort(portNames: string[]): string {
 function loadSavedTabPorts() {
   try {
     flashSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.serial) || flashSelectedPort.value;
-    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || gatewaySelectedPort.value;
-    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || gatewaySelectedPort.value;
+    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || gatewaySelectedPort.value;
     monitorSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.monitor) || monitorSelectedPort.value;
     settingsSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.settings) || settingsSelectedPort.value;
   } catch {
@@ -3169,36 +3165,7 @@ async function loadEasyPairGateway(isAuto = false) {
   }
 }
 
-async function configureEasyPairGateway() {
-  const fleetKey = pairFleetKey.value.trim();
-  if (!fleetKey) {
-    notify('Enter the fleet key before pairing');
-    return;
-  }
-  await loadEasyPairGateway();
-  if (!gatewayReady.value) return;
-  const password = pairPassword();
-  if (!password) {
-    notify('Load the gateway factory password first');
-    return;
-  }
-  isPairBusy.value = true;
-  pushPairLog('Configuring selected USB device as gateway...');
-  try {
-    await sendPairCommand('configure_gateway', {
-      admin_password: password,
-      fleet_passphrase: fleetKey,
-      expected_remotes: pairExpectedCount.value
-    }, 10000);
-    pushPairLog(`Gateway configured for up to ${pairExpectedCount.value} remote device${pairExpectedCount.value === 1 ? '' : 's'}.`);
-    await refreshGatewayStatusForPair();
-  } catch (e) {
-    pushPairLog('Gateway configuration failed: ' + e);
-    notify('Gateway configuration failed: ' + e);
-  } finally {
-    isPairBusy.value = false;
-  }
-}
+
 
 async function runEasyPair() {
   const expected = Math.max(1, Math.min(12, Number(pairExpectedCount.value) || 12));
@@ -3325,26 +3292,7 @@ async function startEasyPairDiscovery() {
   }
 }
 
-async function provisionEasyPairDevices() {
-  const password = pairPassword();
-  if (!password) {
-    notify('Load the gateway factory password first');
-    return;
-  }
-  isPairBusy.value = true;
-  provisionCacheRefreshedChips.clear();
-  pushPairLog('Provisioning discovered remotes...');
-  try {
-    await sendPairCommand('provision_all', { admin_password: password }, 10000);
-    startEasyPairStatusPolling();
-    await refreshEasyPairStatus(true);
-  } catch (e) {
-    pushPairLog('Provisioning failed: ' + e);
-    notify('Provisioning failed: ' + e);
-  } finally {
-    isPairBusy.value = false;
-  }
-}
+
 
 async function loadGatewayTargetAddresses(password: string): Promise<number[]> {
   const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
@@ -4129,15 +4077,13 @@ watch(selectedPort, (port) => {
 });
 
 watch(gatewaySelectedPort, (port) => {
+  // Provisioning side-effects
   pairStatus.value = null;
   saveTabPort('pair', port);
   if (port && activeMode.value === 'pair') {
     loadEasyPairGateway(true);
   }
-});
-
-watch(flashSelectedPort, port => saveTabPort('serial', port));
-watch(gatewaySelectedPort, port => {
+  // Fleet side-effects
   saveTabPort('network', port);
   loraInventory.value = [];
   loraInventoryScan.value = null;
@@ -4147,6 +4093,8 @@ watch(gatewaySelectedPort, port => {
     loadNetworkGateway();
   }
 });
+
+watch(flashSelectedPort, port => saveTabPort('serial', port));
 watch(monitorSelectedPort, port => saveTabPort('monitor', port));
 watch(settingsSelectedPort, port => saveTabPort('settings', port));
 
@@ -4692,21 +4640,17 @@ function toggleSelectAllBulkPorts() {
             </div>
           </div>
 
-          <button @click="runEasyPair" :disabled="pairPrimaryDisabled" class="primary-btn h-9 flex items-center justify-center gap-3 text-sm font-bold">
-            <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5', { 'animate-spin': isPairBusy }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
-            <span>{{ isPairBusy ? 'Provisioning...' : 'Provision' }}</span>
-          </button>
-
-          <details class="rounded-md border border-slate-800 bg-slate-900/30 px-2 py-1.5">
-            <summary class="cursor-pointer select-none text-xs font-semibold text-slate-500 hover:text-slate-300">Advanced steps</summary>
-            <div class="mt-3 grid grid-cols-2 xl:grid-cols-5 gap-3">
-              <button @click="configureEasyPairGateway" :disabled="pairAdvancedStartDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Load and configure the USB device as gateway">Prepare</button>
-              <button @click="startEasyPairDiscovery" :disabled="pairAdvancedStartDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Load the gateway, prepare it, then discover powered remotes over LoRa">Scan</button>
-              <button @click="provisionEasyPairDevices" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Provision all discovered remotes">Provision All</button>
-              <button @click="saveEasyPairTargets" :disabled="pairControlsDisabled" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Save discovered remote addresses on the gateway">Finish</button>
-              <button @click="cancelEasyPair" :disabled="!gatewayReady" class="glass-input h-10 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Stop the current discovery or provisioning session">Stop</button>
-            </div>
-          </details>
+          <div class="grid grid-cols-[1fr_auto] gap-3">
+            <button @click="isPairBusy ? cancelEasyPair() : runEasyPair()" :disabled="!isPairBusy && pairPrimaryDisabled" :class="['h-9 flex items-center justify-center gap-3 text-sm font-bold transition-colors', isPairBusy ? 'rounded-md border border-amber-500/40 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30' : 'primary-btn']">
+              <svg v-if="isPairBusy" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"></rect></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
+              <span>{{ isPairBusy ? 'Cancel' : 'Provision' }}</span>
+            </button>
+            <button @click="startEasyPairDiscovery" :disabled="isPairBusy || isGatewayLoading || !selectedPort" class="glass-input h-9 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa without provisioning">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Scan
+            </button>
+          </div>
           </div>
 
           <div v-else class="flex flex-col gap-3">
