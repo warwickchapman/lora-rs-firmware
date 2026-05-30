@@ -295,6 +295,7 @@ interface SerialDeviceState {
   isFlashing: boolean;
   flashProgress: number;
   flashStatus: string;
+  flashPhase: 'idle' | 'erase' | 'write' | 'verify';
   isResetting: boolean;
   resetStatus: string;
 }
@@ -555,6 +556,7 @@ function newSerialDeviceState(): SerialDeviceState {
     isFlashing: false,
     flashProgress: 0,
     flashStatus: 'Idle',
+    flashPhase: 'idle',
     isResetting: false,
     resetStatus: 'Idle'
   };
@@ -948,10 +950,43 @@ function pushSerialLogForPort(port: string, line: string) {
       state.flashLogs = state.flashLogs.slice(-2000);
     }
     
-    // Parse progress percentage from esptool logs (e.g. "Writing at 0x... (23 %)")
+    // Detect flash phase transitions from esptool log content
+    if (state.flashPhase === 'erase' && /erase complete/i.test(line)) {
+      state.flashPhase = 'write';
+      state.flashStatus = 'Flashing...';
+      state.flashProgress = 30;
+    }
+    if (state.flashPhase !== 'verify' && /hash of data verified/i.test(line)) {
+      state.flashPhase = 'verify';
+      state.flashProgress = 90;
+    }
+    // Also catch the transition when write starts after erase
+    if (state.flashPhase === 'erase' && /writing at/i.test(line)) {
+      state.flashPhase = 'write';
+      state.flashStatus = 'Flashing...';
+      if (state.flashProgress < 30) state.flashProgress = 30;
+    }
+
+    // Parse progress percentage from esptool logs and map into weighted segments:
+    // With erase:    erase=0-30%, write=30-90%, verify=90-100%
+    // Without erase: write=0-90%, verify=90-100%
     const match = line.match(/(\d+)\s*%/);
     if (match) {
-      state.flashProgress = parseInt(match[1], 10);
+      const raw = parseInt(match[1], 10);
+      const withErase = eraseBeforeFlash.value;
+      let mapped = raw;
+      if (state.flashPhase === 'erase') {
+        mapped = Math.round(raw * 0.3);                    // 0–30%
+      } else if (state.flashPhase === 'write') {
+        const base = withErase ? 30 : 0;
+        mapped = Math.round(base + raw * 0.6);             // 30–90% or 0–60%
+      } else if (state.flashPhase === 'verify') {
+        mapped = Math.round(90 + raw * 0.1);               // 90–100%
+      }
+      // Only move forward — never let the bar go backwards
+      if (mapped > state.flashProgress) {
+        state.flashProgress = mapped;
+      }
     }
   }
   if (port === selectedPort.value) {
@@ -1169,6 +1204,7 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
         state.isFlashing = false;
         state.flashProgress = 0;
         state.flashStatus = 'Idle';
+        state.flashPhase = 'idle';
         state.flashLogs = [];
         state.isResetting = false;
         state.resetStatus = 'Idle';
@@ -3788,6 +3824,7 @@ async function startBulkFlash() {
         state.isFlashing = true;
         state.flashProgress = 0;
         state.flashStatus = 'Queued';
+        state.flashPhase = 'idle';
         state.flashLogs = [];
 
         try {
@@ -3798,7 +3835,13 @@ async function startBulkFlash() {
             await readDeviceInfoForPort(port, 'serial');
           }
 
-          state.flashStatus = 'Flashing...';
+          if (eraseBeforeFlash.value) {
+            state.flashPhase = 'erase';
+            state.flashStatus = 'Erasing...';
+          } else {
+            state.flashPhase = 'write';
+          }
+          state.flashStatus = eraseBeforeFlash.value ? 'Erasing...' : 'Flashing...';
           const result = await invoke<string>('flash_firmware', {
             port,
             firmwarePath,
@@ -3806,6 +3849,7 @@ async function startBulkFlash() {
             eraseFirst: eraseBeforeFlash.value
           });
 
+          state.flashPhase = 'verify';
           state.flashStatus = 'Completed';
           state.flashProgress = 100;
           state.flashLogs.push(result);
