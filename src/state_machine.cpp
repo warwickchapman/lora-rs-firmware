@@ -2408,6 +2408,12 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
     maintenance_version_pending_ = true;
     maintenance_version_dst_ = dstAddress;
   }
+  maintenance_sensor_pending_ = true;
+  maintenance_sensor_dst_ = dstAddress;
+  if (runtime_.maintenance_debug_telemetry_enabled) {
+    maintenance_debug_pending_ = true;
+    maintenance_debug_dst_ = dstAddress;
+  }
   return true;
 }
 

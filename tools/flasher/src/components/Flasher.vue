@@ -2070,6 +2070,7 @@ function tankDetailLabel(row: LoraInventoryDevice): string {
 }
 
 function fleetSensorsLabel(row: LoraInventoryDevice): string {
+  if (row.age_ms === undefined || row.age_ms === null) return '-';
   const parts = [`in ${remoteInputLabel(row)}`];
   const temp = remoteTempLabel(row);
   if (temp !== '-') parts.push(temp);

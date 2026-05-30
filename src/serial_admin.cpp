@@ -1148,23 +1148,23 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     }
     if (p.uptime_ms > 0)
       row["uptime_ms"] = p.uptime_ms;
-    if (p.relay_state)
+    if (p.last_seen_ms != 0) {
       row["relay_state"] = p.relay_state;
-    if (p.input_state)
       row["input_state"] = p.input_state;
-    if (p.temp_valid) {
-      row["temp_valid"] = true;
-      row["temp_c"] = p.temp_c;
-    }
-    if (p.tank_enabled) {
-      row["tank_enabled"] = true;
-      row["tank_valid"] = p.tank_valid;
-      row["tank_status"] = tankSensorStateText(p.tank_state);
-      if (p.tank_valid) {
-        row["tank_depth_mm"] = p.tank_depth_mm;
-        row["tank_current_centi_ma"] = p.tank_current_centi_ma;
-        row["tank_current_ma"] = static_cast<float>(p.tank_current_centi_ma) / 100.0f;
-        row["tank_voltage_mv"] = p.tank_voltage_mv;
+      if (p.temp_valid) {
+        row["temp_valid"] = true;
+        row["temp_c"] = p.temp_c;
+      }
+      if (p.tank_enabled) {
+        row["tank_enabled"] = true;
+        row["tank_valid"] = p.tank_valid;
+        row["tank_status"] = tankSensorStateText(p.tank_state);
+        if (p.tank_valid) {
+          row["tank_depth_mm"] = p.tank_depth_mm;
+          row["tank_current_centi_ma"] = p.tank_current_centi_ma;
+          row["tank_current_ma"] = static_cast<float>(p.tank_current_centi_ma) / 100.0f;
+          row["tank_voltage_mv"] = p.tank_voltage_mv;
+        }
       }
     }
     if (p.maintenance_debug_known) {
@@ -1181,8 +1181,10 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
       row["downlink_rssi_known"] = true;
       row["downlink_rssi"] = p.downlink_rssi;
     }
-    row["last_seen_ms"] = p.last_seen_ms;
-    row["age_ms"] = p.last_seen_ms == 0 ? 0 : now - p.last_seen_ms;
+    if (p.last_seen_ms != 0) {
+      row["last_seen_ms"] = p.last_seen_ms;
+      row["age_ms"] = now - p.last_seen_ms;
+    }
     if (p.poll_pending)
       row["poll_pending"] = true;
     const bool otaEligible = p.wifi_connected_known && p.wifi_connected &&

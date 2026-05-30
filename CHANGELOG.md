@@ -5,6 +5,9 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Fixed remote maintenance sensor telemetry reporting by scheduling the cascading sequence of all maintenance pages (`kMaintenancePageSensors` and `kMaintenancePageDebug`) on every gateway maintenance request, restoring DS18B20 temperature and 4-20 mA tank level reporting.
+- Improved serial admin peer serialization to unconditionally report input and relay state values when a remote node has checked in (so the frontend receives active `0` values and correctly displays `"Open"` instead of `"waiting"`).
+- Refined Flasher UI fleet listing to omit age, last-seen, and sensor fields for unseen remote devices, rendering clean `"-"` placeholders instead of misleading `"0s"` ages, `"live"` statuses, or `"waiting"` labels.
 - Firmware version is aligned to `0.8.17-dev`.
 - Local maintenance is centered on Flasher over USB serial admin.
 - Remote maintenance uses MQTT admin for online devices and gateway-mediated LoRa admin for bounded remote actions.
