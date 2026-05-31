@@ -4516,7 +4516,8 @@ onMounted(async () => {
         pushNetworkLog(trimmed);
         if (trimmed.includes('event=ota_pull_control_failed') ||
             trimmed.includes('event=ota_pull_control_incomplete') ||
-            trimmed.includes('event=ota_pull_control_bad_hash')) {
+            trimmed.includes('event=ota_pull_control_bad_hash') ||
+            trimmed.includes('event=ota_pull_control_orphan')) {
           const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
           if (ipMatch) {
             const ip = ipMatch[1];
