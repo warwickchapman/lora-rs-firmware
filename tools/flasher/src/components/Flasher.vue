@@ -5577,6 +5577,11 @@ function toggleSelectAllBulkPorts() {
                   <input v-model="serialAdminConfig.maintenance_debug_telemetry_enabled" type="checkbox" />
                   Enabled
                 </label>
+                <label class="self-center text-right font-semibold text-slate-300">Input control</label>
+                <label class="flex items-center gap-2 text-slate-300" title="When enabled, closing the gateway's input terminals will command paired remotes to close their relays">
+                  <input v-model="serialAdminConfig.input_control_paired_lora_enabled" type="checkbox" />
+                  Enabled via gateway input
+                </label>
               </div>
             </div>
 

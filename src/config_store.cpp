@@ -789,7 +789,7 @@ void ConfigStore::setDefaults() {
   cfg_.maintenance_debug_telemetry_enabled = false;
   cfg_.rx_push_on_change_enabled = false;
   cfg_.rx_push_min_interval_ms = 60000;
-  cfg_.input_control_paired_lora_enabled = false;
+  cfg_.input_control_paired_lora_enabled = true;
   cfg_.tx_command_retry_timeout_ms = 180000;
   cfg_.rx_failsafe_mode = "hold_last";
   cfg_.rx_failsafe_timeout_ms = 180000;
