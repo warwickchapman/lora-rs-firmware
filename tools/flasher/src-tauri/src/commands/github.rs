@@ -15,6 +15,20 @@ pub async fn get_firmware_list() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+pub async fn cache_recent_firmware_releases(app: tauri::AppHandle, limit: usize) -> Result<(), String> {
+    let releases = firmware::fetch_releases().await?;
+    for release in releases.into_iter().take(limit) {
+        for asset in release.assets {
+            if asset.name.ends_with(".bin") {
+                let _ = firmware::download_firmware(&app, &asset.browser_download_url, &asset.name).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+
+#[tauri::command]
 pub async fn get_default_local_firmware() -> Result<Option<String>, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = match manifest_dir.join("../../..").canonicalize() {

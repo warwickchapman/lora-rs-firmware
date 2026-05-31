@@ -58,6 +58,10 @@ pub async fn download_firmware(app: &tauri::AppHandle, url: &str, filename: &str
 
     let dest_path = firmware_dir.join(filename);
     
+    if dest_path.exists() && dest_path.is_file() {
+        return Ok(dest_path);
+    }
+    
     let client = reqwest::Client::new();
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static("thanda-lora-flasher"));

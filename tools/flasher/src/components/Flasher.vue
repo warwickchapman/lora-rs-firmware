@@ -4480,6 +4480,11 @@ onMounted(async () => {
   refreshPorts(false);
   fetchFirmware();
 
+  // Background cache the top 5 firmware releases to speed up future OTA updates
+  invoke('cache_recent_firmware_releases', { limit: 5 }).catch(e => {
+    console.warn('Failed to pre-cache recent firmware releases:', e);
+  });
+
   unlistenFlash = await listen<LogEvent>('flash-log', (event) => {
     const rawMsg = event.payload.message;
     const port = event.payload.port;

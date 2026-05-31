@@ -1008,10 +1008,12 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
 
   if (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks) {
     if (tx_group_initial_send_cursor_ < tx_group_target_count_) {
-      if (!sendTxGroupChangeToAddress(tx_group_targets[tx_group_initial_send_cursor_], "tx_alln_send", "initial_window")) {
-        return;
+      if (tx_group_initial_send_cursor_ == 0) {
+        if (!sendTxGroupChangeToAddress(255, "tx_alln_bcast", "initial_window")) {
+          return;
+        }
       }
-      tx_group_initial_send_cursor_++;
+      tx_group_initial_send_cursor_ = tx_group_target_count_;
       return;
     }
 
