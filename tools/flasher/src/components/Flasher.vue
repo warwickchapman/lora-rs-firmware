@@ -1997,15 +1997,116 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     rowStateUntilMs = now + 60000;
   }
 
+  // Hydrate volatile telemetry fields from cache if gateway wiped them
+  const fwVersion = row.fw_version || history.fwVersion;
+  const fwBuild = row.fw_build || history.fw_build;
+  const ip = row.ip || history.ip;
+  const wifiConnected = (row.wifi_connected_known ? row.wifi_connected : history.wifi_connected) ?? false;
+  const wifiConnectedKnown = row.wifi_connected_known || history.wifi_connected_known || false;
+  const wifiEnabled = (row.wifi_enabled_known ? row.wifi_enabled : history.wifi_enabled) ?? false;
+  const wifiEnabledKnown = row.wifi_enabled_known || history.wifi_enabled_known || false;
+  const mqttConnected = (row.mqtt_known ? row.mqtt_connected : history.mqtt_connected) ?? false;
+  const mqttEnabled = (row.mqtt_known ? row.mqtt_enabled : history.mqtt_enabled) ?? false;
+  const mqttKnown = row.mqtt_known || history.mqtt_known || false;
+  
+  const heapFree = row.heap_free || history.heap_free;
+  const heapMaxBlock = row.heap_max_block || history.heap_max_block;
+  const heapFragPct = row.heap_frag_pct || history.heap_frag_pct;
+  
+  const relayState = (row.relay_state !== undefined && row.relay_state !== null) ? row.relay_state : history.relay_state;
+  const relayFeedback = (row.relay_feedback !== undefined && row.relay_feedback !== null) ? row.relay_feedback : history.relay_feedback;
+  const inputState = (row.input_state !== undefined && row.input_state !== null) ? row.input_state : history.input_state;
+  const inputFeedback = (row.input_feedback !== undefined && row.input_feedback !== null) ? row.input_feedback : history.input_feedback;
+  
+  const tempValid = (row.temp_valid !== undefined && row.temp_valid !== null) ? row.temp_valid : history.temp_valid;
+  const tempC = (row.temp_valid) ? row.temp_c : (tempValid ? history.temp_c : undefined);
+  
+  const tankEnabled = (row.tank_enabled !== undefined && row.tank_enabled !== null) ? row.tank_enabled : history.tank_enabled;
+  const tankValid = (row.tank_valid !== undefined && row.tank_valid !== null) ? row.tank_valid : history.tank_valid;
+  const tankStatus = row.tank_status || history.tank_status;
+  const tankDepthMm = row.tank_depth_mm || history.tank_depth_mm;
+  const tankCurrentMa = row.tank_current_ma || history.tank_current_ma;
+  const tankCurrentCentiMa = row.tank_current_centi_ma || history.tank_current_centi_ma;
+  const tankVoltageMv = row.tank_voltage_mv || history.tank_voltage_mv;
+  
+  const rssi = (row.rssi !== undefined && row.rssi !== null && row.rssi !== 0 && row.rssi !== -127) ? row.rssi : history.rssi;
+
+  // Track real telemetry freshness timestamps to tick up age_ms continuously
+  let lastTelemetryTimestamp = history.lastTelemetryTimestamp;
+  if (row.age_ms !== undefined && row.age_ms !== null && row.age_ms < 600000) {
+    lastTelemetryTimestamp = now - row.age_ms;
+  }
+  const ageMs = (row.age_ms !== undefined && row.age_ms !== null) ? row.age_ms : (lastTelemetryTimestamp ? (now - lastTelemetryTimestamp) : undefined);
+
   fleetRowHistory.value[row.address] = {
     ...history,
     uptimeMs: uptime || history.uptimeMs,
-    fwVersion: row.fw_version || history.fwVersion,
+    fwVersion,
+    fw_build: fwBuild,
+    ip,
+    wifi_connected: wifiConnected,
+    wifi_connected_known: wifiConnectedKnown,
+    wifi_enabled: wifiEnabled,
+    wifi_enabled_known: wifiEnabledKnown,
+    mqtt_connected: mqttConnected,
+    mqtt_enabled: mqttEnabled,
+    mqtt_known: mqttKnown,
+    heap_free: heapFree,
+    heap_max_block: heapMaxBlock,
+    heap_frag_pct: heapFragPct,
+    relay_state: relayState,
+    relay_feedback: relayFeedback,
+    input_state: inputState,
+    input_feedback: inputFeedback,
+    temp_valid: tempValid,
+    temp_c: tempC,
+    tank_enabled: tankEnabled,
+    tank_valid: tankValid,
+    tank_status: tankStatus,
+    tank_depth_mm: tankDepthMm,
+    tank_current_ma: tankCurrentMa,
+    tank_current_centi_ma: tankCurrentCentiMa,
+    tank_voltage_mv: tankVoltageMv,
+    rssi,
+    lastTelemetryTimestamp,
     rowState,
     rowStateUntilMs,
     otaExpectedUntilMs
   };
-  return { ...row, row_state: rowState, row_state_until_ms: rowStateUntilMs };
+
+  return {
+    ...row,
+    fw_version: fwVersion,
+    fw_build: fwBuild,
+    ip,
+    wifi_connected_known: wifiConnectedKnown,
+    wifi_connected: wifiConnected,
+    wifi_enabled_known: wifiEnabledKnown,
+    wifi_enabled: wifiEnabled,
+    mqtt_known: mqttKnown,
+    mqtt_connected: mqttConnected,
+    mqtt_enabled: mqttEnabled,
+    heap_free: heapFree,
+    heap_max_block: heapMaxBlock,
+    heap_frag_pct: heapFragPct,
+    relay_state: relayState,
+    relay_feedback: relayFeedback,
+    input_state: inputState,
+    input_feedback: inputFeedback,
+    temp_valid: tempValid,
+    temp_c: tempC,
+    tank_enabled: tankEnabled,
+    tank_valid: tankValid,
+    tank_status: tankStatus,
+    tank_depth_mm: tankDepthMm,
+    tank_current_ma: tankCurrentMa,
+    tank_current_centi_ma: tankCurrentCentiMa,
+    tank_voltage_mv: tankVoltageMv,
+    rssi: rssi ?? row.rssi,
+    age_ms: ageMs,
+    row_state: rowState,
+    row_state_until_ms: rowStateUntilMs
+  };
 }
 
 function fleetRowClass(device: LoraInventoryDevice): string {
