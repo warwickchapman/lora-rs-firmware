@@ -48,6 +48,7 @@ class MqttBridge {
   struct PeerPublishCacheEntry {
     bool in_use = false;
     uint8_t addr = 0;
+    uint32_t chip_id = 0;
     uint32_t last_seen_ms = 0;
     uint32_t last_cmd_counter = 0;
     bool published_once = false;
