@@ -589,28 +589,23 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   if (!mqtt_client_.connected()) return;
   clearPeerPublishCache(addr);
 
-  char addrHex[3];
-  snprintf(addrHex, sizeof(addrHex), "%02X", addr);
-  char addrHexPrefixed[5];
-  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
   char addrDec[4];
   snprintf(addrDec, sizeof(addrDec), "%u", static_cast<unsigned>(addr));
-  const char *addrSegments[] = {addrHexPrefixed, addrHex, addrDec};
 
   const char *leaves[] = {
-      "relay",           "input",              "dry_contact",      "ack_state",        "addr_hex",
-      "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter",
+      "relay",           "input",              "dry_contact",      "ack_state",
+      "addr_hex",        "addr_dec",
+      "uplink_rssi_dbm", "downlink_rssi_dbm",  "last_seen_ms",     "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
       "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
-      "wifi",            "input_feedback",     "uptime_ms",
+      "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",
+      "heap_frag_pct",   "relay_feedback",
   };
 
   char topic[kMqttTopicBufBytes];
-  for (const char *addrSegment : addrSegments) {
-    for (const char *leaf : leaves) {
-      if (!buildPeerTopic(topic, sizeof(topic), addrSegment, leaf)) continue;
-      mqtt_client_.publish(topic, "", true);
-    }
+  for (const char *leaf : leaves) {
+    if (!buildPeerTopic(topic, sizeof(topic), addrDec, leaf)) continue;
+    mqtt_client_.publish(topic, "", true);
   }
 }
 
@@ -867,7 +862,7 @@ void MqttBridge::publishStatus() {
         }
       };
 
-      publishRemote(addrHexPrefixed);
+      publishRemote(addrDec);
       peerCache->last_seen_ms = node.last_seen_ms;
       peerCache->last_cmd_counter = node.last_cmd_counter;
       peerCache->published_once = true;
@@ -951,8 +946,13 @@ void MqttBridge::clearLegacyPeerRetainedTopics() {
 
     char topic[kMqttTopicBufBytes];
     for (const char *leaf : leaves) {
-      const int n = snprintf(topic, sizeof(topic), "%s%s/%s", legacy_peer_prefix_, addrHexPrefixed, leaf);
+      // Clear old peer/ path (hex-addressed)
+      int n = snprintf(topic, sizeof(topic), "%s%s/%s", legacy_peer_prefix_, addrHexPrefixed, leaf);
       if (n > 0 && static_cast<size_t>(n) < sizeof(topic)) {
+        mqtt_client_.publish(topic, "", true);
+      }
+      // Clear hex-addressed topics under current peers/ path
+      if (buildPeerTopic(topic, sizeof(topic), addrHexPrefixed, leaf)) {
         mqtt_client_.publish(topic, "", true);
       }
     }

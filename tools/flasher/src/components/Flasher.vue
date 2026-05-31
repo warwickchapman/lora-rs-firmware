@@ -2745,7 +2745,7 @@ async function processOtaQueue() {
   if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
 
   const updatingDevice = loraInventory.value.find(d => 
-    d.row_state === 'ota_pending' || d.row_state === 'ota_rebooted' || d.row_state === 'ota_updated'
+    d.row_state === 'ota_pending'
   );
   if (updatingDevice) {
     setTimeout(() => processOtaQueue(), 2000);
@@ -2770,6 +2770,8 @@ async function processOtaQueue() {
     }, 8000);
     markFleetOtaPending(device);
     startFleetOtaFollowup(device);
+    // Automatically start UDP logs to monitor the OTA progress over WiFi instead of relying on LoRa polling
+    startFleetUdpLogs(device).catch(e => pushNetworkLog(`Failed to start UDP logs for ${device.address}: ${e}`));
     networkStatusMessage.value = `Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`;
     pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH}), SHA256 ${info.sha256}`);
     notify(`Flash triggered for LoRa ${device.address}`);
