@@ -2765,6 +2765,10 @@ async function processOtaQueue() {
     // If we send it after, the device is already busy with the OTA and might drop the LoRa packet.
     await startFleetUdpLogs(device).catch(e => pushNetworkLog(`Failed to start UDP logs for ${device.address}: ${e}`));
 
+    // Wait 1.5 seconds to give the remote device time to process the UDP log command and transmit
+    // any resulting ACK/telemetry over LoRa. This prevents half-duplex radio collisions that drop OTA chunks.
+    await new Promise(r => setTimeout(r, 1500));
+
     const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
       admin_password: password,
       address: device.address,
@@ -4505,7 +4509,9 @@ onMounted(async () => {
       const trimmed = line.trim();
       if (trimmed) {
         pushNetworkLog(trimmed);
-        if (trimmed.includes('event=ota_pull_control_failed')) {
+        if (trimmed.includes('event=ota_pull_control_failed') ||
+            trimmed.includes('event=ota_pull_control_incomplete') ||
+            trimmed.includes('event=ota_pull_control_bad_hash')) {
           const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
           if (ipMatch) {
             const ip = ipMatch[1];
@@ -6784,7 +6790,7 @@ function toggleSelectAllBulkPorts() {
           <!-- Tab bar -->
           <div class="flex gap-0 border-b border-slate-800">
             <button
-              v-for="tab in ([{key:'wifi',label:'📶 WiFi'},{key:'sensors',label:'🛠️ Sensors'},{key:'security',label:'🔑 Security'}] as const)"
+              v-for="tab in ([{key:'sensors',label:'🛠️ Sensors'},{key:'power',label:'⚡ Power'},{key:'wifi',label:'📶 WiFi'},{key:'security',label:'🔑 Security'}] as const)"
               :key="tab.key"
               @click="settingsDeviceModal.activeTab = tab.key"
               class="px-4 py-2 text-[11px] font-bold transition-colors"
@@ -6794,6 +6800,61 @@ function toggleSelectAllBulkPorts() {
             >
               {{ tab.label }}
             </button>
+          </div>
+
+          <!-- Sensors tab content -->
+          <div v-if="settingsDeviceModal.activeTab === 'sensors'" class="flex flex-col gap-3">
+            <p class="text-xs text-slate-500">Enable or disable hardware sensors over LoRa. Changes persist to remote device flash memory.</p>
+            <div class="flex flex-col gap-3 py-1">
+              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                <input v-model="settingsDeviceModal.sensor_temp_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <div>
+                  <div class="font-semibold text-slate-200">DS18B20 Temperature Sensor</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Enables digital temperature probes on the device.</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                <input v-model="settingsDeviceModal.sensor_tank_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <div>
+                  <div class="font-semibold text-slate-200">4-20mA Pressure Tank Level Sensor</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Enables analog pressure sensor mappings for tank level tracking.</div>
+                </div>
+              </label>
+            </div>
+            <div class="mt-2 flex justify-end gap-2">
+              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+              <button
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
+                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
+              >
+                Apply Config
+              </button>
+            </div>
+          </div>
+
+          <!-- Power tab content -->
+          <div v-if="settingsDeviceModal.activeTab === 'power'" class="flex flex-col gap-3">
+            <p class="text-xs text-slate-500">Configure remote low-power operations over LoRa. Changes persist to remote device flash memory.</p>
+            <div class="flex flex-col gap-3 py-1">
+              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                <input v-model="settingsDeviceModal.power_save_listen_only" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <div>
+                  <div class="font-semibold text-slate-200">PowerSave</div>
+                  <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
+                    The remote device will be in LoRa Listen-Only power saving mode. WiFi, active sensor polling, status LEDs, and Serial Admin will be disabled (with Serial Admin and WiFi opening temporarily for 10 minutes on boot for maintenance) until a LoRa request to the device for telemetry or to change the powersave status.
+                  </div>
+                </div>
+              </label>
+            </div>
+            <div class="mt-2 flex justify-end gap-2">
+              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+              <button
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
+                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
+              >
+                Apply Config
+              </button>
+            </div>
           </div>
 
           <!-- WiFi tab content -->
@@ -6814,43 +6875,6 @@ function toggleSelectAllBulkPorts() {
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Send Credentials
-              </button>
-            </div>
-          </div>
-
-          <!-- Sensors tab content -->
-          <div v-if="settingsDeviceModal.activeTab === 'sensors'" class="flex flex-col gap-3">
-            <p class="text-xs text-slate-500">Enable or disable hardware sensors and power saving over LoRa. Changes persist to remote device flash memory.</p>
-            <div class="flex flex-col gap-3 py-1">
-              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                <input v-model="settingsDeviceModal.sensor_temp_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                <div>
-                  <div class="font-semibold text-slate-200">DS18B20 Temperature Sensor</div>
-                  <div class="text-[10px] text-slate-500 mt-0.5">Enables digital temperature probes on the device.</div>
-                </div>
-              </label>
-              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                <input v-model="settingsDeviceModal.sensor_tank_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                <div>
-                  <div class="font-semibold text-slate-200">4-20mA Pressure Tank Level Sensor</div>
-                  <div class="text-[10px] text-slate-500 mt-0.5">Enables analog pressure sensor mappings for tank level tracking.</div>
-                </div>
-              </label>
-              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                <input v-model="settingsDeviceModal.power_save_listen_only" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                <div>
-                  <div class="font-semibold text-slate-200">LoRa Listen-Only Power Save</div>
-                  <div class="text-[10px] text-slate-500 mt-0.5">Bypasses WiFi, Serial Admin UART, active sensor polling, and status LEDs after 10 minutes.</div>
-                </div>
-              </label>
-            </div>
-            <div class="mt-2 flex justify-end gap-2">
-              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
-              <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
-                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
-              >
-                Apply Config
               </button>
             </div>
           </div>
