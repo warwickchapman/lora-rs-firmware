@@ -40,6 +40,7 @@ class MqttBridge {
   char remote_prefix_[160]{};
   char legacy_peer_prefix_[160]{};
   char discovery_topic_[192]{};
+  char availability_topic_[160]{};
 
   NodeStateMachine *sm_ = nullptr;
 

@@ -383,6 +383,7 @@ void MqttBridge::rebuildTopics() {
   snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peers/", topic_base_);
   snprintf(legacy_peer_prefix_, sizeof(legacy_peer_prefix_), "%s/peer/", topic_base_);
   snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
+  snprintf(availability_topic_, sizeof(availability_topic_), "%s/availability", topic_base_);
 
   mqtt_client_.setServer(settings_->mqtt_host.c_str(), runtime_.mqtt_port);
 }
@@ -629,9 +630,10 @@ bool MqttBridge::connectIfNeeded() {
   bool ok = false;
   if (!settings_) return false;
   if (settings_->mqtt_user.length() > 0) {
-    ok = mqtt_client_.connect(clientId, settings_->mqtt_user.c_str(), settings_->mqtt_password.c_str());
+    ok = mqtt_client_.connect(clientId, settings_->mqtt_user.c_str(), settings_->mqtt_password.c_str(),
+                              availability_topic_, 0, true, "offline");
   } else {
-    ok = mqtt_client_.connect(clientId);
+    ok = mqtt_client_.connect(clientId, availability_topic_, 0, true, "offline");
   }
 
   if (!ok) {
@@ -661,6 +663,7 @@ bool MqttBridge::connectIfNeeded() {
     lrslog::event("mqtt_connected", 0, 0, 0);
   }
   publishDiscovery();
+  mqtt_client_.publish(availability_topic_, "online", true);
   old_peer_cleaned_ = false;
   return true;
 }

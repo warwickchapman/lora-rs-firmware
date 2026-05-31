@@ -137,7 +137,7 @@ interface LoraInventoryDevice {
   ota_eligible?: boolean;
   ota_reason?: string;
   selected?: boolean;
-  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued';
+  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed';
   row_state_until_ms?: number;
 }
 
@@ -2132,6 +2132,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
 
 function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'unexpected_reboot') return 'bg-rose-950/50 ring-1 ring-rose-500/50';
+  if (device.row_state === 'ota_failed') return 'bg-rose-950/40 ring-1 ring-rose-500/40';
   if (device.row_state === 'ota_updated') return 'bg-emerald-950/40 ring-1 ring-emerald-500/40';
   if (device.row_state === 'ota_rebooted') return 'bg-orange-950/40 ring-1 ring-orange-500/40';
   if (device.row_state === 'ota_no_reboot') return 'bg-amber-950/40 ring-1 ring-amber-500/40';
@@ -2142,6 +2143,7 @@ function fleetRowClass(device: LoraInventoryDevice): string {
 
 function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   if (device.row_state === 'unexpected_reboot') return 'Unexpected reboot';
+  if (device.row_state === 'ota_failed') return 'OTA Failed';
   if (device.row_state === 'ota_updated') return 'Updated';
   if (device.row_state === 'ota_rebooted') return 'Rebooted';
   if (device.row_state === 'ota_no_reboot') return 'No reboot seen';
@@ -4479,7 +4481,21 @@ onMounted(async () => {
     const lines = rawLine.split(/[\r\n]+/);
     lines.forEach(line => {
       const trimmed = line.trim();
-      if (trimmed) pushNetworkLog(trimmed);
+      if (trimmed) {
+        pushNetworkLog(trimmed);
+        if (trimmed.includes('event=ota_pull_control_failed')) {
+          const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
+          if (ipMatch) {
+            const ip = ipMatch[1];
+            const dev = loraInventory.value.find(d => d.ip === ip);
+            if (dev && dev.row_state === 'ota_pending') {
+              loraInventory.value = loraInventory.value.map(row => 
+                row.address === dev.address ? { ...row, row_state: 'ota_failed', row_state_until_ms: undefined } : row
+              );
+            }
+          }
+        }
+      }
     });
   });
 
@@ -6546,9 +6562,9 @@ function toggleSelectAllBulkPorts() {
                   </td>
                   <td class="px-2 py-1.5 font-mono">
                     <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
-                    <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer select-none', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : device.row_state === 'ota_rebooted' ? 'text-orange-400' : 'text-sky-300']" :title="device.row_state === 'unexpected_reboot' ? 'Spontaneous restart detected: Device uptime rolled back (rebooted) without a requested OTA command. Typically caused by power cycles, brownouts, or watchdog resets.' : device.row_state === 'ota_rebooted' ? 'Normal post-upgrade restart: Device rebooted successfully to boot into the newly written firmware version.' : device.row_state === 'ota_no_reboot' ? 'Upgrade timeout: The firmware binary was served, but the remote did not reboot to apply it within the expected window.' : undefined">
+                    <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer select-none', (device.row_state === 'unexpected_reboot' || device.row_state === 'ota_failed') ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : device.row_state === 'ota_rebooted' ? 'text-orange-400' : 'text-sky-300']" :title="device.row_state === 'unexpected_reboot' ? 'Spontaneous restart detected: Device uptime rolled back (rebooted) without a requested OTA command. Typically caused by power cycles, brownouts, or watchdog resets.' : device.row_state === 'ota_failed' ? 'Download failed: The remote device failed to download the firmware binary from the server.' : device.row_state === 'ota_rebooted' ? 'Normal post-upgrade restart: Device rebooted successfully to boot into the newly written firmware version.' : device.row_state === 'ota_no_reboot' ? 'Upgrade timeout: The firmware binary was served, but the remote did not reboot to apply it within the expected window.' : undefined">
                       {{ fleetRowStatusLabel(device) }}
-                      <span v-if="device.row_state === 'unexpected_reboot' || device.row_state === 'ota_rebooted' || device.row_state === 'ota_no_reboot'" class="opacity-60 text-[9px]">ⓘ</span>
+                      <span v-if="device.row_state === 'unexpected_reboot' || device.row_state === 'ota_failed' || device.row_state === 'ota_rebooted' || device.row_state === 'ota_no_reboot'" class="opacity-60 text-[9px]">ⓘ</span>
                     </div>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
