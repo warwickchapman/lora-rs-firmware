@@ -617,7 +617,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   const char *leaves[] = {
       "relay",           "input",              "dry_contact",      "ack_state",
       "addr_hex",        "addr_dec",
-      "uplink_rssi_dbm", "downlink_rssi_dbm",  "last_seen_ms",     "last_cmd_counter",
+      "uplink_rssi_dbm", "downlink_rssi_dbm",  "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
       "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
       "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",
@@ -812,19 +812,69 @@ void MqttBridge::publishStatus() {
 
       auto publishRemote = [&](const char *addrSeg) {
         char topic[kMqttTopicBufBytes];
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
-        const uint8_t inputValue = node.input_state ? 1 : 0;
-        if (!peerCache->input_published || peerCache->input_value != inputValue) {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "dry_contact")) publishRetainedTopic(topic, inputValue ? "1" : "0");
-          peerCache->input_published = true;
-          peerCache->input_value = inputValue;
+        char numBuf[24];
+
+        const bool timedOut = (node.ack_state == PeerAckState::Timeout);
+
+        // --- Operational topics: blank when timed out ---
+        if (timedOut) {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, "");
+          if (!peerCache->input_published || peerCache->input_value != 0xFF) {
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, "");
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "dry_contact")) publishRetainedTopic(topic, "");
+            peerCache->input_published = true;
+            peerCache->input_value = 0xFF; // sentinel: stale
+          }
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_status")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay_feedback")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, "");
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
+          const uint8_t inputValue = node.input_state ? 1 : 0;
+          if (!peerCache->input_published || peerCache->input_value != inputValue) {
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "dry_contact")) publishRetainedTopic(topic, inputValue ? "1" : "0");
+            peerCache->input_published = true;
+            peerCache->input_value = inputValue;
+          }
+          if (node.temp_valid) {
+            dtostrf(static_cast<float>(node.temp_c), 0, 1, numBuf);
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, numBuf);
+          } else {
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
+          }
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_status")) {
+            publishRetainedTopic(topic, node.tank_enabled ? tankSensorStateText(node.tank_state) : "disabled");
+          }
+          if (node.tank_enabled && node.tank_valid) {
+            snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_depth_mm));
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, numBuf);
+            dtostrf(static_cast<float>(node.tank_current_centi_ma) / 100.0f, 0, 2, numBuf);
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, numBuf);
+            snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_voltage_mv));
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, numBuf);
+          } else {
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, "");
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, "");
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, "");
+          }
+          if (node.wifi_state_known) {
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, node.wifi_enabled ? "1" : "0");
+          } else {
+            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
+          }
         }
+
+        // --- Always published: status/metadata/diagnostic ---
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ack_state")) publishRetainedTopic(topic, peerAckStateText(node.ack_state));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_hex")) publishRetainedTopic(topic, addrHex);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_dec")) publishRetainedTopic(topic, addrDec);
 
-        char numBuf[24];
         snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
         if (node.downlink_rssi_valid) {
@@ -835,6 +885,9 @@ void MqttBridge::publishStatus() {
         }
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
+        const uint32_t ageS = (node.last_seen_ms > 0) ? (millis() - node.last_seen_ms) / 1000U : 0;
+        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(ageS));
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, numBuf);
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_cmd_counter")) publishRetainedTopic(topic, numBuf);
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
@@ -842,33 +895,8 @@ void MqttBridge::publishStatus() {
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
-        if (node.wifi_state_known) {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, node.wifi_enabled ? "1" : "0");
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
-        }
-        if (node.temp_valid) {
-          dtostrf(static_cast<float>(node.temp_c), 0, 1, numBuf);
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
-        }
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_status")) {
-          publishRetainedTopic(topic, node.tank_enabled ? tankSensorStateText(node.tank_state) : "disabled");
-        }
-        if (node.tank_enabled && node.tank_valid) {
-          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_depth_mm));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, numBuf);
-          dtostrf(static_cast<float>(node.tank_current_centi_ma) / 100.0f, 0, 2, numBuf);
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, numBuf);
-          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_voltage_mv));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, "");
-        }
-        if (node.maintenance_debug_known) {
+
+        if (!timedOut && node.maintenance_debug_known) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_free));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, numBuf);
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_max_block));
@@ -880,7 +908,7 @@ void MqttBridge::publishStatus() {
           snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.input_feedback));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, numBuf);
         }
-        if (node.uptime_ms > 0) {
+        if (!timedOut && node.uptime_ms > 0) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, numBuf);
         }
@@ -953,7 +981,7 @@ void MqttBridge::clearLegacyPeerRetainedTopics() {
 
   const char *leaves[] = {
       "relay",           "input",              "dry_contact",      "ack_state",        "addr_hex",
-      "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter",
+      "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
       "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
       "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",

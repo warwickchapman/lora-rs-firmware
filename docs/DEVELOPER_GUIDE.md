@@ -154,6 +154,11 @@ Published retained under `<root>/lrs-<chipid>/peers/<NN_lrs-peerchipid>/`.
 Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c27/relay`).
 Falls back to `peers/03/...` when chip_id is not yet known.
 
+> **Stale data protection:** When `ack_state` is `timeout`, all operational topics
+> (`relay`, `input`, `dry_contact`, `temp_c`, `tank_*`, `wifi`, `relay_feedback`,
+> `input_feedback`) are published as empty strings so automations do not act on
+> stale values. Status/metadata/polling topics continue updating normally.
+
 **Operational** — use these for automations and integrations:
 
 | Topic | Type | Description |
@@ -180,6 +185,7 @@ Falls back to `peers/03/...` when chip_id is not yet known.
 | `poll_state` | `idle`/`pending` | Whether a poll request is in flight. |
 | `last_poll_tx_ms` | int | `millis()` of last poll request sent. |
 | `last_seen_ms` | int | `millis()` of last received packet from peer. |
+| `last_seen_age_s` | int | Seconds since last received packet — recomputed every publish cycle. Use to detect stale peers without knowing gateway absolute time. |
 | `last_cmd_counter` | int | Monotonic command counter for change detection. |
 
 **Cross-reference** — address lookup helpers:
