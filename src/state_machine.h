@@ -59,6 +59,7 @@ struct PeerStatusSnapshot {
   uint8_t relay_state = 0;
   uint8_t input_state = 0;
   bool temp_valid = false;
+  bool temp_enabled = false;
   int8_t temp_c = 0;
   bool tank_enabled = false;
   bool tank_valid = false;
@@ -98,6 +99,7 @@ struct PeerStatusSnapshot {
   uint32_t debug_uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
   bool power_save_listen_only = false;
+  bool power_save_boot_grace = true;
 };
 
 struct FleetScanSnapshot {
@@ -183,7 +185,7 @@ class NodeStateMachine {
   int lastPacketRssi() const;
   uint32_t lastPacketMs() const;
   uint32_t lastTxMs() const;
-  void setLocalTemperature(bool valid, float celsius);
+  void setLocalTemperature(bool enabled, bool valid, float celsius);
   void setLocalTank(bool enabled, bool valid, TankSensorState state,
                     uint16_t depthMm, uint16_t currentCentiMa,
                     uint16_t voltageMv);
@@ -234,9 +236,9 @@ class NodeStateMachine {
   bool sendPeerReboot(uint8_t dstAddress);
   bool hasPendingReboot() const { return reboot_pending_; }
   bool consumePendingReboot();
-  bool sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled);
+  bool sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled, bool powerSaveBootGrace);
   bool hasPendingSensorConfig() const { return sensor_config_pending_; }
-  bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled);
+  bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled, bool &powerSaveBootGrace);
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials);
   bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
   bool sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey);
@@ -321,6 +323,7 @@ class NodeStateMachine {
   bool remote_temp_valid_ = false;
   int8_t remote_temp_c_ = 0;
   uint32_t remote_temp_ms_ = 0;
+  bool local_temp_enabled_ = false;
   bool local_tank_enabled_ = false;
   bool local_tank_valid_ = false;
   TankSensorState local_tank_state_ = TankSensorState::Disabled;
@@ -384,6 +387,7 @@ class NodeStateMachine {
     uint8_t relay_state = 0;
     uint8_t input_state = 0;
     bool temp_valid = false;
+    bool temp_enabled = false;
     int8_t temp_c = 0;
     bool tank_enabled = false;
     bool tank_valid = false;
@@ -420,6 +424,7 @@ class NodeStateMachine {
     uint32_t debug_uptime_ms = 0;
     uint32_t wifi_last_confirm_ms = 0;
     bool power_save_listen_only = false;
+    bool power_save_boot_grace = true;
     bool wifi_pending = false;
     bool wifi_pending_enabled = true;
     uint32_t wifi_pending_counter = 0;
@@ -536,6 +541,7 @@ class NodeStateMachine {
   bool sensor_config_temp_enabled_ = false;
   bool sensor_config_tank_enabled_ = false;
   bool sensor_config_power_save_enabled_ = false;
+  bool sensor_config_power_save_boot_grace_ = true;
   bool fleet_prov_apply_pending_ = false;
   uint16_t fleet_prov_apply_session_nonce_ = 0;
   uint8_t fleet_prov_apply_address_ = 0;

@@ -75,7 +75,13 @@ void App::begin() {
     }
   }
 
-  startNetworking();
+  const auto &cfg = config_.settings();
+  const bool skipWifiAtBoot = cfg.power_save_listen_only && !cfg.power_save_boot_grace;
+  if (!skipWifiAtBoot) {
+    startNetworking();
+  } else {
+    LRS_LOGW(SYS, "event=skip_networking_at_boot reason=power_save_no_grace");
+  }
 
   if (!radio_.begin(config_.settings())) {
     lrslog::event("radio_start_failed", 0, 0, 0);
@@ -115,7 +121,8 @@ void App::tick() {
   const uint32_t tickStartMs = millis();
   const auto &cfg = config_.settings();
   if (cfg.power_save_listen_only && !power_save_locked_off_ && !power_save_active_) {
-    if (tickStartMs > 600000UL) {
+    const uint32_t graceLimitMs = cfg.power_save_boot_grace ? 600000UL : 0UL;
+    if (tickStartMs > graceLimitMs) {
       if (serial_admin_.hasActivity() || lrslog::udpMirrorEnabled()) {
         power_save_locked_off_ = true;
         LRS_LOGI(SYS, "event=power_save_deferred reason=activity_detected");
@@ -212,7 +219,7 @@ void App::tick() {
     phaseStartMs = millis();
   }
   const TempSensorStatus &ts = sensors_.tempStatus();
-  sm_.setLocalTemperature(ts.valid, ts.celsius);
+  sm_.setLocalTemperature(config_.settings().sensor_temp_enabled, ts.valid, ts.celsius);
   const TankSensorStatus &tank = sensors_.tankStatus();
   sm_.setLocalTank(tank.enabled, tank.valid, tank.state, tank.depth_mm,
                    tank.current_centi_ma, tank.voltage_mv);
@@ -343,15 +350,18 @@ void App::tick() {
     bool sensorTempEnabled = false;
     bool sensorTankEnabled = false;
     bool sensorPowerSaveEnabled = false;
-    if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled, sensorPowerSaveEnabled)) {
+    bool sensorPowerSaveBootGrace = true;
+    if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled, sensorPowerSaveEnabled, sensorPowerSaveBootGrace)) {
       auto &cfg = config_.settings();
       const bool changed = (cfg.sensor_temp_enabled != sensorTempEnabled) ||
                            (cfg.sensor_tank_enabled != sensorTankEnabled) ||
-                           (cfg.power_save_listen_only != sensorPowerSaveEnabled);
+                           (cfg.power_save_listen_only != sensorPowerSaveEnabled) ||
+                           (cfg.power_save_boot_grace != sensorPowerSaveBootGrace);
       if (changed) {
         cfg.sensor_temp_enabled = sensorTempEnabled;
         cfg.sensor_tank_enabled = sensorTankEnabled;
         cfg.power_save_listen_only = sensorPowerSaveEnabled;
+        cfg.power_save_boot_grace = sensorPowerSaveBootGrace;
         if (config_.save()) {
           applyUpdatedConfig(false, false);
           lrslog::event("sensor_config_exec_success", 0, 0, 0);

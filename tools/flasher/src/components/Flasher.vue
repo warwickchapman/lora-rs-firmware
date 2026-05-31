@@ -111,6 +111,7 @@ interface LoraInventoryDevice {
   mqtt_enabled?: boolean;
   mqtt_connected?: boolean;
   power_save_listen_only?: boolean;
+  power_save_boot_grace?: boolean;
   maintenance_debug_known?: boolean;
   heap_free?: number;
   heap_max_block?: number;
@@ -119,6 +120,7 @@ interface LoraInventoryDevice {
   relay_feedback?: number;
   input_state?: number;
   input_feedback?: number;
+  temp_enabled?: boolean;
   temp_valid?: boolean;
   temp_c?: number;
   tank_enabled?: boolean;
@@ -451,6 +453,7 @@ interface SettingsModalState {
   sensor_temp_enabled: boolean;
   sensor_tank_enabled: boolean;
   power_save_listen_only: boolean;
+  power_save_boot_grace: boolean;
   // Security tab
   fleet_key: string;
   fleet_key_confirmed: boolean;
@@ -529,6 +532,8 @@ const fleetRowHistory = ref<Record<number, {
   mqtt_connected?: boolean;
   mqtt_enabled?: boolean;
   mqtt_known?: boolean;
+  power_save_listen_only?: boolean;
+  power_save_boot_grace?: boolean;
   fw_build?: number;
   heap_free?: number;
   heap_max_block?: number;
@@ -537,6 +542,7 @@ const fleetRowHistory = ref<Record<number, {
   relay_feedback?: number;
   input_state?: number;
   input_feedback?: number;
+  temp_enabled?: boolean;
   temp_valid?: boolean;
   temp_c?: number;
   tank_enabled?: boolean;
@@ -2028,6 +2034,9 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const mqttEnabled = (row.mqtt_known ? row.mqtt_enabled : history.mqtt_enabled) ?? false;
   const mqttKnown = row.mqtt_known || history.mqtt_known || false;
   
+  const powerSaveListenOnly = (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null) ? row.power_save_listen_only : history.power_save_listen_only;
+  const powerSaveBootGrace = (row.power_save_boot_grace !== undefined && row.power_save_boot_grace !== null) ? row.power_save_boot_grace : history.power_save_boot_grace;
+  
   const heapFree = row.heap_free || history.heap_free;
   const heapMaxBlock = row.heap_max_block || history.heap_max_block;
   const heapFragPct = row.heap_frag_pct || history.heap_frag_pct;
@@ -2037,6 +2046,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const inputState = (row.input_state !== undefined && row.input_state !== null) ? row.input_state : history.input_state;
   const inputFeedback = (row.input_feedback !== undefined && row.input_feedback !== null) ? row.input_feedback : history.input_feedback;
   
+  const tempEnabled = (row.temp_enabled !== undefined && row.temp_enabled !== null) ? row.temp_enabled : history.temp_enabled;
   const tempValid = (row.temp_valid !== undefined && row.temp_valid !== null) ? row.temp_valid : history.temp_valid;
   const tempC = (row.temp_valid) ? row.temp_c : (tempValid ? history.temp_c : undefined);
   
@@ -2070,6 +2080,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     mqtt_connected: mqttConnected,
     mqtt_enabled: mqttEnabled,
     mqtt_known: mqttKnown,
+    power_save_listen_only: powerSaveListenOnly,
+    power_save_boot_grace: powerSaveBootGrace,
     heap_free: heapFree,
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
@@ -2077,6 +2089,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     relay_feedback: relayFeedback,
     input_state: inputState,
     input_feedback: inputFeedback,
+    temp_enabled: tempEnabled,
     temp_valid: tempValid,
     temp_c: tempC,
     tank_enabled: tankEnabled,
@@ -2106,6 +2119,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     mqtt_known: mqttKnown,
     mqtt_connected: mqttConnected,
     mqtt_enabled: mqttEnabled,
+    power_save_listen_only: powerSaveListenOnly,
+    power_save_boot_grace: powerSaveBootGrace,
     heap_free: heapFree,
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
@@ -2113,6 +2128,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     relay_feedback: relayFeedback,
     input_state: inputState,
     input_feedback: inputFeedback,
+    temp_enabled: tempEnabled,
     temp_valid: tempValid,
     temp_c: tempC,
     tank_enabled: tankEnabled,
@@ -2816,9 +2832,10 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
     activeTab: tab,
     wifi_ssid: ssid,
     wifi_password: getCachedWifiPassword(ssid) || pairAdminPassword.value || '',
-    sensor_temp_enabled: !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
+    sensor_temp_enabled: !!device.temp_enabled || !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
     sensor_tank_enabled: !!device.tank_enabled,
     power_save_listen_only: !!device.power_save_listen_only,
+    power_save_boot_grace: device.power_save_boot_grace !== false,
     fleet_key: '',
     fleet_key_confirmed: false,
     show_fleet_key: false
@@ -2849,7 +2866,7 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
 }
 
 
-async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean) {
+async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean, graceEnabled: boolean) {
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
@@ -2863,9 +2880,17 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       target_address: device.address,
       sensor_temp_enabled: tempEnabled,
       sensor_tank_enabled: tankEnabled,
-      power_save_listen_only: powerSaveEnabled
+      power_save_listen_only: powerSaveEnabled,
+      power_save_boot_grace: graceEnabled
     }, 8000);
     notify(`Sensors updated successfully on remote ${device.address}`);
+    // Optimistically update local state so re-opening the modal shows the applied config
+    loraInventory.value = loraInventory.value.map(row => {
+      if (row.address === device.address) {
+        return { ...row, temp_enabled: tempEnabled, tank_enabled: tankEnabled, power_save_listen_only: powerSaveEnabled, power_save_boot_grace: graceEnabled };
+      }
+      return row;
+    });
     settingsDeviceModal.value = null;
   } catch (e) {
     const msg = serialFeatureError(`Remote sensors update`, e);
@@ -6835,7 +6860,7 @@ function toggleSelectAllBulkPorts() {
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Config
@@ -6848,7 +6873,12 @@ function toggleSelectAllBulkPorts() {
             <p class="text-xs text-slate-500">Configure remote low-power operations over LoRa. Changes persist to remote device flash memory.</p>
             <div class="flex flex-col gap-3 py-1">
               <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                <input v-model="settingsDeviceModal.power_save_listen_only" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <input 
+                  v-model="settingsDeviceModal.power_save_listen_only" 
+                  @change="if (!settingsDeviceModal.power_save_listen_only) settingsDeviceModal.power_save_boot_grace = true"
+                  type="checkbox" 
+                  class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" 
+                />
                 <div>
                   <div class="font-semibold text-slate-200">PowerSave</div>
                   <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
@@ -6856,15 +6886,30 @@ function toggleSelectAllBulkPorts() {
                   </div>
                 </div>
               </label>
+
+              <!-- Boot grace period sub-checkbox -->
+              <div 
+                v-if="settingsDeviceModal.power_save_listen_only" 
+                class="flex flex-col gap-3 ml-6 animate-fade-in"
+              >
+                <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                  <input v-model="settingsDeviceModal.power_save_boot_grace" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                  <div>
+                    <div class="font-semibold text-slate-200">10-Minute Boot Grace Period</div>
+                    <div class="text-[10px] text-slate-500 mt-0.5 select-text leading-relaxed">
+                      Give a 10-minute boot grace period where WiFi and Serial Admin are active on startup before entering power save. If unchecked, the node enters power save IMMEDIATELY upon boot without starting WiFi or Serial to prevent brownouts on weak power sources.
+                    </div>
+                  </div>
+                </label>
+              </div>
             </div>
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Config
-              </button>
             </div>
           </div>
 

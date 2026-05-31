@@ -146,6 +146,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["wifi_ap_fallback_policy"] = cfg.wifi_ap_fallback_policy;
   doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
   doc["power_save_listen_only"] = cfg.power_save_listen_only;
+  doc["power_save_boot_grace"] = cfg.power_save_boot_grace;
   doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
   doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
   doc["mqtt_controller_addresses"] = cfg.mqtt_controller_addresses;
@@ -193,6 +194,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   FixedSettingString<24> prevWifiApFallbackPolicy = cfg.wifi_ap_fallback_policy;
   const bool prevWifiAdminEnabled = cfg.wifi_admin_enabled;
   const bool prevPowerSaveListenOnly = cfg.power_save_listen_only;
+  const bool prevPowerSaveBootGrace = cfg.power_save_boot_grace;
   FixedSettingString<33> prevAdminPassword = cfg.admin_password;
 
   auto fail = [&](const String &msg) {
@@ -301,6 +303,8 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       parseBoolField(doc["wifi_admin_enabled"], cfg.wifi_admin_enabled);
   cfg.power_save_listen_only =
       parseBoolField(doc["power_save_listen_only"], cfg.power_save_listen_only);
+  cfg.power_save_boot_grace =
+      parseBoolField(doc["power_save_boot_grace"], cfg.power_save_boot_grace);
   cfg.mqtt_client_enabled =
       parseBoolField(doc["mqtt_client_enabled"], cfg.mqtt_client_enabled);
   cfg.mqtt_control_enabled =
@@ -502,7 +506,8 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
                    (cfg.wifi_channel_override != prevWifiChannelOverride) ||
                    (cfg.wifi_ap_fallback_policy != prevWifiApFallbackPolicy) ||
                    (cfg.wifi_admin_enabled != prevWifiAdminEnabled) ||
-                   (cfg.power_save_listen_only != prevPowerSaveListenOnly);
+                   (cfg.power_save_listen_only != prevPowerSaveListenOnly) ||
+                   (cfg.power_save_boot_grace != prevPowerSaveBootGrace);
   otaAuthChanged = (cfg.admin_password != prevAdminPassword);
   if (!config.save()) {
     return fail("save_failed");
@@ -1134,6 +1139,7 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     row["mqtt_enabled"] = p.mqtt_enabled;
     row["mqtt_connected"] = p.mqtt_connected;
     row["power_save_listen_only"] = p.power_save_listen_only;
+    row["power_save_boot_grace"] = p.power_save_boot_grace;
     if (p.chip_id != 0) {
       char chipBuf[9];
       snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
@@ -1159,6 +1165,7 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     if (p.last_seen_ms != 0) {
       row["relay_state"] = p.relay_state;
       row["input_state"] = p.input_state;
+      row["temp_enabled"] = p.temp_enabled;
       if (p.temp_valid) {
         row["temp_valid"] = true;
         row["temp_c"] = p.temp_c;
@@ -1439,8 +1446,9 @@ void SerialAdmin::handleRemoteSensorConfig(JsonDocument &doc) {
   const bool tempEnabled = doc["sensor_temp_enabled"] | false;
   const bool tankEnabled = doc["sensor_tank_enabled"] | false;
   const bool powerSaveEnabled = doc["power_save_listen_only"] | false;
+  const bool powerSaveBootGrace = doc["power_save_boot_grace"].isNull() ? true : (doc["power_save_boot_grace"] | false);
 
-  if (!sm_->sendPeerSensorConfig(static_cast<uint8_t>(rawAddr), tempEnabled, tankEnabled, powerSaveEnabled)) {
+  if (!sm_->sendPeerSensorConfig(static_cast<uint8_t>(rawAddr), tempEnabled, tankEnabled, powerSaveEnabled, powerSaveBootGrace)) {
     sendError("remote_sensor_config", "send_failed", id);
     return;
   }
@@ -1453,6 +1461,7 @@ void SerialAdmin::handleRemoteSensorConfig(JsonDocument &doc) {
   out["sensor_temp_enabled"] = tempEnabled;
   out["sensor_tank_enabled"] = tankEnabled;
   out["power_save_listen_only"] = powerSaveEnabled;
+  out["power_save_boot_grace"] = powerSaveBootGrace;
   sendOk(out);
 }
 
