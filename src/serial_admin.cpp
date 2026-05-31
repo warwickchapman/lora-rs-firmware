@@ -1707,6 +1707,18 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
       sendError(cmd, "invalid_addresses", id);
       return;
     }
+    // Snapshot existing chip_id mapping before clearing so previously
+    // persisted values survive when volatile caches have been lost (reboot,
+    // eviction). Resolution precedence: volatile provisioning cache > active
+    // peer table > previously persisted Settings.
+    uint8_t  prevAddresses[Settings::kAddressListCap]{};
+    uint32_t prevChipIds[Settings::kAddressListCap]{};
+    const uint8_t prevCount = cfg.known_peer_count < Settings::kAddressListCap
+                                  ? cfg.known_peer_count
+                                  : Settings::kAddressListCap;
+    memcpy(prevAddresses, cfg.known_peer_addresses, sizeof(prevAddresses));
+    memcpy(prevChipIds, cfg.known_peer_chip_ids, sizeof(prevChipIds));
+
     clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
     clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
     memset(cfg.known_peer_chip_ids, 0, sizeof(cfg.known_peer_chip_ids));
@@ -1714,12 +1726,15 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
       const uint8_t addr = targetAddresses[i];
       cfg.paired_target_addresses[cfg.paired_target_count++] = addr;
       cfg.known_peer_addresses[cfg.known_peer_count++] = addr;
-      
-      uint32_t resolvedChipId = sm_->resolveChipIdForAddress(addr);
-      if (resolvedChipId == 0) {
-        resolvedChipId = sm_->activePeerChipIdForAddress(addr);
+
+      uint32_t chipId = sm_->resolveChipIdForAddress(addr);
+      if (chipId == 0) chipId = sm_->activePeerChipIdForAddress(addr);
+      if (chipId == 0) {
+        for (uint8_t j = 0; j < prevCount; ++j) {
+          if (prevAddresses[j] == addr) { chipId = prevChipIds[j]; break; }
+        }
       }
-      cfg.known_peer_chip_ids[cfg.known_peer_count - 1] = resolvedChipId;
+      cfg.known_peer_chip_ids[cfg.known_peer_count - 1] = chipId;
     }
     cfg.remote_address = cfg.paired_target_addresses[0];
     if (!config_->save()) {
