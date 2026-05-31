@@ -1617,7 +1617,6 @@ async function startNetworkUdpListener() {
     isNetworkUdpMonitoring.value = true;
     networkUdpTarget.value = 'admin-enabled devices';
     pushNetworkLog(started);
-    pushNetworkLog('Enable UDP logging over USB serial, MQTT, or gateway-mediated LoRa admin.');
   } catch (e) {
     pushNetworkLog('UDP monitor error: ' + e);
     notify('UDP monitor error: ' + e);
