@@ -137,7 +137,7 @@ interface LoraInventoryDevice {
   ota_eligible?: boolean;
   ota_reason?: string;
   selected?: boolean;
-  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot';
+  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued';
   row_state_until_ms?: number;
 }
 
@@ -356,8 +356,10 @@ const bulkShowLogsByPort = ref<Record<string, boolean>>({});
 const bulkLogRefs = ref<Record<string, HTMLElement>>({});
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
-const isFirmwareServerStarting = ref(false);
+const isFirmwareServerStarting = ref(false);const showPairDeviceSettings = ref(false);
+
 const remoteOtaBusyAddress = ref<number | null>(null);
+const otaQueue = ref<LoraInventoryDevice[]>([]);
 const remoteUdpBusyAddress = ref<number | null>(null);
 const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
 const serialLogs = ref<string[]>([]);
@@ -1971,10 +1973,11 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const uptime = Number(row.uptime_ms || 0);
   const previousUptime = Number(history.uptimeMs || 0);
   let otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
+  const knownReboot = history.knownRebootUntilMs && history.knownRebootUntilMs > now;
 
   if (previousUptime > 0 && uptime > 0 && uptime + 30000 < previousUptime) {
-    rowState = otaExpected ? 'ota_rebooted' : 'unexpected_reboot';
-    rowStateUntilMs = now + (otaExpected ? 20000 : 60000);
+    rowState = (otaExpected || knownReboot) ? 'ota_rebooted' : 'unexpected_reboot';
+    rowStateUntilMs = now + ((otaExpected || knownReboot) ? 20000 : 60000);
   }
   if (otaExpected && history.fwVersion && row.fw_version && history.fwVersion !== row.fw_version) {
     rowState = 'ota_updated';
@@ -1985,6 +1988,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   if (rowState === 'ota_updated') {
     otaExpectedUntilMs = undefined;
     otaExpected = false;
+    history.knownRebootUntilMs = now + 120000;
   }
 
   if (rowStateUntilMs && rowStateUntilMs <= now) {
@@ -2070,7 +2074,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     lastTelemetryTimestamp,
     rowState,
     rowStateUntilMs,
-    otaExpectedUntilMs
+    otaExpectedUntilMs,
+    knownRebootUntilMs: history.knownRebootUntilMs
   };
 
   return {
@@ -2114,6 +2119,7 @@ function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_rebooted') return 'bg-sky-950/40 ring-1 ring-sky-500/40';
   if (device.row_state === 'ota_no_reboot') return 'bg-amber-950/40 ring-1 ring-amber-500/40';
   if (device.row_state === 'ota_pending') return 'bg-cyan-950/30';
+  if (device.row_state === 'ota_queued') return 'bg-fuchsia-950/30 ring-1 ring-fuchsia-500/30';
   return 'bg-slate-950/20';
 }
 
@@ -2123,6 +2129,7 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_rebooted') return 'Rebooted';
   if (device.row_state === 'ota_no_reboot') return 'No reboot seen';
   if (device.row_state === 'ota_pending') return 'Waiting for reboot';
+  if (device.row_state === 'ota_queued') return 'Queued for OTA';
   return '';
 }
 
@@ -2684,7 +2691,6 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
 }
 
 async function flashLoraRemote(device: LoraInventoryDevice) {
-  if (remoteOtaBusyAddress.value != null) return;
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
@@ -2695,6 +2701,26 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
     notify(fleetFlashUnavailableReason(device));
     return;
   }
+  if (otaQueue.value.find(d => d.address === device.address)) return;
+  
+  otaQueue.value.push(device);
+  fleetRowHistory.value[device.address] = {
+    ...(fleetRowHistory.value[device.address] || {}),
+    rowState: 'ota_queued',
+    rowStateUntilMs: Date.now() + 300000
+  };
+  
+  if (otaQueue.value.length === 1 && remoteOtaBusyAddress.value === null) {
+    processOtaQueue();
+  }
+}
+
+async function processOtaQueue() {
+  if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
+  const device = otaQueue.value[0];
+  const port = gatewaySelectedPort.value;
+  const password = adminPasswordForPort(port);
+
   try {
     remoteOtaBusyAddress.value = device.address;
     if (!portGatewayReady(port)) await loadNetworkGateway();
@@ -2719,6 +2745,10 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
     notify(msg);
   } finally {
     remoteOtaBusyAddress.value = null;
+    otaQueue.value.shift();
+    if (otaQueue.value.length > 0) {
+      setTimeout(() => processOtaQueue(), 2500);
+    }
   }
 }
 
