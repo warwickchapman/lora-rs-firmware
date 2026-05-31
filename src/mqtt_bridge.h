@@ -38,6 +38,7 @@ class MqttBridge {
   char udp_log_control_topic_[160]{};
   char ota_pull_topic_[160]{};
   char remote_prefix_[160]{};
+  char legacy_peer_prefix_[160]{};
   char discovery_topic_[192]{};
 
   NodeStateMachine *sm_ = nullptr;
@@ -64,6 +65,7 @@ class MqttBridge {
   bool status_publish_in_progress_ = false;
   bool status_publish_locals_done_ = false;
   size_t status_publish_peer_index_ = 0;
+  bool old_peer_cleaned_ = false;
 
   static MqttBridge *instance_;
   static void staticCallback(char *topic, uint8_t *payload, unsigned int length);
@@ -83,4 +85,5 @@ class MqttBridge {
   bool connectIfNeeded();
   void publishStatus();
   void publishDiscovery();
+  void clearLegacyPeerRetainedTopics();
 };

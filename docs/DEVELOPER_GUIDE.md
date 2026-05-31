@@ -125,19 +125,20 @@ Published status topics (retained, every 10 s):
 - `type`
 - `addr`
 - `last_updated`
+- `uptime_ms`
   - `addr` is published as `0xNN` (for example `0x9D`).
 
 Subscribed control topics:
 - `relay`: sets local relay directly on that node.
 - `control`: TX-only JSON control for remote LoRa relay send.
 - `control.addr` parsing: JSON number = decimal address, JSON string = hex address.
-- TX publishes per-peer child state under `<root>/lrs-<tx_chipid>/peer/0xNN/...` (canonical path).
+- TX publishes per-peer child state under `<root>/lrs-<tx_chipid>/peers/0xNN/...` (canonical path).
 - Peer status leaves include `input`, `dry_contact`, `temp_c`, `tank_status`,
-  `tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv`.
+  `tank_depth_mm`, `tank_current_ma`, `tank_voltage_mv`, and `uptime_ms`.
 - TX can be commanded to poll peers via:
-  - `<root>/lrs-<tx_chipid>/peer/0xNN/poll_interval_s`
-  - `<root>/lrs-<tx_chipid>/peer/0xNN/poll_now`
-  - `<root>/lrs-<tx_chipid>/peer/0xNN/forget` (payload `1` removes runtime node and clears retained peer subtree topics)
+  - `<root>/lrs-<tx_chipid>/peers/0xNN/poll_interval_s`
+  - `<root>/lrs-<tx_chipid>/peers/0xNN/poll_now`
+  - `<root>/lrs-<tx_chipid>/peers/0xNN/forget` (payload `1` removes runtime node and clears retained peer subtree topics)
 
 TX input-to-LoRa control gate:
 - Setting: `input_control_paired_lora_enabled` (LoRa tab).

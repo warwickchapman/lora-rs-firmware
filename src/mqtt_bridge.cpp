@@ -269,6 +269,7 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
   status_publish_in_progress_ = false;
   status_publish_locals_done_ = false;
   status_publish_peer_index_ = 0;
+  old_peer_cleaned_ = false;
 }
 
 void MqttBridge::tick(bool wifiConnected) {
@@ -379,7 +380,8 @@ void MqttBridge::rebuildTopics() {
   snprintf(control_topic_, sizeof(control_topic_), "%s/control", topic_base_);
   snprintf(udp_log_control_topic_, sizeof(udp_log_control_topic_), "%s/udp_log_control", topic_base_);
   snprintf(ota_pull_topic_, sizeof(ota_pull_topic_), "%s/ota_pull", topic_base_);
-  snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peer/", topic_base_);
+  snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peers/", topic_base_);
+  snprintf(legacy_peer_prefix_, sizeof(legacy_peer_prefix_), "%s/peer/", topic_base_);
   snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
 
   mqtt_client_.setServer(settings_->mqtt_host.c_str(), runtime_.mqtt_port);
@@ -393,7 +395,7 @@ bool MqttBridge::buildLocalTopic(char *out, size_t outLen, const char *leaf) con
 
 bool MqttBridge::buildPeerTopic(char *out, size_t outLen, const char *addrSegment, const char *leaf) const {
   if (out == nullptr || outLen == 0) return false;
-  const int n = snprintf(out, outLen, "%s/peer/%s/%s", topic_base_, addrSegment, leaf);
+  const int n = snprintf(out, outLen, "%s/peers/%s/%s", topic_base_, addrSegment, leaf);
   return n > 0 && static_cast<size_t>(n) < outLen;
 }
 
@@ -599,7 +601,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
       "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
       "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
-      "wifi",            "input_feedback",
+      "wifi",            "input_feedback",     "uptime_ms",
   };
 
   char topic[kMqttTopicBufBytes];
@@ -659,6 +661,7 @@ bool MqttBridge::connectIfNeeded() {
     lrslog::event("mqtt_connected", 0, 0, 0);
   }
   publishDiscovery();
+  old_peer_cleaned_ = false;
   return true;
 }
 
@@ -745,6 +748,8 @@ void MqttBridge::publishStatus() {
     if (buildLocalTopic(topic, sizeof(topic), "heap_max_block")) publishRetained(topic, numBuf);
     snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(lrslog::heapFragPercent()));
     if (buildLocalTopic(topic, sizeof(topic), "heap_frag_pct")) publishRetained(topic, numBuf);
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(millis()));
+    if (buildLocalTopic(topic, sizeof(topic), "uptime_ms")) publishRetained(topic, numBuf);
     status_publish_locals_done_ = true;
     if (runtime_.role_tx) {
       return;
@@ -853,6 +858,10 @@ void MqttBridge::publishStatus() {
           snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.input_feedback));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, numBuf);
         }
+        if (node.uptime_ms > 0) {
+          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, numBuf);
+        }
       };
 
       publishRemote(addrHexPrefixed);
@@ -873,6 +882,10 @@ void MqttBridge::publishStatus() {
   const uint32_t now = millis();
   if ((now - last_discovery_publish_ms_) >= kDiscoveryPublishIntervalMs) {
     publishDiscovery();
+  }
+  if (!old_peer_cleaned_) {
+    clearLegacyPeerRetainedTopics();
+    old_peer_cleaned_ = true;
   }
 }
 
@@ -910,4 +923,37 @@ void MqttBridge::publishDiscovery() {
       lrslog::event("mqtt_discovery_publish_failed", 0, 0, 0);
     }
   }
+}
+
+void MqttBridge::clearLegacyPeerRetainedTopics() {
+  if (!mqtt_client_.connected() || sm_ == nullptr) return;
+
+  const char *leaves[] = {
+      "relay",           "input",              "dry_contact",      "ack_state",        "addr_hex",
+      "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_cmd_counter",
+      "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
+      "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
+      "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",
+      "heap_frag_pct",   "relay_feedback",
+  };
+
+  const size_t nodeCount = sm_->peerCount();
+  for (size_t i = 0; i < nodeCount; ++i) {
+    PeerStatusSnapshot node{};
+    if (!sm_->peerByIndex(i, node)) continue;
+    const uint8_t addr = node.address;
+
+    char addrHexPrefixed[5];
+    snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%02X", addr);
+
+    char topic[kMqttTopicBufBytes];
+    for (const char *leaf : leaves) {
+      const int n = snprintf(topic, sizeof(topic), "%s%s/%s", legacy_peer_prefix_, addrHexPrefixed, leaf);
+      if (n > 0 && static_cast<size_t>(n) < sizeof(topic)) {
+        mqtt_client_.publish(topic, "", true);
+      }
+    }
+    yield();
+  }
+  lrslog::event("mqtt_legacy_peer_cleared", 0, static_cast<uint32_t>(nodeCount), 0);
 }
