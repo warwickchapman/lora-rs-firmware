@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Renamed the Fleet table "LoRa" column to "Addr", shortened the WiFi status label from `"Connected"` to `"OK"` to conserve horizontal layout space, and dynamically hide the "IP" column if no active remote devices report a WiFi IP address.
 - Colorized the Sensors column dry-contact input status values to render the `"Closed"` word in emerald green and `"Open"` in vibrant orange to highlight device states at first glance.
 - Added a highly informative hover `ⓘ` tooltip to fleet status labels (`Unexpected reboot`, `Rebooted (OTA)`, `No reboot seen (OTA)`) in the Uptime column explaining their triggers and diagnostic context.
 - Stored remote device address-to-chip ID pairings persistently in gateway config store, pre-populating runtime caches on boot to instantly preserve remote names (`lrs-XXXXXXXX`) across gateway power cycles or Flasher re-connections.

@@ -97,6 +97,7 @@ struct PeerStatusSnapshot {
   uint8_t input_feedback = 0;
   uint32_t debug_uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
+  bool power_save_listen_only = false;
 };
 
 struct FleetScanSnapshot {
@@ -233,9 +234,9 @@ class NodeStateMachine {
   bool sendPeerReboot(uint8_t dstAddress);
   bool hasPendingReboot() const { return reboot_pending_; }
   bool consumePendingReboot();
-  bool sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled);
+  bool sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled);
   bool hasPendingSensorConfig() const { return sensor_config_pending_; }
-  bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled);
+  bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled);
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials);
   bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
   bool sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey);
@@ -418,6 +419,7 @@ class NodeStateMachine {
     uint8_t input_feedback = 0;
     uint32_t debug_uptime_ms = 0;
     uint32_t wifi_last_confirm_ms = 0;
+    bool power_save_listen_only = false;
     bool wifi_pending = false;
     bool wifi_pending_enabled = true;
     uint32_t wifi_pending_counter = 0;
@@ -533,6 +535,7 @@ class NodeStateMachine {
   bool sensor_config_pending_ = false;
   bool sensor_config_temp_enabled_ = false;
   bool sensor_config_tank_enabled_ = false;
+  bool sensor_config_power_save_enabled_ = false;
   bool fleet_prov_apply_pending_ = false;
   uint16_t fleet_prov_apply_session_nonce_ = 0;
   uint8_t fleet_prov_apply_address_ = 0;

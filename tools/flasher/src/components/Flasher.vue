@@ -110,6 +110,7 @@ interface LoraInventoryDevice {
   mqtt_known?: boolean;
   mqtt_enabled?: boolean;
   mqtt_connected?: boolean;
+  power_save_listen_only?: boolean;
   maintenance_debug_known?: boolean;
   heap_free?: number;
   heap_max_block?: number;
@@ -442,13 +443,14 @@ const activeDropdownAddress = ref<number | null>(null);
 
 interface SettingsModalState {
   device: LoraInventoryDevice;
-  activeTab: 'wifi' | 'sensors' | 'security';
+  activeTab: 'sensors' | 'power' | 'wifi' | 'security';
   // WiFi tab
   wifi_ssid: string;
   wifi_password: string;
   // Sensors tab
   sensor_temp_enabled: boolean;
   sensor_tank_enabled: boolean;
+  power_save_listen_only: boolean;
   // Security tab
   fleet_key: string;
   fleet_key_confirmed: boolean;
@@ -816,6 +818,9 @@ const fleetGatewayReady = computed(() =>
 const fleetGatewayIsFactoryDefault = computed(() => {
   const st = fleetGatewayStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
+});
+const hasAnyRemoteIp = computed(() => {
+  return loraInventory.value.some(d => !!d.ip);
 });
 const fleetGatewayFlashDisabled = computed(() =>
   !gatewaySelectedPort.value ||
@@ -2799,7 +2804,7 @@ function toggleFleetDropdown(address: number) {
 }
 
 
-function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState['activeTab'] = 'wifi') {
+function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState['activeTab'] = 'sensors') {
   activeDropdownAddress.value = null;
   const ssid = pairWifiSsid.value || '';
   settingsDeviceModal.value = {
@@ -2809,6 +2814,7 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
     wifi_password: getCachedWifiPassword(ssid) || pairAdminPassword.value || '',
     sensor_temp_enabled: !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
     sensor_tank_enabled: !!device.tank_enabled,
+    power_save_listen_only: !!device.power_save_listen_only,
     fleet_key: '',
     fleet_key_confirmed: false,
     show_fleet_key: false
@@ -2839,7 +2845,7 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
 }
 
 
-async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean) {
+async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean) {
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
@@ -2852,7 +2858,8 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       admin_password: password,
       target_address: device.address,
       sensor_temp_enabled: tempEnabled,
-      sensor_tank_enabled: tankEnabled
+      sensor_tank_enabled: tankEnabled,
+      power_save_listen_only: powerSaveEnabled
     }, 8000);
     notify(`Sensors updated successfully on remote ${device.address}`);
     settingsDeviceModal.value = null;
@@ -6525,12 +6532,13 @@ function toggleSelectAllBulkPorts() {
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
                   <th class="w-10 px-2 py-1.5 text-left"></th>
-                  <th class="px-2 py-1.5 text-left font-semibold">LoRa</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Device</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Role</th>
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">IP</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Power Save</th>
+                  <th v-if="hasAnyRemoteIp" class="px-2 py-1.5 text-left font-semibold">IP</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
@@ -6540,7 +6548,7 @@ function toggleSelectAllBulkPorts() {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td colspan="12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
+                  <td :colspan="hasAnyRemoteIp ? 13 : 12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -6558,10 +6566,16 @@ function toggleSelectAllBulkPorts() {
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
                     <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_connected_known ? (device.wifi_connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-600 bg-slate-800/50 text-slate-400') : 'border-slate-800 bg-slate-900/50 text-slate-500']">
-                      {{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : '-' }}
+                      {{ device.wifi_connected_known ? (device.wifi_connected ? 'OK' : 'Offline') : '-' }}
                     </span>
                   </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+                  <td class="px-2 py-1.5">
+                    <span v-if="device.power_save_listen_only" class="rounded border px-2 py-1 text-[10px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                      Enabled
+                    </span>
+                    <span v-else class="text-slate-500">-</span>
+                  </td>
+                  <td v-if="hasAnyRemoteIp" class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
                   <td class="px-2 py-1.5">
                     <div class="text-slate-300 flex items-center gap-1 flex-wrap">
                       <template v-if="device.age_ms !== undefined && device.age_ms !== null">
@@ -6806,7 +6820,7 @@ function toggleSelectAllBulkPorts() {
 
           <!-- Sensors tab content -->
           <div v-if="settingsDeviceModal.activeTab === 'sensors'" class="flex flex-col gap-3">
-            <p class="text-xs text-slate-500">Enable or disable hardware sensors over LoRa. Changes persist to remote device flash memory.</p>
+            <p class="text-xs text-slate-500">Enable or disable hardware sensors and power saving over LoRa. Changes persist to remote device flash memory.</p>
             <div class="flex flex-col gap-3 py-1">
               <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
                 <input v-model="settingsDeviceModal.sensor_temp_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
@@ -6822,11 +6836,18 @@ function toggleSelectAllBulkPorts() {
                   <div class="text-[10px] text-slate-500 mt-0.5">Enables analog pressure sensor mappings for tank level tracking.</div>
                 </div>
               </label>
+              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
+                <input v-model="settingsDeviceModal.power_save_listen_only" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                <div>
+                  <div class="font-semibold text-slate-200">LoRa Listen-Only Power Save</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Bypasses WiFi, Serial Admin UART, active sensor polling, and status LEDs after 10 minutes.</div>
+                </div>
+              </label>
             </div>
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Config

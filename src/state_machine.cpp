@@ -682,6 +682,7 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.input_feedback = node.input_feedback;
   out.debug_uptime_ms = node.debug_uptime_ms;
   out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
+  out.power_save_listen_only = node.power_save_listen_only;
   out.poll_interval_ms = node.poll_interval_ms;
   const PollRuntime *poll = pollStateForIndex(index);
   out.last_poll_tx_ms = poll ? poll->last_poll_tx_ms : 0U;
@@ -1714,7 +1715,7 @@ bool NodeStateMachine::consumePendingReboot() {
   return true;
 }
 
-bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled) {
+bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled) {
   if (!radioTxBudgetAvailable()) return false;
   if (!runtime_.role_tx) return false;
   if (radio_ == nullptr) return false;
@@ -1723,7 +1724,7 @@ bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled
   uint8_t payload[12]{};
   payload[0] = kSensorConfigMagic0;
   payload[1] = kSensorConfigMagic1;
-  payload[2] = tempEnabled ? 1 : 0;
+  payload[2] = (tempEnabled ? 0x01 : 0) | (powerSaveEnabled ? 0x02 : 0);
   payload[3] = tankEnabled ? 1 : 0;
   payload[4] = static_cast<uint8_t>(runtime_.local_address);
   payload[5] = static_cast<uint8_t>(millis() & 0xFFU);
@@ -1737,10 +1738,11 @@ bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled
   return true;
 }
 
-bool NodeStateMachine::consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled) {
+bool NodeStateMachine::consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled) {
   if (!sensor_config_pending_) return false;
   tempEnabled = sensor_config_temp_enabled_;
   tankEnabled = sensor_config_tank_enabled_;
+  powerSaveEnabled = sensor_config_power_save_enabled_;
   sensor_config_pending_ = false;
   return true;
 }
@@ -2435,6 +2437,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   if (settings_->mqtt_client_enabled) flags |= 0x04;
   if (mqtt_connected_) flags |= 0x08;
   if (runtime_.role_tx) flags |= 0x10;
+  if (settings_->power_save_listen_only) flags |= 0x20;
   uint8_t payload[12]{};
   const uint32_t chipId = ESP.getChipId() & 0xFFFFFFUL;
   payload[0] = kMaintenancePayloadVersion;
@@ -2626,6 +2629,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->mqtt_state_known = true;
     node->mqtt_enabled = (flags & 0x04U) != 0U;
     node->mqtt_connected = (flags & 0x08U) != 0U;
+    node->power_save_listen_only = (flags & 0x20U) != 0U;
     memcpy(node->ip, p + 8, sizeof(node->ip));
   } else if (p[1] == kMaintenancePageVersion) {
     node->fw_major = p[2];
@@ -3686,7 +3690,8 @@ bool NodeStateMachine::handleSensorConfigFrame(const ProtocolMessage &msg) {
     lrslog::event("sensor_config_rx_bad", msg.rssi, msg.counter, 0);
     return false;
   }
-  sensor_config_temp_enabled_ = (msg.flags == 1);
+  sensor_config_temp_enabled_ = (msg.flags & 0x01) != 0;
+  sensor_config_power_save_enabled_ = (msg.flags & 0x02) != 0;
   sensor_config_tank_enabled_ = (msg.temp_code == 1);
   sensor_config_pending_ = true;
   lrslog::event("sensor_config_rx", msg.rssi, msg.counter, msg.src);

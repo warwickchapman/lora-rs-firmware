@@ -1135,6 +1135,7 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
     row["mqtt_known"] = p.mqtt_state_known;
     row["mqtt_enabled"] = p.mqtt_enabled;
     row["mqtt_connected"] = p.mqtt_connected;
+    row["power_save_listen_only"] = p.power_save_listen_only;
     if (p.chip_id != 0) {
       char chipBuf[9];
       snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
@@ -1439,8 +1440,9 @@ void SerialAdmin::handleRemoteSensorConfig(JsonDocument &doc) {
 
   const bool tempEnabled = doc["sensor_temp_enabled"] | false;
   const bool tankEnabled = doc["sensor_tank_enabled"] | false;
+  const bool powerSaveEnabled = doc["power_save_listen_only"] | false;
 
-  if (!sm_->sendPeerSensorConfig(static_cast<uint8_t>(rawAddr), tempEnabled, tankEnabled)) {
+  if (!sm_->sendPeerSensorConfig(static_cast<uint8_t>(rawAddr), tempEnabled, tankEnabled, powerSaveEnabled)) {
     sendError("remote_sensor_config", "send_failed", id);
     return;
   }
@@ -1452,6 +1454,7 @@ void SerialAdmin::handleRemoteSensorConfig(JsonDocument &doc) {
   out["target_address"] = rawAddr;
   out["sensor_temp_enabled"] = tempEnabled;
   out["sensor_tank_enabled"] = tankEnabled;
+  out["power_save_listen_only"] = powerSaveEnabled;
   sendOk(out);
 }
 

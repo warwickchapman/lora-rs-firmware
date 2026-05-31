@@ -342,13 +342,16 @@ void App::tick() {
   {
     bool sensorTempEnabled = false;
     bool sensorTankEnabled = false;
-    if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled)) {
+    bool sensorPowerSaveEnabled = false;
+    if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled, sensorPowerSaveEnabled)) {
       auto &cfg = config_.settings();
       const bool changed = (cfg.sensor_temp_enabled != sensorTempEnabled) ||
-                           (cfg.sensor_tank_enabled != sensorTankEnabled);
+                           (cfg.sensor_tank_enabled != sensorTankEnabled) ||
+                           (cfg.power_save_listen_only != sensorPowerSaveEnabled);
       if (changed) {
         cfg.sensor_temp_enabled = sensorTempEnabled;
         cfg.sensor_tank_enabled = sensorTankEnabled;
+        cfg.power_save_listen_only = sensorPowerSaveEnabled;
         if (config_.save()) {
           applyUpdatedConfig(false, false);
           lrslog::event("sensor_config_exec_success", 0, 0, 0);
