@@ -19,7 +19,10 @@ def _run_git(args, default):
 
 def _git_dirty_flag():
     try:
-        rc = subprocess.call(["git", "diff", "--quiet", "--ignore-submodules", "HEAD"], stderr=subprocess.DEVNULL)
+        rc = subprocess.call(
+            ["git", "diff", "--quiet", "--ignore-submodules", "HEAD", "--", ".", ":!tools"],
+            stderr=subprocess.DEVNULL,
+        )
         return 1 if rc != 0 else 0
     except Exception:
         return 0
@@ -31,14 +34,15 @@ def _deterministic_tree_id(git_sha, dirty):
 
     # Hash the exact local patch set so a dirty working tree is still stable
     # across repeated builds until the tree content changes.
-    staged = _run_git(["diff", "--cached", "--binary", "HEAD"], "")
-    unstaged = _run_git(["diff", "--binary", "HEAD"], "")
+    # Exclude tools/ — Flasher and tooling changes must not affect firmware builds.
+    staged = _run_git(["diff", "--cached", "--binary", "HEAD", "--", ".", ":!tools"], "")
+    unstaged = _run_git(["diff", "--binary", "HEAD", "--", ".", ":!tools"], "")
     untracked_list = _run_git(["ls-files", "--others", "--exclude-standard"], "")
     untracked_entries = []
     if untracked_list:
         for path in untracked_list.splitlines():
             path = path.strip()
-            if not path:
+            if not path or path.startswith("tools/"):
                 continue
             try:
                 blob = subprocess.check_output(
@@ -52,6 +56,7 @@ def _deterministic_tree_id(git_sha, dirty):
         f"{git_sha}|{staged}|{unstaged}|{untracked}".encode("utf-8")
     ).hexdigest()
     return f"{git_sha}-dirty-{dirty_fingerprint[:7]}"
+
 
 
 def _read_repo_version(default):
