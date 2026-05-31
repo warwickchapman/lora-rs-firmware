@@ -522,9 +522,6 @@ bool SerialAdmin::begin(ConfigStore *config, NodeStateMachine *sm,
 }
 
 void SerialAdmin::tick() {
-  if (Serial.available() > 0) {
-    has_activity_ = true;
-  }
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
     if (c == '\r')
@@ -548,6 +545,7 @@ void SerialAdmin::tick() {
 void SerialAdmin::handleLine(const String &line) {
   if (!line.startsWith("LRS:"))
     return;
+  has_activity_ = true;
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, line.substring(4));
   if (err) {
