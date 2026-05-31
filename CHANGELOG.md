@@ -17,7 +17,8 @@ All notable changes to this pre-release project are documented here in current o
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
 
 ### Added
-- Added `"forget_gateway_target"` serial admin command enabling permanent remote deletion, updating settings and clearing volatile peers in one step.
+- Added a `power_save_listen_only` configuration flag for remote transmitter nodes that enables an ultra-lean power save mode (disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin) 10 minutes after boot unless active technician Serial or WiFi (OTA/UDP logs) activity is detected.
+- Added a `hasActivity()` tracker to SerialAdmin to dynamically extend technician maintenance windows when active configuration commands are sent over USB.
 - Added a `🗑️ Forget Device` action in the Flasher Fleet Actions dropdown with safety confirmation to cleanly remove outdated or replaced nodes.
 - Flasher settings pane displays the decrypted Fleet Key with hide/show toggle, enabling direct local credential updates over USB serial admin.
 - Firmware supports targeted, same-key encrypted LoRa key rollover commands (`MessageType::FleetKeyControl`), enabling secure over-the-air Fleet Key updates to remote nodes via gateway.

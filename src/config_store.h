@@ -56,6 +56,7 @@ struct Settings {
   uint8_t wifi_channel_override;
   FixedSettingString<24> wifi_ap_fallback_policy;
   bool wifi_admin_enabled;
+  bool power_save_listen_only;
 
   bool mqtt_client_enabled;
   bool mqtt_control_enabled;

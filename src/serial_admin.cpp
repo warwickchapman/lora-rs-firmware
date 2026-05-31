@@ -145,6 +145,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["wifi_channel_override"] = cfg.wifi_channel_override;
   doc["wifi_ap_fallback_policy"] = cfg.wifi_ap_fallback_policy;
   doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
+  doc["power_save_listen_only"] = cfg.power_save_listen_only;
   doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
   doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
   doc["mqtt_controller_addresses"] = cfg.mqtt_controller_addresses;
@@ -191,6 +192,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   const uint8_t prevWifiChannelOverride = cfg.wifi_channel_override;
   FixedSettingString<24> prevWifiApFallbackPolicy = cfg.wifi_ap_fallback_policy;
   const bool prevWifiAdminEnabled = cfg.wifi_admin_enabled;
+  const bool prevPowerSaveListenOnly = cfg.power_save_listen_only;
   FixedSettingString<33> prevAdminPassword = cfg.admin_password;
 
   auto fail = [&](const String &msg) {
@@ -297,6 +299,8 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       doc["wifi_ap_fallback_policy"] | cfg.wifi_ap_fallback_policy.c_str();
   cfg.wifi_admin_enabled =
       parseBoolField(doc["wifi_admin_enabled"], cfg.wifi_admin_enabled);
+  cfg.power_save_listen_only =
+      parseBoolField(doc["power_save_listen_only"], cfg.power_save_listen_only);
   cfg.mqtt_client_enabled =
       parseBoolField(doc["mqtt_client_enabled"], cfg.mqtt_client_enabled);
   cfg.mqtt_control_enabled =
@@ -497,7 +501,8 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
                    (cfg.wifi_static_subnet != prevWifiStaticSubnet) ||
                    (cfg.wifi_channel_override != prevWifiChannelOverride) ||
                    (cfg.wifi_ap_fallback_policy != prevWifiApFallbackPolicy) ||
-                   (cfg.wifi_admin_enabled != prevWifiAdminEnabled);
+                   (cfg.wifi_admin_enabled != prevWifiAdminEnabled) ||
+                   (cfg.power_save_listen_only != prevPowerSaveListenOnly);
   otaAuthChanged = (cfg.admin_password != prevAdminPassword);
   if (!config.save()) {
     return fail("save_failed");
@@ -512,10 +517,14 @@ bool SerialAdmin::begin(ConfigStore *config, NodeStateMachine *sm,
   sm_ = sm;
   on_apply_ = onApply;
   input_.reserve(256);
+  has_activity_ = false;
   return true;
 }
 
 void SerialAdmin::tick() {
+  if (Serial.available() > 0) {
+    has_activity_ = true;
+  }
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
     if (c == '\r')

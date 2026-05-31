@@ -105,12 +105,31 @@ void App::begin() {
   startup_defer_logged_ = false;
   slow_phase_last_log_ms_ = 0;
   slow_phase_suppressed_count_ = 0;
+  power_save_active_ = false;
+  power_save_locked_off_ = false;
 
   lrslog::event("boot", 0, 0, 0);
 }
 
 void App::tick() {
   const uint32_t tickStartMs = millis();
+  const auto &cfg = config_.settings();
+  if (cfg.power_save_listen_only && !power_save_locked_off_ && !power_save_active_) {
+    if (tickStartMs > 600000UL) {
+      if (serial_admin_.hasActivity() || lrslog::udpMirrorEnabled()) {
+        power_save_locked_off_ = true;
+        LRS_LOGI(SYS, "event=power_save_deferred reason=activity_detected");
+      } else {
+        LRS_LOGW(SYS, "event=power_save_entered reason=inactivity_timeout");
+        Serial.flush();
+        delay(50);
+        power_save_active_ = true;
+        Serial.end();
+        stopWifiForAdminDisable();
+      }
+    }
+  }
+
   const bool startupTrace =
       static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
   bool emitStartupBreadcrumb = false;
@@ -181,15 +200,17 @@ void App::tick() {
   }
 
   uint32_t phaseStartMs = millis();
-  serial_admin_.tick();
-  phaseSlowWarn("serial_admin_tick", phaseStartMs);
-  phaseStartMs = millis();
-  updateNetworking();
-  phaseSlowWarn("update_networking", phaseStartMs);
-  phaseStartMs = millis();
-  tickTimeSync();
-  phaseSlowWarn("tick_time_sync", phaseStartMs);
-  phaseStartMs = millis();
+  if (!power_save_active_) {
+    serial_admin_.tick();
+    phaseSlowWarn("serial_admin_tick", phaseStartMs);
+    phaseStartMs = millis();
+    updateNetworking();
+    phaseSlowWarn("update_networking", phaseStartMs);
+    phaseStartMs = millis();
+    tickTimeSync();
+    phaseSlowWarn("tick_time_sync", phaseStartMs);
+    phaseStartMs = millis();
+  }
   const TempSensorStatus &ts = sensors_.tempStatus();
   sm_.setLocalTemperature(ts.valid, ts.celsius);
   const TankSensorStatus &tank = sensors_.tankStatus();
@@ -200,7 +221,7 @@ void App::tick() {
              static_cast<unsigned long>(millis()));
   }
   phaseStartMs = millis();
-  sm_.tick();
+  sm_.tick(power_save_active_);
   phaseSlowWarn("sm_tick", phaseStartMs);
   {
     // Remote LoRa admin commands are applied in App so persistent config,
@@ -210,6 +231,10 @@ void App::tick() {
       uint8_t ctrlSrc = 0;
       uint32_t ctrlCounter = 0;
       if (sm_.consumePendingWifiControl(wifiEnabled, ctrlSrc, ctrlCounter)) {
+        if (wifiEnabled) {
+          power_save_locked_off_ = true;
+          power_save_active_ = false;
+        }
         auto &cfg = config_.settings();
         const bool changed = (cfg.wifi_admin_enabled != wifiEnabled);
         cfg.wifi_admin_enabled = wifiEnabled;
@@ -414,17 +439,19 @@ void App::tick() {
                "reason=wifi_not_connected",
                static_cast<unsigned long>(kStartupNonEssentialDeferralMs));
     }
-  } else {
+  } else if (!power_save_active_) {
     startup_defer_logged_ = false;
     phaseStartMs = millis();
     mqtt_.tick(WiFi.isConnected());
     sm_.setMqttConnected(mqtt_.connected());
     phaseSlowWarn("mqtt_tick", phaseStartMs);
   }
-  phaseStartMs = millis();
-  sensors_.tick();
-  phaseSlowWarn("sensors_tick", phaseStartMs);
-  if (!startupDeferNonEssential) {
+  if (!power_save_active_) {
+    phaseStartMs = millis();
+    sensors_.tick();
+    phaseSlowWarn("sensors_tick", phaseStartMs);
+  }
+  if (!startupDeferNonEssential && !power_save_active_) {
     if (ota_enabled_) {
       phaseStartMs = millis();
       ArduinoOTA.handle();
@@ -659,6 +686,9 @@ void App::applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth) {
 }
 
 void App::startNtpClient() {
+  if (config_.settings().role_tx) {
+    return;
+  }
   configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
   ntp_started_ = true;
   ntp_last_check_ms_ = 0;
@@ -669,6 +699,9 @@ void App::startNtpClient() {
 }
 
 void App::tickTimeSync() {
+  if (config_.settings().role_tx) {
+    return;
+  }
   if (!sta_connected_) {
     return;
   }

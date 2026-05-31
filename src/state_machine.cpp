@@ -572,7 +572,7 @@ void NodeStateMachine::freePollStorage() {
   poll_state_capacity_ = 0;
 }
 
-void NodeStateMachine::tick() {
+void NodeStateMachine::tick(bool powerSaveActive) {
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - tick_watchdog_last_log_ms_) >= kStateMachineLivenessLogIntervalMs) {
     LRS_LOGI(SYS,
@@ -598,7 +598,7 @@ void NodeStateMachine::tick() {
   }
   tickProvisioningTarget(now);
 
-  tickLed();
+  tickLed(powerSaveActive);
   finishRadioTxBudgetForTick();
 }
 

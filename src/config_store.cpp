@@ -75,6 +75,7 @@ constexpr const char *kAllowedFields[] = {
     "wifi_channel_override",
     "wifi_ap_fallback_policy",
     "wifi_admin_enabled",
+    "power_save_listen_only",
     "mqtt_client_enabled",
     "mqtt_control_enabled",
     "mqtt_controller_addresses",
@@ -281,20 +282,31 @@ bool ConfigStore::begin() {
     ensureProvisionedDefaults();
     return save();
   }
+
+  bool needs_save = false;
+
+  // 1. Remove/Warn deprecated/unknown fields
   for (JsonPair kv : root) {
     if (!isAllowedConfigKey(kv.key().c_str())) {
-      LRS_LOGW(FS, "event=config_invalid path=%s reason=unknown_field field=%s action=reset_defaults", kConfigPath, kv.key().c_str());
-      ensureProvisionedDefaults();
-      return save();
+      LRS_LOGI(FS, "event=config_migration info=removing_deprecated_field field=%s", kv.key().c_str());
+      needs_save = true;
+    }
+  }
+
+  // 2. Check for newly introduced/missing fields
+  for (size_t i = 0; i < kAllowedFieldCount; ++i) {
+    if (!root.containsKey(kAllowedFields[i])) {
+      LRS_LOGI(FS, "event=config_migration info=adding_missing_field field=%s", kAllowedFields[i]);
+      needs_save = true;
     }
   }
 
   cfg_.schema_version = root["schema_version"] | 0;
   if (cfg_.schema_version != kConfigSchemaVersion) {
-    LRS_LOGW(FS, "event=config_invalid path=%s reason=schema_mismatch got=%u expected=%u action=reset_defaults", kConfigPath,
+    LRS_LOGI(FS, "event=config_migration info=schema_updated got=%u expected=%u",
              static_cast<unsigned>(cfg_.schema_version), static_cast<unsigned>(kConfigSchemaVersion));
-    ensureProvisionedDefaults();
-    return save();
+    cfg_.schema_version = kConfigSchemaVersion;
+    needs_save = true;
   }
   cfg_.commissioned = root["commissioned"] | false;
   cfg_.mode = root["mode"] | "";
@@ -359,6 +371,7 @@ bool ConfigStore::begin() {
   cfg_.wifi_channel_override = static_cast<uint8_t>(root["wifi_channel_override"] | 0);
   cfg_.wifi_ap_fallback_policy = root["wifi_ap_fallback_policy"] | "fallback_on_disconnect";
   cfg_.wifi_admin_enabled = root["wifi_admin_enabled"] | true;
+  cfg_.power_save_listen_only = root["power_save_listen_only"] | false;
   cfg_.mqtt_client_enabled = root["mqtt_client_enabled"] | false;
   cfg_.mqtt_control_enabled = root["mqtt_control_enabled"] | false;
   cfg_.mqtt_controller_addresses = root["mqtt_controller_addresses"] | "";
@@ -453,6 +466,10 @@ bool ConfigStore::begin() {
            static_cast<unsigned>(cfg_.remote_address),
            cfg_.wifi_sta_ssid.c_str(),
            lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str());
+  if (needs_save) {
+    LRS_LOGI(FS, "event=config_healed action=saving_clean_config");
+    save();
+  }
   return true;
 }
 
@@ -510,6 +527,7 @@ bool ConfigStore::save() {
   doc["wifi_channel_override"] = cfg_.wifi_channel_override;
   doc["wifi_ap_fallback_policy"] = cfg_.wifi_ap_fallback_policy;
   doc["wifi_admin_enabled"] = cfg_.wifi_admin_enabled;
+  doc["power_save_listen_only"] = cfg_.power_save_listen_only;
   doc["mqtt_client_enabled"] = cfg_.mqtt_client_enabled;
   doc["mqtt_control_enabled"] = cfg_.mqtt_control_enabled;
   doc["mqtt_controller_addresses"] = cfg_.mqtt_controller_addresses;
@@ -790,6 +808,7 @@ void ConfigStore::setDefaults() {
   cfg_.wifi_channel_override = 0;
   cfg_.wifi_ap_fallback_policy = "fallback_on_disconnect";
   cfg_.wifi_admin_enabled = true;
+  cfg_.power_save_listen_only = false;
   cfg_.mqtt_client_enabled = false;
   cfg_.mqtt_control_enabled = false;
   cfg_.mqtt_controller_addresses = "";

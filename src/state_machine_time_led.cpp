@@ -64,7 +64,12 @@ uint32_t NodeStateMachine::currentUnixTimeS(uint32_t nowMs) const {
   return shared_time_sync_unix_s_ + ((nowMs - shared_time_sync_ms_) / 1000U);
 }
 
-void NodeStateMachine::tickLed() {
+void NodeStateMachine::tickLed(bool powerSaveActive) {
+  if (powerSaveActive) {
+    led_on_ = false;
+    digitalWrite(kLedPin, HIGH);
+    return;
+  }
   const uint32_t now = millis();
   if (tickIdentifyLed(now)) return;
 

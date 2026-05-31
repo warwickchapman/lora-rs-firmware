@@ -12,6 +12,7 @@ class App {
  public:
   void begin();
   void tick();
+  bool powerSaveActive() const { return power_save_active_; }
 
  private:
   ConfigStore config_;
@@ -76,4 +77,6 @@ class App {
 
   uint32_t sta_reconnect_fib_prev_s_ = 0;
   uint32_t sta_reconnect_fib_curr_s_ = 1;
+  bool power_save_active_ = false;
+  bool power_save_locked_off_ = false;
 };

@@ -13,11 +13,14 @@ public:
              std::function<void(bool, bool)> onApply);
   void tick();
 
+  bool hasActivity() const { return has_activity_; }
+
 private:
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
   String input_;
+  bool has_activity_ = false;
 
   void handleLine(const String &line);
   void handleCommand(JsonDocument &doc);

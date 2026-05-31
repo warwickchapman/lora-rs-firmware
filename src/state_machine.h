@@ -171,7 +171,7 @@ class NodeStateMachine {
 
   bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);
-  void tick();
+  void tick(bool powerSaveActive = false);
   void setMqttConnected(bool connected);
 
   LinkState linkState() const;
@@ -623,7 +623,7 @@ class NodeStateMachine {
   void tickReceiver();
   void tickReceive();
   void tickFleetScan(uint32_t now);
-  void tickLed();
+  void tickLed(bool powerSaveActive = false);
   bool tickIdentifyLed(uint32_t now);
   void tickProvisioningCoordinator(uint32_t now);
   void tickProvisioningTarget(uint32_t now);
