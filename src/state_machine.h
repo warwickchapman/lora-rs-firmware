@@ -272,7 +272,7 @@ class NodeStateMachine {
     uint32_t mqtt_remote_retry_timeout_ms = 5000;
     bool tx_mqtt_remote_polling_enabled = false;
     uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
-    bool maintenance_debug_telemetry_enabled = true;
+    bool maintenance_debug_telemetry_enabled = false;
     bool rx_push_on_change_enabled = false;
     uint32_t rx_push_min_interval_ms = 60000;
     bool input_control_paired_lora_enabled = false;
