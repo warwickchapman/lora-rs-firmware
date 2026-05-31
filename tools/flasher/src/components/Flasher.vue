@@ -2129,7 +2129,10 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_rebooted') return 'Rebooted';
   if (device.row_state === 'ota_no_reboot') return 'No reboot seen';
   if (device.row_state === 'ota_pending') return 'Waiting for reboot';
-  if (device.row_state === 'ota_queued') return 'Queued for OTA';
+  if (device.row_state === 'ota_queued') {
+    const qIdx = otaQueue.value.findIndex(d => d.address === device.address);
+    return qIdx >= 0 ? `Queued for OTA (#${qIdx + 1})` : 'Queued for OTA';
+  }
   return '';
 }
 
@@ -2710,6 +2713,10 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
     rowStateUntilMs: Date.now() + 300000
   };
   
+  loraInventory.value = loraInventory.value.map(row => 
+    row.address === device.address ? { ...row, row_state: 'ota_queued' } : row
+  );
+  
   if (otaQueue.value.length === 1 && remoteOtaBusyAddress.value === null) {
     processOtaQueue();
   }
@@ -2717,6 +2724,15 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
 
 async function processOtaQueue() {
   if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
+
+  const updatingDevice = loraInventory.value.find(d => 
+    d.row_state === 'ota_pending' || d.row_state === 'ota_rebooted' || d.row_state === 'ota_updated'
+  );
+  if (updatingDevice) {
+    setTimeout(() => processOtaQueue(), 2000);
+    return;
+  }
+
   const device = otaQueue.value[0];
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
