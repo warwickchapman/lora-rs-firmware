@@ -780,9 +780,23 @@ const isGatewayUpgradeAvailable = computed(() => {
     return false;
   }
 
-  const candidateStr = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
+  let candidateStr = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
     ? flasherAppVersion.value
     : selectedVersion.value;
+
+  if (selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX) && selectedLocalPath.value) {
+    const fileMatch = selectedLocalPath.value.match(/(\d+\.\d+\.\d+)(?:~(\d+))?/);
+    if (fileMatch) {
+      candidateStr = fileMatch[0];
+    } else {
+      // The ~68 update was a flasher-only release. If using a generic local firmware.bin
+      // and flasher version is ~68, cap/treat candidate firmware version as 0.9.2~67.
+      const pFlasher = parseVersion(flasherAppVersion.value);
+      if (pFlasher && pFlasher.major === 0 && pFlasher.minor === 9 && pFlasher.patch === 2 && pFlasher.dev === 68) {
+        candidateStr = '0.9.2~67';
+      }
+    }
+  }
 
   const p1 = parseVersion(candidateStr);
   const p2 = parseVersion(currentFw);
@@ -2762,6 +2776,10 @@ async function processOtaQueue() {
     networkStatusMessage.value = msg;
     pushNetworkLog(msg);
     notify(msg);
+    delete fleetRowHistory.value[device.address];
+    loraInventory.value = loraInventory.value.map(row => 
+      row.address === device.address ? { ...row, row_state: undefined, row_state_until_ms: undefined } : row
+    );
   } finally {
     remoteOtaBusyAddress.value = null;
     otaQueue.value.shift();
