@@ -5,8 +5,7 @@
 #include <PubSubClient.h>
 
 #include "config_store.h"
-
-class NodeStateMachine;
+#include "state_machine.h"
 
 class MqttBridge {
  public:
@@ -43,8 +42,7 @@ class MqttBridge {
 
   NodeStateMachine *sm_ = nullptr;
 
-  // Keep this aligned with NodeStateMachine::kMaxPeers.
-  static constexpr size_t kPeerPublishCacheSize = 8;
+  static constexpr size_t kPeerPublishCacheSize = LRS_MAX_PEERS;
   struct PeerPublishCacheEntry {
     bool in_use = false;
     uint8_t addr = 0;

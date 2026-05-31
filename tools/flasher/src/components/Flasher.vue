@@ -1919,25 +1919,27 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
   });
 }
 
+/** Wait for deviceInfo to be populated on the given port (by the normal port-detection flow). */
+async function waitForDeviceInfo(port: string, timeoutMs = 12000): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const state = serialDeviceState(port);
+    if (state?.deviceInfo) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  // One final direct attempt if the normal flow hasn't populated it yet
+  return await readDeviceInfoForPort(port, 'network');
+}
+
 async function loadNetworkGateway() {
   const port = gatewaySelectedPort.value;
   if (!port || isNetworkGatewayLoading.value) return;
   isNetworkGatewayLoading.value = true;
   try {
-    let state = serialDeviceState(port);
-    networkStatusMessage.value = `Reading gateway identity on ${port}...`;
-    // Retry with back-off — the ESP may still be booting after plug-in or app startup
-    let info = false;
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      info = await readDeviceInfoForPort(port, 'network');
-      if (info) break;
-      if (attempt < 5) {
-        networkStatusMessage.value = `Waiting for serial device on ${port} to become ready (attempt ${attempt}/5)...`;
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    }
-    if (!info) throw new Error('Unable to read gateway factory details');
-    state = serialDeviceState(port);
+    networkStatusMessage.value = `Waiting for serial device on ${port}...`;
+    const ready = await waitForDeviceInfo(port);
+    if (!ready) throw new Error('Unable to read gateway factory details');
+    const state = serialDeviceState(port);
     const hello = await waitForSerialAdminHello(port, 6000);
     if (state) {
       state.adminSupported = true;
@@ -3395,20 +3397,11 @@ async function loadEasyPairGateway(isAuto = false) {
   if (loadGatewayInFlight) return;
   loadGatewayInFlight = true;
   isGatewayLoading.value = true;
-  pushPairLog('Reading USB gateway identity...');
+  pushPairLog('Waiting for USB gateway identity...');
   try {
-    // Retry with back-off — the ESP may still be booting after plug-in or app startup
-    let ok = false;
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      ok = await readDeviceInfoForPort(port, 'pair');
-      if (ok) break;
-      if (attempt < 5) {
-        pushPairLog(`Waiting for serial device on ${port} to become ready (attempt ${attempt}/5)...`);
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    }
+    const ready = await waitForDeviceInfo(port);
     const state = serialDeviceState(port);
-    if (!ok || !state?.deviceInfo) throw new Error('Unable to read gateway factory details');
+    if (!ready || !state?.deviceInfo) throw new Error('Unable to read gateway factory details');
     state.adminPassword = state.deviceInfo.password || '';
     pushPairLog('Waiting for serial admin to become ready...');
     const hello = await waitForSerialAdminHello(port);
