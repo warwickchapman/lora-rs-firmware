@@ -362,6 +362,59 @@ const remoteUdpBusyAddress = ref<number | null>(null);
 const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
+const filteredNetworkLogs = computed(() => {
+  const targetLabel = networkUdpTarget.value;
+  if (!targetLabel) {
+    return networkLogs.value.map(line => formatUdpLogLine(line));
+  }
+  
+  const dev = loraInventory.value.find(d => fleetDeviceUdpLabel(d) === targetLabel);
+  const targetIp = dev?.ip;
+  const targetAddress = dev?.address;
+
+  return networkLogs.value
+    .filter(line => {
+      const ipMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
+      if (!ipMatch) {
+        if (line.includes('addr ') || line.includes('follow-up ')) {
+          const addrMatch = line.match(/(?:addr|follow-up)\s+(\d+)/);
+          if (addrMatch) {
+            const addr = Number(addrMatch[1]);
+            if (targetAddress !== undefined && addr !== targetAddress) {
+              return false;
+            }
+          }
+        }
+        return true;
+      }
+      return targetIp && ipMatch[1] === targetIp;
+    })
+    .map(line => formatUdpLogLine(line));
+});
+
+function formatUdpLogLine(line: string): string {
+  if (!line) return '';
+  const ipMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(.*)$/);
+  if (!ipMatch) return line;
+
+  const ip = ipMatch[1];
+  const rest = ipMatch[2];
+
+  const dev = loraInventory.value.find(d => d.ip === ip);
+  if (dev) {
+    const chip = String(dev.chip_id || '').trim().replace(/^0x/i, '').toLowerCase();
+    const name = chip ? `lrs-${chip}` : `Addr ${dev.address}`;
+    return `[${name}] ${rest}`;
+  }
+
+  const gwIp = fleetGatewayStatus.value?.wifi?.ip;
+  if (gwIp && gwIp === ip) {
+    return `[Gateway] ${rest}`;
+  }
+
+  return `[${ip}] ${rest}`;
+}
+
 const pairLogs = ref<string[]>([]);
 const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
@@ -1433,11 +1486,11 @@ function copyActivityLog() {
 }
 
 function copyNetworkUdpLog() {
-  if (networkLogs.value.length === 0) {
+  if (filteredNetworkLogs.value.length === 0) {
     notify('No UDP logs to copy');
     return;
   }
-  copyToClipboard(networkLogs.value.join('\n'), 'UDP log');
+  copyToClipboard(filteredNetworkLogs.value.join('\n'), 'UDP log');
 }
 
 function copyActivePassword() {
@@ -2656,9 +2709,6 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
     notify('Enter the gateway admin password');
     return;
   }
-  if (!await confirmOperatorAction(`Factory reset remote device ${device.address}? This cannot be undone!`, { confirmText: 'Factory reset', danger: true })) {
-    return;
-  }
   try {
     notify(`Triggering factory reset on remote ${device.address}...`);
     await sendEasyPairCommandOnPort(port, 'remote_factory_reset', {
@@ -2668,7 +2718,23 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
       keep_wifi_credentials: keepWifi
     }, 8000);
     notify(`Factory reset triggered on remote ${device.address}. Device is rebooting.`);
+
+    if (!keepFleet) {
+      const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
+      notify(`Forgetting remote ${deviceName} from gateway settings...`);
+      try {
+        await sendEasyPairCommandOnPort(port, 'forget_gateway_target', {
+          admin_password: password,
+          address: device.address
+        });
+        notify(`Successfully forgot remote ${deviceName} from gateway`);
+      } catch (forgetErr) {
+        console.error('Failed to forget gateway target:', forgetErr);
+      }
+    }
+
     factoryResetTargetModal.value = null;
+    refreshLoraInventoryStatus(false);
   } catch (e) {
     const msg = serialFeatureError(`Remote factory reset`, e);
     notify(msg);
@@ -6365,10 +6431,10 @@ function toggleSelectAllBulkPorts() {
             <div class="mb-2 flex items-center justify-between gap-3">
               <div class="min-w-0">
                 <div class="truncate text-xs font-bold text-slate-300">UDP logs · {{ networkUdpTarget || 'Fleet' }}</div>
-                <div class="mt-0.5 text-[10px] text-slate-600">{{ networkLogs.length }} lines · following latest</div>
+                <div class="mt-0.5 text-[10px] text-slate-600">{{ filteredNetworkLogs.length }} lines · following latest</div>
               </div>
               <div class="flex shrink-0 items-center gap-2">
-                <button @click="copyNetworkUdpLog" :disabled="networkLogs.length === 0" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50">Copy</button>
+                <button @click="copyNetworkUdpLog" :disabled="filteredNetworkLogs.length === 0" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50">Copy</button>
                 <button @click="networkUdpLogsExpanded = !networkUdpLogsExpanded; nextTick(() => scrollNetworkUdpToBottom())" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">
                   {{ networkUdpLogsExpanded ? 'Collapse' : 'Full screen' }}
                 </button>
@@ -6376,8 +6442,8 @@ function toggleSelectAllBulkPorts() {
               </div>
             </div>
             <div ref="networkUdpLogContainer" :class="['overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400', networkUdpLogsExpanded ? 'min-h-0 flex-1 rounded border border-slate-800 bg-slate-950/60 p-2' : 'max-h-44']">
-              <div v-for="(log, i) in networkLogs.slice(-200)" :key="i">{{ log }}</div>
-              <div v-if="networkLogs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
+              <div v-for="(log, i) in filteredNetworkLogs.slice(-200)" :key="i">{{ log }}</div>
+              <div v-if="filteredNetworkLogs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
             </div>
           </div>
         </div>
