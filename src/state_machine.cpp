@@ -84,7 +84,7 @@ constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 2200;
 constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 30000;
 constexpr uint8_t kProvDiscoverBroadcastBurstCount = 2;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
-constexpr uint8_t kProvMaxRetriesPerNode = 1;
+constexpr uint8_t kProvMaxRetriesPerNode = 3;
 constexpr uint8_t kProvCoordinatorBurstPacketsPerTick = 6;
 constexpr uint8_t kProvAnnounceRepeatCount = 2;
 constexpr uint16_t kProvAnnounceRetryBackoffMs = 120;
@@ -3839,9 +3839,8 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         d.key_commit_sent = false;
         d.late_verify_probe_sent = false;
       } else {
-        d.state = ProvisioningDeviceState::AppliedUnconfirmed;
-        rememberProvisionedAddress(d.chip_id, d.assigned_address);
-        lrslog::event("prov_applied_unconfirmed", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
+        d.state = ProvisioningDeviceState::Failed;
+        lrslog::event("prov_verify_exhausted", 0, static_cast<uint32_t>(d.chip_id & 0xFFFFU), d.assigned_address);
         prov_.current_index++;
       }
       continue;

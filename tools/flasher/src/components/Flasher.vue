@@ -1796,7 +1796,7 @@ function uniqueSortedAddresses(values: number[]): number[] {
 }
 
 function isProvisionedTargetState(device: EasyPairDevice): boolean {
-  return device.state === 'verified' || device.state === 'applied_unconfirmed';
+  return device.state === 'verified';
 }
 
 function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | undefined, status: SerialAdminStatus | null): SerialAdminConfig {
@@ -3446,8 +3446,7 @@ async function saveEasyPairTargets() {
   const newAddresses = uniqueSortedAddresses(deviceAddresses);
   isPairBusy.value = true;
   devices.forEach(d => pushPairLog(`Address allocation: addr ${d.assigned_address} chip ${d.chip_id_hex || 'unknown'}`));
-  const unconfirmed = devices.filter(d => d.state === 'applied_unconfirmed');
-  unconfirmed.forEach(d => pushPairLog(`Address ${d.assigned_address} for ${d.chip_id_hex || 'unknown'} was applied but not verified; keeping it in the gateway target list.`));
+
   try {
     const existingAddresses = await loadGatewayTargetAddresses(password);
     const mergedAddresses = uniqueSortedAddresses([...existingAddresses, ...newAddresses]);
