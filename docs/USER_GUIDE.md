@@ -47,12 +47,19 @@ Recommended defaults:
 Use `Settings` in Flasher with a USB-connected device.
 
 - `General`: role/address and LoRa timing/fail-safe controls.
-- `Network`: WiFi SSID/password, hostname, PHY/TX power, static IP, fallback AP policy.
+- `Network`: WiFi SSID/password, hostname, PHY/TX power, static IP, fallback AP policy, and optional listen-only power save.
 - `MQTT`: broker, topic root, MQTT client/control, controller addresses.
 - `Sensors`: DS18B20 reporting and 4-20 mA tank level enablement.
 - `System`: save config, reboot, guarded factory reset.
 
 Secret fields are redacted on fetch. Leave password fields blank to preserve the stored value.
+
+### Listen-Only Power Save
+`power_save_listen_only` is for remote devices that should spend most of their time listening for LoRa commands with the least possible background activity.
+
+When enabled, the device waits 10 minutes after boot. If no technician USB serial activity and no UDP logging activity is detected, it turns off Serial Admin, WiFi background work, MQTT, OTA handling, sensor polling, and status LEDs. LoRa control continues running.
+
+Use this only when the device is installed and no local technician session is expected. To maintain a device in this mode, power-cycle it and connect with Flasher within the first 10 minutes.
 
 ## Fleet
 Fleet uses a USB-connected TX/gateway as the source of truth.

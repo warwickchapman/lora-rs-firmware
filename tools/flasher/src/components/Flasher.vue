@@ -356,7 +356,7 @@ const bulkShowLogsByPort = ref<Record<string, boolean>>({});
 const bulkLogRefs = ref<Record<string, HTMLElement>>({});
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
-const isFirmwareServerStarting = ref(false);const showPairDeviceSettings = ref(false);
+const isFirmwareServerStarting = ref(false);
 
 const remoteOtaBusyAddress = ref<number | null>(null);
 const otaQueue = ref<LoraInventoryDevice[]>([]);
@@ -546,6 +546,7 @@ const fleetRowHistory = ref<Record<number, {
   tank_voltage_mv?: number;
   rssi?: number;
   lastTelemetryTimestamp?: number;
+  knownRebootUntilMs?: number;
 }>>({});
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
@@ -1925,14 +1926,14 @@ async function loadNetworkGateway() {
   try {
     let state = serialDeviceState(port);
     networkStatusMessage.value = `Reading gateway identity on ${port}...`;
-    // Retry with delay — the serial port may not be ready immediately on app startup
+    // Retry with back-off — the ESP may still be booting after plug-in or app startup
     let info = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       info = await readDeviceInfoForPort(port, 'network');
       if (info) break;
-      if (attempt < 3) {
-        networkStatusMessage.value = `Waiting for ${port} to become ready (attempt ${attempt}/3)...`;
-        await new Promise(r => setTimeout(r, 1000));
+      if (attempt < 5) {
+        networkStatusMessage.value = `Waiting for serial device on ${port} to become ready (attempt ${attempt}/5)...`;
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
     if (!info) throw new Error('Unable to read gateway factory details');
@@ -3396,14 +3397,14 @@ async function loadEasyPairGateway(isAuto = false) {
   isGatewayLoading.value = true;
   pushPairLog('Reading USB gateway identity...');
   try {
-    // Retry with delay — the serial port may not be ready immediately on app startup
+    // Retry with back-off — the ESP may still be booting after plug-in or app startup
     let ok = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       ok = await readDeviceInfoForPort(port, 'pair');
       if (ok) break;
-      if (attempt < 3) {
-        pushPairLog(`Waiting for ${port} to become ready (attempt ${attempt}/3)...`);
-        await new Promise(r => setTimeout(r, 1000));
+      if (attempt < 5) {
+        pushPairLog(`Waiting for serial device on ${port} to become ready (attempt ${attempt}/5)...`);
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
     const state = serialDeviceState(port);

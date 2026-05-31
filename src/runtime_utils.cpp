@@ -46,14 +46,10 @@ const char *wifiStatusText(wl_status_t st) {
     return "connection_lost";
   case WL_DISCONNECTED:
     return "disconnected";
-#ifdef WL_WRONG_PASSWORD
   case WL_WRONG_PASSWORD:
     return "wrong_password";
-#endif
-#ifdef WL_NO_SHIELD
   case WL_NO_SHIELD:
     return "no_shield";
-#endif
   default:
     return "unknown";
   }

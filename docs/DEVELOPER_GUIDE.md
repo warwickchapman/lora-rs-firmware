@@ -62,6 +62,8 @@ In `App::tick`:
 
 This ordering keeps LoRa control priority above MQTT.
 
+When `power_save_listen_only` is enabled, `App::tick` enters listen-only power save after 10 minutes if USB serial admin and UDP log activity have both stayed idle. In that state, firmware skips USB serial admin, networking, NTP, MQTT, sensors, OTA handling, and status LED activity while continuing the LoRa state machine tick. Treat this as a remote-node runtime mode, not a general low-power framework.
+
 ## 6. Networking Behavior
 - Mode: AP+STA
 - AP starts immediately
@@ -69,6 +71,7 @@ This ordering keeps LoRa control priority above MQTT.
 - On STA connection, Soft AP is disabled
 - On STA disconnect/failure, Soft AP fallback is re-enabled unless `wifi_ap_fallback_policy=secure_sta_only`
 - WiFi power-save disabled; TX power set high for stable local-link behavior
+- `power_save_listen_only` is disabled by default. Enable it only for installed remote nodes where LoRa responsiveness matters more than local USB/network maintenance after the startup service window.
 
 ## 7. Local Admin and Fleet Control
 Local maintenance is via USB serial admin in Flasher. Remote maintenance is via MQTT admin where online, plus gateway-mediated LoRa admin for bounded remote actions.
@@ -231,7 +234,7 @@ Local non-release flasher version policy:
 Release execution guardrails:
 - Never trigger `package_flasher.yml` in release mode with `platform=all` or `platform=macos`.
 - Standard release path is tag-driven CI plus local macOS builds.
-- CI release mode is Windows/Linux only; local macOS portable ZIPs are uploaded after CI.
+- CI release mode is Windows/Linux only; local macOS DMGs are uploaded after CI.
 - `package_flasher.yml` now blocks `create_release=true` when `platform=all` or `platform=macos`.
 - `create_release=true` is allowed only on tag refs (`refs/tags/v*`); release dispatches from `main` are blocked.
 - Mandatory release order:
@@ -239,8 +242,8 @@ Release execution guardrails:
   2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS app bundles locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
   3. Push release tag and let CI publish Linux/Windows flasher artifacts, or dispatch explicitly from the release tag ref:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
-  4. Upload local macOS portable ZIPs to the same release:
-     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x64-portable.zip>`
+  4. Upload local macOS DMGs to the same release:
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x86_64.dmg>`
   5. Verify complete assets in both repos:
      - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
@@ -252,7 +255,7 @@ Deterministic release mode (preferred):
 3. The script handles end-to-end:
    - firmware release publish (`lora-rs` + `lora-rs-firmware`),
    - Windows/Linux flasher CI release dispatch from the release tag and completion wait,
-   - local macOS arm64/x86_64 portable ZIP builds from the release tag,
+   - local macOS arm64/x86_64 DMG builds from the release tag,
    - macOS asset upload to both repos,
    - full 10-asset contract verification in both repos,
    - workflow run pruning for `package_flasher.yml` (keeps latest 10 completed runs by default).
@@ -289,8 +292,9 @@ Conditional checklist: when `tools/flasher/**` changed in the release:
 
 Release binary set contract:
 - Firmware: `za`, `us`, `eu` (`3` files)
-- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 portable zip`, `macos x64 portable zip` (`7` files)
+- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x86_64 dmg` (`7` files)
 - Total release binaries: `10`
+- macOS DMGs should contain `Thanda LoRa Flasher.app` plus an `Applications` shortcut, allowing one-off run-from-image service use or drag-install into `/Applications`.
 
 Release tooling notes:
 - `tools/release_manager.py` now defaults to no asset verification unless explicitly requested:

@@ -31,6 +31,9 @@ Packed fields:
 - `Provisioning` (`'V'`)
 - `MaintenanceRequest` (`'Q'`)
 - `MaintenanceStatus` (`'T'`)
+- `Reboot` (`'B'`)
+- `SensorConfig` (`'K'`)
+- `FleetKeyControl` (`'Z'`)
 
 ## Encrypted Payload Layout (12 bytes)
 - `b0`: `relay_state`
@@ -113,6 +116,14 @@ Otherwise packet is dropped and logged.
 - The HTTP firmware stream is hashed while being written to the inactive OTA slot. The update is finalized only if the final SHA256 matches the authenticated digest.
 - `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
 - `FactoryReset` supports an option to preserve the current shared fleet key during reset.
+- `Reboot` (`'B'`) carries a compact magic-value command payload for a targeted remote reboot.
+- `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
+- `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.
+
+Targeting rules:
+- `Reboot`, `SensorConfig`, `FleetKeyControl`, `UdpLogControl`, `OtaPullControl`, and `FactoryReset` must be addressed to the target device's LoRa address.
+- Broadcast is reserved for controlled provisioning-style flows. Do not use broadcast for destructive or lockout-prone maintenance commands.
+- Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, or factory-reset commands.
 
 ## MQTT-to-LoRa Semantics
 - MQTT `relay` topic sets only the local node relay state immediately.
@@ -151,4 +162,6 @@ Upgrade paired nodes together.
 
 Gateway-mediated remote OTA requires digest-capable firmware on both the USB gateway and target remote; older one-packet OTA trigger firmware will not interoperate with the SHA256-segmented trigger.
 
-Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset` do not change frame size; they only define additional message types and alternate payload semantics.
+Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`UdpLogControl`/`OtaPullControl`/`FactoryReset`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
+
+Any future change that changes packet size, encrypted payload layout, replay behavior, addressing rules, or Fleet Key derivation is a breaking protocol change and should use a major version boundary or explicit protocol-version signaling.

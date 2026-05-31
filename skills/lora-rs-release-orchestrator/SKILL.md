@@ -37,7 +37,7 @@ Run the validated end-to-end LRS release workflow:
 - `CHANGELOG.md` is updated in human-readable form before release prep is committed.
 - If flasher assets are being built, run `python3 tools/flasher/sync_version.py` first.
 - Rebuild flasher if `tools/flasher/**` changed since the source release.
-- macOS flasher builds are local; Windows/Linux flasher builds come from CI.
+- macOS flasher DMG builds are local; Windows/Linux flasher builds come from CI.
 - For local ad-hoc flasher builds, do not mutate releases/tags/assets; build locally only.
 
 ## Workflow
@@ -74,7 +74,7 @@ Run the validated end-to-end LRS release workflow:
    - `python3 tools/flasher/sync_version.py`
 3. Build macOS flasher locally:
    - arm64 DMG
-   - x64 DMG
+   - x86_64 DMG
 4. Build Windows/Linux flasher assets via CI.
 5. Upload flasher assets to both repos with `gh release upload --clobber`.
 
@@ -121,7 +121,7 @@ Current release contract:
   - `thanda-lora-flasher-<version>-linux-x64.rpm`
   - `thanda-lora-flasher-<version>-linux-x64.AppImage.tar.gz`
   - `thanda-lora-flasher-<version>-macos-arm64.dmg`
-  - `thanda-lora-flasher-<version>-macos-x64.dmg`
+  - `thanda-lora-flasher-<version>-macos-x86_64.dmg`
 - Total binaries: 10
 
 Enforce these rules:

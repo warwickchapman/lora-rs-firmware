@@ -4,7 +4,7 @@ Release helper for flasher assets.
 
 Policy encoded:
 - GitHub Actions release builds: Windows + Linux only.
-- macOS release artifacts: built locally, uploaded manually.
+- macOS release artifacts: DMGs built locally, uploaded manually.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def expected_assets(version: str) -> Set[str]:
         f"lrs-firmware-{version}-za.bin",
         f"lrs-firmware-{version}-us.bin",
         f"lrs-firmware-{version}-eu.bin",
-        f"thanda-lora-flasher-{version}-macos-arm64-portable.zip",
-        f"thanda-lora-flasher-{version}-macos-x86_64-portable.zip",
+        f"thanda-lora-flasher-{version}-macos-arm64.dmg",
+        f"thanda-lora-flasher-{version}-macos-x86_64.dmg",
         f"thanda-lora-flasher-{version}-windows-x64.msi",
         f"thanda-lora-flasher-{version}-windows-x64-portable.zip",
         f"thanda-lora-flasher-{version}-linux-x64.deb",
@@ -128,10 +128,10 @@ def parse_args() -> argparse.Namespace:
     ap_dispatch.add_argument("--repo", default=REPO_MAIN)
     ap_dispatch.add_argument("--workflow", default=WORKFLOW)
 
-    ap_upload = sub.add_parser("upload-macos", help="Upload local macOS portable ZIPs to both repos.")
+    ap_upload = sub.add_parser("upload-macos", help="Upload local macOS DMGs to both repos.")
     ap_upload.add_argument("--tag", required=True, help="Release tag (vX.Y.Z-alpha or X.Y.Z-alpha)")
-    ap_upload.add_argument("--arm64", required=True, type=Path, help="Path to macOS arm64 portable ZIP")
-    ap_upload.add_argument("--x64", required=True, type=Path, help="Path to macOS x86_64 portable ZIP")
+    ap_upload.add_argument("--arm64", required=True, type=Path, help="Path to macOS arm64 DMG")
+    ap_upload.add_argument("--x64", required=True, type=Path, help="Path to macOS x86_64 DMG")
     ap_upload.add_argument("--repo-main", default=REPO_MAIN)
     ap_upload.add_argument("--repo-public", default=REPO_PUBLIC)
 
