@@ -2866,7 +2866,7 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
 }
 
 
-async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean, graceEnabled: boolean) {
+async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean) {
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
@@ -2880,14 +2880,13 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       target_address: device.address,
       sensor_temp_enabled: tempEnabled,
       sensor_tank_enabled: tankEnabled,
-      power_save_listen_only: powerSaveEnabled,
-      power_save_boot_grace: graceEnabled
+      power_save_listen_only: powerSaveEnabled
     }, 8000);
     notify(`Sensors updated successfully on remote ${device.address}`);
     // Optimistically update local state so re-opening the modal shows the applied config
     loraInventory.value = loraInventory.value.map(row => {
       if (row.address === device.address) {
-        return { ...row, temp_enabled: tempEnabled, tank_enabled: tankEnabled, power_save_listen_only: powerSaveEnabled, power_save_boot_grace: graceEnabled };
+        return { ...row, temp_enabled: tempEnabled, tank_enabled: tankEnabled, power_save_listen_only: powerSaveEnabled };
       }
       return row;
     });
@@ -6860,7 +6859,7 @@ function toggleSelectAllBulkPorts() {
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Config
@@ -6875,7 +6874,6 @@ function toggleSelectAllBulkPorts() {
               <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
                 <input 
                   v-model="settingsDeviceModal.power_save_listen_only" 
-                  @change="if (!settingsDeviceModal.power_save_listen_only) settingsDeviceModal.power_save_boot_grace = true"
                   type="checkbox" 
                   class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" 
                 />
@@ -6887,29 +6885,15 @@ function toggleSelectAllBulkPorts() {
                 </div>
               </label>
 
-              <!-- Boot grace period sub-checkbox -->
-              <div 
-                v-if="settingsDeviceModal.power_save_listen_only" 
-                class="flex flex-col gap-3 ml-6 animate-fade-in"
-              >
-                <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                  <input v-model="settingsDeviceModal.power_save_boot_grace" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                  <div>
-                    <div class="font-semibold text-slate-200">10-Minute Boot Grace Period</div>
-                    <div class="text-[10px] text-slate-500 mt-0.5 select-text leading-relaxed">
-                      Give a 10-minute boot grace period where WiFi and Serial Admin are active on startup before entering power save. If unchecked, the node enters power save IMMEDIATELY upon boot without starting WiFi or Serial to prevent brownouts on weak power sources.
-                    </div>
-                  </div>
-                </label>
-              </div>
             </div>
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Config
+              </button>
             </div>
           </div>
 
