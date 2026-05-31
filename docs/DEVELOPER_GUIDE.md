@@ -112,33 +112,102 @@ MQTT runs only when:
 Base path:
 - `<root>/lrs-<chipid>/...`
 
-Published status topics (retained, every 10 s):
-- `input`
-- `dry_contact`
-- `relay`
-- `temp_c`
-- `remote_temp_c`
-- `tank_status`
-- `tank_depth_mm`
-- `tank_current_ma`
-- `tank_voltage_mv`
-- `type`
-- `addr`
-- `last_updated`
-- `uptime_ms`
-  - `addr` is published as `0xNN` (for example `0x9D`).
+### Availability
 
-Subscribed control topics:
+| Topic | Values | Description |
+|-------|--------|-------------|
+| `availability` | `online` / `offline` | LWT — broker publishes `offline` (retained) on disconnect; gateway publishes `online` (retained) on connect. |
+
+### Discovery
+
+| Topic | Format | Description |
+|-------|--------|-------------|
+| `<root>/discovery/lrs-<chipid>` | JSON | Device metadata published on connect (chip_id, firmware, role, address). |
+
+### Gateway (local) status topics
+
+Published retained every ~10 s under `<root>/lrs-<chipid>/`:
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `input` | `0`/`1` | Dry contact / digital input state. |
+| `dry_contact` | `0`/`1` | Alias for `input`. |
+| `relay` | `0`/`1` | Local relay state. |
+| `relay_feedback` | `0`/`1` | Hardware GPIO readback of relay driver. |
+| `type` | `tx`/`rx` | Device role. |
+| `addr` | `0xNN` | LoRa address (hex). |
+| `temp_c` | float | Local temperature sensor (empty string if not available). |
+| `remote_temp_c` | float | Legacy single-remote temperature (empty string if not available). |
+| `tank_status` | string | `disabled`, `ok`, `fault_open`, `fault_short`, etc. |
+| `tank_depth_mm` | int | Tank depth in mm (empty string if disabled/invalid). |
+| `tank_current_ma` | float | 4–20 mA loop current (empty string if disabled/invalid). |
+| `tank_voltage_mv` | int | ADC reference voltage in mV (empty string if disabled/invalid). |
+| `last_updated` | int | `millis()` at publish time — use to detect stale data. |
+| `uptime_ms` | int | Gateway uptime in milliseconds. |
+| `heap_free` | int | Free heap bytes (diagnostic). |
+| `heap_max_block` | int | Largest contiguous free block (diagnostic). |
+| `heap_frag_pct` | int | Heap fragmentation percentage (diagnostic). |
+
+### Peer status topics
+
+Published retained under `<root>/lrs-<chipid>/peers/<NN_lrs-peerchipid>/`.
+Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c27/relay`).
+Falls back to `peers/03/...` when chip_id is not yet known.
+
+**Operational** — use these for automations and integrations:
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `relay` | `0`/`1` | Remote relay state. |
+| `input` | `0`/`1` | Remote dry contact state (from sensors telemetry, change-detected). |
+| `dry_contact` | `0`/`1` | Alias for `input`. |
+| `ack_state` | string | `acked`, `pending`, `timeout`, `unknown`. |
+| `temp_c` | float | Remote temperature (empty string if not available). |
+| `tank_status` | string | `disabled`, `ok`, `fault_open`, `fault_short`, etc. |
+| `tank_depth_mm` | int | Tank depth in mm (empty string if disabled/invalid). |
+| `tank_current_ma` | float | 4–20 mA loop current (empty string if disabled/invalid). |
+| `tank_voltage_mv` | int | ADC voltage in mV (empty string if disabled/invalid). |
+| `wifi` | `0`/`1` | Remote WiFi enabled state (empty string if unknown). |
+| `uptime_ms` | int | Remote uptime in milliseconds (from maintenance telemetry). |
+| `uplink_rssi_dbm` | int | RSSI of last received packet from this peer (dBm). |
+| `downlink_rssi_dbm` | int | RSSI reported by peer for gateway's signal (dBm, empty if unknown). |
+
+**Polling / timing** — gateway-managed peer polling state:
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `poll_interval_s` | int | Configured poll interval in seconds (0 = disabled). |
+| `poll_state` | `idle`/`pending` | Whether a poll request is in flight. |
+| `last_poll_tx_ms` | int | `millis()` of last poll request sent. |
+| `last_seen_ms` | int | `millis()` of last received packet from peer. |
+| `last_cmd_counter` | int | Monotonic command counter for change detection. |
+
+**Cross-reference** — address lookup helpers:
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `addr_hex` | string | Two-character hex address (e.g. `03`). |
+| `addr_dec` | string | Zero-padded decimal address (e.g. `03`). |
+
+**Diagnostic** — raw hardware state from debug maintenance telemetry:
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `relay_feedback` | `0`/`1` | Raw GPIO readback of remote relay driver pin. |
+| `input_feedback` | `0`/`1` | Raw GPIO readback of remote input pin. May differ from `input` due to telemetry page timing. |
+| `heap_free` | int | Remote free heap bytes. |
+| `heap_max_block` | int | Remote largest contiguous free block. |
+| `heap_frag_pct` | int | Remote heap fragmentation percentage. |
+
+### Subscribed control topics
+
 - `relay`: sets local relay directly on that node.
 - `control`: TX-only JSON control for remote LoRa relay send.
 - `control.addr` parsing: JSON number = decimal address, JSON string = hex address.
-- TX publishes per-peer child state under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/...`
-  (e.g. `peers/03_lrs-804a9c27/relay`). Falls back to `peers/03/...` if chip_id is not yet known.
-- Peer status leaves include `input`, `dry_contact`, `temp_c`, `tank_status`,
-  `tank_depth_mm`, `tank_current_ma`, `tank_voltage_mv`, and `uptime_ms`.
 - TX can be commanded to poll peers via:
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/poll_interval_s`
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/poll_now`
+  - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/wifi` (payload `1`/`0`)
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/forget` (payload `1` removes runtime node and clears retained peer subtree topics)
 
 TX input-to-LoRa control gate:
