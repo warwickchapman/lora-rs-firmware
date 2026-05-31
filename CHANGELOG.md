@@ -5,6 +5,8 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Colorized the Sensors column dry-contact input status values to render the `"Closed"` word in emerald green and `"Open"` in vibrant orange to highlight device states at first glance.
+- Added a highly informative hover `ⓘ` tooltip to fleet status labels (`Unexpected reboot`, `Rebooted (OTA)`, `No reboot seen (OTA)`) in the Uptime column explaining their triggers and diagnostic context.
 - Stored remote device address-to-chip ID pairings persistently in gateway config store, pre-populating runtime caches on boot to instantly preserve remote names (`lrs-XXXXXXXX`) across gateway power cycles or Flasher re-connections.
 - Fixed remote maintenance sensor telemetry reporting by scheduling the cascading sequence of all maintenance pages (`kMaintenancePageSensors` and `kMaintenancePageDebug`) on every gateway maintenance request, restoring DS18B20 temperature and 4-20 mA tank level reporting.
 - Improved serial admin peer serialization to unconditionally report input and relay state values when a remote node has checked in (so the frontend receives active `0` values and correctly displays `"Open"` instead of `"waiting"`).

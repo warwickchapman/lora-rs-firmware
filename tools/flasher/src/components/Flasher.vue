@@ -2261,16 +2261,6 @@ function tankDetailLabel(row: LoraInventoryDevice): string {
   return parts.join(' / ');
 }
 
-function fleetSensorsLabel(row: LoraInventoryDevice): string {
-  if (row.age_ms === undefined || row.age_ms === null) return '-';
-  const parts = [`in ${remoteInputLabel(row)}`];
-  const temp = remoteTempLabel(row);
-  if (temp !== '-') parts.push(temp);
-  const tank = tankLabel(row);
-  if (tank !== '-') parts.push(`tank ${tank}`);
-  return parts.join(' · ');
-}
-
 function adoptMonitorMqttFromStatus(st: SerialAdminStatus | null) {
   if (!st?.mqtt) return;
   monitorMqttHost.value = st.mqtt.host || monitorMqttHost.value;
@@ -6485,13 +6475,23 @@ function toggleSelectAllBulkPorts() {
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
                   <td class="px-2 py-1.5">
-                    <div class="text-slate-300">{{ fleetSensorsLabel(device) }}</div>
+                    <div class="text-slate-300 flex items-center gap-1 flex-wrap">
+                      <template v-if="device.age_ms !== undefined && device.age_ms !== null">
+                        <span>in <span :class="remoteInputLabel(device) === 'Closed' ? 'text-emerald-400 font-semibold' : remoteInputLabel(device) === 'Open' ? 'text-orange-400 font-semibold' : 'text-slate-400'">{{ remoteInputLabel(device) }}</span></span>
+                        <span v-if="remoteTempLabel(device) !== '-'" class="text-slate-500">·</span>
+                        <span v-if="remoteTempLabel(device) !== '-'">{{ remoteTempLabel(device) }}</span>
+                        <span v-if="tankLabel(device) !== '-'" class="text-slate-500">·</span>
+                        <span v-if="tankLabel(device) !== '-'">tank {{ tankLabel(device) }}</span>
+                      </template>
+                      <template v-else>-</template>
+                    </div>
                     <div v-if="tankDetailLabel(device)" class="mt-1 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
                   </td>
                   <td class="px-2 py-1.5 font-mono">
                     <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
-                    <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']">
+                    <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer select-none', device.row_state === 'unexpected_reboot' ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : 'text-sky-300']" :title="device.row_state === 'unexpected_reboot' ? 'Spontaneous restart detected: Device uptime rolled back (rebooted) without a requested OTA command. Typically caused by power cycles, brownouts, or watchdog resets.' : device.row_state === 'ota_rebooted' ? 'Normal post-upgrade restart: Device rebooted successfully to boot into the newly written firmware version.' : device.row_state === 'ota_no_reboot' ? 'Upgrade timeout: The firmware binary was served, but the remote did not reboot to apply it within the expected window.' : undefined">
                       {{ fleetRowStatusLabel(device) }}
+                      <span v-if="device.row_state === 'unexpected_reboot' || device.row_state === 'ota_rebooted' || device.row_state === 'ota_no_reboot'" class="opacity-60 text-[9px]">ⓘ</span>
                     </div>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
