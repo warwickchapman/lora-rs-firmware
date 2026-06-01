@@ -12,19 +12,11 @@ public:
   bool begin(ConfigStore *config, NodeStateMachine *sm,
              std::function<void(bool, bool)> onApply);
   void tick();
-
-  bool consumeActivity() {
-    bool act = has_activity_;
-    has_activity_ = false;
-    return act;
-  }
-
 private:
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
   String input_;
-  bool has_activity_ = false;
 
   void handleLine(const String &line);
   void handleCommand(JsonDocument &doc);

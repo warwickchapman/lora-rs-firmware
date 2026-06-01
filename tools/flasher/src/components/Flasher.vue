@@ -6900,18 +6900,10 @@ function toggleSelectAllBulkPorts() {
                     </span>
                     <template v-else-if="device.power_save_listen_only">
                       <span 
-                        v-if="device.power_save_active"
-                        class="rounded border px-2 py-1 text-[10px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                        title="Power save active: node is currently sleeping"
-                      >
-                        Sleeping
-                      </span>
-                      <span 
-                        v-else
                         class="rounded border px-2 py-1 text-[10px] font-bold border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                        title="Power save enabled: node is awake in 10-minute maintenance window"
+                        title="Power save active: node is running in LoRa-only low-power mode"
                       >
-                        ON
+                        PowerSave
                       </span>
                     </template>
                     <span v-else class="text-slate-500">-</span>
@@ -7169,7 +7161,7 @@ function toggleSelectAllBulkPorts() {
 
           <!-- Power tab content (Stateless Commands Console) -->
           <div v-if="settingsDeviceModal.activeTab === 'power'" class="flex flex-col gap-3">
-            <p class="text-xs text-slate-500">Configure remote power management over LoRa. Changes persist to remote device flash memory.</p>
+            <p class="text-xs text-slate-500">PowerSave turns off WiFi, Serial Admin, OTA, MQTT, UDP logging, LEDs, and background services. LoRa command handling remains active so the node can be returned to Full Power remotely.</p>
             
             <div class="flex flex-col gap-3 py-1">
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-4">
@@ -7180,7 +7172,7 @@ function toggleSelectAllBulkPorts() {
                   </div>
                   <div class="text-[10px] text-slate-400 mt-2 select-text leading-relaxed">
                     <template v-if="settingsDeviceModal.power_save_listen_only">
-                      The node starts in the ArmedAwake maintenance window for 10 minutes (enabling WiFi & Serial Admin). It will then enter deep sleeping listen-only mode. Any local activity (Serial, OTA, local config save, LoRa command) resets this 10-minute timer.
+                      The node is configured for deep power saving. Local Wi-Fi, Serial Admin, and background services are completely shut down to preserve battery life. LoRa receiver remains active.
                     </template>
                     <template v-else>
                       Keeps the remote node continuously awake. WiFi, Serial Admin, OTA, and active sensor polling remain fully operational at all times.

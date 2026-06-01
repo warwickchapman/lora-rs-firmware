@@ -54,12 +54,12 @@ Use `Settings` in Flasher with a USB-connected device.
 
 Secret fields are redacted on fetch. Leave password fields blank to preserve the stored value.
 
-### Listen-Only Power Save
-`power_save_listen_only` is for remote devices that should spend most of their time listening for LoRa commands with the least possible background activity.
+### PowerSave Mode
+`power_save_listen_only` is for remote devices that should spend their time in low-power sleep mode with the least possible background activity.
 
-When enabled, the device waits 10 minutes after boot. If no technician USB serial activity and no UDP logging activity is detected, it turns off Serial Admin, WiFi background work, MQTT, OTA handling, sensor polling, and status LEDs. LoRa control continues running.
+When enabled, the device immediately transitions to deep sleeping listen-only mode on boot. In this state, local WiFi access, Serial Admin, MQTT, OTA, UDP logs, status LEDs, and background sensor polling are completely disabled to conserve power.
 
-Use this only when the device is installed and no local technician session is expected. To maintain a device in this mode, power-cycle it and connect with Flasher within the first 10 minutes.
+Recovery is performed remotely over LoRa. To wake a node back to Full Power, send the `Disable PowerSave` command from the gateway via the Flasher UI. This restarts all normal networking, Serial, and OTA services. Local WiFi/Serial access is intentionally unavailable while PowerSave is active.
 
 ## Fleet
 Fleet uses a USB-connected TX/gateway as the source of truth.

@@ -62,7 +62,7 @@ In `App::tick`:
 
 This ordering keeps LoRa control priority above MQTT.
 
-When `power_save_listen_only` is enabled, `App::tick` enters listen-only power save after 10 minutes if USB serial admin and UDP log activity have both stayed idle. In that state, firmware skips USB serial admin, networking, NTP, MQTT, sensors, OTA handling, and status LED activity while continuing the LoRa state machine tick. Treat this as a remote-node runtime mode, not a general low-power framework.
+When `power_save_listen_only` is enabled (representing binary PowerSave), the node immediately enters deep sleeping listen-only mode on boot or remote command. In this state, the node completely disables its WiFi stack, MQTT, Serial Admin, OTA, UDP logs, status LEDs, and nonessential sensor polling, leaving only the LoRa receiver active. It remains unpingable and unreachable locally until a remote LoRa command disables PowerSave, returning the node to Full Power.
 
 ## 6. Networking Behavior
 - Mode: AP+STA
@@ -71,7 +71,7 @@ When `power_save_listen_only` is enabled, `App::tick` enters listen-only power s
 - On STA connection, Soft AP is disabled
 - On STA disconnect/failure, Soft AP fallback is re-enabled unless `wifi_ap_fallback_policy=secure_sta_only`
 - WiFi power-save disabled; TX power set high for stable local-link behavior
-- `power_save_listen_only` is disabled by default. Enable it only for installed remote nodes where LoRa responsiveness matters more than local USB/network maintenance after the startup service window.
+- `power_save_listen_only` is disabled by default. Enable it only for installed remote nodes where remote LoRa recovery is preferred and local WiFi/Serial access is not required during normal field operation.
 
 ## 7. Local Admin and Fleet Control
 Local maintenance is via USB serial admin in Flasher. Remote maintenance is via MQTT admin where online, plus gateway-mediated LoRa admin for bounded remote actions.

@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Refactored PowerSave into a pure, binary model ("Full Power" vs "PowerSave") with no inactivity timers, boot grace periods, or delayed/instant modes. The node immediately enters LoRa-only low-power mode on boot or remote command, completely turning off WiFi, Serial Admin, OTA, MQTT, LEDs, and background services, and can only be woken back to Full Power by a remote LoRa command.
 - Added a clear, premium BETA tag to the Monitor page title in the Flasher UI.
 - Implemented smart sleep telemetry in Flasher: the WiFi column now transitions to a pulsing orange `"..."` (pending offline) state when a node's grace period ends and PowerSave goes ON, until the actual reported connection status drops or the node goes silent.
 - Automatically clear the IP address field to `"-"` when a device's WiFi status is reported as Offline.

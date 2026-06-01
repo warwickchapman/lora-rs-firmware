@@ -77,12 +77,15 @@ void App::begin() {
 
   const auto &cfg = config_.settings();
   if (cfg.power_save_listen_only) {
-    power_save_state_ = PowerSaveRuntimeState::ArmedAwake;
-    power_save_last_activity_ms_ = millis();
+    power_save_state_ = PowerSaveRuntimeState::Sleeping;
+    wifi_stack_disabled_ = true;
+    WiFi.mode(WIFI_OFF);
+    ap_enabled_ = false;
+    sta_connected_ = false;
   } else {
     power_save_state_ = PowerSaveRuntimeState::FullPower;
+    startNetworking();
   }
-  startNetworking();
 
   if (!radio_.begin(config_.settings())) {
     lrslog::event("radio_start_failed", 0, 0, 0);
@@ -106,7 +109,9 @@ void App::begin() {
         applyUpdatedConfig(restartNetwork, restartOtaAuth);
       });
 
-  startOta();
+  if (power_save_state_ != PowerSaveRuntimeState::Sleeping) {
+    startOta();
+  }
   startup_trace_until_ms_ = millis() + kStartupTraceWindowMs;
   startup_trace_next_breadcrumb_ms_ = 0;
   startup_defer_logged_ = false;
@@ -119,14 +124,7 @@ void App::begin() {
 void App::tick() {
   const uint32_t tickStartMs = millis();
   
-  if (serial_admin_.consumeActivity()) {
-    markPowerSaveActivity(PowerSaveActivitySource::SerialAdminInput);
-  }
-  if (lrslog::udpMirrorEnabled()) {
-    markPowerSaveActivity(PowerSaveActivitySource::UdpMirrorEnable);
-  }
 
-  tickPowerSave();
 
   const bool startupTrace =
       static_cast<int32_t>(tickStartMs - startup_trace_until_ms_) < 0;
@@ -231,7 +229,6 @@ void App::tick() {
       if (sm_.consumePendingWifiControl(wifiEnabled, ctrlSrc, ctrlCounter)) {
         if (wifiEnabled) {
           exitPowerSave("remote_wifi_control");
-          markPowerSaveActivity(PowerSaveActivitySource::LoRaMaintCommand);
         }
         auto &cfg = config_.settings();
         const bool changed = (cfg.wifi_admin_enabled != wifiEnabled);
@@ -290,7 +287,6 @@ void App::tick() {
       uint8_t provSrc = 0;
       if (sm_.consumePendingWifiProvision(provSsid, provPassword, provSrc)) {
         exitPowerSave("remote_wifi_provision");
-        markPowerSaveActivity(PowerSaveActivitySource::LoRaMaintCommand);
         auto &cfg = config_.settings();
         const bool changed = (cfg.wifi_sta_ssid != provSsid) ||
                              (cfg.wifi_sta_password != provPassword) ||
@@ -356,10 +352,7 @@ void App::tick() {
       
       // Enforce runtime power state adjustments immediately on command consumption
       if (sensorPowerSaveEnabled) {
-        power_save_state_ = PowerSaveRuntimeState::ArmedAwake;
-        power_save_last_activity_ms_ = millis();
-        markPowerSaveActivity(PowerSaveActivitySource::LoRaMaintCommand);
-        lrslog::disableUdpMirror(); // Stop UDP logging mirror so it doesn't block entering sleep!
+        enterPowerSave("remote_command");
       } else {
         exitPowerSave("remote_command");
       }
@@ -1045,12 +1038,7 @@ void App::startOta() {
   }
   ArduinoOTA.setHostname(cached_sta_hostname_.c_str());
   ArduinoOTA.setPassword(cfg.admin_password.c_str());
-  ArduinoOTA.onStart([this]() {
-    markPowerSaveActivity(PowerSaveActivitySource::OtaTraffic);
-  });
-  ArduinoOTA.onProgress([this](unsigned int progress, unsigned int total) {
-    markPowerSaveActivity(PowerSaveActivitySource::OtaTraffic);
-  });
+
   // Disable ArduinoOTA's internal service advertisement to keep heap usage
   // predictable on ESP8266.
   ArduinoOTA.begin(false);
@@ -1101,35 +1089,7 @@ void App::normalizeHostname(const char *input, char *out, size_t outSize) const 
   out[len] = '\0';
 }
 
-void App::tickPowerSave() {
-  if (!config_.settings().power_save_listen_only) {
-    if (power_save_state_ == PowerSaveRuntimeState::Sleeping) {
-      exitPowerSave("disabled");
-    }
-    power_save_state_ = PowerSaveRuntimeState::FullPower;
-    return;
-  }
 
-  if (power_save_state_ == PowerSaveRuntimeState::FullPower) {
-    power_save_state_ = PowerSaveRuntimeState::ArmedAwake;
-    power_save_last_activity_ms_ = millis();
-  }
-
-  // 10 minutes maintenance window
-  constexpr uint32_t kPowerSaveIdleMs = 600000UL;
-  if (power_save_state_ == PowerSaveRuntimeState::ArmedAwake &&
-      millis() - power_save_last_activity_ms_ >= kPowerSaveIdleMs) {
-    enterPowerSave("idle_timeout");
-  }
-}
-
-void App::markPowerSaveActivity(PowerSaveActivitySource source) {
-  if (!config_.settings().power_save_listen_only) return;
-  if (power_save_state_ == PowerSaveRuntimeState::Sleeping) return;
-
-  power_save_last_activity_ms_ = millis();
-  LRS_LOGD(SYS, "event=power_save_activity source=%d", static_cast<int>(source));
-}
 
 void App::enterPowerSave(const char *reason) {
   if (power_save_state_ == PowerSaveRuntimeState::Sleeping) return;
