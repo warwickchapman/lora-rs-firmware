@@ -2527,10 +2527,8 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   last_maint_page_tx_ms_ = last_tx_ms_;
   markRadioTxSentThisTick();
   lrslog::event("maint_status_tx", 0, last_counter_, dstAddress);
-  if (fwDevBuild() > 0) {
-    maintenance_version_pending_ = true;
-    maintenance_version_dst_ = dstAddress;
-  }
+  maintenance_version_pending_ = true;
+  maintenance_version_dst_ = dstAddress;
   maintenance_sensor_pending_ = true;
   maintenance_sensor_dst_ = dstAddress;
   if (runtime_.maintenance_debug_telemetry_enabled) {
@@ -2544,7 +2542,6 @@ bool NodeStateMachine::sendMaintenanceVersionStatus(uint8_t dstAddress) {
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
   const uint16_t build = fwDevBuild();
-  if (build == 0) return false;
   uint8_t major = 0;
   uint8_t minor = 0;
   uint8_t patch = 0;
@@ -2556,6 +2553,7 @@ bool NodeStateMachine::sendMaintenanceVersionStatus(uint8_t dstAddress) {
   payload[3] = minor;
   payload[4] = patch;
   encodeU16LE(payload + 5, build);
+  encodeU32LE(payload + 7, millis());
 
   last_counter_++;
   if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
@@ -2719,6 +2717,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->fw_minor = p[3];
     node->fw_patch = p[4];
     node->fw_build = decodeU16LE(p + 5);
+    node->uptime_ms = decodeU32LE(p + 7);
     lrslog::event("maint_version_rx", msg.rssi, msg.counter, node->address);
   } else if (p[1] == kMaintenancePageSensors) {
     node->input_state = p[2] ? 1 : 0;

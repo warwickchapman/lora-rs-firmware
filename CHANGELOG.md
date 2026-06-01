@@ -59,6 +59,7 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Remote uptime now travels on the normal maintenance version page instead of only the optional debug page, restoring Fleet uptime display while keeping debug telemetry disabled.
 - Gateway input-control fan-out now builds its LoRa target list from paired targets, persisted known peers, and the live peer cache, so a stale or collapsed primary `remote_address` cannot silently reduce control to only address 1.
 - Gateway peer-cache input state now ignores ACK packets in both receive paths; Fleet dry-contact Open/Closed status is only marked known from real remote status or sensor telemetry.
 - Paired input-control ACKs no longer mark a remote dry-contact input as verified or copy the gateway's desired input state into peer-cache sensor rows; only actual remote telemetry/sensor pages can drive Fleet `"Open"` / `"Closed"` input display.

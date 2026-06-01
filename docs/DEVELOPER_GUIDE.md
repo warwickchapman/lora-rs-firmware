@@ -173,7 +173,7 @@ Falls back to `peers/03/...` when chip_id is not yet known.
 | `tank_current_ma` | float | 4–20 mA loop current (empty string if disabled/invalid). |
 | `tank_voltage_mv` | int | ADC voltage in mV (empty string if disabled/invalid). |
 | `wifi` | `0`/`1` | Remote WiFi enabled state (empty string if unknown). |
-| `uptime_ms` | int | Remote uptime in milliseconds (from maintenance telemetry). |
+| `uptime_ms` | int | Remote uptime in milliseconds (from normal maintenance version telemetry). |
 | `uplink_rssi_dbm` | int | RSSI of last received packet from this peer (dBm). |
 | `downlink_rssi_dbm` | int | RSSI reported by peer for gateway's signal (dBm, empty if unknown). |
 
