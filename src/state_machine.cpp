@@ -2432,6 +2432,7 @@ bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sent
 }
 
 bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
+  if (ota_pull_rx_.active) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 || settings_ == nullptr) return false;
   uint8_t major = 0;
@@ -2574,6 +2575,7 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 }
 
 void NodeStateMachine::tickPendingMaintenancePages() {
+  if (ota_pull_rx_.active) return;
   if (maintenance_version_pending_) {
     if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
       if (sendMaintenanceVersionStatus(maintenance_version_dst_)) {

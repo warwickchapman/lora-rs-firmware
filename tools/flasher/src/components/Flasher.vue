@@ -147,6 +147,9 @@ interface LoraInventoryDevice {
   selected?: boolean;
   row_state?: 'ota_pending' | 'ota_downloading' | 'ota_apply_wait' | 'ota_retrying' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed';
   row_state_until_ms?: number;
+  pending_power_save_listen_only?: boolean;
+  pending_power_save_boot_grace?: boolean;
+  pending_power_save_tx_ms?: number;
 }
 
 interface LoraInventoryStatus {
@@ -531,6 +534,9 @@ const fleetRowHistory = ref<Record<number, {
   otaRetryCount?: number;
   lastOtaActivityMs?: number;
   rebootExpectedUntilMs?: number;
+  pendingPowerSaveListenOnly?: boolean;
+  pendingPowerSaveBootGrace?: boolean;
+  pendingPowerSaveTxMs?: number;
   
   // Volatile telemetry cache
   ip?: string;
@@ -2838,19 +2844,21 @@ async function triggerOtaFailureOrRetry(device: LoraInventoryDevice) {
   otaQueue.value = otaQueue.value.filter(d => d.address !== device.address);
 
   if (currentRetry <= 3) {
-    notify(`OTA failure detected for Address ${device.address}. Retrying (${currentRetry}/3) in 5 seconds...`);
+    const jitter = Math.floor(Math.random() * 3000);
+    const retryDelay = 5000 + jitter;
+    notify(`OTA failure detected for Address ${device.address}. Retrying (${currentRetry}/3) in ${(retryDelay / 1000).toFixed(1)} seconds...`);
     
     fleetRowHistory.value[device.address] = {
       ...history,
       rowState: 'ota_retrying',
-      rowStateUntilMs: Date.now() + 6000,
+      rowStateUntilMs: Date.now() + retryDelay + 1000,
       otaRetryCount: currentRetry,
       otaExpectedUntilMs: Date.now() + 180000
     };
 
     loraInventory.value = loraInventory.value.map(row => 
       row.address === device.address 
-        ? { ...row, row_state: 'ota_retrying', row_state_until_ms: Date.now() + 6000 } 
+        ? { ...row, row_state: 'ota_retrying', row_state_until_ms: Date.now() + retryDelay + 1000 } 
         : row
     );
 
@@ -2869,7 +2877,7 @@ async function triggerOtaFailureOrRetry(device: LoraInventoryDevice) {
         }
       };
       checkAndRetry();
-    }, 5000);
+    }, retryDelay);
   } else {
     notify(`OTA for Address ${device.address} failed after 3 attempts.`);
     fleetRowHistory.value[device.address] = {
@@ -2929,9 +2937,9 @@ async function processOtaQueue() {
     // If we send it after, the device is already busy with the OTA and might drop the LoRa packet.
     await startFleetUdpLogs(device).catch(e => pushNetworkLog(`Failed to start UDP logs for ${device.address}: ${e}`));
 
-    // Wait 1.5 seconds to give the remote device time to process the UDP log command and transmit
+    // Wait 3.0 seconds to give the remote device time to process the UDP log command and transmit
     // any resulting ACK/telemetry over LoRa. This prevents half-duplex radio collisions that drop OTA chunks.
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 3000));
 
     const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
       admin_password: password,
