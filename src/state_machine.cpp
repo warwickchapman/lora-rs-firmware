@@ -1441,19 +1441,8 @@ bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, St
   return true;
 }
 
-bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
-  if (!runtime_.role_tx) return false;
-  if (dstAddress == 0 || dstAddress == 255) return false;
-
-  size_t idx = kMaxPeers;
-  for (size_t i = 0; i < peer_count_; ++i) {
-    if (peers_[i].in_use && peers_[i].address == dstAddress) {
-      idx = i;
-      break;
-    }
-  }
-  if (idx >= peer_count_) return false;
-
+void NodeStateMachine::removePeerAt(size_t idx) {
+  if (idx >= peer_count_) return;
   for (size_t i = idx; i + 1 < peer_count_; ++i) {
     peers_[i] = peers_[i + 1];
     if (poll_states_ != nullptr && i + 1 < poll_state_capacity_) {
@@ -1467,6 +1456,21 @@ bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
       poll_states_[peer_count_] = PollRuntime{};
     }
   }
+}
+
+bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
+  if (!runtime_.role_tx) return false;
+  if (dstAddress == 0 || dstAddress == 255) return false;
+
+  size_t idx = kMaxPeers;
+  for (size_t i = 0; i < peer_count_; ++i) {
+    if (peers_[i].in_use && peers_[i].address == dstAddress) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx >= peer_count_) return false;
+  removePeerAt(idx);
   {
     lrslog::event("mqtt_remote_forget", 0, 0, dstAddress);
   }
@@ -2657,9 +2661,24 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   }
   if (p[1] == kMaintenancePageIdentity) {
     const uint8_t flags = p[2];
-    node->chip_id = static_cast<uint32_t>(p[3]) |
-                    (static_cast<uint32_t>(p[4]) << 8) |
-                    (static_cast<uint32_t>(p[5]) << 16);
+    const uint32_t reportedChipId = static_cast<uint32_t>(p[3]) |
+                                    (static_cast<uint32_t>(p[4]) << 8) |
+                                    (static_cast<uint32_t>(p[5]) << 16);
+    if (reportedChipId != 0) {
+      for (size_t i = 0; i < peer_count_; ++i) {
+        if (!peers_[i].in_use || peers_[i].address == msg.src ||
+            peers_[i].chip_id != reportedChipId) {
+          continue;
+        }
+        lrslog::event("peer_identity_moved", msg.rssi, peers_[i].address, msg.src);
+        removePeerAt(i);
+        node = findOrCreatePeer(msg.src);
+        if (node == nullptr) return false;
+        break;
+      }
+      rememberProvisionedAddress(reportedChipId, msg.src);
+    }
+    node->chip_id = reportedChipId;
     const uint8_t nextMajor = static_cast<uint8_t>((p[6] >> 4) & 0x0FU);
     const uint8_t nextMinor = static_cast<uint8_t>(p[6] & 0x0FU);
     const uint8_t nextPatch = p[7];

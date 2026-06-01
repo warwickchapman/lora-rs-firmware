@@ -399,9 +399,11 @@ void App::tick() {
         cfg.mode = "paired";
         cfg.role = provRoleTx ? "transmitter" : "receiver";
         if (provRoleTx) {
+          cfg.input_control_paired_lora_enabled = true;
           cfg.paired_target_count = 0;
           memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
         } else {
+          cfg.input_control_paired_lora_enabled = false;
           if (provControllerAddr < 1 || provControllerAddr > 254) {
             provControllerAddr = cfg.remote_address;
           }

@@ -418,8 +418,8 @@ bool ConfigStore::begin() {
     return save();
   }
   if (cfg_.input_control_paired_lora_enabled && (cfg_.mode != kModePaired || !cfg_.role_tx)) {
-    LRS_LOGW(FS, "event=config_invalid path=%s reason=paired_input_requires_paired_tx action=reset_defaults", kConfigPath);
-    ensureProvisionedDefaults();
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=paired_input_requires_paired_tx action=disable_input_control", kConfigPath);
+    cfg_.input_control_paired_lora_enabled = false;
     return save();
   }
   if (cfg_.heartbeat_ms < 60000UL) cfg_.heartbeat_ms = 60000UL;
@@ -838,9 +838,11 @@ void ConfigStore::ensureProvisionedDefaults() {
   if (cfg_.role_tx) {
     cfg_.local_address = kGatewayAddress;
     cfg_.remote_address = kFirstRemoteAddress;
+    cfg_.input_control_paired_lora_enabled = true;
   } else {
     cfg_.local_address = kFirstRemoteAddress;
     cfg_.remote_address = kGatewayAddress;
+    cfg_.input_control_paired_lora_enabled = false;
   }
   cfg_.paired_target_count = 1;
   memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));

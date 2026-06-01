@@ -58,6 +58,8 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Receiver provisioning now explicitly disables paired-input gateway control on remotes, and config repair disables that incompatible flag instead of resetting the whole receiver back to default address `1`.
+- Gateway peer cache now treats chip ID as the physical identity and collapses stale duplicate rows when the same chip reports from a different LoRa source address.
 - Gateway `set_gateway_targets` now merges target addresses by default instead of destructively replacing the fleet list, preventing follow-up provisioning batches from silently removing existing remotes from Fleet. Explicit replacement now requires `replace: true`.
 - Remote firmware checks the target destination address of `MessageType::MaintenanceRequest` packets before responding, preventing concurrent reply packet collisions when the gateway performs sequential fleet scans.
 - Remote firmware packs the dynamic dev build number into the provisioning announce/verify packet revision bytes, allowing the Flasher's Provisioning tab to display the full beta version string (e.g. `0.9.2~11` or higher) during discovery.
