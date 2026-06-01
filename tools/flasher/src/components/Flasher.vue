@@ -530,6 +530,7 @@ const fleetRowHistory = ref<Record<number, {
   
   otaRetryCount?: number;
   lastOtaActivityMs?: number;
+  rebootExpectedUntilMs?: number;
   
   // Volatile telemetry cache
   ip?: string;
@@ -1999,14 +2000,20 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   let otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
   const knownReboot = history.knownRebootUntilMs && history.knownRebootUntilMs > now;
 
+  const expectedReboot = history.rebootExpectedUntilMs && history.rebootExpectedUntilMs > now;
+
   if (previousUptime > 0 && uptime > 0 && uptime + 30000 < previousUptime) {
     if (history.rowState === 'ota_updated' && knownReboot) {
       // Ignore the uptime drop if we already flagged a successful OTA update
       rowState = 'ota_updated';
       rowStateUntilMs = history.rowStateUntilMs;
     } else {
-      rowState = (otaExpected || knownReboot) ? 'ota_rebooted' : 'unexpected_reboot';
-      rowStateUntilMs = now + ((otaExpected || knownReboot) ? 20000 : 60000);
+      const isExpected = expectedReboot || otaExpected || knownReboot;
+      rowState = isExpected ? 'ota_rebooted' : 'unexpected_reboot';
+      rowStateUntilMs = now + (isExpected ? 20000 : 60000);
+      
+      // Consume the expected reboot once processed to prevent repeat triggers
+      history.rebootExpectedUntilMs = undefined;
     }
   }
   if (otaExpected && history.fwVersion && row.fw_version && history.fwVersion !== row.fw_version) {
@@ -2112,7 +2119,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     rowState,
     rowStateUntilMs,
     otaExpectedUntilMs,
-    knownRebootUntilMs: history.knownRebootUntilMs
+    knownRebootUntilMs: history.knownRebootUntilMs,
+    rebootExpectedUntilMs: history.rebootExpectedUntilMs
   };
 
   return {
@@ -3035,7 +3043,8 @@ async function executeRemoteReboot(device: LoraInventoryDevice) {
     const now = Date.now();
     fleetRowHistory.value[device.address] = {
       ...(fleetRowHistory.value[device.address] || {}),
-      knownRebootUntilMs: now + 60000
+      knownRebootUntilMs: now + 60000,
+      rebootExpectedUntilMs: now + 240000
     };
   } catch (e) {
     const msg = serialFeatureError(`Remote reboot`, e);
@@ -3073,7 +3082,8 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
     const now = Date.now();
     fleetRowHistory.value[device.address] = {
       ...(fleetRowHistory.value[device.address] || {}),
-      knownRebootUntilMs: now + 60000
+      knownRebootUntilMs: now + 60000,
+      rebootExpectedUntilMs: now + 240000
     };
 
     if (!keepFleet) {
@@ -3156,7 +3166,8 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
     const now = Date.now();
     fleetRowHistory.value[device.address] = {
       ...(fleetRowHistory.value[device.address] || {}),
-      knownRebootUntilMs: now + 60000
+      knownRebootUntilMs: now + 60000,
+      rebootExpectedUntilMs: now + 240000
     };
     settingsDeviceModal.value = null;
   } catch (e) {
@@ -4742,7 +4753,8 @@ onMounted(async () => {
               fleetRowHistory.value[dev.address] = {
                 ...(fleetRowHistory.value[dev.address] || {}),
                 rowState: 'ota_apply_wait',
-                rowStateUntilMs: Date.now() + 120000
+                rowStateUntilMs: Date.now() + 120000,
+                rebootExpectedUntilMs: Date.now() + 240000
               };
               loraInventory.value = loraInventory.value.map(row => 
                 row.address === dev.address ? { ...row, row_state: 'ota_apply_wait', row_state_until_ms: Date.now() + 120000 } : row
@@ -6883,7 +6895,7 @@ function toggleSelectAllBulkPorts() {
                       >
                         <button
                           @click="flashLoraRemote(device); activeDropdownAddress = null"
-                          :disabled="remoteOtaBusyAddress !== null || isFirmwareServerStarting || !fleetFlashAvailable(device)"
+                          :disabled="isFirmwareServerStarting || ['ota_queued', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'].includes(device.row_state || '') || !fleetFlashAvailable(device)"
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
                           :title="fleetFlashUnavailableReason(device)"
                         >
@@ -6900,7 +6912,7 @@ function toggleSelectAllBulkPorts() {
                           @click="openSettingsModal(device)"
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                         >
-                          ⚙️ Settings
+                          🛠️ Commands
                         </button>
                         <button
                           @click="executeRemoteReboot(device)"
@@ -7040,7 +7052,7 @@ function toggleSelectAllBulkPorts() {
         <div class="w-full max-w-lg rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
           <!-- Header with device info -->
           <div>
-            <h3 class="text-base font-bold text-slate-200">⚙️ Settings — Node {{ settingsDeviceModal.device.address }}</h3>
+            <h3 class="text-base font-bold text-slate-200">🛠️ Command Console — Node {{ settingsDeviceModal.device.address }}</h3>
             <p class="mt-1 text-xs text-slate-500">
               <span v-if="settingsDeviceModal.device.chip_id">{{ settingsDeviceModal.device.chip_id }}</span>
               <span v-if="settingsDeviceModal.device.fw_version"> · v{{ settingsDeviceModal.device.fw_version }}</span>
@@ -7088,55 +7100,73 @@ function toggleSelectAllBulkPorts() {
                 @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
-                Apply Config
+                Apply Sensor Configuration
               </button>
             </div>
           </div>
 
-          <!-- Power tab content -->
+          <!-- Power tab content (Stateless Commands Console) -->
           <div v-if="settingsDeviceModal.activeTab === 'power'" class="flex flex-col gap-3">
-            <p class="text-xs text-slate-500">Configure remote low-power operations over LoRa. Changes persist to remote device flash memory.</p>
+            <p class="text-xs text-slate-500">Select and transmit an explicit power management command over LoRa. These actions apply instantly to the remote node.</p>
+            
             <div class="flex flex-col gap-3 py-1">
-              <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                <input 
-                  v-model="settingsDeviceModal.power_save_listen_only" 
-                  @change="settingsDeviceModal.power_save_listen_only ? null : settingsDeviceModal.power_save_boot_grace = true"
-                  type="checkbox" 
-                  class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" 
-                />
-                <div>
-                  <div class="font-semibold text-slate-200">PowerSave</div>
+              <!-- Card 1: Disable PowerSave -->
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-3">
+                <div class="flex-1">
+                  <div class="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Keep Awake Mode
+                  </div>
                   <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
-                    The remote device will be in LoRa Listen-Only power saving mode. WiFi, active sensor polling, status LEDs, and Serial Admin will be disabled (with Serial Admin and WiFi opening temporarily for 10 minutes on boot for maintenance) until a LoRa request to the device for telemetry or to change the powersave status.
+                    Keeps the remote node continuously awake. WiFi stack remains online, active sensor polling remains enabled, status LEDs function, and Serial Admin remains active.
                   </div>
                 </div>
-              </label>
-
-              <!-- Boot grace period sub-checkbox -->
-              <div 
-                v-if="settingsDeviceModal.power_save_listen_only" 
-                class="flex flex-col gap-3 ml-6 animate-fade-in"
-              >
-                <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-3 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-                  <input v-model="settingsDeviceModal.power_save_boot_grace" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                  <div>
-                    <div class="font-semibold text-slate-200">10-Minute Boot Grace Period</div>
-                    <div class="text-[10px] text-slate-500 mt-0.5 select-text leading-relaxed">
-                      Give a 10-minute boot grace period where WiFi and Serial Admin are active on startup before entering power save. If unchecked, the node enters power save IMMEDIATELY upon boot without starting WiFi or Serial to prevent brownouts on weak power sources.
-                    </div>
-                  </div>
-                </label>
+                <button
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, false, true)"
+                  class="m-0 h-8 self-center rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/25 px-3 text-[10px] font-bold transition-colors whitespace-nowrap"
+                >
+                  Disable PowerSave
+                </button>
               </div>
 
+              <!-- Card 2: Enable PowerSave with Grace -->
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-3">
+                <div class="flex-1">
+                  <div class="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> 10-Minute Grace Mode
+                  </div>
+                  <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
+                    Puts the node in deep power saving listen-only mode, but grants a 10-minute active networking window on boot for local firmware maintenance.
+                  </div>
+                </div>
+                <button
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, true)"
+                  class="m-0 h-8 self-center rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/25 px-3 text-[10px] font-bold transition-colors whitespace-nowrap"
+                >
+                  Enable with Grace
+                </button>
+              </div>
+
+              <!-- Card 3: Enable PowerSave Instant Sleep -->
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-3">
+                <div class="flex-1">
+                  <div class="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Immediate Mode
+                  </div>
+                  <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
+                    Bypasses the WiFi stack completely on boot and immediately transitions to deep listen-only mode. Essential for weak power supply units (PSUs) to prevent boot brownouts.
+                  </div>
+                </div>
+                <button
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, false)"
+                  class="m-0 h-8 self-center rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/25 px-3 text-[10px] font-bold transition-colors whitespace-nowrap"
+                >
+                  Enable (Instant Sleep)
+                </button>
+              </div>
             </div>
-            <div class="mt-2 flex justify-end gap-2">
-              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
-              <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
-                class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
-              >
-                Apply Config
-              </button>
+
+            <div class="mt-2 flex justify-end">
+              <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Close Console</button>
             </div>
           </div>
 
