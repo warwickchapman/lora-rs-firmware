@@ -4,6 +4,10 @@ All notable changes to this pre-release project are documented here in current o
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.9.2-beta] - 2026-06-01
+
 ### Changed
 - Implemented stateful, terminal-state based OTA queue pacing in Flasher UI, keeping the queue locked (`remoteOtaBusyAddress`) until the current remote node reaches a terminal state (`ota_updated`, `ota_failed`, or `ota_no_reboot`).
 - Replaced the short-term 3.0s post-UDP log delay in Flasher with the complete removal of automatic UDP log enablement before starting OTA.
@@ -22,7 +26,7 @@ All notable changes to this pre-release project are documented here in current o
 - Fixed remote maintenance sensor telemetry reporting by scheduling the cascading sequence of all maintenance pages (`kMaintenancePageSensors` and `kMaintenancePageDebug`) on every gateway maintenance request, restoring DS18B20 temperature and 4-20 mA tank level reporting.
 - Improved serial admin peer serialization to unconditionally report input and relay state values when a remote node has checked in (so the frontend receives active `0` values and correctly displays `"Open"` instead of `"waiting"`).
 - Refined Flasher UI fleet listing to omit age, last-seen, and sensor fields for unseen remote devices, rendering clean `"-"` placeholders instead of misleading `"0s"` ages, `"live"` statuses, or `"waiting"` labels.
-- Firmware version is aligned to `0.8.17-dev`.
+- Firmware and Flasher release metadata are aligned to `0.9.2-beta`.
 - Local maintenance is centered on Flasher over USB serial admin.
 - Remote maintenance uses MQTT admin for online devices and gateway-mediated LoRa admin for bounded remote actions.
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
