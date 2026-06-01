@@ -1694,24 +1694,45 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
       return;
     }
     auto &cfg = config_->settings();
+    const bool replaceTargets = doc["replace"] | false;
     bool used[256]{};
     used[0] = true;
     used[255] = true;
     used[cfg.local_address] = true;
     uint8_t targetAddresses[Settings::kAddressListCap]{};
     uint8_t targetCount = 0;
+    auto appendTarget = [&](uint8_t addr) -> bool {
+      if (addr < 1 || addr > 254 || addr == cfg.local_address) return false;
+      if (used[addr]) return true;
+      if (targetCount >= Settings::kAddressListCap) return false;
+      used[addr] = true;
+      targetAddresses[targetCount++] = addr;
+      return true;
+    };
+    if (!replaceTargets) {
+      for (uint8_t i = 0; i < cfg.paired_target_count && i < Settings::kAddressListCap; ++i) {
+        if (!appendTarget(cfg.paired_target_addresses[i])) {
+          sendError(cmd, "too_many_targets", id);
+          return;
+        }
+      }
+      for (uint8_t i = 0; i < cfg.known_peer_count && i < Settings::kAddressListCap; ++i) {
+        if (!appendTarget(cfg.known_peer_addresses[i])) {
+          sendError(cmd, "too_many_targets", id);
+          return;
+        }
+      }
+    }
     for (JsonVariantConst v : arr) {
       const int raw = v.as<int>();
-      if (raw < 1 || raw > 254 || used[raw]) {
+      if (raw < 1 || raw > 254 || raw == cfg.local_address) {
         sendError(cmd, "invalid_addresses", id);
         return;
       }
-      if (targetCount >= Settings::kAddressListCap) {
+      if (!appendTarget(static_cast<uint8_t>(raw))) {
         sendError(cmd, "too_many_targets", id);
         return;
       }
-      used[raw] = true;
-      targetAddresses[targetCount++] = static_cast<uint8_t>(raw);
     }
     if (targetCount == 0) {
       sendError(cmd, "invalid_addresses", id);
@@ -1758,6 +1779,7 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
     if (id[0] != '\0')
       out["id"] = id;
     out["target_count"] = cfg.paired_target_count;
+    out["replace"] = replaceTargets;
     sendOk(out);
     return;
   }

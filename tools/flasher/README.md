@@ -53,7 +53,7 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 - the generic Tauri command is `serial_admin_command`
 - the selected USB device is configured as the TX/gateway
 - remotes are discovered and provisioned over LoRa by that selected gateway
-- final gateway target lists should be written with `set_gateway_targets`
+- gateway target additions should be written with `set_gateway_targets`; the firmware merges by default, and destructive full-list replacement requires `replace: true`
 - Provision and Flash include an Identify LED action, shown only after the selected port confirms LRS serial-admin support, that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
 
 Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and Provision. Switching away from Flash stops the serial monitor so Provision can take the selected gateway port cleanly. Flash and Provision use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Provision WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.

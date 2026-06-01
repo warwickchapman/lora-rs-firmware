@@ -3896,8 +3896,12 @@ async function saveEasyPairTargets() {
     pushPairLog(`Saving gateway target list: existing ${existingAddresses.join(', ') || 'none'} + new ${newAddresses.join(', ')} -> ${mergedAddresses.join(', ')}`);
     const out = await sendPairCommand<any>('set_gateway_targets', {
       admin_password: password,
-      addresses: mergedAddresses
+      addresses: newAddresses,
+      replace: false
     }, 10000);
+    if (out.target_count && out.target_count < mergedAddresses.length) {
+      throw new Error(`gateway target list shrank unexpectedly (${out.target_count} < ${mergedAddresses.length})`);
+    }
     if (out.target_count) {
       pushPairLog(`Gateway target list now has ${out.target_count} address${out.target_count === 1 ? '' : 'es'}.`);
     }
