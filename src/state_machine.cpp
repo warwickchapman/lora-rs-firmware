@@ -363,6 +363,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   ota_pull_pending_sha256_ = "";
   ota_pull_pending_src_ = 0;
   ota_silence_until_ms_ = 0;
+  ota_pull_active_ = false;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -2461,7 +2462,7 @@ bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sent
 }
 
 bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
-  if (ota_pull_rx_.active || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return false;
+  if (ota_pull_active_ || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 || settings_ == nullptr) return false;
   uint8_t major = 0;
@@ -2604,7 +2605,7 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 }
 
 void NodeStateMachine::tickPendingMaintenancePages() {
-  if (ota_pull_rx_.active || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return;
+  if (ota_pull_active_ || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return;
   if (maintenance_version_pending_) {
     if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
       if (sendMaintenanceVersionStatus(maintenance_version_dst_)) {
@@ -3630,6 +3631,7 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
     if (transferId == 0 || port == 0 || host == IPAddress() ||
         totalChunks != kOtaPullControlHashChunks) {
       ota_pull_rx_ = OtaPullRxTransfer{};
+      ota_pull_active_ = false;
       lrslog::event("ota_pull_control_bad_start", msg.rssi, msg.counter, op);
       return false;
     }
@@ -3639,6 +3641,7 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
     ota_pull_rx_.transfer_id = transferId;
     ota_pull_rx_.host = host;
     ota_pull_rx_.port = port;
+    ota_pull_active_ = true;
     lrslog::event("ota_pull_control_start_rx", msg.rssi, msg.counter, msg.src);
     return true;
   }
@@ -3654,6 +3657,8 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
     const uint8_t chunkLen = payload[3];
     if (chunkIndex >= kOtaPullControlHashChunks ||
         chunkLen != kOtaPullControlHashChunkBytes) {
+      ota_pull_rx_ = OtaPullRxTransfer{};
+      ota_pull_active_ = false;
       lrslog::event("ota_pull_control_bad_hash", msg.rssi, msg.counter, chunkIndex);
       return false;
     }
@@ -3670,6 +3675,7 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
         (ota_pull_rx_.received_bitmap & wantBitmap) != wantBitmap) {
       lrslog::event("ota_pull_control_incomplete", msg.rssi, msg.counter, totalChunks);
       ota_pull_rx_ = OtaPullRxTransfer{};
+      ota_pull_active_ = false;
       return false;
     }
 
@@ -3685,6 +3691,7 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
 
   lrslog::event("ota_pull_control_bad_op", msg.rssi, msg.counter, op);
   ota_pull_rx_ = OtaPullRxTransfer{};
+  ota_pull_active_ = false;
   return false;
 }
 

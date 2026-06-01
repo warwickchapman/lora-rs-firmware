@@ -5,6 +5,10 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Implemented stateful, terminal-state based OTA queue pacing in Flasher UI, keeping the queue locked (`remoteOtaBusyAddress`) until the current remote node reaches a terminal state (`ota_updated`, `ota_failed`, or `ota_no_reboot`).
+- Replaced the short-term 3.0s post-UDP log delay in Flasher with the complete removal of automatic UDP log enablement before starting OTA.
+- Refactored firmware LoRa telemetry suppression during OTA to be stateful (`ota_pull_active_` flag), guaranteeing complete silence throughout both control-frame assembly and the entire HTTP download loop, with explicit failsafe clearing on all validation failure and download error paths.
+- Excluded purely diagnostic `ota_pull_control_orphan` log events from triggering Flasher UI OTA retry or failure decisions.
 - Refactored PowerSave into a pure, binary model ("Full Power" vs "PowerSave") with no inactivity timers, boot grace periods, or delayed/instant modes. The node immediately enters LoRa-only low-power mode on boot or remote command, completely turning off WiFi, Serial Admin, OTA, MQTT, LEDs, and background services, and can only be woken back to Full Power by a remote LoRa command.
 - Added a clear, premium BETA tag to the Monitor page title in the Flasher UI.
 - Implemented smart sleep telemetry in Flasher: the WiFi column now transitions to a pulsing orange `"..."` (pending offline) state when a node's PowerSave goes ON, until the actual reported connection status drops or the node goes silent.

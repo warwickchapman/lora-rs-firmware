@@ -113,7 +113,8 @@ Otherwise packet is dropped and logged.
 - TX stores Wi-Fi state confirmations in runtime peer state only; polling/status responses can refresh the state after reboot.
 - `OtaPullControl` (`'O'`) triggers a remote WiFi-connected node to pull `/firmware.bin` from a temporary HTTP server.
 - OTA pull control is segmented as `start`, four `hash` chunks, and `commit`. The encrypted LoRa payload carries the server host/port and the 32-byte firmware SHA256; the target refuses to flash without a complete digest.
-- The HTTP firmware stream is hashed while being written to the inactive OTA slot. The update is finalized only if the final SHA256 matches the authenticated digest.
+- The remote node maintains strict stateful LoRa telemetry silence throughout both control-frame assembly and the entire HTTP download loop (cleared only on reboot or explicit failure).
+- The HTTP firmware stream is hashed while being written to the inactive OTA slot. The update is finalized only if the final SHA256 matches the authenticated digest. On any hash validation failure or download error, the remote node explicitly clears its active OTA state to lift silence blocks.
 - `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
 - `FactoryReset` supports an option to preserve the current shared fleet key during reset.
 - `Reboot` (`'B'`) carries a compact magic-value command payload for a targeted remote reboot.

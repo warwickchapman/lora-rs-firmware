@@ -218,6 +218,8 @@ class NodeStateMachine {
   bool sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,
                               const char *sha256Hex);
   bool isOtaPullTxActive() const { return ota_pull_tx_.active; }
+  bool isOtaPullActive() const { return ota_pull_active_; }
+  void clearOtaPullActive() { ota_pull_active_ = false; }
   bool sendBroadcastWifiDisable();
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
@@ -533,6 +535,7 @@ class NodeStateMachine {
   String ota_pull_pending_sha256_;
   uint8_t ota_pull_pending_src_ = 0;
   uint32_t ota_silence_until_ms_ = 0;
+  bool ota_pull_active_ = false;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;
   bool factory_reset_keep_wifi_pending_ = false;

@@ -274,6 +274,7 @@ void App::tick() {
         ESP.restart();
       } else {
         LRS_LOGW(SYS, "event=ota_pull_control_failed src=%u error=%s", otaSrc, error.c_str());
+        sm_.clearOtaPullActive();
       }
     }
   }
