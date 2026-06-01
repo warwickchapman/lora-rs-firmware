@@ -6642,9 +6642,22 @@ function toggleSelectAllBulkPorts() {
                     </span>
                   </td>
                   <td class="px-2 py-1.5">
-                    <span v-if="device.power_save_listen_only" class="rounded border px-2 py-1 text-[10px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-                      Enabled
-                    </span>
+                    <template v-if="device.power_save_listen_only">
+                      <span 
+                        v-if="device.power_save_boot_grace !== false && device.uptime_ms && device.uptime_ms < 600000"
+                        class="rounded border px-2 py-1 text-[10px] font-bold border-amber-500/30 bg-amber-500/10 text-amber-300"
+                        title="In 10-minute boot grace period (WiFi & Serial active)"
+                      >
+                        {{ formatUptime(600000 - device.uptime_ms) }}
+                      </span>
+                      <span 
+                        v-else
+                        class="rounded border px-2 py-1 text-[10px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                        title="Power save fully active (WiFi & Serial disabled)"
+                      >
+                        ON
+                      </span>
+                    </template>
                     <span v-else class="text-slate-500">-</span>
                   </td>
                   <td v-if="hasAnyRemoteIp" class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
