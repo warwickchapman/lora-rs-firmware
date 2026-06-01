@@ -2864,6 +2864,11 @@ async function triggerOtaFailureOrRetry(device: LoraInventoryDevice) {
 
     setTimeout(() => {
       const checkAndRetry = () => {
+        const currentDev = loraInventory.value.find(d => d.address === device.address);
+        if (!currentDev || currentDev.row_state !== 'ota_retrying') {
+          // The device successfully completed/applied the OTA or was cancelled, halt the retry!
+          return;
+        }
         if (remoteOtaBusyAddress.value === null) {
           notify(`Retrying OTA flash for remote ${device.address} now...`);
           
