@@ -38,12 +38,37 @@ pub struct FirmwareServerInfo {
     pub urls: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct NetworkInterface {
+    pub ip: String,
+    pub netmask: String,
+}
+
 #[tauri::command]
 pub async fn local_udp_log_hosts() -> Result<Vec<String>, String> {
     Ok(network::local_lan_subnets()?
         .into_iter()
         .map(|s| s.address)
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_network_interfaces() -> Result<Vec<NetworkInterface>, String> {
+    let mut interfaces = Vec::new();
+    let addrs = get_if_addrs::get_if_addrs().map_err(|e| e.to_string())?;
+    
+    for iface in addrs {
+        if let get_if_addrs::IfAddr::V4(addr) = iface.addr {
+            if !addr.is_loopback() {
+                interfaces.push(NetworkInterface {
+                    ip: addr.ip.to_string(),
+                    netmask: addr.netmask.to_string(),
+                });
+            }
+        }
+    }
+    
+    Ok(interfaces)
 }
 
 #[tauri::command]

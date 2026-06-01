@@ -149,6 +149,7 @@ pub fn run() {
             crate::commands::network::start_firmware_file_server,
             crate::commands::network::stop_firmware_file_server,
             crate::commands::network::local_udp_log_hosts,
+            crate::commands::network::get_network_interfaces,
             crate::commands::network::start_network_udp_monitor,
             crate::commands::network::stop_network_udp_monitor,
             crate::commands::easy_pair::serial_admin_command,
