@@ -30,6 +30,7 @@ constexpr uint32_t kMinRemotePollIntervalMs = 60000;
 constexpr uint32_t kMaxRemotePollIntervalMs = 3600000;
 constexpr uint8_t kFlagTimeAuthoritative = 0x01;
 constexpr uint8_t kFlagPairedInputSlave = 0x02;
+constexpr uint8_t kFlagGroupPollCorrelation = 0x04;
 constexpr uint32_t kMinRetryTimeoutMs = 5000U;
 constexpr uint32_t kMaxRetryTimeoutMs = 3600000U;
 constexpr uint32_t kMinRxFailsafeTimeoutMs = 5000U;
@@ -888,6 +889,35 @@ bool NodeStateMachine::sendTxGroupChangeToAddress(uint8_t addr, const char *even
   return true;
 }
 
+bool NodeStateMachine::sendTxGroupPollToAddress(uint8_t addr, const char *eventName, const char *phase) {
+  if (!radioTxBudgetAvailable() || radio_ == nullptr) return false;
+  const uint32_t now = millis();
+  last_counter_++;
+  if (!radio_->send(MessageType::PollRequest, 0, input_state_, txFlags() | kFlagGroupPollCorrelation, last_counter_,
+                    runtime_.local_address, addr, local_temp_code_, 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
+    return false;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  // Don't modify link_state_ or tx_command_pending_ because this is a non-actuating poll.
+  tx_group_retry_addr_ = addr;
+  tx_group_retry_deadline_ms_ = now + kAckRetryOneShotTimeoutMs;
+  if (eventName != nullptr) {
+    lrslog::event(eventName, 0, tx_group_command_id_, addr);
+  }
+  LRS_LOGI(LORA,
+           "event=%s phase=%s command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
+           eventName ? eventName : "tx_alln_poll_send",
+           phase ? phase : "unknown",
+           static_cast<unsigned long>(tx_group_command_id_),
+           static_cast<unsigned>(tx_group_target_count_),
+           static_cast<unsigned long>(tx_group_expected_bitmap_),
+           static_cast<unsigned long>(tx_group_acked_bitmap_),
+           static_cast<unsigned long>(txGroupMissingBitmap()),
+           static_cast<unsigned>(addr));
+  return true;
+}
+
 void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputState) {
   if (!buildTxGroupTargets()) {
     resetTxGroupState();
@@ -1071,14 +1101,14 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
              static_cast<unsigned long>(tx_group_expected_bitmap_),
              static_cast<unsigned long>(tx_group_acked_bitmap_),
              static_cast<unsigned long>(txGroupMissingBitmap()));
-    tx_group_phase_ = PairedGroupPhase::RetryMissingSequential;
+    tx_group_phase_ = PairedGroupPhase::PollMissingSequential;
     tx_group_retry_cursor_ = 0;
     tx_group_retry_addr_ = 0;
     tx_group_retry_deadline_ms_ = now;
     return;
   }
 
-  if (tx_group_phase_ != PairedGroupPhase::RetryMissingSequential) return;
+  if (tx_group_phase_ != PairedGroupPhase::PollMissingSequential) return;
 
   if (!txGroupHasMissingTargets()) {
     finishTxGroupSuccess();
@@ -1093,9 +1123,9 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
       return;
     }
     if (static_cast<int32_t>(now - tx_group_retry_deadline_ms_) < 0) return;
-    lrslog::event("tx_alln_retry_timeout", 0, tx_group_command_id_, tx_group_retry_addr_);
+    lrslog::event("tx_alln_poll_timeout", 0, tx_group_command_id_, tx_group_retry_addr_);
     LRS_LOGI(LORA,
-             "event=tx_alln_retry_timeout phase=retry_once command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
+             "event=tx_alln_poll_timeout phase=poll_once command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
              static_cast<unsigned long>(tx_group_command_id_),
              static_cast<unsigned>(tx_group_target_count_),
              static_cast<unsigned long>(tx_group_expected_bitmap_),
@@ -1115,9 +1145,8 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
     if ((tx_group_retry_bitmap_ & bit) == 0U) continue;
     if ((tx_group_acked_bitmap_ & bit) != 0U) continue;
     const uint8_t addr = tx_group_targets[idx];
-    if (!sendTxGroupChangeToAddress(addr, "tx_alln_retry_send", "retry_once")) return;
-    tx_group_retry_addr_ = addr;
-    tx_group_retry_deadline_ms_ = now + kAckRetryOneShotTimeoutMs;
+    if (!sendTxGroupPollToAddress(addr, "tx_alln_poll_send", "poll_once")) return;
+    // sendTxGroupPollToAddress sets tx_group_retry_addr_ and tx_group_retry_deadline_ms_
     return;
   }
 
@@ -2974,7 +3003,7 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   if (runtime_.input_control_paired_lora_enabled &&
-      (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::RetryMissingSequential)) {
+      (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::PollMissingSequential)) {
     tickTxGroupCommand(now);
     return;
   }
@@ -3269,7 +3298,7 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("tx_alln_ack_rx", msg.rssi, tx_group_command_id_, msg.src);
         LRS_LOGI(LORA,
                  "event=tx_alln_ack_rx phase=%s command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
-                 (tx_group_phase_ == PairedGroupPhase::RetryMissingSequential) ? "retry_once" : "initial_window",
+                 (tx_group_phase_ == PairedGroupPhase::PollMissingSequential) ? "poll_once" : "initial_window",
                  static_cast<unsigned long>(tx_group_command_id_),
                  static_cast<unsigned>(tx_group_target_count_),
                  static_cast<unsigned long>(tx_group_expected_bitmap_),
@@ -3277,7 +3306,7 @@ void NodeStateMachine::tickReceive() {
                  static_cast<unsigned long>(txGroupMissingBitmap()),
                  static_cast<unsigned>(msg.src));
       }
-      if (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::RetryMissingSequential) {
+      if (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::PollMissingSequential) {
         if (!txGroupHasMissingTargets()) {
           finishTxGroupSuccess();
         }
@@ -3347,6 +3376,28 @@ void NodeStateMachine::tickReceive() {
           poll->next_poll_ms = millis() + node->poll_interval_ms;
         }
         lrslog::event("tx_poll_response", msg.rssi, msg.counter, msg.relay_state);
+        
+        // Non-actuating confirmation for PollMissingSequential phase
+        if (tx_group_phase_ == PairedGroupPhase::PollMissingSequential && msg.unix_time_s == tx_group_command_id_) {
+          if (msg.relay_state == tx_group_desired_relay_state_) {
+            const uint8_t idx = txGroupTargetIndexForAddress(msg.src);
+            if (idx != 0xFF) {
+              tx_group_acked_bitmap_ |= (1UL << idx);
+              lrslog::event("tx_alln_poll_ok", msg.rssi, tx_group_command_id_, msg.src);
+              LRS_LOGI(LORA,
+                       "event=tx_alln_poll_ok phase=poll_once command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
+                       static_cast<unsigned long>(tx_group_command_id_),
+                       static_cast<unsigned>(tx_group_target_count_),
+                       static_cast<unsigned long>(tx_group_expected_bitmap_),
+                       static_cast<unsigned long>(tx_group_acked_bitmap_),
+                       static_cast<unsigned long>(txGroupMissingBitmap()),
+                       static_cast<unsigned>(msg.src));
+              if (!txGroupHasMissingTargets()) {
+                finishTxGroupSuccess();
+              }
+            }
+          }
+        }
       }
     }
     return;
@@ -3359,11 +3410,22 @@ void NodeStateMachine::tickReceive() {
     const uint8_t sensorMask = 0x0C;  // downlink RSSI + WiFi enabled state
     const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(msg.rssi));
     const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
-    const uint32_t unixTimeS = currentUnixTimeS(millis());
+    
+    const bool isGroupPoll = (msg.flags & kFlagGroupPollCorrelation) != 0U;
+    uint32_t replyUnixTime;
+    uint8_t replyFlags = txFlags();
+    if (isGroupPoll) {
+      // Correlated echo path for group poll: echo command ID and clear authoritative flag to prevent feeding random IDs to time sync
+      replyUnixTime = msg.unix_time_s;
+      replyFlags &= ~kFlagTimeAuthoritative;
+    } else {
+      replyUnixTime = currentUnixTimeS(millis());
+    }
+
     last_counter_++;
-    if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), txFlags(), last_counter_, runtime_.local_address,
+    if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), replyFlags, last_counter_, runtime_.local_address,
                      msg.src,
-                     local_temp_code_, sensorMask, wifiState, downlinkRssiEnc, unixTimeS)) {
+                     local_temp_code_, sensorMask, wifiState, downlinkRssiEnc, replyUnixTime)) {
       last_tx_ms_ = millis();
       markRadioTxSentThisTick();
       {

@@ -50,7 +50,7 @@ enum class PeerAckState : uint8_t {
 enum class PairedGroupPhase : uint8_t {
   Idle,
   AwaitInitialAcks,
-  RetryMissingSequential,
+  PollMissingSequential,
   Complete,
 };
 
@@ -716,6 +716,7 @@ class NodeStateMachine {
   void startTxGroupCommand(uint8_t relayState, uint8_t inputState);
   void tickTxGroupCommand(uint32_t now);
   bool sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase);
+  bool sendTxGroupPollToAddress(uint8_t addr, const char *eventName, const char *phase);
   void finishTxGroupSuccess();
   void finishTxGroupPartial();
   void updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi = -127);

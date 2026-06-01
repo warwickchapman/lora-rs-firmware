@@ -83,7 +83,7 @@ Otherwise packet is dropped and logged.
 - TX sends `Change` on debounced input transition.
 - When paired LoRa input control is enabled, TX sends `Change` as a paced
   multi-target group command: first broadcast to destination `255`, then
-  one-shot targeted retries for missing ACKs.
+  non-actuating `PollRequest` confirmations for missing ACKs.
 - When paired LoRa input control is enabled, periodic heartbeat sync uses the
   same multi-target group command path rather than the legacy single
   `remote_address`.
@@ -155,9 +155,9 @@ Targeting rules:
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
 - TX publishes confirmed peer Wi-Fi state under `<root>/lrs-<tx_chipid>/peer/0xNN/wifi` as retained `1`, `0`, or empty when unknown.
-- Paired TX input-control retries wait for slotted ACKs after the broadcast
-  command, then retry missing remotes one at a time until the hard retry
-  deadline (`tx_command_retry_timeout_ms`).
+- Paired TX input-control waits for slotted ACKs after the broadcast
+  command, then polls missing remotes using `PollRequest` (visibility only, no late actuation) one at a time until the hard retry
+  deadline (`tx_command_retry_timeout_ms`). `flags.bit2` (0x04) on `PollRequest` means `b8..b11` (unixTimeS) carries a paired group command correlation id; matching `PollResponse` echoes it and must not set `time_authoritative`.
 
 ## Timing Defaults
 - `heartbeat_ms`: 60000 (60 s)
