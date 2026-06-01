@@ -99,7 +99,7 @@ struct PeerStatusSnapshot {
   uint32_t debug_uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
   bool power_save_listen_only = false;
-  bool power_save_boot_grace = true;
+  bool power_save_active = false;
 };
 
 struct FleetScanSnapshot {
@@ -424,7 +424,7 @@ class NodeStateMachine {
     uint32_t debug_uptime_ms = 0;
     uint32_t wifi_last_confirm_ms = 0;
     bool power_save_listen_only = false;
-    bool power_save_boot_grace = true;
+    bool power_save_active = false;
     bool wifi_pending = false;
     bool wifi_pending_enabled = true;
     uint32_t wifi_pending_counter = 0;
@@ -714,4 +714,5 @@ class NodeStateMachine {
   void tickDeferredAck(uint32_t now);
   void applyReceiverFailsafe(uint32_t now);
   uint32_t tick_watchdog_last_log_ms_ = 0;
+  bool power_save_active_ = false;
 };

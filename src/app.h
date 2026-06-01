@@ -8,11 +8,27 @@
 #include "serial_admin.h"
 #include "state_machine.h"
 
+enum class PowerSaveRuntimeState {
+  FullPower,
+  ArmedAwake,
+  Sleeping
+};
+
+enum class PowerSaveActivitySource {
+  SerialAdminInput,
+  UdpMirrorEnable,
+  OtaTraffic,
+  ConfigWrite,
+  LoRaMaintCommand
+};
+
 class App {
  public:
   void begin();
   void tick();
-  bool powerSaveActive() const { return power_save_active_; }
+  bool powerSaveActive() const { return power_save_state_ == PowerSaveRuntimeState::Sleeping; }
+  PowerSaveRuntimeState powerSaveState() const { return power_save_state_; }
+  void markPowerSaveActivity(PowerSaveActivitySource source);
 
  private:
   ConfigStore config_;
@@ -77,6 +93,12 @@ class App {
 
   uint32_t sta_reconnect_fib_prev_s_ = 0;
   uint32_t sta_reconnect_fib_curr_s_ = 1;
-  bool power_save_active_ = false;
-  bool power_save_locked_off_ = false;
+  
+  PowerSaveRuntimeState power_save_state_ = PowerSaveRuntimeState::FullPower;
+  uint32_t power_save_last_activity_ms_ = 0;
+
+  void tickPowerSave();
+  void enterPowerSave(const char *reason);
+  void exitPowerSave(const char *reason);
+  void stopWifiForPowerSave();
 };

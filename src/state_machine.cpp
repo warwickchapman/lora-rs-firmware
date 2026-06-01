@@ -574,6 +574,7 @@ void NodeStateMachine::freePollStorage() {
 }
 
 void NodeStateMachine::tick(bool powerSaveActive) {
+  power_save_active_ = powerSaveActive;
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - tick_watchdog_last_log_ms_) >= kStateMachineLivenessLogIntervalMs) {
     LRS_LOGI(SYS,
@@ -688,7 +689,7 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.debug_uptime_ms = node.debug_uptime_ms;
   out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
   out.power_save_listen_only = node.power_save_listen_only;
-  out.power_save_boot_grace = node.power_save_boot_grace;
+  out.power_save_active = node.power_save_active;
   out.poll_interval_ms = node.poll_interval_ms;
   const PollRuntime *poll = pollStateForIndex(index);
   out.last_poll_tx_ms = poll ? poll->last_poll_tx_ms : 0U;
@@ -2448,7 +2449,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   if (mqtt_connected_) flags |= 0x08;
   if (runtime_.role_tx) flags |= 0x10;
   if (settings_->power_save_listen_only) flags |= 0x20;
-  if (!settings_->power_save_boot_grace) flags |= 0x40;
+  if (power_save_active_) flags |= 0x40;
   uint8_t payload[12]{};
   const uint32_t chipId = ESP.getChipId() & 0xFFFFFFUL;
   payload[0] = kMaintenancePayloadVersion;
@@ -2642,7 +2643,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->mqtt_enabled = (flags & 0x04U) != 0U;
     node->mqtt_connected = (flags & 0x08U) != 0U;
     node->power_save_listen_only = (flags & 0x20U) != 0U;
-    node->power_save_boot_grace = (flags & 0x40U) == 0U;
+    node->power_save_active = (flags & 0x40U) != 0U;
     memcpy(node->ip, p + 8, sizeof(node->ip));
   } else if (p[1] == kMaintenancePageVersion) {
     node->fw_major = p[2];

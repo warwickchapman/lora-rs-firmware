@@ -57,7 +57,6 @@ struct Settings {
   FixedSettingString<24> wifi_ap_fallback_policy;
   bool wifi_admin_enabled;
   bool power_save_listen_only;
-  bool power_save_boot_grace;
 
   bool mqtt_client_enabled;
   bool mqtt_control_enabled;

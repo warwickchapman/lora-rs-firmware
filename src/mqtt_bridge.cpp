@@ -329,6 +329,12 @@ void MqttBridge::tick(bool wifiConnected) {
 
 bool MqttBridge::connected() { return mqtt_client_.connected(); }
 
+void MqttBridge::disconnect() {
+  if (mqtt_client_.connected()) {
+    mqtt_client_.disconnect();
+  }
+}
+
 void MqttBridge::staticCallback(char *topic, uint8_t *payload, unsigned int length) {
   if (instance_ != nullptr) {
     instance_->mqttCallback(topic, payload, length);

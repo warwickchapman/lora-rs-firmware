@@ -76,7 +76,6 @@ constexpr const char *kAllowedFields[] = {
     "wifi_ap_fallback_policy",
     "wifi_admin_enabled",
     "power_save_listen_only",
-    "power_save_boot_grace",
     "mqtt_client_enabled",
     "mqtt_control_enabled",
     "mqtt_controller_addresses",
@@ -373,7 +372,6 @@ bool ConfigStore::begin() {
   cfg_.wifi_ap_fallback_policy = root["wifi_ap_fallback_policy"] | "fallback_on_disconnect";
   cfg_.wifi_admin_enabled = root["wifi_admin_enabled"] | true;
   cfg_.power_save_listen_only = root["power_save_listen_only"] | false;
-  cfg_.power_save_boot_grace = root["power_save_boot_grace"] | true;
   cfg_.mqtt_client_enabled = root["mqtt_client_enabled"] | false;
   cfg_.mqtt_control_enabled = root["mqtt_control_enabled"] | false;
   cfg_.mqtt_controller_addresses = root["mqtt_controller_addresses"] | "";
@@ -530,7 +528,6 @@ bool ConfigStore::save() {
   doc["wifi_ap_fallback_policy"] = cfg_.wifi_ap_fallback_policy;
   doc["wifi_admin_enabled"] = cfg_.wifi_admin_enabled;
   doc["power_save_listen_only"] = cfg_.power_save_listen_only;
-  doc["power_save_boot_grace"] = cfg_.power_save_boot_grace;
   doc["mqtt_client_enabled"] = cfg_.mqtt_client_enabled;
   doc["mqtt_control_enabled"] = cfg_.mqtt_control_enabled;
   doc["mqtt_controller_addresses"] = cfg_.mqtt_controller_addresses;
@@ -812,7 +809,6 @@ void ConfigStore::setDefaults() {
   cfg_.wifi_ap_fallback_policy = "fallback_on_disconnect";
   cfg_.wifi_admin_enabled = true;
   cfg_.power_save_listen_only = false;
-  cfg_.power_save_boot_grace = true;
   cfg_.mqtt_client_enabled = false;
   cfg_.mqtt_control_enabled = false;
   cfg_.mqtt_controller_addresses = "";
