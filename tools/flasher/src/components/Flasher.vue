@@ -150,6 +150,8 @@ interface LoraInventoryDevice {
   pending_power_save_listen_only?: boolean;
   pending_power_save_boot_grace?: boolean;
   pending_power_save_tx_ms?: number;
+  wifi_pending_offline?: boolean;
+  power_save_deferred?: boolean;
 }
 
 interface LoraInventoryStatus {
@@ -537,6 +539,8 @@ const fleetRowHistory = ref<Record<number, {
   pendingPowerSaveListenOnly?: boolean;
   pendingPowerSaveBootGrace?: boolean;
   pendingPowerSaveTxMs?: number;
+  wifi_pending_offline?: boolean;
+  power_save_deferred?: boolean;
   
   // Volatile telemetry cache
   ip?: string;
@@ -2043,17 +2047,40 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     rowStateUntilMs = now + 60000;
   }
 
+  // Track real telemetry freshness timestamps to tick up age_ms continuously
+  let lastTelemetryTimestamp = history.lastTelemetryTimestamp;
+  if (row.age_ms !== undefined && row.age_ms !== null && row.age_ms < 600000) {
+    lastTelemetryTimestamp = now - row.age_ms;
+  }
+  const ageMs = (row.age_ms !== undefined && row.age_ms !== null) ? row.age_ms : (lastTelemetryTimestamp ? (now - lastTelemetryTimestamp) : undefined);
+
+  // Evaluate smart sleep states
+  const powerSaveListenOnly = (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null) ? row.power_save_listen_only : history.power_save_listen_only;
+  const powerSaveBootGrace = (row.power_save_boot_grace !== undefined && row.power_save_boot_grace !== null) ? row.power_save_boot_grace : history.power_save_boot_grace;
+  
+  const gracePeriodEnded = powerSaveBootGrace === false || (uptime !== 0 && uptime >= 600000);
+  const isPowerSaveConfigured = !!powerSaveListenOnly;
+  const isActivelyCheckingIn = ageMs !== undefined && ageMs < 60000;
+  
+  const isPowerSaveDeferred = isPowerSaveConfigured && gracePeriodEnded && isActivelyCheckingIn;
+
   // Hydrate volatile telemetry fields from cache if gateway wiped them
   const fwVersion = row.fw_version || history.fwVersion;
   const fwBuild = row.fw_build || history.fw_build;
-  const ip = row.ip || history.ip;
-  const wifiConnected = (row.wifi_connected_known ? row.wifi_connected : history.wifi_connected) ?? false;
+  
+  const wifiConnected = ((row.wifi_connected_known ? row.wifi_connected : history.wifi_connected) ?? false);
   const wifiConnectedKnown = row.wifi_connected_known || history.wifi_connected_known || false;
-  const wifiEnabled = (row.wifi_enabled_known ? row.wifi_enabled : history.wifi_enabled) ?? false;
+  const ip = wifiConnected ? (row.ip || history.ip) : undefined;
+  
+  const wifiEnabled = ((row.wifi_enabled_known ? row.wifi_enabled : history.wifi_enabled) ?? false);
   const wifiEnabledKnown = row.wifi_enabled_known || history.wifi_enabled_known || false;
-  const mqttConnected = (row.mqtt_known ? row.mqtt_connected : history.mqtt_connected) ?? false;
-  const mqttEnabled = (row.mqtt_known ? row.mqtt_enabled : history.mqtt_enabled) ?? false;
+  const mqttConnected = ((row.mqtt_known ? row.mqtt_connected : history.mqtt_connected) ?? false);
+  const mqttEnabled = ((row.mqtt_known ? row.mqtt_enabled : history.mqtt_enabled) ?? false);
   const mqttKnown = row.mqtt_known || history.mqtt_known || false;
+
+  // Transition state: when PowerSave is on (configured & grace ended) but WiFi has not dropped offline yet,
+  // we show a pending status in the WiFi column until confirmed offline.
+  const wifiPendingOffline = isPowerSaveConfigured && gracePeriodEnded && wifiConnected;
   
   let pendingPowerSaveListenOnly = history.pendingPowerSaveListenOnly;
   let pendingPowerSaveBootGrace = history.pendingPowerSaveBootGrace;
@@ -2075,9 +2102,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     pendingPowerSaveTxMs = undefined;
   }
 
-  const powerSaveListenOnly = (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null) ? row.power_save_listen_only : history.power_save_listen_only;
-  const powerSaveBootGrace = (row.power_save_boot_grace !== undefined && row.power_save_boot_grace !== null) ? row.power_save_boot_grace : history.power_save_boot_grace;
-  
   const heapFree = row.heap_free || history.heap_free;
   const heapMaxBlock = row.heap_max_block || history.heap_max_block;
   const heapFragPct = row.heap_frag_pct || history.heap_frag_pct;
@@ -2101,13 +2125,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   
   const rssi = (row.rssi !== undefined && row.rssi !== null && row.rssi !== 0 && row.rssi !== -127) ? row.rssi : history.rssi;
 
-  // Track real telemetry freshness timestamps to tick up age_ms continuously
-  let lastTelemetryTimestamp = history.lastTelemetryTimestamp;
-  if (row.age_ms !== undefined && row.age_ms !== null && row.age_ms < 600000) {
-    lastTelemetryTimestamp = now - row.age_ms;
-  }
-  const ageMs = (row.age_ms !== undefined && row.age_ms !== null) ? row.age_ms : (lastTelemetryTimestamp ? (now - lastTelemetryTimestamp) : undefined);
-
   fleetRowHistory.value[row.address] = {
     ...history,
     uptimeMs: uptime || history.uptimeMs,
@@ -2126,6 +2143,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     pendingPowerSaveListenOnly,
     pendingPowerSaveBootGrace,
     pendingPowerSaveTxMs,
+    wifi_pending_offline: wifiPendingOffline,
+    power_save_deferred: isPowerSaveDeferred,
     heap_free: heapFree,
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
@@ -2169,6 +2188,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     pending_power_save_listen_only: pendingPowerSaveListenOnly,
     pending_power_save_boot_grace: pendingPowerSaveBootGrace,
     pending_power_save_tx_ms: pendingPowerSaveTxMs,
+    wifi_pending_offline: wifiPendingOffline,
+    power_save_deferred: isPowerSaveDeferred,
     heap_free: heapFree,
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
@@ -6424,8 +6445,9 @@ function toggleSelectAllBulkPorts() {
         <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
-              <h2 class="text-base font-bold text-cyan-300">
-                Monitor
+              <h2 class="text-base font-bold text-cyan-300 flex items-center gap-2">
+                <span>Monitor</span>
+                <span class="px-1.5 py-0.5 text-[9px] uppercase tracking-wider font-extrabold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded">Beta</span>
               </h2>
               <p class="mt-1 text-xs text-slate-400 max-w-3xl">
                 {{ monitorHealthSummary }} · {{ monitorStatusMessage }}
@@ -6887,7 +6909,14 @@ function toggleSelectAllBulkPorts() {
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : '-' }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
-                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_connected_known ? (device.wifi_connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-600 bg-slate-800/50 text-slate-400') : 'border-slate-800 bg-slate-900/50 text-slate-500']">
+                    <span 
+                      v-if="device.wifi_pending_offline"
+                      class="rounded border px-2 py-1 text-[10px] font-bold border-orange-500/30 bg-orange-500/10 text-orange-300 animate-pulse"
+                      title="PowerSave is active. Waiting for WiFi connection to drop."
+                    >
+                      ...
+                    </span>
+                    <span v-else :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_connected_known ? (device.wifi_connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-600 bg-slate-800/50 text-slate-400') : 'border-slate-800 bg-slate-900/50 text-slate-500']">
                       {{ device.wifi_connected_known ? (device.wifi_connected ? 'OK' : 'Offline') : '-' }}
                     </span>
                   </td>

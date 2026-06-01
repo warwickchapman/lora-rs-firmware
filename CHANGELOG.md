@@ -5,6 +5,11 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Changed
+- Added a clear, premium BETA tag to the Monitor page title in the Flasher UI.
+- Implemented smart sleep telemetry in Flasher: the WiFi column now transitions to a pulsing orange `"..."` (pending offline) state when a node's grace period ends and PowerSave goes ON, until the actual reported connection status drops or the node goes silent.
+- Automatically clear the IP address field to `"-"` when a device's WiFi status is reported as Offline.
+- Refactored Power command button names and mode titles in the Tauri Settings UI to professional standards (e.g. `"Enable Full power mode"`, `"Enable PowerSave mode (delayed)"`, `"Enable PowerSave mode (instant)"`).
+- Replaced generic bottom status bar notifications with dynamic, context-aware messages indicating whether power configuration or sensor configuration is being transmitted to a remote.
 - Renamed the Fleet table "LoRa" column to "Addr", shortened the WiFi status label from `"Connected"` to `"OK"` to conserve horizontal layout space, and dynamically hide the "IP" column if no active remote devices report a WiFi IP address.
 - Colorized the Sensors column dry-contact input status values to render the `"Closed"` word in emerald green and `"Open"` in vibrant orange to highlight device states at first glance.
 - Added a highly informative hover `ⓘ` tooltip to fleet status labels (`Unexpected reboot`, `Rebooted (OTA)`, `No reboot seen (OTA)`) in the Uptime column explaining their triggers and diagnostic context.
