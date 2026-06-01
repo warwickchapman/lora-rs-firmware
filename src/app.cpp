@@ -961,6 +961,8 @@ void App::resetWifiStaAttempt() {
 
 void App::applyWifiRuntimeSettings() {
   const auto &cfg = config_.settings();
+  WiFi.forceSleepWake();
+  delay(1);
   // Runtime radio knobs are re-applied before scans, connects, and AP changes
   // because the ESP8266 SDK may reset parts of this state across mode changes.
   WiFi.mode((ap_enabled_ || shouldEnableSoftAp()) ? WIFI_AP_STA : WIFI_STA);
@@ -993,6 +995,8 @@ void App::stopWifiForAdminDisable() {
   delay(50);
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
+  WiFi.forceSleepBegin();
+  delay(1);
   ap_enabled_ = false;
   resetWifiStaAttempt();
   sta_connected_ = false;
