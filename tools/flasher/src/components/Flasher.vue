@@ -3056,7 +3056,9 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
     return;
   }
   try {
-    notify(`Updating sensors configuration on remote ${device.address}...`);
+    const isPowerSaveChange = powerSaveEnabled !== device.power_save_listen_only || graceEnabled !== device.power_save_boot_grace;
+    const actionLabel = isPowerSaveChange ? 'power configuration' : 'sensor configuration';
+    notify(`Transmitting ${actionLabel} to remote ${device.address}...`);
     await sendEasyPairCommandOnPort(port, 'remote_sensor_config', {
       admin_password: password,
       target_address: device.address,
@@ -3065,7 +3067,7 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       power_save_listen_only: powerSaveEnabled,
       power_save_boot_grace: graceEnabled
     }, 8000);
-    notify(`Sensors updated successfully on remote ${device.address}`);
+    notify(`${actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1)} transmitted successfully to remote ${device.address}`);
     // Save to history so it survives refreshes
     const now = Date.now();
     fleetRowHistory.value[device.address] = {
