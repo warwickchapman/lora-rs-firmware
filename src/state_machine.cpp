@@ -2999,8 +2999,13 @@ void NodeStateMachine::tickReceive() {
     handleProvisioningFrame(msg);
     return;
   }
+  const bool isChange = (msg.type == MessageType::Change);
   if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl &&
-      !isMaintenance && msg.dst != runtime_.local_address) {
+      !isMaintenance && !isChange && msg.dst != runtime_.local_address) {
+    lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
+    return;
+  }
+  if (isChange && msg.dst != runtime_.local_address && msg.dst != 255) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }

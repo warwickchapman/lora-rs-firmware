@@ -2759,13 +2759,7 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
 async function processOtaQueue() {
   if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
 
-  const updatingDevice = loraInventory.value.find(d => 
-    d.row_state === 'ota_pending'
-  );
-  if (updatingDevice) {
-    setTimeout(() => processOtaQueue(), 2000);
-    return;
-  }
+
 
   const device = otaQueue.value[0];
   const port = gatewaySelectedPort.value;
