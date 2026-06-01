@@ -2832,6 +2832,9 @@ async function triggerOtaFailureOrRetry(device: LoraInventoryDevice) {
 
   if (remoteOtaBusyAddress.value === device.address) {
     remoteOtaBusyAddress.value = null;
+    if (otaQueue.value.filter(d => d.address !== device.address).length > 0) {
+      setTimeout(() => processOtaQueue(), 2500);
+    }
   }
   otaQueue.value = otaQueue.value.filter(d => d.address !== device.address);
 

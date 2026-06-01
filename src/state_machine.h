@@ -219,7 +219,10 @@ class NodeStateMachine {
                               const char *sha256Hex);
   bool isOtaPullTxActive() const { return ota_pull_tx_.active; }
   bool isOtaPullActive() const { return ota_pull_active_; }
-  void clearOtaPullActive() { ota_pull_active_ = false; }
+  void clearOtaPullActive() {
+    ota_pull_active_ = false;
+    ota_silence_until_ms_ = 0;
+  }
   bool sendBroadcastWifiDisable();
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
