@@ -2906,8 +2906,8 @@ function checkOtaProgressWatchdog() {
           triggerOtaFailureOrRetry(device);
         }
       } else {
-        if (now - otaStartedMs > 10000) {
-          notify(`Address ${device.address} OTA start request timed out (10s silence). Retrying...`);
+        if (now - otaStartedMs > 45000) {
+          notify(`Address ${device.address} OTA start request timed out (45s silence). Retrying...`);
           triggerOtaFailureOrRetry(device);
         }
       }
@@ -2919,7 +2919,7 @@ function checkOtaProgressWatchdog() {
     const activeAddress = remoteOtaBusyAddress.value;
     const activeDev = loraInventory.value.find(d => d.address === activeAddress);
     if (activeDev) {
-      const terminalStates = ['ota_updated', 'ota_failed', 'ota_no_reboot'];
+      const terminalStates = ['ota_updated', 'ota_failed', 'ota_no_reboot', 'ota_rebooted'];
       if (terminalStates.includes(activeDev.row_state || '')) {
         pushNetworkLog(`OTA Session for Address ${activeAddress} completed with status: ${activeDev.row_state}. Advancing queue.`);
         remoteOtaBusyAddress.value = null;

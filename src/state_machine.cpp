@@ -364,6 +364,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   ota_pull_pending_src_ = 0;
   ota_silence_until_ms_ = 0;
   ota_pull_active_ = false;
+  ota_pull_start_ms_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -577,6 +578,11 @@ void NodeStateMachine::freePollStorage() {
 void NodeStateMachine::tick(bool powerSaveActive) {
   power_save_active_ = powerSaveActive;
   const uint32_t now = millis();
+  if (ota_pull_active_ && !ota_pull_pending_ && (now - ota_pull_start_ms_ > 60000UL)) {
+    ota_pull_active_ = false;
+    ota_pull_rx_ = OtaPullRxTransfer{};
+    lrslog::event("ota_pull_control_timeout", 0, 0, 0);
+  }
   if (static_cast<uint32_t>(now - tick_watchdog_last_log_ms_) >= kStateMachineLivenessLogIntervalMs) {
     LRS_LOGI(SYS,
              "event=sm_tick_alive role_tx=%u link_state=%u prov_active=%u prov_state=%u fleet_scan=%u heap_free=%lu max_free_block=%lu",
@@ -3642,6 +3648,7 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
     ota_pull_rx_.host = host;
     ota_pull_rx_.port = port;
     ota_pull_active_ = true;
+    ota_pull_start_ms_ = millis();
     lrslog::event("ota_pull_control_start_rx", msg.rssi, msg.counter, msg.src);
     return true;
   }

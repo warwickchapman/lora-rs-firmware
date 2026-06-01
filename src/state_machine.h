@@ -536,6 +536,7 @@ class NodeStateMachine {
   uint8_t ota_pull_pending_src_ = 0;
   uint32_t ota_silence_until_ms_ = 0;
   bool ota_pull_active_ = false;
+  uint32_t ota_pull_start_ms_ = 0;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;
   bool factory_reset_keep_wifi_pending_ = false;
