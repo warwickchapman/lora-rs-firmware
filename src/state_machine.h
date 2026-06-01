@@ -58,6 +58,7 @@ struct PeerStatusSnapshot {
   uint8_t address = 0;
   uint8_t relay_state = 0;
   uint8_t input_state = 0;
+  bool input_state_known = false;
   bool temp_valid = false;
   bool temp_enabled = false;
   int8_t temp_c = 0;
@@ -391,6 +392,7 @@ class NodeStateMachine {
     uint8_t address = 0;
     uint8_t relay_state = 0;
     uint8_t input_state = 0;
+    bool input_state_known = false;
     bool temp_valid = false;
     bool temp_enabled = false;
     int8_t temp_c = 0;

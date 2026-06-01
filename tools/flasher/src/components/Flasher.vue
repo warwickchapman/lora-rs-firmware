@@ -124,6 +124,7 @@ interface LoraInventoryDevice {
   relay_state?: number;
   relay_feedback?: number;
   input_state?: number;
+  input_state_known?: boolean;
   input_feedback?: number;
   temp_enabled?: boolean;
   temp_valid?: boolean;
@@ -557,6 +558,7 @@ const fleetRowHistory = ref<Record<number, {
   relay_state?: number;
   relay_feedback?: number;
   input_state?: number;
+  input_state_known?: boolean;
   input_feedback?: number;
   temp_enabled?: boolean;
   temp_valid?: boolean;
@@ -2126,8 +2128,9 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   
   const relayState = (row.relay_state !== undefined && row.relay_state !== null) ? row.relay_state : history.relay_state;
   const relayFeedback = (row.relay_feedback !== undefined && row.relay_feedback !== null) ? row.relay_feedback : history.relay_feedback;
-  const inputState = (row.input_state !== undefined && row.input_state !== null) ? row.input_state : history.input_state;
-  const inputFeedback = (row.input_feedback !== undefined && row.input_feedback !== null) ? row.input_feedback : history.input_feedback;
+  const inputStateKnown = row.input_state_known === true;
+  const inputState = inputStateKnown ? row.input_state : undefined;
+  const inputFeedback = (row.input_feedback !== undefined && row.input_feedback !== null) ? row.input_feedback : undefined;
   
   const tempEnabled = (row.temp_enabled !== undefined && row.temp_enabled !== null) ? row.temp_enabled : history.temp_enabled;
   const tempValid = (row.temp_valid !== undefined && row.temp_valid !== null) ? row.temp_valid : history.temp_valid;
@@ -2168,6 +2171,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     relay_state: relayState,
     relay_feedback: relayFeedback,
     input_state: inputState,
+    input_state_known: inputStateKnown,
     input_feedback: inputFeedback,
     temp_enabled: tempEnabled,
     temp_valid: tempValid,
@@ -2212,6 +2216,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     relay_state: relayState,
     relay_feedback: relayFeedback,
     input_state: inputState,
+    input_state_known: inputStateKnown,
     input_feedback: inputFeedback,
     temp_enabled: tempEnabled,
     temp_valid: tempValid,
@@ -2366,7 +2371,7 @@ function monitorUptimeLabel(row: LoraInventoryDevice): string {
 }
 
 function remoteInputLabel(row: LoraInventoryDevice): string {
-  const value = row.input_feedback ?? row.input_state;
+  const value = row.input_feedback ?? (row.input_state_known ? row.input_state : undefined);
   if (value === undefined || value === null) return 'waiting';
   return Number(value) === 1 ? 'Closed' : 'Open';
 }

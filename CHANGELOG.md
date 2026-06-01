@@ -58,6 +58,7 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Gateway peer-cache snapshots now mark dry-contact input state as known only after a remote packet or maintenance sensor page actually reports it, preventing Fleet from displaying default `"Open"` / `"Closed"` values for unverified remotes.
 - Flasher Fleet Sensors now falls back to the normal dry-contact `input_state` when optional debug-only `input_feedback` is absent, restoring `"Open"` / `"Closed"` display for remotes that are reporting standard sensor telemetry.
 - Flasher now treats a remote row reporting the selected target firmware version as an OTA success, clearing stale `Downloading OTA...` / queued state even if reboot/status timing was missed.
 - Receiver provisioning now explicitly disables paired-input gateway control on remotes, and config repair disables that incompatible flag instead of resetting the whole receiver back to default address `1`.

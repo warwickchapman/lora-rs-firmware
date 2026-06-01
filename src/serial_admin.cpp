@@ -1156,7 +1156,10 @@ void SerialAdmin::handleLoraInventoryStatus(JsonDocument &doc) {
       row["uptime_ms"] = p.uptime_ms;
     if (p.last_seen_ms != 0) {
       row["relay_state"] = p.relay_state;
-      row["input_state"] = p.input_state;
+      row["input_state_known"] = p.input_state_known;
+      if (p.input_state_known) {
+        row["input_state"] = p.input_state;
+      }
       row["temp_enabled"] = p.temp_enabled;
       if (p.temp_valid) {
         row["temp_valid"] = true;

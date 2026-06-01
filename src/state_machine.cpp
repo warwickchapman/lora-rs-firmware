@@ -658,6 +658,7 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.address = node.address;
   out.relay_state = node.relay_state;
   out.input_state = node.input_state;
+  out.input_state_known = node.input_state_known;
   out.temp_valid = node.temp_valid;
   out.temp_enabled = node.temp_enabled;
   out.temp_c = node.temp_c;
@@ -955,6 +956,7 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint
   if (node == nullptr) return;
   node->relay_state = relayState ? 1 : 0;
   node->input_state = inputState ? 1 : 0;
+  node->input_state_known = true;
   node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
@@ -2706,6 +2708,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     lrslog::event("maint_version_rx", msg.rssi, msg.counter, node->address);
   } else if (p[1] == kMaintenancePageSensors) {
     node->input_state = p[2] ? 1 : 0;
+    node->input_state_known = true;
     node->input_feedback = node->input_state;
     if (p[3] == 0xFFU) {
       node->temp_valid = false;
@@ -3194,6 +3197,7 @@ void NodeStateMachine::tickReceive() {
       } else {
         node->input_state = msg.input_state ? 1 : 0;
       }
+      node->input_state_known = true;
       
       if (msg.temp_code != 0xFF) {
         node->temp_valid = true;
@@ -3280,6 +3284,7 @@ void NodeStateMachine::tickReceive() {
       } else {
         node->input_state = msg.input_state ? 1 : 0;
       }
+      node->input_state_known = true;
       node->uplink_rssi = msg.rssi;
       node->last_seen_ms = millis();
       node->last_cmd_counter = msg.counter;
