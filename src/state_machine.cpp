@@ -969,8 +969,10 @@ void NodeStateMachine::finishTxGroupPartial() {
 void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi) {
   PeerRuntime *node = findOrCreatePeer(src);
   if (node == nullptr) return;
-  (void)relayState;
   (void)inputState;
+  if (ackState == PeerAckState::Ok) {
+    node->relay_state = relayState ? 1 : 0;
+  }
   node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;

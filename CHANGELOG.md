@@ -63,7 +63,7 @@ All notable changes to this pre-release project are documented here in current o
 
 ### Fixed
 - Paired input-control heartbeat now uses the same multi-target group command path as input changes instead of targeting only the legacy primary `remote_address`, preventing address 1 from being the only receiver kept in sync.
-- Gateway peer-cache relay state now ignores ACK packets and only updates from real remote status packets, so Fleet `Relay` no longer mirrors the gateway's desired command state across the whole table.
+- Gateway peer-cache relay state now updates from valid matching ACK packets and real remote status packets, while timeout/unmatched ACK bookkeeping no longer mirrors the gateway's desired command state across the whole table.
 - Receivers now accept same-key gateway input-control packets from LoRa address `254` even if recovered devices have stale controller-pairing metadata, restoring fleet-wide input control after provisioning or OTA recovery churn.
 - Remote uptime now travels on the normal maintenance version page instead of only the optional debug page, restoring Fleet uptime display while keeping debug telemetry disabled.
 - Gateway input-control fan-out now builds its LoRa target list from paired targets, persisted known peers, and the live peer cache, so a stale or collapsed primary `remote_address` cannot silently reduce control to only address 1.
