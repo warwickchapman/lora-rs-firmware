@@ -779,12 +779,10 @@ bool NodeStateMachine::buildTxGroupTargets() {
   tx_group_retry_bitmap_ = 0;
 
   if (settings_ == nullptr) return false;
-  uint8_t rawCount = settings_->paired_target_count;
-  if (rawCount > Settings::kAddressListCap) rawCount = Settings::kAddressListCap;
-
-  for (uint8_t i = 0; i < rawCount; ++i) {
-    const uint8_t addr = settings_->paired_target_addresses[i];
-    if (addr == 0 || addr == 255) continue;
+  auto addTarget = [this](uint8_t addr) {
+    if (addr == 0 || addr == 255) return;
+    if (addr == runtime_.local_address) return;
+    if (tx_group_target_count_ >= Settings::kAddressListCap) return;
     bool dup = false;
     for (uint8_t j = 0; j < tx_group_target_count_; ++j) {
       if (tx_group_targets[j] == addr) {
@@ -792,11 +790,28 @@ bool NodeStateMachine::buildTxGroupTargets() {
         break;
       }
     }
-    if (dup) continue;
+    if (dup) return;
     tx_group_targets[tx_group_target_count_] = addr;
     tx_group_expected_bitmap_ |= (1UL << tx_group_target_count_);
     tx_group_target_count_++;
-    if (tx_group_target_count_ >= Settings::kAddressListCap) break;
+  };
+
+  uint8_t rawCount = settings_->paired_target_count;
+  if (rawCount > Settings::kAddressListCap) rawCount = Settings::kAddressListCap;
+
+  for (uint8_t i = 0; i < rawCount && tx_group_target_count_ < Settings::kAddressListCap; ++i) {
+    addTarget(settings_->paired_target_addresses[i]);
+  }
+
+  uint8_t knownCount = settings_->known_peer_count;
+  if (knownCount > Settings::kAddressListCap) knownCount = Settings::kAddressListCap;
+  for (uint8_t i = 0; i < knownCount && tx_group_target_count_ < Settings::kAddressListCap; ++i) {
+    addTarget(settings_->known_peer_addresses[i]);
+  }
+
+  for (size_t i = 0; i < peer_count_ && tx_group_target_count_ < Settings::kAddressListCap; ++i) {
+    if (!peers_[i].in_use) continue;
+    addTarget(peers_[i].address);
   }
 
   if (tx_group_target_count_ == 0 && runtime_.remote_address >= 1 && runtime_.remote_address <= 254) {
@@ -3188,30 +3203,35 @@ void NodeStateMachine::tickReceive() {
       node->relay_state = msg.relay_state ? 1 : 0;
       node->uplink_rssi = msg.rssi;
       node->last_seen_ms = millis();
-      
-      // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
-      const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
-      if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
-        node->input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
-      } else {
-        node->input_state = msg.input_state ? 1 : 0;
-      }
-      node->input_state_known = true;
-      
-      if (msg.temp_code != 0xFF) {
-        node->temp_valid = true;
-        node->temp_c = static_cast<int8_t>(msg.temp_code);
-      }
-      
-      if ((msg.sensor_mask & 0x04U) != 0U) {
-        node->downlink_rssi_valid = true;
-        node->downlink_rssi = static_cast<int>(static_cast<int16_t>(msg.sensor_analog0));
-      }
-      
-      if ((msg.sensor_mask & 0x08U) != 0U && msg.sensor_digital0 != 0xFFU) {
-        node->wifi_state_known = true;
-        node->wifi_enabled = (msg.sensor_digital0 != 0U);
-        node->wifi_last_confirm_ms = millis();
+
+      const bool statusCarriesInput = (msg.type == MessageType::Heartbeat ||
+                                       msg.type == MessageType::PollResponse ||
+                                       msg.type == MessageType::MqttStatus);
+      if (statusCarriesInput) {
+        // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
+        const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
+        if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
+          node->input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
+        } else {
+          node->input_state = msg.input_state ? 1 : 0;
+        }
+        node->input_state_known = true;
+
+        if (msg.temp_code != 0xFF) {
+          node->temp_valid = true;
+          node->temp_c = static_cast<int8_t>(msg.temp_code);
+        }
+
+        if ((msg.sensor_mask & 0x04U) != 0U) {
+          node->downlink_rssi_valid = true;
+          node->downlink_rssi = static_cast<int>(static_cast<int16_t>(msg.sensor_analog0));
+        }
+
+        if ((msg.sensor_mask & 0x08U) != 0U && msg.sensor_digital0 != 0xFFU) {
+          node->wifi_state_known = true;
+          node->wifi_enabled = (msg.sensor_digital0 != 0U);
+          node->wifi_last_confirm_ms = millis();
+        }
       }
     }
 

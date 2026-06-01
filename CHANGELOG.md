@@ -58,6 +58,8 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Gateway input-control fan-out now builds its LoRa target list from paired targets, persisted known peers, and the live peer cache, so a stale or collapsed primary `remote_address` cannot silently reduce control to only address 1.
+- Gateway peer-cache input state now ignores ACK packets in both receive paths; Fleet dry-contact Open/Closed status is only marked known from real remote status or sensor telemetry.
 - Paired input-control ACKs no longer mark a remote dry-contact input as verified or copy the gateway's desired input state into peer-cache sensor rows; only actual remote telemetry/sensor pages can drive Fleet `"Open"` / `"Closed"` input display.
 - Provision now treats the connected gateway as the fleet-key authority: commissioned gateways must supply their existing fleet key from device config, the Provision fleet-key field is cleared if that fetch fails, and accidental commissioned-gateway re-keying is rejected by firmware `configure_gateway`.
 - Multi-target gateway address lists are no longer rewritten from the legacy single `remote_address` field during config load/save validation, preventing paired input control from collapsing back to one remote.
