@@ -13,7 +13,11 @@ public:
              std::function<void(bool, bool)> onApply);
   void tick();
 
-  bool hasActivity() const { return has_activity_; }
+  bool consumeActivity() {
+    bool act = has_activity_;
+    has_activity_ = false;
+    return act;
+  }
 
 private:
   ConfigStore *config_ = nullptr;

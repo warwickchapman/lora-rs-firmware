@@ -119,7 +119,7 @@ void App::begin() {
 void App::tick() {
   const uint32_t tickStartMs = millis();
   
-  if (serial_admin_.hasActivity()) {
+  if (serial_admin_.consumeActivity()) {
     markPowerSaveActivity(PowerSaveActivitySource::SerialAdminInput);
   }
   if (lrslog::udpMirrorEnabled()) {

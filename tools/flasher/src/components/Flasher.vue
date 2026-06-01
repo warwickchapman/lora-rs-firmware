@@ -116,7 +116,6 @@ interface LoraInventoryDevice {
   mqtt_enabled?: boolean;
   mqtt_connected?: boolean;
   power_save_listen_only?: boolean;
-  power_save_boot_grace?: boolean;
   power_save_active?: boolean;
   maintenance_debug_known?: boolean;
   heap_free?: number;
@@ -149,7 +148,6 @@ interface LoraInventoryDevice {
   row_state?: 'ota_pending' | 'ota_downloading' | 'ota_apply_wait' | 'ota_retrying' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed';
   row_state_until_ms?: number;
   pending_power_save_listen_only?: boolean;
-  pending_power_save_boot_grace?: boolean;
   pending_power_save_tx_ms?: number;
   wifi_pending_offline?: boolean;
   power_save_deferred?: boolean;
@@ -464,7 +462,6 @@ interface SettingsModalState {
   sensor_temp_enabled: boolean;
   sensor_tank_enabled: boolean;
   power_save_listen_only: boolean;
-  power_save_boot_grace: boolean;
   // Security tab
   fleet_key: string;
   fleet_key_confirmed: boolean;
@@ -538,7 +535,6 @@ const fleetRowHistory = ref<Record<number, {
   lastOtaActivityMs?: number;
   rebootExpectedUntilMs?: number;
   pendingPowerSaveListenOnly?: boolean;
-  pendingPowerSaveBootGrace?: boolean;
   pendingPowerSaveTxMs?: number;
   wifi_pending_offline?: boolean;
   power_save_deferred?: boolean;
@@ -553,7 +549,6 @@ const fleetRowHistory = ref<Record<number, {
   mqtt_enabled?: boolean;
   mqtt_known?: boolean;
   power_save_listen_only?: boolean;
-  power_save_boot_grace?: boolean;
   power_save_active?: boolean;
   fw_build?: number;
   heap_free?: number;
@@ -2058,7 +2053,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
 
   // Evaluate smart sleep states
   const powerSaveListenOnly = (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null) ? row.power_save_listen_only : history.power_save_listen_only;
-  const powerSaveBootGrace = (row.power_save_boot_grace !== undefined && row.power_save_boot_grace !== null) ? row.power_save_boot_grace : history.power_save_boot_grace;
   const powerSaveActive = (row.power_save_active !== undefined && row.power_save_active !== null) ? row.power_save_active : history.power_save_active;
   
   const isPowerSaveConfigured = !!powerSaveListenOnly;
@@ -2084,14 +2078,12 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const wifiPendingOffline = isPowerSaveConfigured && powerSaveActive && wifiConnected;
   
   let pendingPowerSaveListenOnly = history.pendingPowerSaveListenOnly;
-  let pendingPowerSaveBootGrace = history.pendingPowerSaveBootGrace;
   let pendingPowerSaveTxMs = history.pendingPowerSaveTxMs;
 
   // Check if incoming row values match the pending state to clear it
   if (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null && pendingPowerSaveListenOnly !== undefined) {
-    if (row.power_save_listen_only === pendingPowerSaveListenOnly && row.power_save_boot_grace === pendingPowerSaveBootGrace) {
+    if (row.power_save_listen_only === pendingPowerSaveListenOnly) {
       pendingPowerSaveListenOnly = undefined;
-      pendingPowerSaveBootGrace = undefined;
       pendingPowerSaveTxMs = undefined;
     }
   }
@@ -2099,7 +2091,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   // Timeout pending state after 45 seconds if no response
   if (pendingPowerSaveTxMs && now - pendingPowerSaveTxMs > 45000) {
     pendingPowerSaveListenOnly = undefined;
-    pendingPowerSaveBootGrace = undefined;
     pendingPowerSaveTxMs = undefined;
   }
 
@@ -2140,10 +2131,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     mqtt_enabled: mqttEnabled,
     mqtt_known: mqttKnown,
     power_save_listen_only: powerSaveListenOnly,
-    power_save_boot_grace: powerSaveBootGrace,
     power_save_active: powerSaveActive,
     pendingPowerSaveListenOnly,
-    pendingPowerSaveBootGrace,
     pendingPowerSaveTxMs,
     wifi_pending_offline: wifiPendingOffline,
     power_save_deferred: isPowerSaveDeferred,
@@ -2186,10 +2175,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     mqtt_connected: mqttConnected,
     mqtt_enabled: mqttEnabled,
     power_save_listen_only: powerSaveListenOnly,
-    power_save_boot_grace: powerSaveBootGrace,
     power_save_active: powerSaveActive,
     pending_power_save_listen_only: pendingPowerSaveListenOnly,
-    pending_power_save_boot_grace: pendingPowerSaveBootGrace,
     pending_power_save_tx_ms: pendingPowerSaveTxMs,
     wifi_pending_offline: wifiPendingOffline,
     power_save_deferred: isPowerSaveDeferred,
@@ -3001,7 +2988,6 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
     sensor_temp_enabled: !!device.temp_enabled || !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
     sensor_tank_enabled: !!device.tank_enabled,
     power_save_listen_only: !!device.power_save_listen_only,
-    power_save_boot_grace: device.power_save_boot_grace !== false,
     fleet_key: '',
     fleet_key_confirmed: false,
     show_fleet_key: false
@@ -3040,7 +3026,7 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
     return;
   }
   try {
-    const isPowerSaveChange = powerSaveEnabled !== device.power_save_listen_only || graceEnabled !== device.power_save_boot_grace;
+    const isPowerSaveChange = powerSaveEnabled !== device.power_save_listen_only;
     const actionLabel = isPowerSaveChange ? 'power configuration' : 'sensor configuration';
     notify(`Transmitting ${actionLabel} to remote ${device.address}...`);
     await sendEasyPairCommandOnPort(port, 'remote_sensor_config', {
@@ -3057,7 +3043,6 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
     fleetRowHistory.value[device.address] = {
       ...(fleetRowHistory.value[device.address] || {}),
       pendingPowerSaveListenOnly: powerSaveEnabled,
-      pendingPowerSaveBootGrace: graceEnabled,
       pendingPowerSaveTxMs: now
     };
     loraInventory.value = loraInventory.value.map(row => {
@@ -3067,7 +3052,6 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
           temp_enabled: tempEnabled, 
           tank_enabled: tankEnabled,
           pending_power_save_listen_only: powerSaveEnabled,
-          pending_power_save_boot_grace: graceEnabled,
           pending_power_save_tx_ms: now
         };
       }
@@ -7175,7 +7159,7 @@ function toggleSelectAllBulkPorts() {
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, settingsDeviceModal.power_save_boot_grace)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, true)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Sensor Configuration
@@ -7205,14 +7189,14 @@ function toggleSelectAllBulkPorts() {
                 </div>
                 <button
                   v-if="settingsDeviceModal.power_save_listen_only"
-                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, false, true); settingsDeviceModal.power_save_listen_only = false"
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, false, true)"
                   class="m-0 h-9 self-center rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/25 px-4 text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   Disable Power Save
                 </button>
                 <button
                   v-else
-                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, true); settingsDeviceModal.power_save_listen_only = true"
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, true)"
                   class="m-0 h-9 self-center rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/25 px-4 text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   Enable Power Save
