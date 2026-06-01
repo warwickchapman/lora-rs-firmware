@@ -830,7 +830,6 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
   } else {
     cfg.remote_address = kFirstRemoteAddress;
     clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
-    clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
   }
   clearAddressList(cfg.allowed_controller_addresses,
                    cfg.allowed_controller_count);

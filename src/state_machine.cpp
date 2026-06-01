@@ -2164,6 +2164,24 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     }
     return false;
   };
+  auto getSettingsChipIdForAddress = [this](uint8_t address) -> uint32_t {
+    if (settings_ == nullptr) return 0;
+    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+      if (settings_->known_peer_addresses[i] == address) {
+        return settings_->known_peer_chip_ids[i];
+      }
+    }
+    return 0;
+  };
+  auto hasUnassignedProvisioningDevices = [this]() -> bool {
+    if (prov_devices_ == nullptr) return false;
+    for (size_t i = 0; i < prov_device_count_; ++i) {
+      if (prov_devices_[i].in_use && prov_devices_[i].assigned_address == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
   if (runtime_.local_address >= kProvAddressMin && runtime_.local_address <= kProvAddressMax) {
     used[runtime_.local_address] = true;
   }
@@ -2172,12 +2190,18 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
       const uint8_t addr = settings_->paired_target_addresses[i];
       if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
       if (addressBelongsToCurrentProvisioningDevice(addr)) continue;
+      if (getSettingsChipIdForAddress(addr) == 0 && hasUnassignedProvisioningDevices()) {
+        continue;
+      }
       used[addr] = true;
     }
     for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
       const uint8_t addr = settings_->known_peer_addresses[i];
       if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
       if (addressBelongsToCurrentProvisioningDevice(addr)) continue;
+      if (getSettingsChipIdForAddress(addr) == 0 && hasUnassignedProvisioningDevices()) {
+        continue;
+      }
       used[addr] = true;
     }
   }
@@ -2194,6 +2218,9 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     if (!e.in_use) continue;
     if (e.assigned_address < kProvAddressMin || e.assigned_address > kProvAddressMax) continue;
     if (hasDiscoveredProvisioningChip(e.chip_id)) continue;
+    if (e.chip_id == 0 && hasUnassignedProvisioningDevices()) {
+      continue;
+    }
     used[e.assigned_address] = true;
   }
   for (size_t i = 0; i < prov_device_count_; ++i) {
