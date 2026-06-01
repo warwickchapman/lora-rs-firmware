@@ -4572,6 +4572,12 @@ onMounted(async () => {
             const ip = ipMatch[1];
             const dev = loraInventory.value.find(d => d.ip === ip);
             if (dev && dev.row_state === 'ota_pending') {
+              fleetRowHistory.value[dev.address] = {
+                ...(fleetRowHistory.value[dev.address] || {}),
+                rowState: 'ota_failed',
+                rowStateUntilMs: undefined,
+                otaExpectedUntilMs: undefined
+              };
               loraInventory.value = loraInventory.value.map(row => 
                 row.address === dev.address ? { ...row, row_state: 'ota_failed', row_state_until_ms: undefined } : row
               );
