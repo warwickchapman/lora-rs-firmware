@@ -795,6 +795,21 @@ function parseVersion(v: string) {
   return null;
 }
 
+function compareParsedVersions(a: ReturnType<typeof parseVersion>, b: ReturnType<typeof parseVersion>): number {
+  if (!a || !b) return 0;
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  if (a.patch !== b.patch) return a.patch - b.patch;
+  return a.dev - b.dev;
+}
+
+function selectedFirmwareCandidateVersion(): string {
+  if (!selectedVersion.value) return '';
+  if (!selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)) return selectedVersion.value;
+  const fileMatch = selectedLocalPath.value.match(/(\d+\.\d+\.\d+)(?:~(\d+))?/);
+  return fileMatch ? fileMatch[0] : flasherAppVersion.value;
+}
+
 const isGatewayUpgradeAvailable = computed(() => {
   const currentFw = fleetGatewayStatus.value?.fw_version;
   if (!currentFw || !selectedVersion.value) return false;
@@ -826,10 +841,7 @@ const isGatewayUpgradeAvailable = computed(() => {
   const p2 = parseVersion(currentFw);
   if (!p1 || !p2) return false;
 
-  if (p1.major !== p2.major) return p1.major > p2.major;
-  if (p1.minor !== p2.minor) return p1.minor > p2.minor;
-  if (p1.patch !== p2.patch) return p1.patch > p2.patch;
-  return p1.dev > p2.dev;
+  return compareParsedVersions(p1, p2) > 0;
 });
 const fleetGatewayReady = computed(() =>
   !!gatewaySelectedPort.value &&
@@ -2024,6 +2036,15 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     }
   }
   if (otaExpected && history.fwVersion && row.fw_version && history.fwVersion !== row.fw_version) {
+    rowState = 'ota_updated';
+    rowStateUntilMs = now + 30000;
+  }
+  const activeOtaStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait', 'ota_retrying', 'ota_queued'];
+  const targetVersion = parseVersion(selectedFirmwareCandidateVersion());
+  const reportedVersion = parseVersion(row.fw_version || '');
+  if (row.fw_version && targetVersion && reportedVersion &&
+      compareParsedVersions(reportedVersion, targetVersion) >= 0 &&
+      activeOtaStates.includes(rowState || '')) {
     rowState = 'ota_updated';
     rowStateUntilMs = now + 30000;
   }
