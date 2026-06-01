@@ -218,7 +218,9 @@ Falls back to `peers/03/...` when chip_id is not yet known.
 
 TX input-to-LoRa control gate:
 - Setting: `input_control_paired_lora_enabled` (LoRa tab).
-- `true`: TX input transitions send `Change`; heartbeat relay field follows TX input state.
+- `true`: TX input transitions and periodic state sync use paced multi-target
+  `Change` commands for the paired target list, including broadcast plus
+  targeted retries for missing ACKs.
 - `false`: TX still reports local input status, but does not send paired input-driven `Change`/`Heartbeat`; MQTT remote control remains active.
 - MQTT deployments should avoid targeting RX nodes at the TX-paired `remote_address` unless this gate is `false`.
 

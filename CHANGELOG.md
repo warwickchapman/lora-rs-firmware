@@ -28,6 +28,9 @@ All notable changes to this pre-release project are documented here in current o
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
 
 ### Added
+- Added a Settings diagnostic action to copy the currently fetched device
+  configuration as JSON, making paired target and controller lists easy to
+  inspect during field recovery.
 - Added a Fleet table `Relay` column showing each remote relay as `On`, `Off`, or `waiting` from the gateway peer cache.
 - Added a `power_save_listen_only` configuration flag for remote transmitter nodes that enables an ultra-lean power save mode (disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin) immediately on boot or remote command.
 - Added a `🗑️ Forget Device` action in the Flasher Fleet Actions dropdown with safety confirmation to cleanly remove outdated or replaced nodes.
@@ -59,6 +62,9 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Paired input-control heartbeat now uses the same multi-target group command path as input changes instead of targeting only the legacy primary `remote_address`, preventing address 1 from being the only receiver kept in sync.
+- Gateway peer-cache relay state now ignores ACK packets and only updates from real remote status packets, so Fleet `Relay` no longer mirrors the gateway's desired command state across the whole table.
+- Receivers now accept same-key gateway input-control packets from LoRa address `254` even if recovered devices have stale controller-pairing metadata, restoring fleet-wide input control after provisioning or OTA recovery churn.
 - Remote uptime now travels on the normal maintenance version page instead of only the optional debug page, restoring Fleet uptime display while keeping debug telemetry disabled.
 - Gateway input-control fan-out now builds its LoRa target list from paired targets, persisted known peers, and the live peer cache, so a stale or collapsed primary `remote_address` cannot silently reduce control to only address 1.
 - Gateway peer-cache input state now ignores ACK packets in both receive paths; Fleet dry-contact Open/Closed status is only marked known from real remote status or sensor telemetry.

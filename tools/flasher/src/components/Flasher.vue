@@ -1567,6 +1567,15 @@ function copyAllDeviceInfo() {
   copyToClipboard(block, 'all device configuration');
 }
 
+function copySerialAdminConfigJson() {
+  const cfg = serialAdminConfig.value;
+  if (!cfg) {
+    notify('Fetch settings first');
+    return;
+  }
+  copyToClipboard(JSON.stringify(cfg, null, 2), 'device config JSON');
+}
+
 function copyActivityLog() {
   if (activeLogs.value.length === 0) {
     notify('No activity logs to copy');
@@ -5845,6 +5854,9 @@ function toggleSelectAllBulkPorts() {
               </button>
               <button @click="fetchSerialDeviceSettings" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy" class="primary-btn m-0 h-8 px-3 text-xs font-bold disabled:opacity-60">
                 {{ isSerialAdminLoading ? 'Fetching...' : 'Fetch settings' }}
+              </button>
+              <button @click="copySerialAdminConfigJson" :disabled="!serialAdminConfig" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+                Copy config JSON
               </button>
             </div>
           </div>

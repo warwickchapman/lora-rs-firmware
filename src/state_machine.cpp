@@ -969,8 +969,8 @@ void NodeStateMachine::finishTxGroupPartial() {
 void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi) {
   PeerRuntime *node = findOrCreatePeer(src);
   if (node == nullptr) return;
+  (void)relayState;
   (void)inputState;
-  node->relay_state = relayState ? 1 : 0;
   node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
@@ -2978,10 +2978,16 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   if (runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
+    last_heartbeat_ms_ = now;
+    if (runtime_.input_control_paired_lora_enabled) {
+      resetTxGroupState();
+      startTxGroupCommand(input_state_, input_state_);
+      tickTxGroupCommand(now);
+      return;
+    }
     if (!radioTxBudgetAvailable()) {
       return;
     }
-    last_heartbeat_ms_ = now;
     last_counter_++;
     const uint32_t unixTimeS = currentUnixTimeS(now);
     if (radio_->send(MessageType::Heartbeat, input_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
@@ -3141,6 +3147,9 @@ void NodeStateMachine::tickReceive() {
       // Same-key remote sensor config.
     } else if (msg.type == MessageType::FleetKeyControl) {
       // Same-key targeted Fleet Key Control.
+    } else if ((msg.type == MessageType::Change || msg.type == MessageType::Heartbeat) && msg.src == 254) {
+      // Same-key gateway fleet control remains valid even if an older or
+      // manually recovered receiver has stale controller-pairing metadata.
     } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;
@@ -3199,14 +3208,14 @@ void NodeStateMachine::tickReceive() {
   if (runtime_.role_tx) {
     PeerRuntime *node = findOrCreatePeer(msg.src);
     if (node != nullptr) {
-      node->relay_state = msg.relay_state ? 1 : 0;
       node->uplink_rssi = msg.rssi;
       node->last_seen_ms = millis();
 
-      const bool statusCarriesInput = (msg.type == MessageType::Heartbeat ||
+      const bool statusCarriesState = (msg.type == MessageType::Heartbeat ||
                                        msg.type == MessageType::PollResponse ||
                                        msg.type == MessageType::MqttStatus);
-      if (statusCarriesInput) {
+      if (statusCarriesState) {
+        node->relay_state = msg.relay_state ? 1 : 0;
         // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
         const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
         if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
