@@ -532,6 +532,7 @@ class NodeStateMachine {
   uint16_t ota_pull_pending_port_ = 0;
   String ota_pull_pending_sha256_;
   uint8_t ota_pull_pending_src_ = 0;
+  uint32_t ota_silence_until_ms_ = 0;
   bool factory_reset_pending_ = false;
   bool factory_reset_keep_fleet_pending_ = true;
   bool factory_reset_keep_wifi_pending_ = false;

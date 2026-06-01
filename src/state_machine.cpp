@@ -362,6 +362,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   ota_pull_pending_port_ = 0;
   ota_pull_pending_sha256_ = "";
   ota_pull_pending_src_ = 0;
+  ota_silence_until_ms_ = 0;
   factory_reset_pending_ = false;
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_pending_src_ = 0;
@@ -2432,7 +2433,7 @@ bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sent
 }
 
 bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
-  if (ota_pull_rx_.active) return false;
+  if (ota_pull_rx_.active || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 || settings_ == nullptr) return false;
   uint8_t major = 0;
@@ -2575,7 +2576,7 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 }
 
 void NodeStateMachine::tickPendingMaintenancePages() {
-  if (ota_pull_rx_.active) return;
+  if (ota_pull_rx_.active || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return;
   if (maintenance_version_pending_) {
     if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
       if (sendMaintenanceVersionStatus(maintenance_version_dst_)) {
@@ -3585,6 +3586,9 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
     lrslog::event("ota_pull_control_tx_ignored", msg.rssi, msg.counter, msg.src);
     return false;
   }
+
+  // Any OTA traffic actively silences telemetry transmission for 90 seconds
+  ota_silence_until_ms_ = millis() + 90000;
 
   const uint8_t *payload = msg.raw_payload;
   const uint8_t op = payload[0];
