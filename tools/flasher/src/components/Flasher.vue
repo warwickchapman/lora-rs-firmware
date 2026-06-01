@@ -145,7 +145,7 @@ interface LoraInventoryDevice {
   ota_eligible?: boolean;
   ota_reason?: string;
   selected?: boolean;
-  row_state?: 'ota_pending' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed';
+  row_state?: 'ota_pending' | 'ota_downloading' | 'ota_apply_wait' | 'ota_retrying' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed';
   row_state_until_ms?: number;
 }
 
@@ -527,6 +527,9 @@ const fleetRowHistory = ref<Record<number, {
   otaExpectedUntilMs?: number;
   rowState?: LoraInventoryDevice['row_state'];
   rowStateUntilMs?: number;
+  
+  otaRetryCount?: number;
+  lastOtaActivityMs?: number;
   
   // Volatile telemetry cache
   ip?: string;
@@ -2019,10 +2022,10 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   }
 
   if (rowStateUntilMs && rowStateUntilMs <= now) {
-    rowState = otaExpected ? 'ota_pending' : undefined;
+    rowState = otaExpected ? (rowState || 'ota_downloading') : undefined;
     rowStateUntilMs = otaExpected ? otaExpectedUntilMs : undefined;
   }
-  if (otaExpectedUntilMs && otaExpectedUntilMs <= now && rowState === 'ota_pending') {
+  if (otaExpectedUntilMs && otaExpectedUntilMs <= now && (rowState === 'ota_pending' || rowState === 'ota_downloading' || rowState === 'ota_apply_wait' || rowState === 'ota_retrying')) {
     rowState = 'ota_no_reboot';
     rowStateUntilMs = now + 60000;
   }
@@ -2157,6 +2160,9 @@ function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_rebooted') return 'bg-orange-950/40 ring-1 ring-orange-500/40';
   if (device.row_state === 'ota_no_reboot') return 'bg-amber-950/40 ring-1 ring-amber-500/40';
   if (device.row_state === 'ota_pending') return 'bg-cyan-950/30';
+  if (device.row_state === 'ota_downloading') return 'bg-cyan-950/40 ring-1 ring-cyan-500/40 animate-pulse';
+  if (device.row_state === 'ota_apply_wait') return 'bg-sky-950/40 ring-1 ring-sky-500/40';
+  if (device.row_state === 'ota_retrying') return 'bg-amber-950/30 ring-1 ring-amber-500/30 animate-pulse';
   if (device.row_state === 'ota_queued') return 'bg-fuchsia-950/30 ring-1 ring-fuchsia-500/30';
   return 'bg-slate-950/20';
 }
@@ -2168,6 +2174,13 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_rebooted') return 'Rebooted';
   if (device.row_state === 'ota_no_reboot') return 'No reboot seen';
   if (device.row_state === 'ota_pending') return 'Waiting for reboot';
+  if (device.row_state === 'ota_downloading') return 'Downloading OTA...';
+  if (device.row_state === 'ota_apply_wait') return 'Waiting for reboot';
+  if (device.row_state === 'ota_retrying') {
+    const history = fleetRowHistory.value[device.address] || {};
+    const retryCount = history.otaRetryCount || 0;
+    return `Retrying (${retryCount}/3)...`;
+  }
   if (device.row_state === 'ota_queued') {
     const qIdx = otaQueue.value.findIndex(d => d.address === device.address);
     return qIdx >= 0 ? `Queued for OTA (#${qIdx + 1})` : 'Queued for OTA';
@@ -2642,12 +2655,12 @@ function markFleetOtaPending(device: LoraInventoryDevice) {
     uptimeMs: device.uptime_ms || fleetRowHistory.value[device.address]?.uptimeMs,
     fwVersion: device.fw_version || fleetRowHistory.value[device.address]?.fwVersion,
     otaExpectedUntilMs: now + 180000,
-    rowState: 'ota_pending',
+    rowState: 'ota_downloading',
     rowStateUntilMs: now + 180000
   };
   loraInventory.value = loraInventory.value.map(row =>
     row.address === device.address
-      ? { ...row, row_state: 'ota_pending', row_state_until_ms: now + 180000 }
+      ? { ...row, row_state: 'ota_downloading', row_state_until_ms: now + 180000 }
       : row
   );
 }
@@ -2779,6 +2792,88 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
   if (otaQueue.value.length === 1 && remoteOtaBusyAddress.value === null) {
     processOtaQueue();
   }
+}
+
+async function triggerOtaFailureOrRetry(device: LoraInventoryDevice) {
+  const history = fleetRowHistory.value[device.address] || {};
+  const currentRetry = (history.otaRetryCount || 0) + 1;
+
+  if (remoteOtaBusyAddress.value === device.address) {
+    remoteOtaBusyAddress.value = null;
+  }
+  otaQueue.value = otaQueue.value.filter(d => d.address !== device.address);
+
+  if (currentRetry <= 3) {
+    notify(`OTA failure detected for Address ${device.address}. Retrying (${currentRetry}/3) in 5 seconds...`);
+    
+    fleetRowHistory.value[device.address] = {
+      ...history,
+      rowState: 'ota_retrying',
+      rowStateUntilMs: Date.now() + 6000,
+      otaRetryCount: currentRetry,
+      otaExpectedUntilMs: Date.now() + 180000
+    };
+
+    loraInventory.value = loraInventory.value.map(row => 
+      row.address === device.address 
+        ? { ...row, row_state: 'ota_retrying', row_state_until_ms: Date.now() + 6000 } 
+        : row
+    );
+
+    setTimeout(() => {
+      const checkAndRetry = () => {
+        if (remoteOtaBusyAddress.value === null) {
+          notify(`Retrying OTA flash for remote ${device.address} now...`);
+          
+          // Clear watchdog activity for the retry attempt
+          const cleanHistory = fleetRowHistory.value[device.address] || {};
+          delete cleanHistory.lastOtaActivityMs;
+          
+          flashLoraRemote(device);
+        } else {
+          setTimeout(checkAndRetry, 5000);
+        }
+      };
+      checkAndRetry();
+    }, 5000);
+  } else {
+    notify(`OTA for Address ${device.address} failed after 3 attempts.`);
+    fleetRowHistory.value[device.address] = {
+      ...history,
+      rowState: 'ota_failed',
+      rowStateUntilMs: undefined,
+      otaExpectedUntilMs: undefined,
+      otaRetryCount: 0
+    };
+    loraInventory.value = loraInventory.value.map(row => 
+      row.address === device.address 
+        ? { ...row, row_state: 'ota_failed', row_state_until_ms: undefined } 
+        : row
+    );
+  }
+}
+
+function checkOtaProgressWatchdog() {
+  const now = Date.now();
+  loraInventory.value.forEach(device => {
+    if (device.row_state === 'ota_downloading') {
+      const history = fleetRowHistory.value[device.address] || {};
+      const otaStartedMs = history.otaExpectedUntilMs ? history.otaExpectedUntilMs - 180000 : now;
+      const lastActivity = history.lastOtaActivityMs;
+      
+      if (lastActivity) {
+        if (now - lastActivity > 8000) {
+          notify(`Address ${device.address} OTA chunk progress stalled (8s silence). Retrying...`);
+          triggerOtaFailureOrRetry(device);
+        }
+      } else {
+        if (now - otaStartedMs > 10000) {
+          notify(`Address ${device.address} OTA start request timed out (10s silence). Retrying...`);
+          triggerOtaFailureOrRetry(device);
+        }
+      }
+    }
+  });
 }
 
 async function processOtaQueue() {
@@ -2935,6 +3030,13 @@ async function executeRemoteReboot(device: LoraInventoryDevice) {
       target_address: device.address
     }, 8000);
     notify(`Reboot command sent to remote ${device.address}`);
+    
+    // Track known reboot to prevent unexpected reboot status
+    const now = Date.now();
+    fleetRowHistory.value[device.address] = {
+      ...(fleetRowHistory.value[device.address] || {}),
+      knownRebootUntilMs: now + 60000
+    };
   } catch (e) {
     const msg = serialFeatureError(`Remote reboot`, e);
     notify(msg);
@@ -2966,6 +3068,13 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
       keep_wifi_credentials: keepWifi
     }, 8000);
     notify(`Factory reset triggered on remote ${device.address}. Device is rebooting.`);
+
+    // Track known reboot to prevent unexpected reboot status
+    const now = Date.now();
+    fleetRowHistory.value[device.address] = {
+      ...(fleetRowHistory.value[device.address] || {}),
+      knownRebootUntilMs: now + 60000
+    };
 
     if (!keepFleet) {
       const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
@@ -3042,6 +3151,13 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
       new_fleet_passphrase: newKey
     }, 15000);
     notify(`Remote fleet key change sequence transmitted. Remote ${device.address} is applying and rebooting.`);
+    
+    // Track known reboot to prevent unexpected reboot status
+    const now = Date.now();
+    fleetRowHistory.value[device.address] = {
+      ...(fleetRowHistory.value[device.address] || {}),
+      knownRebootUntilMs: now + 60000
+    };
     settingsDeviceModal.value = null;
   } catch (e) {
     const msg = serialFeatureError(`Remote fleet key change`, e);
@@ -4476,6 +4592,7 @@ onMounted(async () => {
   generatePairFleetKey(false);
   fleetClockTimer.value = window.setInterval(() => {
     fleetClockMs.value = Date.now();
+    checkOtaProgressWatchdog();
   }, 1000);
   loadSavedTabPorts();
   try {
@@ -4488,6 +4605,42 @@ onMounted(async () => {
   } catch {
     flasherInterfaces.value = [];
   }
+
+  // Poll network interfaces every 5 seconds to dynamically adapt to network configuration changes
+  window.setInterval(async () => {
+    try {
+      const nextInterfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
+      const prevStr = JSON.stringify(flasherInterfaces.value.map(i => i.ip).sort());
+      const nextStr = JSON.stringify(nextInterfaces.map(i => i.ip).sort());
+      if (prevStr !== nextStr) {
+        pushNetworkLog('Host network interfaces changed. Updating subnets...');
+        flasherInterfaces.value = nextInterfaces;
+        
+        if (firmwareServerInfo.value) {
+          const currentUrls = firmwareServerInfo.value.urls;
+          const stillValid = currentUrls.some(url => {
+            try {
+              const parsed = new URL(url);
+              return nextInterfaces.some(i => i.ip === parsed.hostname);
+            } catch (_) {
+              return false;
+            }
+          });
+          
+          if (!stillValid) {
+            pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
+            await stopFirmwareServer();
+            const firmwareOptions = networkOtaFirmwareOptions();
+            if (firmwareOptions) {
+              await startFirmwareServerWithOptions(firmwareOptions);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to poll network interfaces:', e);
+    }
+  }, 5000);
   try {
     const savedMonitor = localStorage.getItem(MONITOR_AFTER_FLASH_STORAGE_KEY);
     if (savedMonitor === 'true' || savedMonitor === 'false') {
@@ -4563,6 +4716,42 @@ onMounted(async () => {
       const trimmed = line.trim();
       if (trimmed) {
         pushNetworkLog(trimmed);
+        
+        // Track active OTA packet transmissions for progress watchdog
+        if (trimmed.includes('event=ota_pull_control_start_rx') || trimmed.includes('event=ota_pull_control_rx')) {
+          const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
+          if (ipMatch) {
+            const ip = ipMatch[1];
+            const dev = loraInventory.value.find(d => d.ip === ip);
+            if (dev) {
+              if (!fleetRowHistory.value[dev.address]) {
+                fleetRowHistory.value[dev.address] = {};
+              }
+              fleetRowHistory.value[dev.address].lastOtaActivityMs = Date.now();
+            }
+          }
+        }
+
+        // Handle OTA completed downloading & waiting to apply/reboot
+        if (trimmed.includes('event=ota_pull_control_apply')) {
+          const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
+          if (ipMatch) {
+            const ip = ipMatch[1];
+            const dev = loraInventory.value.find(d => d.ip === ip);
+            if (dev && (dev.row_state === 'ota_downloading' || dev.row_state === 'ota_pending' || dev.row_state === 'ota_retrying')) {
+              fleetRowHistory.value[dev.address] = {
+                ...(fleetRowHistory.value[dev.address] || {}),
+                rowState: 'ota_apply_wait',
+                rowStateUntilMs: Date.now() + 120000
+              };
+              loraInventory.value = loraInventory.value.map(row => 
+                row.address === dev.address ? { ...row, row_state: 'ota_apply_wait', row_state_until_ms: Date.now() + 120000 } : row
+              );
+            }
+          }
+        }
+
+        // Handle OTA failures
         if (trimmed.includes('event=ota_pull_control_failed') ||
             trimmed.includes('event=ota_pull_control_incomplete') ||
             trimmed.includes('event=ota_pull_control_bad_hash') ||
@@ -4571,16 +4760,9 @@ onMounted(async () => {
           if (ipMatch) {
             const ip = ipMatch[1];
             const dev = loraInventory.value.find(d => d.ip === ip);
-            if (dev && dev.row_state === 'ota_pending') {
-              fleetRowHistory.value[dev.address] = {
-                ...(fleetRowHistory.value[dev.address] || {}),
-                rowState: 'ota_failed',
-                rowStateUntilMs: undefined,
-                otaExpectedUntilMs: undefined
-              };
-              loraInventory.value = loraInventory.value.map(row => 
-                row.address === dev.address ? { ...row, row_state: 'ota_failed', row_state_until_ms: undefined } : row
-              );
+            const activeStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'];
+            if (dev && activeStates.includes(dev.row_state || '')) {
+              triggerOtaFailureOrRetry(dev);
             }
           }
         }
