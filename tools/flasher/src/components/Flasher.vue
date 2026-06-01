@@ -4781,28 +4781,36 @@ onMounted(async () => {
       if (trimmed) {
         pushNetworkLog(trimmed);
         
-        // Track active OTA packet transmissions for progress watchdog
-        if (trimmed.includes('event=ota_pull_control_start_rx') || trimmed.includes('event=ota_pull_control_rx')) {
+        // Find matching device by chip ID from [lrs-xxxxxx] in log content first, falling back to IP match
+        let dev: LoraInventoryDevice | undefined = undefined;
+        const chipMatch = trimmed.match(/\[lrs-([0-9a-fA-F]+)\]/);
+        if (chipMatch) {
+          const chipId = chipMatch[1].toLowerCase();
+          dev = loraInventory.value.find(d => 
+            String(d.chip_id || '').trim().replace(/^0x/i, '').toLowerCase() === chipId
+          );
+        }
+        
+        if (!dev) {
           const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
           if (ipMatch) {
             const ip = ipMatch[1];
-            const dev = loraInventory.value.find(d => d.ip === ip);
-            if (dev) {
-              if (!fleetRowHistory.value[dev.address]) {
-                fleetRowHistory.value[dev.address] = {};
-              }
-              fleetRowHistory.value[dev.address].lastOtaActivityMs = Date.now();
-            }
+            dev = loraInventory.value.find(d => d.ip === ip);
           }
         }
 
-        // Handle OTA completed downloading & waiting to apply/reboot
-        if (trimmed.includes('event=ota_pull_control_apply')) {
-          const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
-          if (ipMatch) {
-            const ip = ipMatch[1];
-            const dev = loraInventory.value.find(d => d.ip === ip);
-            if (dev && (dev.row_state === 'ota_downloading' || dev.row_state === 'ota_pending' || dev.row_state === 'ota_retrying')) {
+        if (dev) {
+          // Track active OTA packet transmissions for progress watchdog
+          if (trimmed.includes('event=ota_pull_control_start_rx') || trimmed.includes('event=ota_pull_control_rx')) {
+            if (!fleetRowHistory.value[dev.address]) {
+              fleetRowHistory.value[dev.address] = {};
+            }
+            fleetRowHistory.value[dev.address].lastOtaActivityMs = Date.now();
+          }
+
+          // Handle OTA completed downloading & waiting to apply/reboot
+          if (trimmed.includes('event=ota_pull_control_apply')) {
+            if (dev.row_state === 'ota_downloading' || dev.row_state === 'ota_pending' || dev.row_state === 'ota_retrying') {
               fleetRowHistory.value[dev.address] = {
                 ...(fleetRowHistory.value[dev.address] || {}),
                 rowState: 'ota_apply_wait',
@@ -4814,19 +4822,14 @@ onMounted(async () => {
               );
             }
           }
-        }
 
-        // Handle OTA failures
-        if (trimmed.includes('event=ota_pull_control_failed') ||
-            trimmed.includes('event=ota_pull_control_incomplete') ||
-            trimmed.includes('event=ota_pull_control_bad_hash') ||
-            trimmed.includes('event=ota_pull_control_orphan')) {
-          const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
-          if (ipMatch) {
-            const ip = ipMatch[1];
-            const dev = loraInventory.value.find(d => d.ip === ip);
+          // Handle OTA failures
+          if (trimmed.includes('event=ota_pull_control_failed') ||
+              trimmed.includes('event=ota_pull_control_incomplete') ||
+              trimmed.includes('event=ota_pull_control_bad_hash') ||
+              trimmed.includes('event=ota_pull_control_orphan')) {
             const activeStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'];
-            if (dev && activeStates.includes(dev.row_state || '')) {
+            if (activeStates.includes(dev.row_state || '')) {
               triggerOtaFailureOrRetry(dev);
             }
           }
