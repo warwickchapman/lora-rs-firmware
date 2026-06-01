@@ -2684,28 +2684,9 @@ function fleetFlashAvailable(device: LoraInventoryDevice): boolean {
   return fleetFlashUnavailableReason(device) === 'Ready to trigger OTA pull';
 }
 
-function ipToNumber(ip: string): number {
-  return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
-}
-
-function fleetFlashUnavailableReason(device: LoraInventoryDevice): string {
-  if (!device.wifi_connected_known) return 'Needs confirmed WiFi status from Fleet scan';
-  if (!device.wifi_connected) return 'Device WiFi is offline';
-  if (!device.ip) return 'Device has no IP address in Fleet status';
-  
-  if (flasherInterfaces.value.length > 0) {
-    const devIpNum = ipToNumber(device.ip);
-    const hasCompatibleSubnet = flasherInterfaces.value.some(iface => {
-      const flasherIpNum = ipToNumber(iface.ip);
-      const maskNum = ipToNumber(iface.netmask);
-      return (flasherIpNum & maskNum) === (devIpNum & maskNum);
-    });
-    
-    if (!hasCompatibleSubnet) {
-      return `Flasher host network cannot reach device IP (${device.ip})`;
-    }
-  }
-  
+function fleetFlashUnavailableReason(_device: LoraInventoryDevice): string {
+  // Allow triggering remote OTA pull even if the device's WiFi is currently offline or it has no IP,
+  // since the LoRa start command will wake up the Wi-Fi stack and connect dynamically.
   return 'Ready to trigger OTA pull';
 }
 
