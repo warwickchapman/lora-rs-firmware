@@ -2366,7 +2366,7 @@ function monitorUptimeLabel(row: LoraInventoryDevice): string {
 }
 
 function remoteInputLabel(row: LoraInventoryDevice): string {
-  const value = row.input_feedback;
+  const value = row.input_feedback ?? row.input_state;
   if (value === undefined || value === null) return 'waiting';
   return Number(value) === 1 ? 'Closed' : 'Open';
 }
