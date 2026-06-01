@@ -2398,6 +2398,12 @@ function remoteInputLabel(row: LoraInventoryDevice): string {
   return Number(value) === 1 ? 'Closed' : 'Open';
 }
 
+function remoteRelayLabel(row: LoraInventoryDevice): string {
+  const value = row.relay_feedback ?? row.relay_state;
+  if (value === undefined || value === null) return 'waiting';
+  return Number(value) === 1 ? 'On' : 'Off';
+}
+
 function remoteTempLabel(row: LoraInventoryDevice): string {
   return row.temp_valid && row.temp_c !== undefined && row.temp_c !== null ? `${row.temp_c} °C` : '-';
 }
@@ -6924,7 +6930,7 @@ function toggleSelectAllBulkPorts() {
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
-            <table class="w-full min-w-[1120px] border-collapse text-xs">
+            <table class="w-full min-w-[1180px] border-collapse text-xs">
               <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
                 <tr class="border-b border-slate-800">
                   <th class="w-10 px-2 py-1.5 text-left"></th>
@@ -6935,6 +6941,7 @@ function toggleSelectAllBulkPorts() {
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Power Save</th>
                   <th v-if="hasAnyRemoteIp" class="px-2 py-1.5 text-left font-semibold">IP</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
@@ -6944,7 +6951,7 @@ function toggleSelectAllBulkPorts() {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td :colspan="hasAnyRemoteIp ? 13 : 12" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
+                  <td :colspan="hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -6991,6 +6998,14 @@ function toggleSelectAllBulkPorts() {
                     <span v-else class="text-slate-500">-</span>
                   </td>
                   <td v-if="hasAnyRemoteIp" class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+                  <td class="px-2 py-1.5">
+                    <template v-if="device.age_ms !== undefined && device.age_ms !== null">
+                      <span :class="['rounded border px-2 py-1 text-[10px] font-bold', remoteRelayLabel(device) === 'On' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : remoteRelayLabel(device) === 'Off' ? 'border-slate-600 bg-slate-800/50 text-slate-300' : 'border-slate-800 bg-slate-900/50 text-slate-500']">
+                        {{ remoteRelayLabel(device) }}
+                      </span>
+                    </template>
+                    <span v-else class="text-slate-500">-</span>
+                  </td>
                   <td class="px-2 py-1.5">
                     <div class="text-slate-300 flex items-center gap-1 flex-wrap">
                       <template v-if="device.age_ms !== undefined && device.age_ms !== null">

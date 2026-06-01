@@ -28,6 +28,7 @@ All notable changes to this pre-release project are documented here in current o
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
 
 ### Added
+- Added a Fleet table `Relay` column showing each remote relay as `On`, `Off`, or `waiting` from the gateway peer cache.
 - Added a `power_save_listen_only` configuration flag for remote transmitter nodes that enables an ultra-lean power save mode (disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin) immediately on boot or remote command.
 - Added a `🗑️ Forget Device` action in the Flasher Fleet Actions dropdown with safety confirmation to cleanly remove outdated or replaced nodes.
 - Flasher settings pane displays the decrypted Fleet Key with hide/show toggle, enabling direct local credential updates over USB serial admin.
