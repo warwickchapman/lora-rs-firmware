@@ -374,12 +374,14 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       cfg.remote_address = cfg.allowed_controller_addresses[0];
     }
   }
-  if (cfg.paired_target_count == 0)
+  if (cfg.paired_target_count == 0) {
     cfg.paired_target_count = 1;
-  cfg.paired_target_addresses[0] = cfg.remote_address;
-  if (cfg.allowed_controller_count == 0)
+    cfg.paired_target_addresses[0] = cfg.remote_address;
+  }
+  if (cfg.allowed_controller_count == 0) {
     cfg.allowed_controller_count = 1;
-  cfg.allowed_controller_addresses[0] = cfg.remote_address;
+    cfg.allowed_controller_addresses[0] = cfg.remote_address;
+  }
 
   const bool allowDefaultDeploymentKey =
       parseBoolField(doc["allow_default_deployment_key"], false);
@@ -808,6 +810,12 @@ void SerialAdmin::handleConfigureGateway(JsonDocument &doc) {
   const uint8_t expected =
       clampExpectedRemotes(doc["expected_remotes"] | doc["expected_count"] | 1);
   auto &cfg = config_->settings();
+  if (cfg.commissioned && cfg.role_tx &&
+      !isDefaultDeploymentKey(cfg.fleet_passphrase.c_str()) &&
+      !cfg.fleet_passphrase.equals(fleetKey)) {
+    sendError("configure_gateway", "fleet_key_mismatch", requestId(doc));
+    return;
+  }
   const bool preserveTargets = cfg.commissioned && cfg.role_tx &&
                                cfg.fleet_passphrase.equals(fleetKey) &&
                                cfg.paired_target_count > 0;

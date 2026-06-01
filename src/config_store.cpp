@@ -404,7 +404,7 @@ bool ConfigStore::begin() {
     cfg_.paired_target_count = 1;
     cfg_.paired_target_addresses[0] = cfg_.remote_address;
   } else if (cfg_.paired_target_count > 0) {
-    cfg_.paired_target_addresses[0] = cfg_.remote_address;
+    cfg_.remote_address = cfg_.paired_target_addresses[0];
   }
   if (cfg_.allowed_controller_count == 0 && cfg_.remote_address >= 1 && cfg_.remote_address <= 254) {
     cfg_.allowed_controller_count = 1;

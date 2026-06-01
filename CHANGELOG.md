@@ -58,6 +58,8 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Provision now treats the connected gateway as the fleet-key authority: commissioned gateways must supply their existing fleet key from device config, the Provision fleet-key field is cleared if that fetch fails, and accidental commissioned-gateway re-keying is rejected by firmware `configure_gateway`.
+- Multi-target gateway address lists are no longer rewritten from the legacy single `remote_address` field during config load/save validation, preventing paired input control from collapsing back to one remote.
 - Gateway peer-cache snapshots now mark dry-contact input state as known only after a remote packet or maintenance sensor page actually reports it, preventing Fleet from displaying default `"Open"` / `"Closed"` values for unverified remotes.
 - Flasher Fleet Sensors now falls back to the normal dry-contact `input_state` when optional debug-only `input_feedback` is absent, restoring `"Open"` / `"Closed"` display for remotes that are reporting standard sensor telemetry.
 - Flasher now treats a remote row reporting the selected target firmware version as an OTA success, clearing stale `Downloading OTA...` / queued state even if reboot/status timing was missed.

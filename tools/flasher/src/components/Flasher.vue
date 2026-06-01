@@ -577,6 +577,7 @@ const fleetRowHistory = ref<Record<number, {
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
 const pairFleetKey = ref('');
+const pairFleetKeySource = ref<'none' | 'gateway' | 'factory_generated' | 'manual'>('none');
 const showPairFleetKey = ref(false);
 const showPairAdminPassword = ref(false);
 const pairStatus = ref<EasyPairStatus | null>(null);
@@ -1631,6 +1632,27 @@ function generateReadableFleetKey(): string {
 function generatePairFleetKey(force = false) {
   if (!force && pairFleetKey.value.trim()) return;
   pairFleetKey.value = generateReadableFleetKey();
+  pairFleetKeySource.value = 'factory_generated';
+}
+
+function clearPairFleetKey() {
+  pairFleetKey.value = '';
+  pairFleetKeySource.value = 'none';
+}
+
+function markPairFleetKeyManual() {
+  pairFleetKeySource.value = 'manual';
+}
+
+function requireProvisionFleetKeyAuthority() {
+  const status = serialDeviceState(gatewaySelectedPort.value)?.status;
+  const isCommissioned = status?.commissioned === true && status?.fleet_passphrase_default !== true;
+  if (isCommissioned && pairFleetKeySource.value !== 'gateway') {
+    throw new Error('commissioned gateway fleet key was not fetched from the gateway; load gateway again');
+  }
+  if (!isCommissioned && !pairFleetKey.value.trim()) {
+    throw new Error('fleet key is empty; load a factory gateway or enter a key explicitly');
+  }
 }
 
 function copyPairFleetKey() {
@@ -3722,14 +3744,18 @@ async function loadEasyPairGateway(isAuto = false) {
         
         if (isCommissioned && retrievedKey && retrievedKey !== 'lora-default-passphrase' && isDefaultKey === false) {
           pairFleetKey.value = retrievedKey;
+          pairFleetKeySource.value = 'gateway';
           pushPairLog(`Retrieved commissioned fleet key from gateway.`);
         } else if (!isCommissioned || isDefaultKey === true) {
           generatePairFleetKey(true);
-          pushPairLog('Gateway is uncommissioned; generated a new random fleet key.');
+          pairFleetKeySource.value = 'factory_generated';
+          pushPairLog('Gateway is factory/uncommissioned; generated a new fleet key for first commissioning.');
         } else {
-          pushPairLog('Gateway has default or unconfigured fleet key.');
+          clearPairFleetKey();
+          pushPairLog('Gateway fleet key could not be verified; fleet key field cleared.');
         }
       } catch (configErr) {
+        clearPairFleetKey();
         pushPairLog('Gateway config fetch failed: ' + configErr);
       }
     }
@@ -3765,6 +3791,7 @@ async function runEasyPair() {
     if (!fleetKey) {
       throw new Error('Fleet key is empty');
     }
+    requireProvisionFleetKeyAuthority();
     const password = pairPassword();
     await sendPairCommand('configure_gateway', {
       admin_password: password,
@@ -3851,6 +3878,7 @@ async function startEasyPairDiscovery() {
     if (!fleetKey) {
       throw new Error('Fleet key is empty');
     }
+    requireProvisionFleetKeyAuthority();
     const password = pairPassword();
     if (!password) throw new Error('gateway password unavailable');
     await sendPairCommand('configure_gateway', {
@@ -4700,7 +4728,6 @@ const handleWindowClick = () => {
 
 onMounted(async () => {
   window.addEventListener('click', handleWindowClick);
-  generatePairFleetKey(false);
   fleetClockTimer.value = window.setInterval(() => {
     fleetClockMs.value = Date.now();
     checkOtaProgressWatchdog();
@@ -5310,10 +5337,10 @@ function toggleSelectAllBulkPorts() {
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Fleet key</label>
               <div class="grid grid-cols-[3rem_minmax(0,1fr)_3rem_3rem] gap-2">
-                <button @click="generatePairFleetKey(true)" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" title="Generate fleet key" aria-label="Generate fleet key">
+                <button @click="generatePairFleetKey(true)" :disabled="serialDeviceState(gatewaySelectedPort)?.status?.commissioned && !serialDeviceState(gatewaySelectedPort)?.status?.fleet_passphrase_default" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed" title="Generate fleet key" aria-label="Generate fleet key">
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
                 </button>
-                <input v-model="pairFleetKey" class="glass-input h-10 flex-1 font-mono" :type="showPairFleetKey ? 'text' : 'password'" autocomplete="new-password" />
+                <input v-model="pairFleetKey" @input="markPairFleetKeyManual" class="glass-input h-10 flex-1 font-mono" :type="showPairFleetKey ? 'text' : 'password'" autocomplete="new-password" />
                 <button @click="showPairFleetKey = !showPairFleetKey" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'" :aria-label="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'">
                   <svg v-if="!showPairFleetKey" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
