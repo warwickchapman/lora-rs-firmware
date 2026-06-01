@@ -2089,6 +2089,9 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     history.knownRebootUntilMs = now + 120000;
   }
 
+  if (rowState === 'ota_queued' && otaQueue.value.some(d => d.address === row.address)) {
+    rowStateUntilMs = undefined;
+  }
   if (rowStateUntilMs && rowStateUntilMs <= now) {
     rowState = otaExpected ? (rowState || 'ota_downloading') : undefined;
     rowStateUntilMs = otaExpected ? otaExpectedUntilMs : undefined;
@@ -2882,7 +2885,7 @@ async function flashLoraRemote(device: LoraInventoryDevice) {
   fleetRowHistory.value[device.address] = {
     ...(fleetRowHistory.value[device.address] || {}),
     rowState: 'ota_queued',
-    rowStateUntilMs: Date.now() + 300000
+    rowStateUntilMs: undefined
   };
   
   loraInventory.value = loraInventory.value.map(row => 

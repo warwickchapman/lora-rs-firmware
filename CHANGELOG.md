@@ -62,6 +62,9 @@ All notable changes to this pre-release project are documented here in current o
 - Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
 
 ### Fixed
+- Flasher Fleet queued OTA rows now keep the `Queued for OTA` label for as
+  long as the device remains in the active queue, instead of hiding it after a
+  fixed five-minute display timeout.
 - Paired input-control heartbeat now uses the same multi-target group command path as input changes instead of targeting only the legacy primary `remote_address`, preventing address 1 from being the only receiver kept in sync.
 - Gateway peer-cache relay state now updates from valid matching ACK packets and real remote status packets, while timeout/unmatched ACK bookkeeping no longer mirrors the gateway's desired command state across the whole table.
 - Receivers now accept same-key gateway input-control packets from LoRa address `254` even if recovered devices have stale controller-pairing metadata, restoring fleet-wide input control after provisioning or OTA recovery churn.
