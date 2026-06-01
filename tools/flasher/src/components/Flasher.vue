@@ -2049,6 +2049,26 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const mqttEnabled = (row.mqtt_known ? row.mqtt_enabled : history.mqtt_enabled) ?? false;
   const mqttKnown = row.mqtt_known || history.mqtt_known || false;
   
+  let pendingPowerSaveListenOnly = history.pendingPowerSaveListenOnly;
+  let pendingPowerSaveBootGrace = history.pendingPowerSaveBootGrace;
+  let pendingPowerSaveTxMs = history.pendingPowerSaveTxMs;
+
+  // Check if incoming row values match the pending state to clear it
+  if (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null && pendingPowerSaveListenOnly !== undefined) {
+    if (row.power_save_listen_only === pendingPowerSaveListenOnly && row.power_save_boot_grace === pendingPowerSaveBootGrace) {
+      pendingPowerSaveListenOnly = undefined;
+      pendingPowerSaveBootGrace = undefined;
+      pendingPowerSaveTxMs = undefined;
+    }
+  }
+
+  // Timeout pending state after 45 seconds if no response
+  if (pendingPowerSaveTxMs && now - pendingPowerSaveTxMs > 45000) {
+    pendingPowerSaveListenOnly = undefined;
+    pendingPowerSaveBootGrace = undefined;
+    pendingPowerSaveTxMs = undefined;
+  }
+
   const powerSaveListenOnly = (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null) ? row.power_save_listen_only : history.power_save_listen_only;
   const powerSaveBootGrace = (row.power_save_boot_grace !== undefined && row.power_save_boot_grace !== null) ? row.power_save_boot_grace : history.power_save_boot_grace;
   
@@ -2097,6 +2117,9 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     mqtt_known: mqttKnown,
     power_save_listen_only: powerSaveListenOnly,
     power_save_boot_grace: powerSaveBootGrace,
+    pendingPowerSaveListenOnly,
+    pendingPowerSaveBootGrace,
+    pendingPowerSaveTxMs,
     heap_free: heapFree,
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
@@ -2137,6 +2160,9 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     mqtt_enabled: mqttEnabled,
     power_save_listen_only: powerSaveListenOnly,
     power_save_boot_grace: powerSaveBootGrace,
+    pending_power_save_listen_only: pendingPowerSaveListenOnly,
+    pending_power_save_boot_grace: pendingPowerSaveBootGrace,
+    pending_power_save_tx_ms: pendingPowerSaveTxMs,
     heap_free: heapFree,
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
@@ -2297,7 +2323,7 @@ function monitorUptimeLabel(row: LoraInventoryDevice): string {
 }
 
 function remoteInputLabel(row: LoraInventoryDevice): string {
-  const value = row.input_feedback ?? row.input_state;
+  const value = row.input_feedback;
   if (value === undefined || value === null) return 'waiting';
   return Number(value) === 1 ? 'Closed' : 'Open';
 }
@@ -3006,10 +3032,24 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       power_save_boot_grace: graceEnabled
     }, 8000);
     notify(`Sensors updated successfully on remote ${device.address}`);
-    // Optimistically update local state so re-opening the modal shows the applied config
+    // Save to history so it survives refreshes
+    const now = Date.now();
+    fleetRowHistory.value[device.address] = {
+      ...(fleetRowHistory.value[device.address] || {}),
+      pendingPowerSaveListenOnly: powerSaveEnabled,
+      pendingPowerSaveBootGrace: graceEnabled,
+      pendingPowerSaveTxMs: now
+    };
     loraInventory.value = loraInventory.value.map(row => {
       if (row.address === device.address) {
-        return { ...row, temp_enabled: tempEnabled, tank_enabled: tankEnabled, power_save_listen_only: powerSaveEnabled, power_save_boot_grace: graceEnabled };
+        return { 
+          ...row, 
+          temp_enabled: tempEnabled, 
+          tank_enabled: tankEnabled,
+          pending_power_save_listen_only: powerSaveEnabled,
+          pending_power_save_boot_grace: graceEnabled,
+          pending_power_save_tx_ms: now
+        };
       }
       return row;
     });
@@ -6835,8 +6875,15 @@ function toggleSelectAllBulkPorts() {
                       {{ device.wifi_connected_known ? (device.wifi_connected ? 'OK' : 'Offline') : '-' }}
                     </span>
                   </td>
-                  <td class="px-2 py-1.5">
-                    <template v-if="device.power_save_listen_only">
+                   <td class="px-2 py-1.5">
+                    <span 
+                      v-if="device.pending_power_save_listen_only !== undefined"
+                      class="rounded border px-2 py-1 text-[10px] font-bold border-orange-500/30 bg-orange-500/10 text-orange-300 animate-pulse"
+                      title="Command transmitted. Waiting for remote node to check in over LoRa to confirm."
+                    >
+                      Pending...
+                    </span>
+                    <template v-else-if="device.power_save_listen_only">
                       <span 
                         v-if="device.power_save_boot_grace !== false && device.uptime_ms && device.uptime_ms < 600000"
                         class="rounded border px-2 py-1 text-[10px] font-bold border-amber-500/30 bg-amber-500/10 text-amber-300"
@@ -7110,29 +7157,29 @@ function toggleSelectAllBulkPorts() {
             <p class="text-xs text-slate-500">Select and transmit an explicit power management command over LoRa. These actions apply instantly to the remote node.</p>
             
             <div class="flex flex-col gap-3 py-1">
-              <!-- Card 1: Disable PowerSave -->
+              <!-- Card 1: Disable PowerSave / Full power mode -->
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-3">
                 <div class="flex-1">
                   <div class="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Keep Awake Mode
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Full power mode (default)
                   </div>
                   <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
-                    Keeps the remote node continuously awake. WiFi stack remains online, active sensor polling remains enabled, status LEDs function, and Serial Admin remains active.
+                    Keeps the remote node continuously awake. WiFi stack remains online, active sensor polling remains enabled, status LEDs function, and Serial Admin remains active. Default operational profile.
                   </div>
                 </div>
                 <button
                   @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, false, true)"
                   class="m-0 h-8 self-center rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/25 px-3 text-[10px] font-bold transition-colors whitespace-nowrap"
                 >
-                  Disable PowerSave
+                  Enable Full power mode
                 </button>
               </div>
 
-              <!-- Card 2: Enable PowerSave with Grace -->
+              <!-- Card 2: Enable PowerSave with Grace / Delayed PowerSave -->
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-3">
                 <div class="flex-1">
                   <div class="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
-                    <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> 10-Minute Grace Mode
+                    <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> PowerSave mode (10m inactivity)
                   </div>
                   <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
                     Puts the node in deep power saving listen-only mode, but grants a 10-minute active networking window on boot for local firmware maintenance.
@@ -7142,15 +7189,15 @@ function toggleSelectAllBulkPorts() {
                   @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, true)"
                   class="m-0 h-8 self-center rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/25 px-3 text-[10px] font-bold transition-colors whitespace-nowrap"
                 >
-                  Enable with Grace
+                  Enable PowerSave mode (delayed)
                 </button>
               </div>
 
-              <!-- Card 3: Enable PowerSave Instant Sleep -->
+              <!-- Card 3: Enable PowerSave Instant Sleep / Instant PowerSave -->
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-3">
                 <div class="flex-1">
                   <div class="font-semibold text-slate-200 text-xs flex items-center gap-1.5">
-                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Immediate Mode
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> PowerSave mode (immediate)
                   </div>
                   <div class="text-[10px] text-slate-400 mt-1 select-text leading-relaxed">
                     Bypasses the WiFi stack completely on boot and immediately transitions to deep listen-only mode. Essential for weak power supply units (PSUs) to prevent boot brownouts.
@@ -7160,7 +7207,7 @@ function toggleSelectAllBulkPorts() {
                   @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, false)"
                   class="m-0 h-8 self-center rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/25 px-3 text-[10px] font-bold transition-colors whitespace-nowrap"
                 >
-                  Enable (Instant Sleep)
+                  Enable PowerSave mode (instant)
                 </button>
               </div>
             </div>

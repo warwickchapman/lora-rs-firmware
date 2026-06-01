@@ -313,9 +313,13 @@ void App::tick() {
                      "event=wifi_prov_reapply reason=unchanged_credentials "
                      "action=restart_network");
           }
-          // LoRa-driven WiFi provisioning must always restart networking so a
-          // previously disabled/failed WiFi stack can recover without reboot.
-          applyUpdatedConfig(true, false);
+          if (cfg.power_save_listen_only) {
+            LRS_LOGI(WIFI, "event=wifi_prov_quiet_save reason=powersave_active action=none");
+          } else {
+            // LoRa-driven WiFi provisioning must always restart networking so a
+            // previously disabled/failed WiFi stack can recover without reboot.
+            applyUpdatedConfig(true, false);
+          }
         } else {
           lrslog::event("wifi_prov_save_fail", 0, provSrc, 0);
         }
@@ -357,18 +361,31 @@ void App::tick() {
                            (cfg.sensor_tank_enabled != sensorTankEnabled) ||
                            (cfg.power_save_listen_only != sensorPowerSaveEnabled) ||
                            (cfg.power_save_boot_grace != sensorPowerSaveBootGrace);
+      
+      // Enforce runtime power state adjustments immediately on command consumption
+      if (sensorPowerSaveEnabled) {
+        power_save_locked_off_ = false;
+        lrslog::disableUdpMirror(); // Stop UDP logging mirror so it doesn't block entering sleep!
+      } else {
+        power_save_active_ = false;
+        wifi_stack_disabled_ = false;
+      }
+
       if (changed) {
         cfg.sensor_temp_enabled = sensorTempEnabled;
         cfg.sensor_tank_enabled = sensorTankEnabled;
         cfg.power_save_listen_only = sensorPowerSaveEnabled;
         cfg.power_save_boot_grace = sensorPowerSaveBootGrace;
         if (config_.save()) {
-          applyUpdatedConfig(false, false);
+          bool restartNetwork = !sensorPowerSaveEnabled;
+          applyUpdatedConfig(restartNetwork, false);
           lrslog::event("sensor_config_exec_success", 0, 0, 0);
         } else {
           lrslog::event("sensor_config_exec_failed", 0, 0, 0);
         }
       } else {
+        bool restartNetwork = !sensorPowerSaveEnabled;
+        applyUpdatedConfig(restartNetwork, false);
         lrslog::event("sensor_config_exec_no_change", 0, 0, 0);
       }
     }
