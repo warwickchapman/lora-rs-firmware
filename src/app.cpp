@@ -350,18 +350,16 @@ void App::tick() {
                            (cfg.sensor_tank_enabled != sensorTankEnabled) ||
                            (cfg.power_save_listen_only != sensorPowerSaveEnabled);
       
-      // Enforce runtime power state adjustments immediately on command consumption
-      if (sensorPowerSaveEnabled) {
-        enterPowerSave("remote_command");
-      } else {
-        exitPowerSave("remote_command");
-      }
-
       if (changed) {
         cfg.sensor_temp_enabled = sensorTempEnabled;
         cfg.sensor_tank_enabled = sensorTankEnabled;
         cfg.power_save_listen_only = sensorPowerSaveEnabled;
         if (config_.save()) {
+          if (sensorPowerSaveEnabled) {
+            enterPowerSave("remote_command");
+          } else {
+            exitPowerSave("remote_command");
+          }
           bool restartNetwork = !sensorPowerSaveEnabled;
           applyUpdatedConfig(restartNetwork, false);
           lrslog::event("sensor_config_exec_success", 0, 0, 0);
@@ -369,6 +367,11 @@ void App::tick() {
           lrslog::event("sensor_config_exec_failed", 0, 0, 0);
         }
       } else {
+        if (sensorPowerSaveEnabled) {
+          enterPowerSave("remote_command");
+        } else {
+          exitPowerSave("remote_command");
+        }
         bool restartNetwork = !sensorPowerSaveEnabled;
         applyUpdatedConfig(restartNetwork, false);
         lrslog::event("sensor_config_exec_no_change", 0, 0, 0);

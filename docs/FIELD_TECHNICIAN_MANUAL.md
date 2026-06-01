@@ -69,18 +69,18 @@ For remote updates:
 
 Firmware is not sent over LoRa. LoRa only sends the update command and checksum. The remote downloads the firmware over WiFi.
 
-## Listen-Only Power Save
-Some remote devices may use listen-only power save.
+## PowerSave Mode
+Some remote devices may use PowerSave mode to conserve battery.
 
-In this mode the device waits 10 minutes after boot. If no technician uses USB and no UDP logging is active, it turns off WiFi work, MQTT, sensor polling, Serial Admin, OTA handling, and status LEDs. LoRa control keeps running.
+In this mode, the device immediately transitions to deep sleeping listen-only mode on boot. Local WiFi access, MQTT, Serial Admin, OTA, UDP logs, status LEDs, and background sensor polling are completely disabled.
 
 To service this type of device:
-1. Power-cycle the device.
-2. Connect USB.
-3. Open Flasher within 10 minutes.
-4. Make the required changes before the service window closes.
+1. Connect with the gateway device.
+2. In the Flasher UI, send the remote LoRa command to **Disable PowerSave** on the target device.
+3. Once the target remote node receives the command, it wakes up to **Full Power** immediately, turning on WiFi, Serial Admin, and OTA services.
+4. After completing maintenance, transmit the **Enable PowerSave** LoRa command to return the node to sleep.
 
-If you miss the 10 minute window, power-cycle the device and try again.
+Local USB serial is still the absolute backup recovery path if LoRa commands cannot be sent.
 
 ## Recovery
 If a device does not respond remotely:
@@ -105,5 +105,5 @@ Devices do not communicate. Flash the correct regional firmware for the installa
 No WiFi:
 Remote OTA, MQTT, and UDP logs will not work. LoRa control can still work.
 
-Power-save service window missed:
-Power-cycle the device and connect Flasher within 10 minutes.
+Device in PowerSave:
+If you cannot connect locally to configure or flash a sleeping node, either send a remote LoRa `Disable PowerSave` command via gateway, or physically connect USB and flash/configure the node locally.

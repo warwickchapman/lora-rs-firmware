@@ -7,9 +7,9 @@ All notable changes to this pre-release project are documented here in current o
 ### Changed
 - Refactored PowerSave into a pure, binary model ("Full Power" vs "PowerSave") with no inactivity timers, boot grace periods, or delayed/instant modes. The node immediately enters LoRa-only low-power mode on boot or remote command, completely turning off WiFi, Serial Admin, OTA, MQTT, LEDs, and background services, and can only be woken back to Full Power by a remote LoRa command.
 - Added a clear, premium BETA tag to the Monitor page title in the Flasher UI.
-- Implemented smart sleep telemetry in Flasher: the WiFi column now transitions to a pulsing orange `"..."` (pending offline) state when a node's grace period ends and PowerSave goes ON, until the actual reported connection status drops or the node goes silent.
+- Implemented smart sleep telemetry in Flasher: the WiFi column now transitions to a pulsing orange `"..."` (pending offline) state when a node's PowerSave goes ON, until the actual reported connection status drops or the node goes silent.
 - Automatically clear the IP address field to `"-"` when a device's WiFi status is reported as Offline.
-- Refactored Power command button names and mode titles in the Tauri Settings UI to professional standards (e.g. `"Enable Full power mode"`, `"Enable PowerSave mode (delayed)"`, `"Enable PowerSave mode (instant)"`).
+- Refactored Power command button names and mode titles in the Tauri Settings UI to professional standards (e.g. `"Enable Power Save"`, `"Disable Power Save"`).
 - Replaced generic bottom status bar notifications with dynamic, context-aware messages indicating whether power configuration or sensor configuration is being transmitted to a remote.
 - Renamed the Fleet table "LoRa" column to "Addr", shortened the WiFi status label from `"Connected"` to `"OK"` to conserve horizontal layout space, and dynamically hide the "IP" column if no active remote devices report a WiFi IP address.
 - Colorized the Sensors column dry-contact input status values to render the `"Closed"` word in emerald green and `"Open"` in vibrant orange to highlight device states at first glance.
@@ -24,8 +24,7 @@ All notable changes to this pre-release project are documented here in current o
 - OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
 
 ### Added
-- Added a `power_save_listen_only` configuration flag for remote transmitter nodes that enables an ultra-lean power save mode (disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin) 10 minutes after boot unless active technician Serial or WiFi (OTA/UDP logs) activity is detected.
-- Added a `hasActivity()` tracker to SerialAdmin to dynamically extend technician maintenance windows when active configuration commands are sent over USB.
+- Added a `power_save_listen_only` configuration flag for remote transmitter nodes that enables an ultra-lean power save mode (disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin) immediately on boot or remote command.
 - Added a `🗑️ Forget Device` action in the Flasher Fleet Actions dropdown with safety confirmation to cleanly remove outdated or replaced nodes.
 - Flasher settings pane displays the decrypted Fleet Key with hide/show toggle, enabling direct local credential updates over USB serial admin.
 - Firmware supports targeted, same-key encrypted LoRa key rollover commands (`MessageType::FleetKeyControl`), enabling secure over-the-air Fleet Key updates to remote nodes via gateway.

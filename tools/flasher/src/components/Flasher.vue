@@ -2913,30 +2913,45 @@ function checkOtaProgressWatchdog() {
       }
     }
   });
+
+  // Terminal-state queue pacing
+  if (remoteOtaBusyAddress.value !== null) {
+    const activeAddress = remoteOtaBusyAddress.value;
+    const activeDev = loraInventory.value.find(d => d.address === activeAddress);
+    if (activeDev) {
+      const terminalStates = ['ota_updated', 'ota_failed', 'ota_no_reboot'];
+      if (terminalStates.includes(activeDev.row_state || '')) {
+        pushNetworkLog(`OTA Session for Address ${activeAddress} completed with status: ${activeDev.row_state}. Advancing queue.`);
+        remoteOtaBusyAddress.value = null;
+        otaQueue.value.shift();
+        if (otaQueue.value.length > 0) {
+          setTimeout(() => processOtaQueue(), 2500);
+        }
+      }
+    } else {
+      // If the active device was cleanly removed/cancelled from inventory, clear lock
+      remoteOtaBusyAddress.value = null;
+      otaQueue.value.shift();
+      if (otaQueue.value.length > 0) {
+        setTimeout(() => processOtaQueue(), 2500);
+      }
+    }
+  }
 }
 
 async function processOtaQueue() {
   if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
 
-
-
   const device = otaQueue.value[0];
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
 
+  let success = false;
   try {
     remoteOtaBusyAddress.value = device.address;
     if (!portGatewayReady(port)) await loadNetworkGateway();
     const info = await ensureRemoteFlashFirmwareServer();
     const target = firmwareServerTarget(info);
-    
-    // Automatically start UDP logs to monitor the OTA progress over WiFi before sending the OTA pull command.
-    // If we send it after, the device is already busy with the OTA and might drop the LoRa packet.
-    await startFleetUdpLogs(device).catch(e => pushNetworkLog(`Failed to start UDP logs for ${device.address}: ${e}`));
-
-    // Wait 3.0 seconds to give the remote device time to process the UDP log command and transmit
-    // any resulting ACK/telemetry over LoRa. This prevents half-duplex radio collisions that drop OTA chunks.
-    await new Promise(r => setTimeout(r, 3000));
 
     const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
       admin_password: password,
@@ -2950,6 +2965,7 @@ async function processOtaQueue() {
     networkStatusMessage.value = `Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`;
     pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${NETWORK_FIRMWARE_PATH} (${out.path || NETWORK_FIRMWARE_PATH}), SHA256 ${info.sha256}`);
     notify(`Flash triggered for LoRa ${device.address}`);
+    success = true;
   } catch (e) {
     const msg = serialFeatureError(`Remote flash ${device.address}`, e);
     networkStatusMessage.value = msg;
@@ -2960,10 +2976,13 @@ async function processOtaQueue() {
       row.address === device.address ? { ...row, row_state: undefined, row_state_until_ms: undefined } : row
     );
   } finally {
-    remoteOtaBusyAddress.value = null;
-    otaQueue.value.shift();
-    if (otaQueue.value.length > 0) {
-      setTimeout(() => processOtaQueue(), 2500);
+    // If command failed to send entirely, release the queue lock immediately
+    if (!success) {
+      remoteOtaBusyAddress.value = null;
+      otaQueue.value.shift();
+      if (otaQueue.value.length > 0) {
+        setTimeout(() => processOtaQueue(), 2500);
+      }
     }
   }
 }
@@ -3018,7 +3037,7 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
 }
 
 
-async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean, graceEnabled: boolean = true) {
+async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean) {
   const port = gatewaySelectedPort.value;
   const password = adminPasswordForPort(port);
   if (!password) {
@@ -3034,8 +3053,7 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
       target_address: device.address,
       sensor_temp_enabled: tempEnabled,
       sensor_tank_enabled: tankEnabled,
-      power_save_listen_only: powerSaveEnabled,
-      power_save_boot_grace: graceEnabled
+      power_save_listen_only: powerSaveEnabled
     }, 8000);
     notify(`${actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1)} transmitted successfully to remote ${device.address}`);
     // Save to history so it survives refreshes
@@ -4814,11 +4832,10 @@ onMounted(async () => {
             }
           }
 
-          // Handle OTA failures
+          // Handle OTA failures (excluding orphan logs which are purely diagnostic)
           if (trimmed.includes('event=ota_pull_control_failed') ||
               trimmed.includes('event=ota_pull_control_incomplete') ||
-              trimmed.includes('event=ota_pull_control_bad_hash') ||
-              trimmed.includes('event=ota_pull_control_orphan')) {
+              trimmed.includes('event=ota_pull_control_bad_hash')) {
             const activeStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'];
             if (activeStates.includes(dev.row_state || '')) {
               triggerOtaFailureOrRetry(dev);
@@ -7151,7 +7168,7 @@ function toggleSelectAllBulkPorts() {
             <div class="mt-2 flex justify-end gap-2">
               <button @click="settingsDeviceModal = null" class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only, true)"
+                @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, settingsDeviceModal.power_save_listen_only)"
                 class="m-0 h-9 rounded-md border border-cyan-500/40 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30 px-4 text-xs font-bold transition-colors"
               >
                 Apply Sensor Configuration
@@ -7181,14 +7198,14 @@ function toggleSelectAllBulkPorts() {
                 </div>
                 <button
                   v-if="settingsDeviceModal.power_save_listen_only"
-                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, false, true)"
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, false)"
                   class="m-0 h-9 self-center rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/25 px-4 text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   Disable Power Save
                 </button>
                 <button
                   v-else
-                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true, true)"
+                  @click="executeRemoteSensors(settingsDeviceModal.device, settingsDeviceModal.sensor_temp_enabled, settingsDeviceModal.sensor_tank_enabled, true)"
                   class="m-0 h-9 self-center rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/25 px-4 text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   Enable Power Save
