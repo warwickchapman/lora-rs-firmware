@@ -2073,12 +2073,15 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const mqttEnabled = ((row.mqtt_known ? row.mqtt_enabled : history.mqtt_enabled) ?? false);
   const mqttKnown = row.mqtt_known || history.mqtt_known || false;
 
-  // Transition state: when PowerSave is on but WiFi has not dropped offline yet,
-  // we show a pending status in the WiFi column until confirmed offline.
-  const wifiPendingOffline = isPowerSaveConfigured && powerSaveActive && wifiConnected;
-  
   let pendingPowerSaveListenOnly = history.pendingPowerSaveListenOnly;
   let pendingPowerSaveTxMs = history.pendingPowerSaveTxMs;
+
+  // Transition state: when PowerSave is confirmed or requested but WiFi has not
+  // dropped offline yet, show a pending status instead of stale green OK.
+  const wifiPendingOffline = wifiConnected && (
+    (isPowerSaveConfigured && powerSaveActive) ||
+    pendingPowerSaveListenOnly === true
+  );
 
   // Check if incoming row values match the pending state to clear it
   if (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null && pendingPowerSaveListenOnly !== undefined) {
@@ -2088,8 +2091,10 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     }
   }
 
-  // Timeout pending state after 45 seconds if no response
-  if (pendingPowerSaveTxMs && now - pendingPowerSaveTxMs > 45000) {
+  // LoRa confirmation can lag behind the gateway's "sent" response by multiple
+  // scan/telemetry cycles. Keep the pending state long enough to avoid briefly
+  // reverting to stale confirmed state while the remote applies the command.
+  if (pendingPowerSaveTxMs && now - pendingPowerSaveTxMs > 180000) {
     pendingPowerSaveListenOnly = undefined;
     pendingPowerSaveTxMs = undefined;
   }
