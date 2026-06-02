@@ -8,112 +8,70 @@ No changes yet.
 
 ## [0.9.2-beta] - 2026-06-01
 
-### Changed
-- Implemented stateful, terminal-state based OTA queue pacing in Flasher UI, keeping the queue locked (`remoteOtaBusyAddress`) until the current remote node reaches a terminal state (`ota_updated`, `ota_failed`, or `ota_no_reboot`).
-- Replaced the short-term 3.0s post-UDP log delay in Flasher with the complete removal of automatic UDP log enablement before starting OTA.
-- Refactored firmware LoRa telemetry suppression during OTA to be stateful (`ota_pull_active_` flag), guaranteeing complete silence throughout both control-frame assembly and the entire HTTP download loop, with explicit failsafe clearing on all validation failure and download error paths.
-- Excluded purely diagnostic `ota_pull_control_orphan` log events from triggering Flasher UI OTA retry or failure decisions.
-- Refactored PowerSave into a pure, binary model ("Full Power" vs "PowerSave") with no inactivity timers, boot grace periods, or delayed/instant modes. The node immediately enters LoRa-only low-power mode on boot or remote command, completely turning off WiFi, Serial Admin, OTA, MQTT, LEDs, and background services, and can only be woken back to Full Power by a remote LoRa command.
-- Added a clear, premium BETA tag to the Monitor page title in the Flasher UI.
-- Implemented smart sleep telemetry in Flasher: the WiFi column now transitions to a pulsing orange `"..."` (pending offline) state when a node's PowerSave goes ON, until the actual reported connection status drops or the node goes silent.
-- Automatically clear the IP address field to `"-"` when a device's WiFi status is reported as Offline.
-- Refactored Power command button names and mode titles in the Tauri Settings UI to professional standards (e.g. `"Enable Power Save"`, `"Disable Power Save"`).
-- Replaced generic bottom status bar notifications with dynamic, context-aware messages indicating whether power configuration or sensor configuration is being transmitted to a remote.
-- Renamed the Fleet table "LoRa" column to "Addr", shortened the WiFi status label from `"Connected"` to `"OK"` to conserve horizontal layout space, and dynamically hide the "IP" column if no active remote devices report a WiFi IP address.
-- Colorized the Sensors column dry-contact input status values to render the `"Closed"` word in emerald green and `"Open"` in vibrant orange to highlight device states at first glance.
-- Added a highly informative hover `ⓘ` tooltip to fleet status labels (`Unexpected reboot`, `Rebooted (OTA)`, `No reboot seen (OTA)`) in the Uptime column explaining their triggers and diagnostic context.
-- Stored remote device address-to-chip ID pairings persistently in gateway config store, pre-populating runtime caches on boot to instantly preserve remote names (`lrs-XXXXXXXX`) across gateway power cycles or Flasher re-connections.
-- Fixed remote maintenance sensor telemetry reporting by scheduling the cascading sequence of all maintenance pages (`kMaintenancePageSensors` and `kMaintenancePageDebug`) on every gateway maintenance request, restoring DS18B20 temperature and 4-20 mA tank level reporting.
-- Improved serial admin peer serialization to unconditionally report input and relay state values when a remote node has checked in (so the frontend receives active `0` values and correctly displays `"Open"` instead of `"waiting"`).
-- Refined Flasher UI fleet listing to omit age, last-seen, and sensor fields for unseen remote devices, rendering clean `"-"` placeholders instead of misleading `"0s"` ages, `"live"` statuses, or `"waiting"` labels.
-- Firmware and Flasher release metadata are aligned to `0.9.2-beta`.
-- Local maintenance is centered on Flasher over USB serial admin.
-- Remote maintenance uses MQTT admin for online devices and gateway-mediated LoRa admin for bounded remote actions.
-- OTA pull now requires SHA256 across serial, MQTT, and gateway-mediated LoRa paths.
+### Firmware Features
+- Added working remote sensor support for dry-contact input state, DS18B20 temperature, and KIT0139-style 4-20 mA tank level telemetry. Sensor values now flow from remotes into the gateway peer cache, Flasher Monitor/Fleet, and MQTT peer topics.
+- Added PowerSave as a clear two-state remote mode: `Full Power` or `PowerSave`. PowerSave disables WiFi, Serial Admin, OTA, MQTT, LEDs, and background services until the remote is woken by LoRa command.
+- Added `power_save_listen_only` for ultra-lean remote nodes, disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin immediately on boot or remote command.
+- Added gateway-mediated remote commands over LoRa, including remote identify, reboot, guarded factory reset, sensor configuration, WiFi provisioning, OTA pull, and targeted Fleet Key rollover.
+- Added secure same-key encrypted LoRa Fleet Key rollover (`MessageType::FleetKeyControl`) so operators can update remote Fleet Keys without physical access.
+- Added persistent address-to-chip ID pairing so gateways remember which physical device owns each LoRa address across gateway restarts, Flasher reconnects, and factory-reset recovery.
+- Added versioned development build reporting such as `0.9.2~122`, including compact LoRa maintenance encoding so Fleet, Monitor, provisioning, and discovery can show full beta/dev build identity.
 
-### Added
-- Added a Settings diagnostic action to copy the currently fetched device
-  configuration as JSON, making paired target and controller lists easy to
-  inspect during field recovery.
-- Added a Fleet table `Relay` column showing each remote relay as `On`, `Off`, or `waiting` from the gateway peer cache.
-- Added a `power_save_listen_only` configuration flag for remote transmitter nodes that enables an ultra-lean power save mode (disabling WiFi, background sensor polling, MQTT, status LEDs, and Serial Admin) immediately on boot or remote command.
-- Added a `🗑️ Forget Device` action in the Flasher Fleet Actions dropdown with safety confirmation to cleanly remove outdated or replaced nodes.
-- Flasher settings pane displays the decrypted Fleet Key with hide/show toggle, enabling direct local credential updates over USB serial admin.
-- Firmware supports targeted, same-key encrypted LoRa key rollover commands (`MessageType::FleetKeyControl`), enabling secure over-the-air Fleet Key updates to remote nodes via gateway.
-- Flasher Fleet table features a "Fleet Key" remote action modal with a stark operational warning banner and explicit safety checkbox confirmation to prevent remote node orphaning.
-- Flasher Fleet Actions dropdown consolidates WiFi provisioning, Sensor configuration, and Fleet Key change into a single tabbed ⚙️ Settings modal with device info header, reducing the dropdown from 7 to 5 items (Flash, Logs, Settings, Reboot, Factory Reset).
-- Flasher caches entered WiFi passwords per SSID in local storage, automatically pre-populating and updating passwords in Provision mode, Settings configuration, and Remote WiFi provisioning dialogs.
-- Dev builds now use unique operator-visible build revisions such as `0.9.2~1`; use `python3 tools/bump_dev_build.py` before flashing or sharing a new development build.
-- Firmware build metadata now rejects reusing the same `~DEVBUILD` version after the source tree changes, preventing accidental duplicate dev firmware versions.
-- LoRa maintenance inventory now carries the compact dev-build revision separately from major/minor/patch, allowing Fleet and Monitor to show versions such as `0.9.2~1` instead of only `0.9.2`.
-- Flasher identity reads now replace cached factory/admin passwords every time, and Provision/Fleet gateway loading always rereads the selected USB gateway instead of trusting stale cached details.
-- Gateway peer-cache identity updates now preserve a known `~DEVBUILD` suffix while the major/minor/patch core is unchanged, so Fleet and Monitor do not drop remote firmware rows back to plain `X.Y.Z` between compact version-extension packets.
-- Flasher now clears stale Flash-tab device status after a successful firmware write, waits for serial admin to return, and rereads device identity/status before showing the running firmware version or starting the serial monitor.
-- Native PlatformIO unit tests now cover pure firmware helpers for fixed settings strings and mode/role parsing, with Python tests for build-version parsing.
-- Flasher Settings provides local USB status, identity, settings fetch/save, WiFi scan, identify, reboot, and guarded factory reset workflows.
-- Flasher Settings features a sticky, globally-accessible action footer with "Save config" and "Reboot" buttons, making saving settings visible from any settings sub-tab (including Sensors, MQTT, and Network) and improving operator UX.
-- Flasher Fleet uses a selected USB gateway to read the gateway-owned peer cache, run explicit bounded LoRa inventory scans, trigger remote identify, enable temporary UDP logs, and start OTA-pull actions for WiFi-connected remotes.
-- Flasher Monitor provides serial-gateway diagnostics and rejects non-gateway device selections.
-- Firmware serial admin supports local status/config actions, WiFi scan, WiFi provisioning, Fleet inventory, UDP log control, OTA pull, identify, reboot, and guarded factory reset commands.
-- Firmware LoRa maintenance inventory returns compact remote identity/status details, including chip ID, firmware version, WiFi state/IP, MQTT state, uptime, and link freshness.
-- Remotes can report dry-contact input, DS18B20 temperature, and KIT0139-style 4-20 mA tank level telemetry to the gateway peer cache, Flasher Monitor/Fleet, and MQTT peer topics.
+### Firmware Fixes
+- Reworked remote OTA around a stateful flow for reliability. Firmware suppresses LoRa chatter during the full OTA pull, paces gateway-mediated control frames over multiple ticks, and rejects duplicate OTA triggers while a pull is active.
+- OTA pull now verifies the exact HTTP stream it flashes, and gateway-mediated OTA sends the expected SHA256 over encrypted LoRa before the remote downloads firmware.
+- Improved input-based relay control so fleet relay actuation happens together. The gateway sends one actuating broadcast/group `Change`, waits for slotted ACKs, and then uses non-actuating correlated `PollRequest` confirmations for missing ACKs instead of late per-node targeted `Change` retries.
+- Fixed paired input-control heartbeat to use the same multi-target group path as input changes, preventing only the legacy primary `remote_address` from being kept in sync.
+- Fixed recovered receivers accepting gateway input-control packets from LoRa address `254` when fleet key matches, even if stale controller-pairing metadata remains after provisioning or OTA recovery.
+- Fixed gateway peer-cache truth handling: relay state updates from valid ACKs or real remote status, while dry-contact input state is marked known only from actual remote telemetry or sensor pages.
+- Fixed ACK handling so ACKs no longer mark remote dry-contact input as verified or copy the gateway's desired input state into Fleet sensor rows.
+- Fixed provisioning address exhaustion and duplicate stale rows by treating chip ID as physical identity, reclaiming old addresses for factory-reset devices, and collapsing stale rows when a chip reports from a new LoRa address.
+- Fixed gateway target-list preservation. New provisioning batches merge target addresses by default instead of destructively replacing the existing fleet list.
+- Fixed receiver provisioning/config repair so paired-input gateway control is disabled on remotes without resetting the receiver back to address `1`.
+- Fixed remote maintenance scan collisions by destination-checking `MaintenanceRequest` replies and returning to compact one-response-per-probe inventory behavior.
+- Fixed remote uptime reporting by moving it onto the normal maintenance version page instead of relying on optional debug telemetry.
+- Fixed sensor telemetry reporting by restoring cascading maintenance pages for sensor/debug data, including DS18B20 temperature and 4-20 mA tank readings.
+- Fixed maintenance snapshot timeouts by omitting unknown/default row fields and accepting larger bounded serial-admin responses for 12-row fleet caches.
+- Fixed ESP8266 heap pressure by replacing long-lived heap-backed settings strings with fixed inline buffers and removing several transient `String` helpers from WiFi, hostname, DS18B20, MQTT, settings, and serial-admin paths.
+
+### Firmware Improvements
+- Improved MQTT peer topics with LWT availability, `peers/` naming, decimal addressing, compound chip/address paths, `uptime_ms`, `last_seen_age_s`, timeout blanking, and publish-cache sizing tied to `LRS_MAX_PEERS`.
+- Improved local and remote maintenance direction: Flasher over USB serial admin is now the primary local admin surface, while remote maintenance uses MQTT admin for online devices and gateway-mediated LoRa admin for bounded remote actions.
+
+### Flasher Features
+- Added bulk flasher foundations and UX: independent USB port handling, per-port serial job queues, recycled-port status cleanup, weighted erase/write/verify progress, decimal esptool percentage parsing, and automatic removal of unplugged devices from the bulk status list.
+- Added explicit `Forget Device` action for removing outdated or replaced remotes from the Fleet list.
+- Added a `Relay` column to Fleet so each remote shows `On`, `Off`, or `waiting` from the gateway peer cache.
+- Introduced a consolidated Fleet Actions menu and tabbed Settings modal for WiFi provisioning, sensor configuration, Fleet Key changes, logs, reboot, flash/OTA, and factory reset actions.
+- Added a sticky Flasher Settings footer with always-visible `Save config` and `Reboot` actions.
+- Added a Settings diagnostic action to copy the currently fetched device configuration as JSON for field recovery and paired-target inspection.
+- Added Fleet Key visibility/editing in Flasher with hide/show control, remote change warnings, and explicit safety confirmation.
+
+### Flasher Fixes
+- Fixed OTA UI recovery cases where rows could remain stuck on `Downloading OTA...`, lose the queued label too early, revert to `Waiting for reboot`, or fail to advance to the next queued device after retry/update state changed.
+- Fixed Flasher serial-port races by separating selected USB ports for Flash, Provision, Fleet, Monitor, and Settings, and by queueing serial jobs per port.
+- Fixed Flasher Settings partial-load cases by normalizing serial-admin responses before binding fields and writing accepted settings/status back into the active settings cache.
+- Fixed packaged Flasher release fetching when the repo-local `.pio/build/lrs_za/firmware.bin` does not exist, preserving release downloads and the manual file picker.
+- Fixed Flasher firmware-version display so it shows exactly what the device reports rather than inferring suffixes from the Flasher app version.
+- Fixed gateway/Fleet startup races by retrying gateway reads, avoiding duplicate gateway loads, and refreshing device identity after flash/reset/provisioning changes.
+
+### Flasher Improvements
+- Improved Fleet and Monitor to use the gateway peer cache as the primary view, preserve cached rows across tab changes, refresh automatically, and rate-limit explicit LoRa force scans.
+- Improved Fleet rows for unseen remotes by showing clean `-` placeholders instead of misleading `0s`, `live`, `waiting`, or default sensor values.
+- Improved Fleet table readability: renamed `LoRa` to `Addr`, shortened WiFi `Connected` to `OK`, dynamically hides the IP column when no active remote reports an IP, and colorizes dry-contact `Closed`/`Open` status words.
+- Added helpful Uptime tooltips for `Unexpected reboot`, `Rebooted (OTA)`, and `No reboot seen (OTA)` states.
+- Added smart PowerSave telemetry in Flasher: WiFi transitions through a pending offline state when PowerSave turns on, and IP address clears to `-` when the device reports offline.
+- Improved operator notifications so Flasher says whether power configuration or sensor configuration is being sent to a remote.
+- Improved provisioning flow: gateway fleet key is treated as authoritative, commissioned gateway re-keying is rejected, advanced Prepare/Scan loads the selected gateway automatically, and scan wording separates factory/unprovisioned count from total fleet size.
+- Improved EasyPair and dense factory scans with preserved target lists, reserved known addresses, and wider reply timing to reduce missed factory remotes.
+
+### Build And Release Improvements
+- Added native PlatformIO tests for pure firmware helpers (`FixedSettingString`, mode/role parsing) and Python tests for build-version parsing. These are now part of the release validation gate.
+- Added release automation cleanup for old GitHub Actions runs, keeping the latest 10 `package_flasher.yml` runs by default.
+- Improved release/build hygiene: firmware and Flasher metadata are aligned to `0.9.2-beta`, flasher manifests sync from `VERSION`, and build documentation emphasizes `lrs_za`, `lrs_us`, and native tests.
 
 ### Removed
-- Device-hosted operator UI/admin services have been removed from normal firmware.
-- Stale device-admin helper scripts and contract/spec documents have been removed from the repository.
-- Orphaned Web UI extraction and local DevMon web helper scripts have been removed.
-- Dormant onboard automation-rule runtime code has been removed until automation returns with a supported Flasher and serial-admin management surface.
-- Pseudo-`mesh` mode aliases and settings audit fields have been removed because they implied unsupported routing and observability behavior.
-
-### Fixed
-- Flasher Fleet queued OTA rows now keep the `Queued for OTA` label for as
-  long as the device remains in the active queue, instead of hiding it after a
-  fixed five-minute display timeout.
-- Paired input-control heartbeat now uses the same multi-target group command path as input changes instead of targeting only the legacy primary `remote_address`, preventing address 1 from being the only receiver kept in sync.
-- Gateway peer-cache relay state now updates from valid matching ACK packets and real remote status packets, while timeout/unmatched ACK bookkeeping no longer mirrors the gateway's desired command state across the whole table.
-- Receivers now accept same-key gateway input-control packets from LoRa address `254` even if recovered devices have stale controller-pairing metadata, restoring fleet-wide input control after provisioning or OTA recovery churn.
-- Remote uptime now travels on the normal maintenance version page instead of only the optional debug page, restoring Fleet uptime display while keeping debug telemetry disabled.
-- Paired input-control missing ACK recovery now uses non-actuating `PollRequest` confirmations instead of per-node targeted `Change` packets, restoring perfectly deterministic simultaneous relay actuation across the fleet.
-- Gateway input-control fan-out now builds its LoRa target list from paired targets, persisted known peers, and the live peer cache, so a stale or collapsed primary `remote_address` cannot silently reduce control to only address 1.
-- Gateway peer-cache input state now ignores ACK packets in both receive paths; Fleet dry-contact Open/Closed status is only marked known from real remote status or sensor telemetry.
-- Paired input-control ACKs no longer mark a remote dry-contact input as verified or copy the gateway's desired input state into peer-cache sensor rows; only actual remote telemetry/sensor pages can drive Fleet `"Open"` / `"Closed"` input display.
-- Provision now treats the connected gateway as the fleet-key authority: commissioned gateways must supply their existing fleet key from device config, the Provision fleet-key field is cleared if that fetch fails, and accidental commissioned-gateway re-keying is rejected by firmware `configure_gateway`.
-- Multi-target gateway address lists are no longer rewritten from the legacy single `remote_address` field during config load/save validation, preventing paired input control from collapsing back to one remote.
-- Gateway peer-cache snapshots now mark dry-contact input state as known only after a remote packet or maintenance sensor page actually reports it, preventing Fleet from displaying default `"Open"` / `"Closed"` values for unverified remotes.
-- Flasher Fleet Sensors now falls back to the normal dry-contact `input_state` when optional debug-only `input_feedback` is absent, restoring `"Open"` / `"Closed"` display for remotes that are reporting standard sensor telemetry.
-- Flasher now treats a remote row reporting the selected target firmware version as an OTA success, clearing stale `Downloading OTA...` / queued state even if reboot/status timing was missed.
-- Receiver provisioning now explicitly disables paired-input gateway control on remotes, and config repair disables that incompatible flag instead of resetting the whole receiver back to default address `1`.
-- Gateway peer cache now treats chip ID as the physical identity and collapses stale duplicate rows when the same chip reports from a different LoRa source address.
-- Gateway `set_gateway_targets` now merges target addresses by default instead of destructively replacing the fleet list, preventing follow-up provisioning batches from silently removing existing remotes from Fleet. Explicit replacement now requires `replace: true`.
-- Remote firmware checks the target destination address of `MessageType::MaintenanceRequest` packets before responding, preventing concurrent reply packet collisions when the gateway performs sequential fleet scans.
-- Remote firmware packs the dynamic dev build number into the provisioning announce/verify packet revision bytes, allowing the Flasher's Provisioning tab to display the full beta version string (e.g. `0.9.2~11` or higher) during discovery.
-- Flasher Fleet now treats the gateway peer cache as the primary view: it refreshes automatically, preserves cached rows across tab changes, removes the manual cache reload button, and rate-limits explicit LoRa Force Scan requests.
-- Firmware version packet fields now use build-generated numeric macros instead of parsing `LRS_FW_VERSION` at runtime.
-- Firmware avoids several transient heap-string helpers in WiFi static IP setup, hostname normalization, DS18B20 address formatting, and MQTT client ID creation.
-- Firmware settings strings now use fixed inline buffers instead of long-lived heap-backed `String` fields, reducing ESP8266 heap fragmentation during settings load/save and serial-admin edits.
-- Serial-admin settings patches avoid unnecessary temporary heap strings for fleet keys and admin password validation.
-- OTA pull now verifies the same HTTP stream it flashes, so a checksum match cannot be followed by a second unchecked download.
-- Gateway-mediated LoRa OTA sends the expected firmware SHA256 over encrypted LoRa control before the remote pulls `/firmware.bin`.
-- Flasher keeps selected USB ports independently for Flash, Provision, Fleet, Monitor, and Settings.
-- Flasher serial jobs are queued per port so monitoring, settings fetches, provisioning, Fleet scans, and flashing do not fight over the same USB adapter.
-- Flasher Settings normalizes serial-admin config responses before binding fields, preventing partial loads from leaving select and numeric fields blank.
-- Flasher release fetching continues when the optional repo-local `.pio/build/lrs_za/firmware.bin` artifact is unavailable, preserving downloaded release choices and the manual file picker on packaged installs.
-- Flasher Settings writes loaded status/config back to the active Settings port cache and reloads accepted settings after save, so the System save action visibly reflects the firmware-accepted configuration.
-- Flasher now displays exactly the firmware version reported by a device instead of inferring a suffix from the Flasher app version.
-- EasyPair follow-up provisioning preserves the gateway's existing target list and reserves saved target addresses, so newly discovered remotes continue at the next free address instead of reusing address `1`.
-- EasyPair discovery now gives dense 12-device scans a wider reply window with two well-spaced factory replies per target, reducing missed factory remotes during bulk pairing without creating extra reply collisions.
-- Provision advanced `Prepare` and `Scan` now load the selected USB gateway automatically; `Scan` prepares the gateway with the current fleet key before starting discovery.
-- Provision target saving now reads the gateway's existing target list, merges newly provisioned addresses in Flasher, and sends one explicit replacement list to firmware; applied-but-unverified remotes are kept in the target list with a clear log message.
-- Provision scan wording now distinguishes the factory/unprovisioned scan count from total fleet size, and discovery status logs no longer present early in-progress polls as final found counts.
-- Fleet cache reload now logs and notifies after rereading the gateway-owned peer cache, making clear that it does not start a LoRa probe scan.
-- Fleet and Monitor maintenance scans are back to one compact response per probe, avoiding hidden sensor/debug response fan-out on the LoRa channel.
-- Fleet and Monitor peer-cache snapshots now omit unknown/default row fields and the Flasher serial reader accepts larger bounded admin responses, preventing 12-row cache snapshots from being dropped as timeouts.
-- Gateway-mediated remote OTA pull control is now paced over multiple firmware ticks instead of bursting all SHA256 control frames in one serial-admin call.
-- Flasher Settings makes redacted secret-preserving saves explicit and clears cached state after reboot, factory reset, flash, or provisioning changes.
-- Provisioning address allocation starts remotes at LoRa address `1`, logs chip IDs, and avoids stale serial cache where possible.
-- Fleet scan defaults are bounded to the supported LRS remote range and refresh incomplete cached rows with focused LoRa probes.
-- UDP logging in Flasher follows the latest line and includes copy plus expand/collapse controls.
-- Gateway protects active remote OTA pull sequences by returning a `gateway_busy` error when another OTA trigger is sent during an ongoing LoRa frame sequence.
-- Flasher Fleet clears `otaExpectedUntilMs` from device history once the device transitions to `ota_updated` status, preventing the UI status from reverting to "Waiting for reboot" after the 30-second update banner expires.
-- Standard build target documentation in `README.md` and `docs/DEVELOPER_GUIDE.md` has been highly emphasized with explicit `[!IMPORTANT]` boxes to ensure development and automation tools focus only on `lrs_za`, `lrs_us`, and native tests.
-- Flasher Fleet and Monitor listings display `-` under the MQTT column by default, and only show `Online` or `Offline` when MQTT is explicitly enabled on the device.
+- Removed the device-hosted operator UI/admin services from normal firmware.
+- Removed stale device-admin helper scripts, old contract/spec documents, orphaned Web UI extraction code, and local DevMon helper scripts.
+- Removed dormant onboard automation-rule runtime code until automation returns with a supported Flasher and serial-admin management surface.
+- Removed pseudo-`mesh` aliases and unsupported settings audit fields because they implied routing and observability behavior that the firmware does not provide.
