@@ -14,6 +14,7 @@ class MqttBridge {
   void tick(bool wifiConnected);
   bool connected();
   void disconnect();
+  static void clearPeerRetained(uint8_t addr, uint32_t chipId = 0);
 
  private:
   WiFiClient wifi_client_;
@@ -84,7 +85,7 @@ class MqttBridge {
   PeerPublishCacheEntry *findPeerPublishCache(uint8_t addr);
   PeerPublishCacheEntry *upsertPeerPublishCache(uint8_t addr);
   void clearPeerPublishCache(uint8_t addr);
-  void clearPeerRetainedTopics(uint8_t addr);
+  void clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId = 0);
   bool connectIfNeeded();
   void publishStatus();
   void publishDiscovery();

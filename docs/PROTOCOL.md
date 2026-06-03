@@ -141,7 +141,7 @@ Targeting rules:
 - `addr` as JSON number is decimal (example: `40`).
 - `addr` as JSON string is parsed as hex (example: `"0x28"` or `"28"`).
 - TX publishes local `addr` topic value as `0xNN`.
-- TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peer/0xNN/...`.
+- TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer).
 - Peer status leaves include `input`, `dry_contact`, `temp_c`, `tank_status`,
   `tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv` when that telemetry
   is known from maintenance status.
@@ -154,7 +154,7 @@ Targeting rules:
 - On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
-- TX publishes confirmed peer Wi-Fi state under `<root>/lrs-<tx_chipid>/peer/0xNN/wifi` as retained `1`, `0`, or empty when unknown.
+- TX publishes confirmed peer Wi-Fi state under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/wifi` as retained `1`, `0`, or empty when unknown.
 - Paired TX input-control waits for slotted ACKs after the broadcast
   command, then polls missing remotes using `PollRequest` (visibility only, no late actuation) one at a time until the hard retry
   deadline (`tx_command_retry_timeout_ms`). `flags.bit2` (0x04) on `PollRequest` means `b8..b11` (unixTimeS) carries a paired group command correlation id; matching `PollResponse` echoes it and must not set `time_authoritative`.

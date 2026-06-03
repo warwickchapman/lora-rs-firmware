@@ -76,6 +76,29 @@ bool parseDecAddressSegmentCstr(const char *segment, size_t len, uint8_t &out) {
   return true;
 }
 
+uint32_t parseChipIdFromSegment(const char *segment, size_t len) {
+  if (segment == nullptr || len == 0) return 0;
+  // Look for "_lrs-"
+  const char *p = nullptr;
+  for (size_t i = 0; i + 5 <= len; ++i) {
+    if (strncmp(segment + i, "_lrs-", 5) == 0) {
+      p = segment + i + 5;
+      break;
+    }
+  }
+  if (p == nullptr) return 0;
+  // Parse hex
+  char hexBuf[16]{};
+  size_t hexLen = len - (p - segment);
+  if (hexLen > 15) hexLen = 15;
+  memcpy(hexBuf, p, hexLen);
+  hexBuf[hexLen] = '\0';
+  char *end = nullptr;
+  uint32_t val = static_cast<uint32_t>(strtoul(hexBuf, &end, 16));
+  if (end == nullptr || *end != '\0') return 0;
+  return val;
+}
+
 bool parsePeerAddressSegmentCstr(const char *segment, size_t len, NodeStateMachine *sm, uint8_t &out) {
   if (segment == nullptr || len == 0) return false;
 
@@ -282,6 +305,12 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   resetPeerPublishCache();
   resetFibonacci();
   return true;
+}
+
+void MqttBridge::clearPeerRetained(uint8_t addr, uint32_t chipId) {
+  if (instance_ != nullptr) {
+    instance_->clearPeerRetainedTopics(addr, chipId);
+  }
 }
 
 void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
@@ -610,8 +639,18 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     if (strcmp(leaf, "forget") == 0) {
       const bool forget = (length > 0 && payload[0] != '0');
       if (!forget) return;
+
+      // Extract the chip ID from the topic address segment if it's canonical
+      uint32_t chipId = 0;
+      const char *suffix = topic + remotePrefixLen;
+      const char *slash = strchr(suffix, '/');
+      if (slash != nullptr) {
+        const size_t addrLen = static_cast<size_t>(slash - suffix);
+        chipId = parseChipIdFromSegment(suffix, addrLen);
+      }
+
+      clearPeerRetainedTopics(addr, chipId);
       const bool removed = sm_->mqttForgetPeer(addr);
-      clearPeerRetainedTopics(addr);
       {
         lrslog::event(removed ? "mqtt_remote_forget_ok" : "mqtt_remote_forget_missing", 0, 0, addr);
       }
@@ -620,12 +659,27 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 }
 
-void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
+void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
   if (!mqtt_client_.connected()) return;
 
-  // Read chip_id from cache before clearing it (peer may already be removed from SM).
+  // Read chip_id from cache/SM/Settings before clearing
   const PeerPublishCacheEntry *entry = findPeerPublishCache(addr);
-  const uint32_t chipId = entry ? entry->chip_id : 0;
+  uint32_t chipId = passedChipId;
+  if (chipId == 0 && entry != nullptr) {
+    chipId = entry->chip_id;
+  }
+  if (chipId == 0 && sm_ != nullptr) {
+    chipId = sm_->resolveChipIdForAddress(addr);
+    if (chipId == 0) chipId = sm_->activePeerChipIdForAddress(addr);
+  }
+  if (chipId == 0 && settings_ != nullptr) {
+    for (uint8_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
+      if (settings_->known_peer_addresses[i] == addr) {
+        chipId = settings_->known_peer_chip_ids[i];
+        break;
+      }
+    }
+  }
   clearPeerPublishCache(addr);
 
   const char *leaves[] = {

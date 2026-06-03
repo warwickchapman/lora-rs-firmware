@@ -10,6 +10,7 @@
 #include "admin_config_utils.h"
 #include "sensor_status.h"
 #include "settings_backup.h"
+#include "mqtt_bridge.h"
 
 using namespace admin_config_utils;
 
@@ -468,7 +469,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       cfg.wifi_ap_fallback_policy != "secure_sta_only") {
     return fail("wifi_ap_fallback_policy_invalid");
   }
-  if (cfg.mqtt_control_enabled && !cfg.mqtt_client_enabled) {
+  if (cfg.role_tx && cfg.mqtt_control_enabled && !cfg.mqtt_client_enabled) {
     return fail("mqtt_control_requires_client");
   }
   if (cfg.mqtt_port == 0)
@@ -1826,8 +1827,10 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
     }
 
     // Remove from known_peer_addresses and known_peer_chip_ids
+    uint32_t chipId = 0;
     for (uint8_t i = 0; i < cfg.known_peer_count; ++i) {
       if (cfg.known_peer_addresses[i] == addr) {
+        chipId = cfg.known_peer_chip_ids[i];
         for (uint8_t j = i; j + 1 < cfg.known_peer_count; ++j) {
           cfg.known_peer_addresses[j] = cfg.known_peer_addresses[j + 1];
           cfg.known_peer_chip_ids[j] = cfg.known_peer_chip_ids[j + 1];
@@ -1838,6 +1841,9 @@ void SerialAdmin::handleCommand(JsonDocument &doc) {
         break;
       }
     }
+
+    // Clear MQTT retained topics for this peer
+    MqttBridge::clearPeerRetained(addr, chipId);
 
     // Tell state machine to forget it from volatile peers
     sm_->mqttForgetPeer(addr);

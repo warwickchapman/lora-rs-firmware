@@ -412,7 +412,7 @@ bool ConfigStore::begin() {
   } else if (cfg_.allowed_controller_count > 0) {
     cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
   }
-  if (cfg_.mqtt_control_enabled && !cfg_.mqtt_client_enabled) {
+  if (cfg_.role_tx && cfg_.mqtt_control_enabled && !cfg_.mqtt_client_enabled) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=mqtt_control_requires_client action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();

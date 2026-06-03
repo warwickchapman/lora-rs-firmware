@@ -218,11 +218,10 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 TX input-to-LoRa control gate:
 - Setting: `input_control_paired_lora_enabled` (LoRa tab).
-- `true`: TX input transitions and periodic state sync use paced multi-target
-  `Change` commands for the paired target list, including broadcast plus
-  targeted retries for missing ACKs.
-- `false`: TX still reports local input status, but does not send paired input-driven `Change`/`Heartbeat`; MQTT remote control remains active.
-- MQTT deployments should avoid targeting RX nodes at the TX-paired `remote_address` unless this gate is `false`.
+- **Mutual Exclusivity:** Gateway physical input-control and MQTT relay control are mutually exclusive.
+  - `true`: Physical gateway input transitions and state synchronization own relay authority. The gateway ignores and blocks incoming MQTT relay commands (both local `relay` and remote `control` topics, logging `relay_local_mqtt_blocked` and `mqtt_remote_relay_blocked` respectively) to prevent conflicting state loops. Remote nodes in slave mode will also block LoRa-bridged MQTT command execution (logging `rx_slave_block_mqtt`).
+  - `false`: Gateway input state is reported but does not trigger LoRa relay commands. Local and remote MQTT relay controls are active and processed.
+
 
 MQTT remote retry control:
 - Setting: `mqtt_remote_retry_timeout_ms` (default 300000 ms / 300 s).

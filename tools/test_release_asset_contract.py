@@ -19,9 +19,9 @@ class ReleaseAssetContractTest(unittest.TestCase):
         self.assertIn("lrs-firmware-1.0.0-za.bin", assets)
         self.assertIn("lrs-firmware-1.0.0-us.bin", assets)
         self.assertIn("lrs-firmware-1.0.0-eu.bin", assets)
-        self.assertIn("thanda-lora-flasher-1.0.0-macos-arm64.dmg", assets)
-        self.assertIn("thanda-lora-flasher-1.0.0-macos-x86_64.dmg", assets)
-        self.assertNotIn("thanda-lora-flasher-1.0.0-macos-arm64-portable.zip", assets)
+        self.assertIn("thanda-lora-flasher-1.0.0-macos-arm64-portable.zip", assets)
+        self.assertIn("thanda-lora-flasher-1.0.0-macos-x86_64-portable.zip", assets)
+        self.assertNotIn("thanda-lora-flasher-1.0.0-macos-arm64.dmg", assets)
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ Per-device topics include:
 - `<root>/lrs-<chipid>/addr`
 - `<root>/lrs-<chipid>/control`
 
-Gateway peer topics use `<root>/lrs-<tx_chipid>/peer/0xNN/...` with matching
+Gateway peer topics use `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer) with matching
 sensor leaves such as `input`, `dry_contact`, `temp_c`, `tank_status`,
 `tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv`.
 

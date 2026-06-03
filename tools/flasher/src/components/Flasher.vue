@@ -598,7 +598,7 @@ const isSerialSystemAction = ref(false);
 const showSerialWifiPassword = ref(false);
 const showSerialMqttPassword = ref(false);
 const showSerialFleetKey = ref(false);
-const serialFactoryKeepFleet = ref(true);
+const serialFactoryKeepFleet = ref(false);
 const serialFactoryKeepWifi = ref(true);
 
 const LOCAL_OPTION = '__local_browse__';
@@ -6065,50 +6065,94 @@ function toggleSelectAllBulkPorts() {
             <div v-if="settingsTab === 'mqtt'" class="flex flex-col gap-3 text-xs">
               <template v-if="serialAdminConfig">
                 <!-- If it's a remote/receiver unit -->
-                <div v-if="!serialAdminConfig.role_tx" class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
-                  <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
-                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></span>
-                    🌐 Remote MQTT Routing Bridge Active
+                <div v-if="!serialAdminConfig.role_tx" class="flex flex-col gap-3">
+                  <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
+                    <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
+                      <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></span>
+                      🌐 Remote MQTT Routing Bridge Active
+                    </div>
+                    This device is configured with the <span class="font-bold text-cyan-100">Remote / Receiver</span> role.
+                    <p class="mt-2 text-slate-300">
+                      Remote units do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
+                    </p>
+                    <p class="mt-2 text-slate-300">
+                      The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote node.
+                    </p>
+                    <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
+                      💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
+                    </p>
                   </div>
-                  This device is configured with the <span class="font-bold text-cyan-100">Remote / Receiver</span> role.
-                  <p class="mt-2 text-slate-300">
-                    Remote units do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
-                  </p>
-                  <p class="mt-2 text-slate-300">
-                    The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote node.
-                  </p>
-                  <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
-                    💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
-                  </p>
+
+                  <!-- Configuration for Remote/Receiver units -->
+                  <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 mt-2 pt-3 border-t border-slate-800">
+                    <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
+                    <div class="flex flex-col gap-1">
+                      <label class="flex items-center gap-2 text-slate-300">
+                        <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
+                        Accept gateway MQTT commands
+                      </label>
+                      <div class="text-[10px] text-slate-500 leading-normal">
+                        Must be enabled for this remote to execute relay commands forwarded by the gateway over LoRa.
+                      </div>
+                    </div>
+
+                    <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
+                    <div class="flex flex-col gap-1">
+                      <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1" />
+                      <div class="text-[10px] text-slate-500 leading-normal">
+                        Comma-separated list of Gateway local addresses (typically <code>1</code>) authorized to command this remote over LoRa.
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- If it's a gateway/transmitter unit -->
-                <div v-else class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
-                  <label class="self-center text-right font-semibold text-slate-300">MQTT host</label>
-                  <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-9" placeholder="venus.local" />
-                  <label class="self-center text-right font-semibold text-slate-300">MQTT port</label>
-                  <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-9" />
-                  <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
-                  <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-9" />
-                  <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
-                  <label class="flex items-center gap-2 text-slate-300">
-                    <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
-                    Enabled
-                  </label>
-                  <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
-                  <label class="flex items-center gap-2 text-slate-300">
-                    <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
-                    Enabled
-                  </label>
-                  <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
-                  <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
-                  <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
-                  <div class="flex gap-2">
-                    <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
-                    <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                <div v-else class="flex flex-col gap-3">
+                  <!-- Warning banner for input control override conflict -->
+                  <div v-if="serialAdminConfig.input_control_paired_lora_enabled" class="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 select-text mb-2">
+                    ⚠️ <strong>MQTT Control Blocked:</strong> "Input control via gateway input" is enabled on the General tab. Physical input-control overrides and blocks local and remote MQTT relay command processing to prevent conflicting state loops. To use MQTT relay commands, disable "Input control" on the General tab first.
                   </div>
-                  <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
-                  <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
+
+                  <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
+                    <label class="self-center text-right font-semibold text-slate-300">MQTT host</label>
+                    <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-9" placeholder="venus.local" />
+                    <label class="self-center text-right font-semibold text-slate-300">MQTT port</label>
+                    <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-9" />
+                    <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
+                    <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-9" />
+                    <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
+                    <label class="flex items-center gap-2 text-slate-300">
+                      <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
+                      Enabled
+                    </label>
+                    <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
+                    <div class="flex flex-col gap-1">
+                      <label class="flex items-center gap-2 text-slate-300">
+                        <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
+                        Enabled
+                      </label>
+                      <div v-if="serialAdminConfig.input_control_paired_lora_enabled" class="text-[10px] text-amber-400 font-semibold leading-normal">
+                        ⚠️ Currently overridden and blocked by Input Control (General tab).
+                      </div>
+                      <div v-else class="text-[10px] text-slate-500 leading-normal">
+                        Enables processing incoming MQTT commands on local and remote topics.
+                      </div>
+                    </div>
+                    <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
+                    <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
+                    <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
+                    <div class="flex gap-2">
+                      <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
+                      <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                    </div>
+                    <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
+                    <div class="flex flex-col gap-1">
+                      <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
+                      <div class="text-[10px] text-slate-500 leading-normal">
+                        Allowed controller addresses (comma-separated). Remote nodes will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </template>
             </div>

@@ -9,16 +9,22 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway cached peer uptime is cleared immediately on standard non-uptime telemetry status packets (Heartbeats, PollResponses, ACKs, MqttStatus) to prevent stale uptime carry-forward.
 - Maintenance telemetry page bursts are protected from clearing fresh uptime by enforcing a 5-second grace period before clearing.
 
+### Firmware Fixes
+- Restructured configuration validation: Remote/Receiver nodes can now set and save `mqtt_control_enabled = true` without triggering config validation resets on boot. This allows receiver nodes to successfully authorize LoRa-bridged MQTT commands.
+
 ### MQTT Improvements
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
 
 ### Flasher UI Improvements
+- Exposed MQTT control inputs ("Accept gateway MQTT commands" and "Controllers" list) for Remote/Receiver units in the settings tab, clarifying that remote nodes must authorize the Gateway's local LoRa address.
+- Added a warning banner and inline warning status on the Gateway MQTT settings tab if paired input-control is enabled, explaining that physical input overrides block MQTT relay commands to prevent conflicting state loops.
 - Simplified operator views in Fleet and Monitor: displays a single unified `Relay` and `Input` state, removing raw feedback columns and confusing `ack X · fb Y` details.
 - Gateway Relay card simplified to show unified Relay and Input columns in a clean 2-column layout.
 - Prevented the Flasher from caching and re-hydrating old `uptime_ms` values from history into the active row display.
 
 ### Flasher UI Fixes
 - Fixed a provisioning issue where resuming or re-running commissioning on the same gateway failed with an error about the commissioned gateway fleet key not being fetched, by updating the fleet key source to `gateway` immediately after a successful `configure_gateway` command.
+- Local USB factory reset now clears the fleet key by default so reset remotes can be rediscovered by EasyPair.
 
 ## [0.9.2-beta] - 2026-06-01
 
