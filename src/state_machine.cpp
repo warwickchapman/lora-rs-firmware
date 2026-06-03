@@ -1006,6 +1006,8 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint
   node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
+  node->uptime_ms = 0;
+  node->debug_uptime_ms = 0;
   if (rssi != -127) {
     node->uplink_rssi = rssi;
   }
@@ -2699,6 +2701,9 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   if (!runtime_.role_tx) return false;
   PeerRuntime *node = findOrCreatePeer(msg.src);
   if (node == nullptr) return false;
+  if (node->uptime_ms > 0 && millis() - node->uptime_received_ms >= 5000) {
+    node->uptime_ms = 0;
+  }
   const uint8_t *p = msg.raw_payload;
   if (p[0] != kMaintenancePayloadVersion) {
     lrslog::event("maint_status_unsupported", msg.rssi, msg.counter, p[0]);
@@ -2749,6 +2754,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->fw_patch = p[4];
     node->fw_build = decodeU16LE(p + 5);
     node->uptime_ms = decodeU32LE(p + 7);
+    node->uptime_received_ms = millis();
     lrslog::event("maint_version_rx", msg.rssi, msg.counter, node->address);
   } else if (p[1] == kMaintenancePageSensors) {
     node->input_state = p[2] ? 1 : 0;
@@ -2780,7 +2786,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->input_feedback = p[8] ? 1 : 0;
     node->debug_uptime_ms = (static_cast<uint32_t>(p[9]) |
                              (static_cast<uint32_t>(p[10]) << 8)) * 60000UL;
-    node->uptime_ms = node->debug_uptime_ms;
   } else {
     lrslog::event("maint_page_unsupported", msg.rssi, msg.counter, p[1]);
     return false;
@@ -3247,6 +3252,8 @@ void NodeStateMachine::tickReceive() {
                                        msg.type == MessageType::MqttStatus);
       if (statusCarriesState) {
         node->relay_state = msg.relay_state ? 1 : 0;
+        node->uptime_ms = 0;
+        node->debug_uptime_ms = 0;
         // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
         const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
         if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
@@ -3335,6 +3342,8 @@ void NodeStateMachine::tickReceive() {
         return;
       }
       node->relay_state = msg.relay_state ? 1 : 0;
+      node->uptime_ms = 0;
+      node->debug_uptime_ms = 0;
       // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
       const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
       if (digitalPresent && msg.sensor_digital0 != 0xFFU) {

@@ -4,7 +4,18 @@ All notable changes to this pre-release project are documented here in current o
 
 ## [Unreleased]
 
-No changes yet.
+### Firmware Features
+- Raw ESP uptime (`uptime_ms`) is now exclusively populated from raw millisecond telemetry (`kMaintenancePageVersion`) and is no longer assigned from coarse debug minutes telemetry.
+- Gateway cached peer uptime is cleared immediately on standard non-uptime telemetry status packets (Heartbeats, PollResponses, ACKs, MqttStatus) to prevent stale uptime carry-forward.
+- Maintenance telemetry page bursts are protected from clearing fresh uptime by enforcing a 5-second grace period before clearing.
+
+### MQTT Improvements
+- Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
+
+### Flasher UI Improvements
+- Simplified operator views in Fleet and Monitor: displays a single unified `Relay` and `Input` state, removing raw feedback columns and confusing `ack X · fb Y` details.
+- Gateway Relay card simplified to show unified Relay and Input columns in a clean 2-column layout.
+- Prevented the Flasher from caching and re-hydrating old `uptime_ms` values from history into the active row display.
 
 ## [0.9.2-beta] - 2026-06-01
 

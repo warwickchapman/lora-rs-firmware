@@ -526,7 +526,7 @@ const fleetClockMs = ref(Date.now());
 const fleetClockTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const fleetOtaFollowupTimers = ref<Record<number, ReturnType<typeof window.setTimeout>>>({});
 const fleetRowHistory = ref<Record<number, {
-  uptimeMs?: number;
+  lastRawUptimeMs?: number;
   fwVersion?: string;
   otaExpectedUntilMs?: number;
   rowState?: LoraInventoryDevice['row_state'];
@@ -2048,7 +2048,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   let rowState = history.rowState;
   let rowStateUntilMs = history.rowStateUntilMs;
   const uptime = Number(row.uptime_ms || 0);
-  const previousUptime = Number(history.uptimeMs || 0);
+  const previousUptime = Number(history.lastRawUptimeMs || 0);
   let otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
   const knownReboot = history.knownRebootUntilMs && history.knownRebootUntilMs > now;
 
@@ -2182,7 +2182,7 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
 
   fleetRowHistory.value[row.address] = {
     ...history,
-    uptimeMs: uptime || history.uptimeMs,
+    lastRawUptimeMs: uptime || history.lastRawUptimeMs,
     fwVersion,
     fw_build: fwBuild,
     ip,
@@ -2400,8 +2400,8 @@ function monitorFragLabel(row: LoraInventoryDevice): string {
 }
 
 function monitorUptimeLabel(row: LoraInventoryDevice): string {
-  const uptime = row.uptime_ms || row.debug_uptime_ms;
-  return uptime ? formatUptime(uptime) : (row.maintenance_debug_known ? '0s' : 'waiting');
+  const uptime = row.uptime_ms;
+  return uptime ? formatUptime(uptime) : 'waiting';
 }
 
 function remoteInputLabel(row: LoraInventoryDevice): string {
@@ -2755,7 +2755,7 @@ function markFleetOtaPending(device: LoraInventoryDevice) {
   const now = Date.now();
   fleetRowHistory.value[device.address] = {
     ...(fleetRowHistory.value[device.address] || {}),
-    uptimeMs: device.uptime_ms || fleetRowHistory.value[device.address]?.uptimeMs,
+    lastRawUptimeMs: device.uptime_ms || fleetRowHistory.value[device.address]?.lastRawUptimeMs,
     fwVersion: device.fw_version || fleetRowHistory.value[device.address]?.fwVersion,
     otaExpectedUntilMs: now + 180000,
     rowState: 'ota_downloading',
@@ -6643,18 +6643,18 @@ function toggleSelectAllBulkPorts() {
             <div :class="['flex h-36 w-36 items-center justify-center rounded-full border text-lg font-black tracking-widest transition-all', monitorRelayBadgeClass]">
               {{ monitorRelayLabel }}
             </div>
-            <div class="grid w-full grid-cols-3 gap-2 text-xs">
+            <div class="grid w-full grid-cols-2 gap-2 text-xs">
               <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Cmd</div>
-                <div class="mt-1 font-mono text-slate-200">{{ monitorGatewayStatus?.relay_state ?? '-' }}</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">FB</div>
-                <div class="mt-1 font-mono text-slate-200">{{ monitorGatewayStatus?.relay_feedback ?? '-' }}</div>
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</div>
+                <div class="mt-1 font-mono text-slate-200">
+                  {{ (monitorGatewayStatus?.relay_feedback ?? monitorGatewayStatus?.relay_state) !== undefined ? (Number(monitorGatewayStatus?.relay_feedback ?? monitorGatewayStatus?.relay_state) === 1 ? 'ON' : 'OFF') : '-' }}
+                </div>
               </div>
               <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
                 <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Input</div>
-                <div class="mt-1 font-mono text-slate-200">{{ monitorGatewayStatus?.input_state ?? '-' }}</div>
+                <div class="mt-1 font-mono text-slate-200">
+                  {{ monitorGatewayStatus?.input_state !== undefined ? (Number(monitorGatewayStatus?.input_state) === 1 ? 'Closed' : 'Open') : '-' }}
+                </div>
               </div>
             </div>
           </div>
@@ -6700,7 +6700,7 @@ function toggleSelectAllBulkPorts() {
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ displayFirmwareVersion(device.fw_version) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">ack {{ device.relay_state ?? '-' }} · fb {{ device.relay_feedback ?? '-' }}</td>
+                  <td class="px-2 py-1.5 text-slate-300">{{ remoteRelayLabel(device) }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ remoteInputLabel(device) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ remoteTempLabel(device) }}</td>
                   <td class="px-2 py-1.5">

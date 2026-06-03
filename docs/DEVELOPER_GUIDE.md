@@ -173,7 +173,7 @@ Falls back to `peers/03/...` when chip_id is not yet known.
 | `tank_current_ma` | float | 4–20 mA loop current (empty string if disabled/invalid). |
 | `tank_voltage_mv` | int | ADC voltage in mV (empty string if disabled/invalid). |
 | `wifi` | `0`/`1` | Remote WiFi enabled state (empty string if unknown). |
-| `uptime_ms` | int | Remote uptime in milliseconds (from normal maintenance version telemetry). |
+| `uptime_ms` | int | Remote uptime in milliseconds (from version telemetry; cleared/published as empty when non-uptime status packet is received). |
 | `uplink_rssi_dbm` | int | RSSI of last received packet from this peer (dBm). |
 | `downlink_rssi_dbm` | int | RSSI reported by peer for gateway's signal (dBm, empty if unknown). |
 
@@ -199,8 +199,8 @@ Falls back to `peers/03/...` when chip_id is not yet known.
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `relay_feedback` | `0`/`1` | Raw GPIO readback of remote relay driver pin. |
-| `input_feedback` | `0`/`1` | Raw GPIO readback of remote input pin. May differ from `input` due to telemetry page timing. |
+| `relay_feedback` | `0`/`1` | Raw GPIO readback of remote relay driver pin (hidden from normal UI). |
+| `input_feedback` | `0`/`1` | Raw GPIO readback of remote input pin (hidden from normal UI). May differ from `input` due to telemetry page timing. |
 | `heap_free` | int | Remote free heap bytes. |
 | `heap_max_block` | int | Remote largest contiguous free block. |
 | `heap_frag_pct` | int | Remote heap fragmentation percentage. |
@@ -309,6 +309,17 @@ Local non-release flasher version policy:
   - clean tree: `<version>.<shortsha>` (for example `0.6.2-dev.abc1234`)
   - dirty tree: `<version>.<shortsha>.dirty`
 - This rule applies to local flasher test artifacts; it is there to keep support/debugging truthful and avoid stale version leakage.
+
+### Dev Build Versioning
+- The repo-root `VERSION` file is the operator-visible firmware and Flasher version source of truth.
+- Every development build that will be flashed, shared, or used for field testing must get a unique dev build revision before building.
+- Use `MAJOR.MINOR.PATCH~DEVBUILD`, for example `0.9.2~1`, `0.9.2~2`, and `0.9.2~3`.
+- The `~DEVBUILD` suffix implies a development build; do not add `-dev`.
+- If `VERSION` is `0.9.2-dev`, the next development build is `0.9.2~1`.
+- Increment only the dev build revision while staying on the same base patch.
+- Do not reuse a dev build version for a different firmware or Flasher artifact.
+- Run `python3 tools/bump_dev_build.py` before a new development build.
+- Firmware builds record the source tree used for each `~DEVBUILD` value and reject reusing the same dev build number after code changes.
 
 Release execution guardrails:
 - Never trigger `package_flasher.yml` in release mode with `platform=all` or `platform=macos`.

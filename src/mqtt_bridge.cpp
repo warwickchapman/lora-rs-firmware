@@ -143,6 +143,17 @@ void formatPeerAddrSegment(char *out, size_t outLen, uint8_t addr, uint32_t chip
   }
 }
 
+// Format canonical peer address topic segment: "01_lrs-8829ca6f". Returns false if chipId is 0.
+bool formatCanonicalPeerAddrSegment(char *out, size_t outLen, uint8_t addr, uint32_t chipId) {
+  if (chipId == 0) {
+    return false;
+  }
+  snprintf(out, outLen, "%02u_lrs-%08lx",
+           static_cast<unsigned>(addr), static_cast<unsigned long>(chipId));
+  return true;
+}
+
+
 bool parseSignedPayloadLong(const uint8_t *payload, unsigned int length, long &out) {
   if (payload == nullptr) return false;
   if (length == 0) {
@@ -794,6 +805,9 @@ void MqttBridge::publishStatus() {
       if (!sm_->peerByIndex(status_publish_peer_index_, node)) {
         continue;
       }
+      if (node.chip_id == 0) {
+        continue;
+      }
       const uint8_t addr = node.address;
       PeerPublishCacheEntry *peerCache = upsertPeerPublishCache(addr);
       if (peerCache == nullptr) {
@@ -814,7 +828,9 @@ void MqttBridge::publishStatus() {
       char addrDec[4];
       snprintf(addrDec, sizeof(addrDec), "%02u", static_cast<unsigned>(node.address));
       char addrSeg[24];
-      formatPeerAddrSegment(addrSeg, sizeof(addrSeg), node.address, node.chip_id);
+      if (!formatCanonicalPeerAddrSegment(addrSeg, sizeof(addrSeg), node.address, node.chip_id)) {
+        continue;
+      }
 
       auto publishRemote = [&](const char *addrSeg) {
         char topic[kMqttTopicBufBytes];
@@ -917,6 +933,8 @@ void MqttBridge::publishStatus() {
         if (!timedOut && node.uptime_ms > 0) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, numBuf);
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, "");
         }
       };
 
