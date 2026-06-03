@@ -5,8 +5,8 @@ Deterministic end-to-end release orchestrator.
 One command for:
 1) Firmware release publish (both repos) using exact notes file.
 2) Windows/Linux flasher build+publish via CI from the release tag.
-3) Local macOS flasher DMG build from the release tag.
-4) Upload macOS DMGs to both repos.
+3) Local macOS flasher portable ZIP build from the release tag.
+4) Upload macOS portable ZIPs to both repos.
 5) Full 10-asset verification in both repos.
 """
 
@@ -147,33 +147,23 @@ def prune_old_workflow_runs(repo: str, workflow: str, keep_last: int) -> None:
     )
 
 
-def create_dmg(app_bundle: Path, output_dmg: Path, volume_name: str) -> None:
-    staging = output_dmg.parent / f"{output_dmg.stem}-staging"
-    if staging.exists():
-        run(["rm", "-rf", str(staging)])
-    staging.mkdir(parents=True)
-    run(["cp", "-R", str(app_bundle), str(staging / app_bundle.name)])
-    run(["ln", "-s", "/Applications", str(staging / "Applications")])
-    if output_dmg.exists():
-        output_dmg.unlink()
+def create_portable_zip(app_bundle: Path, output_zip: Path) -> None:
+    if output_zip.exists():
+        output_zip.unlink()
     run(
         [
-            "hdiutil",
-            "create",
-            "-volname",
-            volume_name,
-            "-srcfolder",
-            str(staging),
-            "-ov",
-            "-format",
-            "UDZO",
-            str(output_dmg),
+            "/usr/bin/ditto",
+            "-c",
+            "-k",
+            "--sequesterRsrc",
+            "--keepParent",
+            str(app_bundle),
+            str(output_zip),
         ]
     )
-    run(["rm", "-rf", str(staging)])
 
 
-def build_local_macos_dmgs(root: Path, tag: str) -> tuple[Path, Path]:
+def build_local_macos_zips(root: Path, tag: str) -> tuple[Path, Path]:
     run(["git", "fetch", "origin", "--tags"], cwd=root)
     tmp_wt = Path(tempfile.mkdtemp(prefix="lrs-rel-macos-"))
     run(["git", "worktree", "add", "--detach", str(tmp_wt), tag], cwd=root)
@@ -227,16 +217,15 @@ def build_local_macos_dmgs(root: Path, tag: str) -> tuple[Path, Path]:
 
     out_dir = tmp_wt / "release-macos"
     out_dir.mkdir(parents=True, exist_ok=True)
-    arm_dmg = out_dir / f"thanda-lora-flasher-{version}-macos-arm64.dmg"
-    x64_dmg = out_dir / f"thanda-lora-flasher-{version}-macos-x86_64.dmg"
+    arm_zip = out_dir / f"thanda-lora-flasher-{version}-macos-arm64-portable.zip"
+    x64_zip = out_dir / f"thanda-lora-flasher-{version}-macos-x86_64-portable.zip"
 
     arm_bundle = src_tauri / "target" / "aarch64-apple-darwin" / "release" / "bundle" / "macos"
     x64_bundle = src_tauri / "target" / "x86_64-apple-darwin" / "release" / "bundle" / "macos"
-    create_dmg(arm_bundle / "Thanda LoRa Flasher.app", arm_dmg, "Thanda LoRa Flasher")
-    create_dmg(x64_bundle / "Thanda LoRa Flasher.app", x64_dmg, "Thanda LoRa Flasher")
+    create_portable_zip(arm_bundle / "Thanda LoRa Flasher.app", arm_zip)
+    create_portable_zip(x64_bundle / "Thanda LoRa Flasher.app", x64_zip)
 
-    return arm_dmg, x64_dmg
-
+    return arm_zip, x64_zip
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="One-shot deterministic release runner.")
@@ -282,7 +271,7 @@ def main() -> int:
     run(["python3", "tools/release_flasher_assets.py", "dispatch-ci", "--tag", tag], cwd=root)
     wait_for_ci_runs(REPO, tag, dispatch_start)
 
-    arm_dmg, x64_dmg = build_local_macos_dmgs(root, tag)
+    arm_zip, x64_zip = build_local_macos_zips(root, tag)
     run(
         [
             "python3",
@@ -291,9 +280,9 @@ def main() -> int:
             "--tag",
             tag,
             "--arm64",
-            str(arm_dmg),
+            str(arm_zip),
             "--x64",
-            str(x64_dmg),
+            str(x64_zip),
         ],
         cwd=root,
     )

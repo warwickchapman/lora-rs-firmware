@@ -259,7 +259,21 @@ def post_release_bump_dev(root: Path, released_tag: str, released_version: str) 
     if current == after_write:
         raise RuntimeError("Refusing post-bump: VERSION did not change (no-op)")
 
-    run(["git", "add", "VERSION"], cwd=root)
+    run(["python3", "tools/flasher/sync_version.py"], cwd=root)
+    run(["npm", "install"], cwd=root / "tools" / "flasher")
+    run(
+        [
+            "git",
+            "add",
+            "VERSION",
+            "tools/flasher/package.json",
+            "tools/flasher/package-lock.json",
+            "tools/flasher/src-tauri/Cargo.toml",
+            "tools/flasher/src-tauri/Cargo.lock",
+            "tools/flasher/src-tauri/tauri.conf.json",
+        ],
+        cwd=root,
+    )
     run(
         ["git", "commit", "-m", f"chore(version): bump to {next_dev} after {released_tag}"],
         cwd=root,
@@ -361,7 +375,7 @@ def save_metrics_rows(path: Path, rows: List[Dict[str, str]]) -> None:
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow(row)

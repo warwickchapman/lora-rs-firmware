@@ -308,12 +308,12 @@ Local non-release flasher version policy:
 - Local ad-hoc flasher artifact labels can then add git identity:
   - clean tree: `<version>.<shortsha>` (for example `0.6.2-dev.abc1234`)
   - dirty tree: `<version>.<shortsha>.dirty`
-- This rule applies to local DMGs and other flasher test artifacts; it is there to keep support/debugging truthful and avoid stale version leakage.
+- This rule applies to local flasher test artifacts; it is there to keep support/debugging truthful and avoid stale version leakage.
 
 Release execution guardrails:
 - Never trigger `package_flasher.yml` in release mode with `platform=all` or `platform=macos`.
 - Standard release path is tag-driven CI plus local macOS builds.
-- CI release mode is Windows/Linux only; local macOS DMGs are uploaded after CI.
+- CI release mode is Windows/Linux only; local macOS portable ZIPs are uploaded after CI.
 - `package_flasher.yml` now blocks `create_release=true` when `platform=all` or `platform=macos`.
 - `create_release=true` is allowed only on tag refs (`refs/tags/v*`); release dispatches from `main` are blocked.
 - Mandatory release order:
@@ -321,8 +321,8 @@ Release execution guardrails:
   2. Run `python3 tools/flasher/sync_version.py`, then build and validate macOS app bundles locally (`arm64` and `x86_64`) with architecture + `codesign --verify --deep --strict`.
   3. Push release tag and let CI publish Linux/Windows flasher artifacts, or dispatch explicitly from the release tag ref:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
-  4. Upload local macOS DMGs to the same release:
-     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x86_64.dmg>`
+  4. Upload local macOS portable ZIPs to the same release:
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x86_64-portable.zip>`
   5. Verify complete assets in both repos:
      - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - Manual `workflow_dispatch` is incident-recovery only and requires explicit project owner approval.
@@ -334,7 +334,7 @@ Deterministic release mode (preferred):
 3. The script handles end-to-end:
    - firmware release publish (`lora-rs` + `lora-rs-firmware`),
    - Windows/Linux flasher CI release dispatch from the release tag and completion wait,
-   - local macOS arm64/x86_64 DMG builds from the release tag,
+   - local macOS arm64/x86_64 portable ZIP builds from the release tag,
    - macOS asset upload to both repos,
    - full 10-asset contract verification in both repos,
    - workflow run pruning for `package_flasher.yml` (keeps latest 10 completed runs by default).
@@ -371,9 +371,9 @@ Conditional checklist: when `tools/flasher/**` changed in the release:
 
 Release binary set contract:
 - Firmware: `za`, `us`, `eu` (`3` files)
-- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x86_64 dmg` (`7` files)
+- Flasher: `windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 portable zip`, `macos x86_64 portable zip` (`7` files)
 - Total release binaries: `10`
-- macOS DMGs should contain `Thanda LoRa Flasher.app` plus an `Applications` shortcut, allowing one-off run-from-image service use or drag-install into `/Applications`.
+- macOS portable ZIPs should contain `Thanda LoRa Flasher.app`; the app handles first-run move-to-Applications or run-once behavior itself.
 
 Release tooling notes:
 - `tools/release_manager.py` now defaults to no asset verification unless explicitly requested:
@@ -386,7 +386,7 @@ Release tooling notes:
 
 Apple signing/notarization policy for flasher macOS artifacts:
 - Non-release/dev builds may use ad-hoc signing (`codesign -`) for rapid iteration.
-- Standard release path currently uses local macOS builds outside CI; verify the resulting DMGs with `spctl` and `codesign`.
+- Standard release path currently uses local macOS builds outside CI; verify the resulting app bundles with `spctl` and `codesign` before zipping.
 - Developer ID signing + notarization remains the future hardening path if release distribution policy changes.
 - Required certificate secrets:
   - `APPLE_DEVELOPER_ID_CERT_P12_BASE64`
@@ -397,7 +397,7 @@ Apple signing/notarization policy for flasher macOS artifacts:
   - API key mode: `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_PRIVATE_KEY_BASE64`
 - Packaging/signing verification checklist:
   - Sign app with hardened runtime + timestamp.
-  - Sign DMG.
-  - Submit DMG with `xcrun notarytool submit --wait`.
+  - Sign the app bundle or ZIP according to the chosen Apple signing path.
+  - Submit the signed artifact with `xcrun notarytool submit --wait` when notarization is enabled.
   - Staple with `xcrun stapler staple`.
   - Verify with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.

@@ -125,7 +125,7 @@ Flasher rebuild policy (mandatory):
 
 Release safety guardrails (mandatory):
 - Do not run `gh workflow run package_flasher.yml` with `platform=all` or `platform=macos` for releases.
-- In release mode, CI is Windows/Linux only; macOS DMGs are local-only.
+- In release mode, CI is Windows/Linux only; macOS portable ZIPs are local-only.
 - `package_flasher.yml` now hard-fails release dispatches that try `platform=all` or `platform=macos` with `create_release=true`.
 - `create_release=true` is tag-locked: dispatch must use `--ref v<release-version>`, never `main`.
 - Enforce this order:
@@ -133,8 +133,8 @@ Release safety guardrails (mandatory):
   2. Run `python3 tools/flasher/sync_version.py` and then build/verify macOS app bundles locally.
   3. Push tag/release so CI builds Linux/Windows assets only, or dispatch only these two from the release tag ref:
      - `python3 tools/release_flasher_assets.py dispatch-ci --tag v<version>`
-  4. Upload local macOS DMG assets to the same release.
-     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64.dmg> --x64 <x86_64.dmg>`
+  4. Upload local macOS portable ZIP assets to the same release.
+     - `python3 tools/release_flasher_assets.py upload-macos --tag v<version> --arm64 <arm64-portable.zip> --x64 <x86_64-portable.zip>`
   5. Verify full asset contract:
      - `python3 tools/release_flasher_assets.py verify --tag v<version>`
 - If any unintended manual run starts, cancel it immediately and verify release assets were not mutated.
@@ -152,9 +152,9 @@ When flasher files changed (`tools/flasher/**`) in a release:
 
 Release asset contract:
 - Firmware binaries: 3 (`za`, `us`, `eu`)
-- Flasher binaries: 7 (`windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 dmg`, `macos x86_64 dmg`)
+- Flasher binaries: 7 (`windows msi`, `windows portable zip`, `linux deb`, `linux rpm`, `linux AppImage.tar.gz`, `macos arm64 portable zip`, `macos x86_64 portable zip`)
 - Total binaries per release: 10
-- macOS DMGs should contain `Thanda LoRa Flasher.app` plus an `Applications` shortcut, allowing the operator either to run from the mounted image for a one-off service session or drag the app into `/Applications`.
+- macOS portable ZIPs should contain `Thanda LoRa Flasher.app`; the app handles first-run move-to-Applications or run-once behavior itself.
 - In reuse-with-keep-names mode, firmware assets use the new release version and flasher assets retain source-tag version in filenames.
 
 Changelog/release-notes rule:
@@ -173,8 +173,8 @@ python3 tools/release_one_shot.py \
 - This script performs the full flow:
   - firmware build + publish to both repos,
   - flasher Windows/Linux CI dispatch from the release tag and wait-for-success,
-  - local macOS DMG builds from the release tag,
-  - macOS upload to both repos,
+  - local macOS portable ZIP builds from the release tag,
+  - macOS portable ZIP upload to both repos,
   - full 10-asset verification in both repos,
   - GitHub Actions run cleanup for `package_flasher.yml` (keeps latest 10 completed runs by default).
 - Release notes are used exactly as provided (no auto-generated summary/highlights).
