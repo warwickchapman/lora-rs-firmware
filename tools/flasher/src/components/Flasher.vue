@@ -3192,8 +3192,8 @@ function openFactoryResetModal(device: LoraInventoryDevice) {
   activeDropdownAddress.value = null;
   factoryResetTargetModal.value = {
     device,
-    keep_shared_fleet_key: true,
-    keep_wifi_credentials: true
+    keep_shared_fleet_key: false,
+    keep_wifi_credentials: false
   };
 }
 
