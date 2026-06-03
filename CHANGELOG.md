@@ -17,6 +17,9 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway Relay card simplified to show unified Relay and Input columns in a clean 2-column layout.
 - Prevented the Flasher from caching and re-hydrating old `uptime_ms` values from history into the active row display.
 
+### Flasher UI Fixes
+- Fixed a provisioning issue where resuming or re-running commissioning on the same gateway failed with an error about the commissioned gateway fleet key not being fetched, by updating the fleet key source to `gateway` immediately after a successful `configure_gateway` command.
+
 ## [0.9.2-beta] - 2026-06-01
 
 ### Firmware Features

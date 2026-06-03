@@ -3816,6 +3816,7 @@ async function runEasyPair() {
       fleet_passphrase: fleetKey,
       expected_remotes: expected
     }, 10000);
+    pairFleetKeySource.value = 'gateway';
     pushPairLog(`Gateway prepared. Scanning for ${expected} remote device${expected === 1 ? '' : 's'}...`);
     await sendPairCommand('start_discovery', {
       admin_password: password,
@@ -3904,6 +3905,7 @@ async function startEasyPairDiscovery() {
       fleet_passphrase: fleetKey,
       expected_remotes: pairExpectedCount.value
     }, 10000);
+    pairFleetKeySource.value = 'gateway';
     pushPairLog(`Gateway prepared. Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
     await sendPairCommand('start_discovery', {
       admin_password: password,
