@@ -6405,25 +6405,25 @@ function toggleSelectAllBulkPorts() {
                       <div class="flex flex-col gap-3 mt-1">
                         <div class="flex flex-col gap-1">
                           <span class="font-semibold text-slate-300">Peer Polling Interval (in seconds)</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/poll_interval_s</code>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/poll_interval_s</code>
                           <span class="text-slate-400">Payload: integer seconds (e.g. <code class="text-slate-200">300</code>). Set 0 to disable regular telemetry polling.</span>
                         </div>
 
                         <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300">Force Peer Polling (Immediate)</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/poll_now</code>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/poll_now</code>
                           <span class="text-slate-400">Payload: any. Forces the gateway to emit a secured LoRa status query reports probe.</span>
                         </div>
 
                         <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300">Peer WiFi Hardware Power Setup</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/wifi</code>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/wifi</code>
                           <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (Enable WiFi chip) or <code class="text-slate-200">0</code> (Power off WiFi to conserve energy).</span>
                         </div>
 
                         <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300">Peer Remote Diagnostics Control</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peer/&lt;address&gt;/udp_log_control</code>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/udp_log_control</code>
                           <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
                             <code class="font-mono text-cyan-400 text-[10px]">{"enabled": true, "host": "...", "port": 5514}</code>
                             <button @click="copyToClipboard('{\&quot;enabled\&quot;:true,\&quot;host\&quot;:\&quot;192.168.1.50\&quot;,\&quot;port\&quot;:5514,\&quot;ttl_s\&quot;:300}', 'Peer UDP config')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
@@ -6451,12 +6451,12 @@ function toggleSelectAllBulkPorts() {
                       <div>
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Remote Peer Telemetry (Forwarded):</div>
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/relay</span>: Remote unit relay feedback</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/input</span>: Remote unit dry contact state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/tank_status</span>: Tank telemetry state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peer/&lt;addr&gt;/tank_depth_mm</span>: Tank depth level</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote unit relay feedback</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote unit dry contact state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/tank_status</span>: Tank telemetry state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/tank_depth_mm</span>: Tank depth level</li>
                         </ul>
                       </div>
                     </div>
