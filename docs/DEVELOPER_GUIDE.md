@@ -151,8 +151,8 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 ### Peer status topics
 
 Published retained under `<root>/lrs-<chipid>/peers/<NN_lrs-peerchipid>/`.
-Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c27/relay`).
-Falls back to `peers/03/...` when chip_id is not yet known.
+Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c27/relay`). Peer topics are withheld and NOT published until the peer's chip ID is known (from identity/version telemetry or persisted config).
+
 
 > **Stale data protection:** When `ack_state` is `timeout`, all operational topics
 > (`relay`, `input`, `dry_contact`, `temp_c`, `tank_*`, `wifi`, `relay_feedback`,

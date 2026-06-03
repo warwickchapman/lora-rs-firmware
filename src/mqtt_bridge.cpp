@@ -628,9 +628,6 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
   const uint32_t chipId = entry ? entry->chip_id : 0;
   clearPeerPublishCache(addr);
 
-  char addrSeg[24];
-  formatPeerAddrSegment(addrSeg, sizeof(addrSeg), addr, chipId);
-
   const char *leaves[] = {
       "relay",           "input",              "dry_contact",      "ack_state",
       "addr_hex",        "addr_dec",
@@ -641,10 +638,46 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr) {
       "heap_frag_pct",   "relay_feedback",
   };
 
+  char addrHexPrefixed[5];
+  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%02X", addr);
+  char addrUnpadded[4];
+  snprintf(addrUnpadded, sizeof(addrUnpadded), "%u", static_cast<unsigned>(addr));
+  char addrPadded[4];
+  snprintf(addrPadded, sizeof(addrPadded), "%02u", static_cast<unsigned>(addr));
+
+  auto clearForSegment = [&](const char *segment) {
+    char topic[kMqttTopicBufBytes];
+    for (const char *leaf : leaves) {
+      if (buildPeerTopic(topic, sizeof(topic), segment, leaf)) {
+        mqtt_client_.publish(topic, "", true);
+      }
+    }
+  };
+
+  // 1. Clear: peers/<NN>/...
+  clearForSegment(addrPadded);
+
+  // 2. Clear: peers/<N>/...
+  clearForSegment(addrUnpadded);
+
+  // 3. Clear: peers/0xNN/...
+  clearForSegment(addrHexPrefixed);
+
+  // 4. Clear: peer/0xNN/...
   char topic[kMqttTopicBufBytes];
   for (const char *leaf : leaves) {
-    if (!buildPeerTopic(topic, sizeof(topic), addrSeg, leaf)) continue;
-    mqtt_client_.publish(topic, "", true);
+    int n = snprintf(topic, sizeof(topic), "%s%s/%s", legacy_peer_prefix_, addrHexPrefixed, leaf);
+    if (n > 0 && static_cast<size_t>(n) < sizeof(topic)) {
+      mqtt_client_.publish(topic, "", true);
+    }
+  }
+
+  // 5. Clear: peers/<NN_lrs-chipid>/... (when chip ID is known)
+  if (chipId != 0) {
+    char canonicalSeg[24];
+    if (formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId)) {
+      clearForSegment(canonicalSeg);
+    }
   }
 }
 
