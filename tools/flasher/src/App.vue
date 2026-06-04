@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { exit } from '@tauri-apps/plugin-process';
@@ -30,6 +30,20 @@ function initialActiveMode(): ActiveMode {
 }
 
 const activeMode = ref<ActiveMode>(initialActiveMode());
+
+interface NavItem {
+  mode: ActiveMode;
+  label: string;
+  shortcut: string;
+}
+
+const navItems: NavItem[] = [
+  { mode: 'serial', label: 'Flash', shortcut: '1' },
+  { mode: 'pair', label: 'Provision', shortcut: '2' },
+  { mode: 'network', label: 'Fleet', shortcut: '3' },
+  { mode: 'monitor', label: 'Monitor', shortcut: '4' },
+  { mode: 'settings', label: 'Settings', shortcut: '5' }
+];
 
 async function fetchVersion() {
   try {
@@ -151,6 +165,33 @@ async function toggleWindowMode() {
   }
 }
 
+function handleKeyDown(event: KeyboardEvent) {
+  // Guard against typing in input/textarea/select or contenteditable elements
+  const target = event.target as HTMLElement | null;
+  if (target) {
+    const tagName = target.tagName.toLowerCase();
+    if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable) {
+      return;
+    }
+  }
+
+  // Check modifier key: Cmd on Mac (rejecting Ctrl), Ctrl on other systems (rejecting Cmd)
+  const hasModifier = isMacOS
+    ? (event.metaKey && !event.ctrlKey)
+    : (event.ctrlKey && !event.metaKey);
+  if (!hasModifier) return;
+
+  // Do not trigger on Shift or Alt
+  if (event.shiftKey || event.altKey) return;
+
+  // Match key 1-5
+  const item = navItems.find((i) => i.shortcut === event.key);
+  if (item) {
+    event.preventDefault();
+    activeMode.value = item.mode;
+  }
+}
+
 onMounted(async () => {
   checkStatus();
   fetchVersion();
@@ -158,6 +199,11 @@ onMounted(async () => {
   await applySavedWindowModePreference();
   await syncWindowMode();
   saveFullscreenPreference(isFullscreen.value);
+  window.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
 });
 
 watch(activeMode, (mode) => {
@@ -181,34 +227,18 @@ watch(activeMode, (mode) => {
       </div>
       <div class="flex min-w-[34rem] max-w-2xl flex-1 overflow-hidden rounded border border-slate-700 bg-slate-900/70">
         <button
-          @click="activeMode = 'serial'"
-          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'serial' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
+          v-for="(item, index) in navItems"
+          :key="item.mode"
+          @click="activeMode = item.mode"
+          :class="[
+            'm-0 h-8 w-1/5 rounded-none px-3 text-xs font-semibold transition-colors shadow-none',
+            index < navItems.length - 1 ? 'border-r border-slate-800' : '',
+            activeMode === item.mode ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+          ]"
+          :title="isMacOS ? `${item.label} (⌘${item.shortcut})` : `${item.label} (Ctrl+${item.shortcut})`"
+          :aria-label="isMacOS ? `${item.label} (⌘${item.shortcut})` : `${item.label} (Ctrl+${item.shortcut})`"
         >
-          Flash
-        </button>
-        <button
-          @click="activeMode = 'pair'"
-          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'pair' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
-        >
-          Provision
-        </button>
-        <button
-          @click="activeMode = 'network'"
-          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'network' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
-        >
-          Fleet
-        </button>
-        <button
-          @click="activeMode = 'monitor'"
-          :class="['m-0 h-8 w-1/5 rounded-none border-r border-slate-800 px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'monitor' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
-        >
-          Monitor
-        </button>
-        <button
-          @click="activeMode = 'settings'"
-          :class="['m-0 h-8 w-1/5 rounded-none px-3 text-xs font-semibold transition-colors shadow-none', activeMode === 'settings' ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
-        >
-          Settings
+          {{ item.label }}
         </button>
       </div>
       <div class="flex gap-2">

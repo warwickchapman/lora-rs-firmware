@@ -16,6 +16,7 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
 
 ### Flasher UI Improvements
+- Added platform-aware keyboard shortcuts (CMD + 1..5 on macOS, CTRL + 1..5 on Windows/Linux) to switch between Flash, Provision, Fleet, Monitor, and Settings views, complete with editable-target input guards and navigation hover tooltip hints.
 - Exposed MQTT control inputs ("Accept gateway MQTT commands" and "Controllers" list) for Remote/Receiver units in the settings tab, clarifying that remote nodes must authorize the Gateway's local LoRa address.
 - Added a warning banner and inline warning status on the Gateway MQTT settings tab if paired input-control is enabled, explaining that physical input overrides block MQTT relay commands to prevent conflicting state loops.
 - Simplified operator views in Fleet and Monitor: displays a single unified `Relay` and `Input` state, removing raw feedback columns and confusing `ack X · fb Y` details.
