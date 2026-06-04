@@ -1871,7 +1871,7 @@ async function refreshProvisionedSerialDeviceCaches() {
     }
 
     pushPairLog(`Refreshing serial details for provisioned remote on ${port} chip ${chip}...`);
-    await readDeviceInfoForPort(port, 'serial');
+    await forceDeviceInfoReadForOperation(port, 'serial');
   }
 }
 
@@ -4336,6 +4336,28 @@ async function ensureDeviceInfoForPort(port: string, mode: ActiveMode | 'network
   return promise;
 }
 
+async function forceDeviceInfoReadForOperation(port: string, mode: ActiveMode | 'network'): Promise<boolean> {
+  if (!port) return false;
+  if (isMonitoring.value && activeMonitorPort.value === port) return false;
+
+  const currentSeq = deviceInfoReadSeqByPort.value[port] || 0;
+  const nextSeq = currentSeq + 1;
+  deviceInfoReadSeqByPort.value = { ...deviceInfoReadSeqByPort.value, [port]: nextSeq };
+
+  inFlightDeviceInfoReads.value.delete(port);
+  const promise = readDeviceInfoForPort(port, mode, nextSeq);
+  inFlightDeviceInfoReads.value.set(port, { seq: nextSeq, promise });
+
+  promise.finally(() => {
+    const active = inFlightDeviceInfoReads.value.get(port);
+    if (active && active.seq === nextSeq) {
+      inFlightDeviceInfoReads.value.delete(port);
+    }
+  });
+
+  return promise;
+}
+
 async function readDeviceInfo() {
   if (!selectedPort.value) return;
   const port = selectedPort.value;
@@ -4408,7 +4430,7 @@ async function refreshFlashPortAfterFirmwareUpdate(port: string): Promise<void> 
   pushSerialLog('Waiting for flashed device to restart...');
   await waitForSerialAdminHello(port, 18000);
   pushSerialLog('Reloading device information after firmware update...');
-  const loaded = await readDeviceInfoForPort(port, 'serial');
+  const loaded = await forceDeviceInfoReadForOperation(port, 'serial');
   if (!loaded) throw new Error('Unable to reload device information after flashing');
 }
 
@@ -4492,7 +4514,7 @@ async function startBulkFlash() {
 
           state.flashStatus = 'Reading Info...';
           if (!state.deviceInfo) {
-            await readDeviceInfoForPort(port, 'serial');
+            await forceDeviceInfoReadForOperation(port, 'serial');
           }
 
           if (eraseBeforeFlash.value) {
@@ -4561,7 +4583,7 @@ async function startBulkFactoryReset() {
           noteMonitorReleasedForPort(port, 'factory reset needs this port');
           
           if (!state.deviceInfo) {
-            await readDeviceInfoForPort(port, 'serial');
+            await forceDeviceInfoReadForOperation(port, 'serial');
           }
 
           const password = state.adminPassword || state.deviceInfo?.password || '';
