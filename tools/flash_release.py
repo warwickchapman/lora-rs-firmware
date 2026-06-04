@@ -27,11 +27,14 @@ def _run_esptool(*args: str) -> str:
     )
 
 
+from chip_id_helper import parse_canonical_chip_id
+
+
 def _parse_chip_id(text: str) -> str:
-    m = re.search(r"Chip ID:\s*0x([0-9A-Fa-f]+)", text)
-    if not m:
-        raise RuntimeError("Unable to parse Chip ID from esptool output")
-    return m.group(1).lower().zfill(8)
+    try:
+        return parse_canonical_chip_id(text)
+    except ValueError as e:
+        raise RuntimeError(f"Unable to parse Chip ID from esptool output: {e}")
 
 
 def _parse_mac(text: str) -> str:

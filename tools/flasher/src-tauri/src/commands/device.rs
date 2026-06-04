@@ -84,10 +84,47 @@ pub async fn get_device_info(
 fn parse_chip_id(output: &str) -> Result<String, String> {
     let re = regex::Regex::new(r"Chip ID:\s*0x([0-9A-Fa-f]+)").unwrap();
     if let Some(caps) = re.captures(output) {
-        let hex = caps.get(1).unwrap().as_str().to_lowercase();
-        Ok(format!("{:0>8}", hex))
+        let hex_str = caps.get(1).unwrap().as_str();
+        let val = u32::from_str_radix(hex_str, 16)
+            .map_err(|e| format!("Failed to parse hex chip ID '{}': {}", hex_str, e))?;
+        let masked = val & 0x00FFFFFF;
+        Ok(format!("{:08x}", masked))
     } else {
         Err("Unable to parse chip ID from esptool output".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_chip_id_success() {
+        // Assert that esptool output with MSB set is parsed and masked correctly
+        assert_eq!(parse_chip_id("Chip ID: 0x800af8d9").unwrap(), "000af8d9");
+        
+        // Assert that a normal ID parses correctly
+        assert_eq!(parse_chip_id("Chip ID: 0x0048cb85").unwrap(), "0048cb85");
+    }
+
+    #[test]
+    fn test_parse_chip_id_failures() {
+        // 1. Missing pattern entirely
+        let res_missing = parse_chip_id("No chip ID here");
+        assert!(res_missing.is_err());
+        assert_ne!(res_missing, Ok("00000000".to_string()));
+
+        // 2. Pattern matches "Chip ID: 0x" prefix but invalid characters following
+        // (Fails regex match, returning standard "Unable to parse chip ID...")
+        let res_invalid = parse_chip_id("Chip ID: 0xinvalid");
+        assert!(res_invalid.is_err());
+        assert_ne!(res_invalid, Ok("00000000".to_string()));
+
+        // 3. Oversized hex string (Matches regex but fails u32::from_str_radix)
+        let res_oversized = parse_chip_id("Chip ID: 0x100000000");
+        assert!(res_oversized.is_err());
+        assert!(res_oversized.as_ref().unwrap_err().contains("Failed to parse hex chip ID"));
+        assert_ne!(res_oversized, Ok("00000000".to_string()));
     }
 }
 

@@ -44,11 +44,14 @@ def _looks_like_serial_port(port: str) -> bool:
     return False
 
 
+from chip_id_helper import parse_canonical_chip_id
+
+
 def _parse_chip_id(output: str) -> str:
-    match = re.search(r"Chip ID:\s*0x([0-9A-Fa-f]+)", output)
-    if not match:
-        raise RuntimeError("Unable to parse chip ID from esptool output")
-    return match.group(1).lower().zfill(8)
+    try:
+        return parse_canonical_chip_id(output)
+    except ValueError as e:
+        raise RuntimeError(f"Unable to parse chip ID from esptool output: {e}")
 
 
 def _parse_mac(output: str) -> str:

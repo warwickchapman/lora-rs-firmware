@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from chip_id_helper import parse_canonical_chip_id
+
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 DEFAULT_DEPLOYMENT_KEY = "lora-default-passphrase"
 ADJ = [
@@ -43,8 +45,9 @@ def read_repo_version(default: str = "0.0.0-dev") -> str:
 
 
 def derive_password(chip_hex: str) -> str:
-    digest = hashlib.sha256(f"{PRODUCT_SECRET}:{chip_hex}".encode()).hexdigest().upper()
-    return digest[:12]
+    # Must stay aligned with src/config_store.cpp deriveShortPassword().
+    digest = hashlib.sha256(f"{PRODUCT_SECRET}:{chip_hex}".encode()).hexdigest().lower()
+    return digest[:8]
 
 
 def serial_for(chip_hex: str) -> str:
@@ -55,10 +58,7 @@ def serial_for(chip_hex: str) -> str:
 
 
 def parse_chip_id(output: str) -> str:
-    m = re.search(r"Chip ID:\s*0x([0-9a-fA-F]+)", output)
-    if not m:
-        raise ValueError("Could not parse chip id")
-    return m.group(1).upper().zfill(8)
+    return parse_canonical_chip_id(output)
 
 
 def parse_mac(output: str) -> str:

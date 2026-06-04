@@ -7,15 +7,11 @@ import sys
 PRODUCT_SECRET = "LRS-v1-rotate-this-secret"
 
 
+from chip_id_helper import parse_canonical_chip_id
+
+
 def _normalize_chip(value: str) -> str:
-    raw = value.strip().lower()
-    if raw.startswith("lrs-"):
-        raw = raw[4:]
-    if raw.startswith("0x"):
-        raw = raw[2:]
-    if not re.fullmatch(r"[0-9a-f]{1,8}", raw):
-        raise ValueError(f"invalid chip id or SSID: {value}")
-    return raw.zfill(8)
+    return parse_canonical_chip_id(value)
 
 
 def _derive_password(chip_hex: str) -> str:

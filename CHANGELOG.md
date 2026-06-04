@@ -26,6 +26,12 @@ All notable changes to this pre-release project are documented here in current o
 ### Flasher UI Fixes
 - Fixed a provisioning issue where resuming or re-running commissioning on the same gateway failed with an error about the commissioned gateway fleet key not being fetched, by updating the fleet key source to `gateway` immediately after a successful `configure_gateway` command.
 - Local USB factory reset now clears the fleet key by default so reset remotes can be rediscovered by EasyPair.
+- Standardized default LoRa Spreading Factor to SF7 to match clean factory/erased firmware nodes, enabling direct out-of-the-box discovery without manual settings adjustments.
+
+### Script & Tooling Fixes
+- Fixed host-side ESP8266 chip ID parsing (in Flasher backend and Python tools: `factory_provision.py`, `flash_release.py`, `post_upload_sticker.py`, `derive_passwords.py`) to mask the parsed value to the lower 24 bits (matching on-device `ESP.getChipId()`). This ensures correct derived credentials, SSID names, and serial numbers for units with the highest byte set in their hardware chip ID.
+- Standardized the factory provisioning script (`factory_provision.py`) to output 8-character lowercase passwords, aligning credential generation across stickers, CSV entries, Flasher UI, and on-device defaults.
+
 
 ## [0.9.2-beta] - 2026-06-01
 
