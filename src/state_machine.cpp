@@ -1951,6 +1951,11 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
     provisioned_addrs_[i] = ProvisionedAddressEntry{};
   }
 
+  prov_log_head_ = 0;
+  prov_log_count_ = 0;
+  memset(prov_logs_, 0, sizeof(prov_logs_));
+  addProvLog("Discovery started: nonce=%u count=%u", prov_.session_nonce, estimatedCount);
+
   lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
   return true;
 }
@@ -2054,6 +2059,37 @@ bool NodeStateMachine::provisioningDeviceByIndex(size_t index, ProvisioningDevic
   out.address_conflict = d.address_conflict;
   out.state = d.state;
   return true;
+}
+
+size_t NodeStateMachine::provisioningLogCount() const {
+  return prov_log_count_;
+}
+
+bool NodeStateMachine::provisioningLogByIndex(size_t index, uint32_t &timestampMs, char outMsg[56]) const {
+  if (index >= prov_log_count_) return false;
+  const size_t start = (prov_log_count_ < kMaxProvLogs) ? 0 : prov_log_head_;
+  const size_t idx = (start + index) % kMaxProvLogs;
+  timestampMs = prov_logs_[idx].timestamp_ms;
+  memcpy(outMsg, prov_logs_[idx].message, 56);
+  return true;
+}
+
+void NodeStateMachine::addProvLog(const char *fmt, ...) {
+  const uint32_t now = millis();
+  const size_t idx = (prov_log_head_ + prov_log_count_) % kMaxProvLogs;
+  
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(prov_logs_[idx].message, sizeof(prov_logs_[idx].message), fmt, args);
+  va_end(args);
+  
+  prov_logs_[idx].timestamp_ms = now;
+  
+  if (prov_log_count_ < kMaxProvLogs) {
+    prov_log_count_++;
+  } else {
+    prov_log_head_ = (prov_log_head_ + 1) % kMaxProvLogs;
+  }
 }
 
 bool NodeStateMachine::consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx,
@@ -3111,6 +3147,10 @@ void NodeStateMachine::tickReceive() {
     return;
   }
 
+  if (isProvisioning && msg.src == runtime_.local_address) {
+    addProvLog("Bypassed self-source check: src=%u type=%u", msg.src, static_cast<unsigned>(msg.type));
+  }
+
   const bool isWifiProvision = (msg.type == MessageType::WifiProvision);
   const bool isWifiControl = (msg.type == MessageType::WifiControl);
   const bool isUdpLogControl = (msg.type == MessageType::UdpLogControl);
@@ -3941,8 +3981,10 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       if (sendProvisioningDiscoverStart(prov_.session_nonce, prov_.discover_reply_window_ms, prov_.discover_broadcast_window_ms)) {
         prov_.discover_broadcast_remaining--;
         prov_.next_discover_broadcast_ms = now + kProvDiscoverBroadcastGapMs;
+        addProvLog("Sent discovery broadcast (nonce=%u)", prov_.session_nonce);
       } else {
         prov_.next_discover_broadcast_ms = now + 120U;
+        addProvLog("Failed to send discovery broadcast");
       }
       return;
     }
@@ -3958,6 +4000,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
                static_cast<unsigned>(prov_device_count_),
                static_cast<unsigned>(prov_.estimated_count),
                static_cast<unsigned long>(now - prov_.started_ms));
+      addProvLog("Discovery completed (found %u, target reached)", prov_device_count_);
       lrslog::event("prov_discover_done_target_reached", 0, prov_device_count_, prov_.estimated_count);
       return;
     }
@@ -3973,6 +4016,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
                static_cast<unsigned>(prov_device_count_),
                static_cast<unsigned>(prov_.estimated_count),
                static_cast<unsigned long>(now - prov_.started_ms));
+      addProvLog("Discovery completed (found %u, deadline reached)", prov_device_count_);
       return;
     }
   }
@@ -4212,10 +4256,16 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
   // Coordinator-side handling
   if (runtime_.role_tx && prov_.active) {
     if (op == kProvOpAnnounce && msg.via_factory_key && (msg.dst == runtime_.local_address || msg.dst == kProvBroadcastAddress)) {
-      if (sessionNonce != prov_.session_nonce) return false;
+      if (sessionNonce != prov_.session_nonce) {
+        addProvLog("Announce rejected: nonce mismatch (got %u, expected %u)", sessionNonce, prov_.session_nonce);
+        return false;
+      }
       const uint32_t chipId = decodeU32LE(payload + 3);
       ProvisioningDevice *d = upsertProvisioningDevice(chipId);
-      if (d == nullptr) return false;
+      if (d == nullptr) {
+        addProvLog("Announce rejected: out of storage slots for chip=0x%08lx", static_cast<unsigned long>(chipId));
+        return false;
+      }
       d->current_address = payload[7];
       d->role_tx = (payload[8] & kProvRoleTxFlag) != 0U;
       d->hw_model = static_cast<uint8_t>((payload[8] >> 4) & 0x0FU);
@@ -4229,15 +4279,22 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       d->last_seen_ms = now;
       if (d->state == ProvisioningDeviceState::Failed) d->state = ProvisioningDeviceState::Discovered;
       recomputeProvisioningConflictsAndAssignments();
+      addProvLog("Announce RX: chip=0x%08lx address=%u", static_cast<unsigned long>(chipId), d->current_address);
       lrslog::event("prov_announce_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), d->current_address);
       return true;
     }
 
     if (op == kProvOpVerify && !msg.via_factory_key && (msg.dst == runtime_.local_address || msg.dst == kProvBroadcastAddress)) {
-      if (sessionNonce != prov_.session_nonce) return false;
+      if (sessionNonce != prov_.session_nonce) {
+        addProvLog("Verify rejected: nonce mismatch (got %u, expected %u)", sessionNonce, prov_.session_nonce);
+        return false;
+      }
       const uint32_t chipId = decodeU32LE(payload + 3);
       ProvisioningDevice *d = findProvisioningDeviceByChip(chipId);
-      if (d == nullptr) return false;
+      if (d == nullptr) {
+        addProvLog("Verify rejected: unknown chip=0x%08lx", static_cast<unsigned long>(chipId));
+        return false;
+      }
       d->current_address = payload[7];
       d->assigned_address = payload[7];
       d->role_tx = (payload[8] & kProvRoleTxFlag) != 0U;
@@ -4256,6 +4313,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
         prov_.current_index++;
       }
       recomputeProvisioningConflictsAndAssignments();
+      addProvLog("Verify RX: chip=0x%08lx assigned=%u", static_cast<unsigned long>(chipId), payload[7]);
       lrslog::event("prov_verify_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), payload[7]);
       return true;
     }

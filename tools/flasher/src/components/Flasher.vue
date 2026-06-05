@@ -3533,7 +3533,7 @@ async function triggerIdentify() {
   }
 }
 
-async function refreshSerialAdminStatus(port: string | any = selectedPort.value) {
+async function refreshSerialAdminStatus(port: unknown = selectedPort.value) {
   const targetPort = typeof port === 'string' ? port : selectedPort.value;
   if (!targetPort) {
     notify('Select a USB device first');
@@ -3562,7 +3562,7 @@ async function refreshSerialAdminStatus(port: string | any = selectedPort.value)
   }
 }
 
-async function loadSerialAdminConfig(port: string | any = selectedPort.value) {
+async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
   const targetPort = typeof port === 'string' ? port : selectedPort.value;
   if (!targetPort) {
     notify('Select a USB device first');

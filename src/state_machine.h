@@ -256,6 +256,8 @@ class NodeStateMachine {
   bool provisioningSession(ProvisioningSessionSnapshot &out) const;
   size_t provisioningDeviceCount() const;
   bool provisioningDeviceByIndex(size_t index, ProvisioningDeviceSnapshot &out) const;
+  size_t provisioningLogCount() const;
+  bool provisioningLogByIndex(size_t index, uint32_t &timestampMs, char outMsg[56]) const;
   bool hasPendingFleetProvisionApply() const;
   bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, uint8_t &controllerAddress,
                                          String &fleetKey);
@@ -727,4 +729,14 @@ class NodeStateMachine {
   void applyReceiverFailsafe(uint32_t now);
   uint32_t tick_watchdog_last_log_ms_ = 0;
   bool power_save_active_ = false;
+
+  struct ProvLogEntry {
+    uint32_t timestamp_ms;
+    char message[56];
+  };
+  static constexpr size_t kMaxProvLogs = 16;
+  ProvLogEntry prov_logs_[kMaxProvLogs]{};
+  size_t prov_log_head_ = 0;
+  size_t prov_log_count_ = 0;
+  void addProvLog(const char *fmt, ...);
 };
