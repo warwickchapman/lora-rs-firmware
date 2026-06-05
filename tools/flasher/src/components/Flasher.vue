@@ -3533,20 +3533,21 @@ async function triggerIdentify() {
   }
 }
 
-async function refreshSerialAdminStatus() {
-  if (!selectedPort.value) {
+async function refreshSerialAdminStatus(port: string | any = selectedPort.value) {
+  const targetPort = typeof port === 'string' ? port : selectedPort.value;
+  if (!targetPort) {
     notify('Select a USB device first');
     return;
   }
-  const port = selectedPort.value;
   isSerialAdminLoading.value = true;
   pushSerialLog('Refreshing local admin status...');
   try {
-    if (!activeSerialDevice.value?.adminSupported) {
-      await probeSerialAdminSupport(port);
+    const state = serialDeviceState(targetPort);
+    if (state && !state.adminSupported) {
+      await probeSerialAdminSupport(targetPort);
     }
-    const out = await sendEasyPairCommand<SerialAdminStatus>('status', {}, 5000, { label: 'Refresh status' });
-    applySerialAdminStatus(out, port);
+    const out = await sendEasyPairCommandOnPort<SerialAdminStatus>(targetPort, 'status', {}, 5000, { label: 'Refresh status' });
+    applySerialAdminStatus(out, targetPort);
     if (!out.commissioned || out.fleet_passphrase_default) {
       pushSerialLog(`Status loaded: factory default, awaiting commissioning, addr ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
     } else {
@@ -3561,13 +3562,14 @@ async function refreshSerialAdminStatus() {
   }
 }
 
-async function loadSerialAdminConfig() {
-  if (!selectedPort.value) {
+async function loadSerialAdminConfig(port: string | any = selectedPort.value) {
+  const targetPort = typeof port === 'string' ? port : selectedPort.value;
+  if (!targetPort) {
     notify('Select a USB device first');
     return;
   }
-  const port = selectedPort.value;
-  const password = serialAdminPassword.value;
+  const state = serialDeviceState(targetPort);
+  const password = state?.deviceInfo?.password?.trim() || '';
   if (!password) {
     notify('Get device info first to use the factory password');
     return;
@@ -3575,14 +3577,13 @@ async function loadSerialAdminConfig() {
   isSerialAdminLoading.value = true;
   pushSerialLog('Loading local device configuration...');
   try {
-    if (!activeSerialDevice.value?.adminSupported) {
-      await probeSerialAdminSupport(port);
+    if (state && !state.adminSupported) {
+      await probeSerialAdminSupport(targetPort);
     }
-    const out = await sendEasyPairCommand<{ ok: boolean; cmd: string; config: SerialAdminConfig }>('get_config', {
+    const out = await sendEasyPairCommandOnPort<{ ok: boolean; cmd: string; config: SerialAdminConfig }>(targetPort, 'get_config', {
       admin_password: password,
       include_secrets: true
     }, 15000, { label: 'Fetch settings' });
-    const state = serialDeviceState(port);
     if (state) {
       state.config = normalizeSerialAdminConfig(out.config, state.status);
     }
@@ -3709,8 +3710,8 @@ async function saveSerialAdminConfig() {
       }
     } else {
       if (selectedPort.value === port) {
-        await refreshSerialAdminStatus();
-        await loadSerialAdminConfig();
+        await refreshSerialAdminStatus(port);
+        await loadSerialAdminConfig(port);
       }
     }
     notify(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
@@ -4197,7 +4198,9 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
   const state = serialDeviceState(port);
   if (!state) return;
   state.status = out;
-  serialUptimeMs.value = Number(out.uptime_ms || 0);
+  if (port === selectedPort.value) {
+    serialUptimeMs.value = Number(out.uptime_ms || 0);
+  }
   state.adminSupported = true;
 
   if (port && port === gatewaySelectedPort.value) {
