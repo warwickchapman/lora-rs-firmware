@@ -3702,11 +3702,16 @@ async function saveSerialAdminConfig() {
     ].filter(Boolean);
     pushSerialLog(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
     if (rebooting) {
-      serialAdminStatus.value = null;
-      serialAdminConfig.value = null;
+      const state = serialDeviceState(port);
+      if (state) {
+        state.status = null;
+        state.config = null;
+      }
     } else {
-      await refreshSerialAdminStatus();
-      await loadSerialAdminConfig();
+      if (selectedPort.value === port) {
+        await refreshSerialAdminStatus();
+        await loadSerialAdminConfig();
+      }
     }
     notify(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
   } catch (e) {
@@ -3738,7 +3743,10 @@ async function rebootSerialDevice() {
   pushSerialLog('Sending reboot command...');
   try {
     await sendEasyPairCommandOnPort(port, 'reboot', { admin_password: password }, 5000, { label: 'Reboot device' });
-    serialAdminStatus.value = null;
+    const state = serialDeviceState(port);
+    if (state) {
+      state.status = null;
+    }
     pushSerialLog('Reboot command accepted; cached live status was cleared until the device responds again.');
   } catch (e) {
     const msg = serialFeatureError('Reboot', e);
@@ -3777,9 +3785,12 @@ async function factoryResetSerialDevice() {
       keep_shared_fleet_key: serialFactoryKeepFleet.value,
       keep_wifi_credentials: serialFactoryKeepWifi.value
     }, 6000, { label: 'Factory reset' });
-    serialAdminStatus.value = null;
-    serialAdminConfig.value = null;
-    settingsWifiNetworks.value = [];
+    const state = serialDeviceState(port);
+    if (state) {
+      state.status = null;
+      state.config = null;
+      state.wifiNetworks = [];
+    }
     if (port && port === gatewaySelectedPort.value) {
       clearFleetGatewayCache();
     }

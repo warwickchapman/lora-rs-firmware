@@ -11,7 +11,7 @@ All notable changes to this pre-release project are documented here in current o
 
 ### Firmware Fixes
 - Allow MessageType::Provisioning packets to bypass self-source validation (msg.src == runtime_.local_address), preventing gateway-side and remote-side packet drops when both devices share factory-default address 254.
-- Filter out invalid source addresses (`0`, `255`, and the local address) early in receive handling to prevent remote peer cache pollution.
+- Filter out invalid source addresses (`0`, `255`, and the local address) early in non-provisioning receive handling to prevent remote peer cache pollution.
 - Restructured configuration validation: Remote/Receiver nodes can now set and save `mqtt_control_enabled = true` without triggering config validation resets on boot. This allows receiver nodes to successfully authorize LoRa-bridged MQTT commands.
 
 ### MQTT Improvements
