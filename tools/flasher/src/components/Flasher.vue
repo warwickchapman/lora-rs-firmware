@@ -91,6 +91,7 @@ interface EasyPairStatus {
     verified_count: number;
     failed_count: number;
     conflict_count: number;
+    debug_events?: string[];
   };
   devices?: EasyPairDevice[];
 }
@@ -522,6 +523,7 @@ const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const activeGatewaySessionKey = ref('');
+const processedEasyPairLogLines = ref<Set<string>>(new Set());
 const isLoraInventoryScanning = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
@@ -3875,6 +3877,7 @@ async function runEasyPair() {
   pairExpectedCount.value = expected;
   isPairBusy.value = true;
   provisionCacheRefreshedChips.clear();
+  processedEasyPairLogLines.value.clear();
   pushPairLog('--- EasyPair ---');
   try {
     // Reload gateway only if not already loaded (avoids duplicate "uncommissioned" messages)
@@ -3921,6 +3924,14 @@ async function runEasyPair() {
 async function refreshEasyPairStatus(log = false) {
   try {
     pairStatus.value = await sendPairCommand<EasyPairStatus>('provisioning_status', {}, 5000);
+    if (pairStatus.value?.session?.debug_events) {
+      for (const line of pairStatus.value.session.debug_events) {
+        if (!processedEasyPairLogLines.value.has(line)) {
+          processedEasyPairLogLines.value.add(line);
+          pushPairLog("[FW] " + line);
+        }
+      }
+    }
     if (log && pairStatus.value.session) {
       const s = pairStatus.value.session;
       const visibleCount = pairStatus.value.devices?.length ?? s.discovered_count;
@@ -3966,6 +3977,7 @@ function stopEasyPairStatusPolling() {
 async function startEasyPairDiscovery() {
   isPairBusy.value = true;
   provisionCacheRefreshedChips.clear();
+  processedEasyPairLogLines.value.clear();
   try {
     // Always load gateway status/config before discovery to ensure fleet key is fetched or generated correctly
     await loadEasyPairGateway();

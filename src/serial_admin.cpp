@@ -607,6 +607,18 @@ void SerialAdmin::buildProvisioningStatus(JsonDocument &doc) {
   s["failed_count"] = sess.failed_count;
   s["now_ms"] = millis();
 
+  JsonArray debugEvents = s["debug_events"].to<JsonArray>();
+  const size_t logCount = sm_->provisioningLogCount();
+  for (size_t i = 0; i < logCount; ++i) {
+    uint32_t ts = 0;
+    char logMsg[56]{};
+    if (sm_->provisioningLogByIndex(i, ts, logMsg)) {
+      char buf[72];
+      snprintf(buf, sizeof(buf), "[%lu] %s", static_cast<unsigned long>(ts), logMsg);
+      debugEvents.add(buf);
+    }
+  }
+
   JsonArray devices = doc["devices"].to<JsonArray>();
   const size_t count = sm_->provisioningDeviceCount();
   for (size_t i = 0; i < count; ++i) {
