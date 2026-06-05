@@ -3105,7 +3105,8 @@ void NodeStateMachine::tickReceive() {
   ProtocolMessage msg{};
   if (!radio_->receive(msg)) return;
 
-  if (msg.src == 0 || msg.src == 255 || msg.src == runtime_.local_address) {
+  const bool isProvisioning = (msg.type == MessageType::Provisioning);
+  if (msg.src == 0 || msg.src == 255 || (!isProvisioning && msg.src == runtime_.local_address)) {
     lrslog::event("rx_invalid_source", msg.rssi, msg.counter, msg.src);
     return;
   }
@@ -3117,7 +3118,6 @@ void NodeStateMachine::tickReceive() {
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
   const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
                               msg.type == MessageType::MaintenanceStatus);
-  const bool isProvisioning = (msg.type == MessageType::Provisioning);
   if (isProvisioning) {
     handleProvisioningFrame(msg);
     return;
