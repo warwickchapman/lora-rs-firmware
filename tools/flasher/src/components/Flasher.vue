@@ -3674,6 +3674,11 @@ function serialConfigPatch(): Record<string, any> {
 }
 
 async function saveSerialAdminConfig() {
+  const port = selectedPort.value;
+  if (!port) {
+    notify('No USB port selected');
+    return;
+  }
   if (!serialAdminConfig.value) {
     notify('Load config first');
     return;
@@ -3686,7 +3691,7 @@ async function saveSerialAdminConfig() {
   isSerialAdminSaving.value = true;
   pushSerialLog('Saving local device configuration...');
   try {
-    const out = await sendEasyPairCommand<any>('set_config', {
+    const out = await sendEasyPairCommandOnPort<any>(port, 'set_config', {
       admin_password: password,
       config: serialConfigPatch()
     }, 12000, { label: 'Save settings' });
@@ -3714,16 +3719,25 @@ async function saveSerialAdminConfig() {
 }
 
 async function rebootSerialDevice() {
+  const port = selectedPort.value;
+  if (!port) {
+    notify('No USB port selected');
+    return;
+  }
   const password = serialAdminPassword.value;
   if (!password) {
     notify('Get device info first to use the factory password');
     return;
   }
   if (!await confirmOperatorAction('Reboot the selected USB device now?', { confirmText: 'Reboot' })) return;
+  if (selectedPort.value !== port) {
+    notify('Selected port changed during confirmation');
+    return;
+  }
   isSerialSystemAction.value = true;
   pushSerialLog('Sending reboot command...');
   try {
-    await sendEasyPairCommand('reboot', { admin_password: password }, 5000, { label: 'Reboot device' });
+    await sendEasyPairCommandOnPort(port, 'reboot', { admin_password: password }, 5000, { label: 'Reboot device' });
     serialAdminStatus.value = null;
     pushSerialLog('Reboot command accepted; cached live status was cleared until the device responds again.');
   } catch (e) {
@@ -3736,6 +3750,11 @@ async function rebootSerialDevice() {
 }
 
 async function factoryResetSerialDevice() {
+  const port = selectedPort.value;
+  if (!port) {
+    notify('No USB port selected');
+    return;
+  }
   const password = serialAdminPassword.value;
   if (!password) {
     notify('Get device info first to use the factory password');
@@ -3746,10 +3765,14 @@ async function factoryResetSerialDevice() {
     serialFactoryKeepWifi.value ? 'keep WiFi' : 'clear WiFi'
   ].join(', ');
   if (!await confirmOperatorAction(`Factory reset the selected USB device (${summary})?`, { confirmText: 'Factory reset', danger: true })) return;
+  if (selectedPort.value !== port) {
+    notify('Selected port changed during confirmation');
+    return;
+  }
   isSerialSystemAction.value = true;
   pushSerialLog(`Sending factory reset command (${summary})...`);
   try {
-    await sendEasyPairCommand('factory_reset', {
+    await sendEasyPairCommandOnPort(port, 'factory_reset', {
       admin_password: password,
       keep_shared_fleet_key: serialFactoryKeepFleet.value,
       keep_wifi_credentials: serialFactoryKeepWifi.value
@@ -3757,7 +3780,7 @@ async function factoryResetSerialDevice() {
     serialAdminStatus.value = null;
     serialAdminConfig.value = null;
     settingsWifiNetworks.value = [];
-    if (selectedPort.value && selectedPort.value === gatewaySelectedPort.value) {
+    if (port && port === gatewaySelectedPort.value) {
       clearFleetGatewayCache();
     }
     pushSerialLog('Factory reset command accepted; device is rebooting and loaded settings were invalidated.');
