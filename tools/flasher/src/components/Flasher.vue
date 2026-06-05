@@ -3757,7 +3757,9 @@ async function factoryResetSerialDevice() {
     serialAdminStatus.value = null;
     serialAdminConfig.value = null;
     settingsWifiNetworks.value = [];
-    clearFleetGatewayCache();
+    if (selectedPort.value && selectedPort.value === gatewaySelectedPort.value) {
+      clearFleetGatewayCache();
+    }
     pushSerialLog('Factory reset command accepted; device is rebooting and loaded settings were invalidated.');
   } catch (e) {
     const msg = serialFeatureError('Factory reset', e);
@@ -4165,7 +4167,7 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
   state.adminSupported = true;
 
   if (port && port === gatewaySelectedPort.value) {
-    const sessionKey = `${out.chip_id || ''}:${out.commissioned === true}:${out.fleet_passphrase_default === true}`;
+    const sessionKey = `${out.chip_id || ''}:${out.commissioned === true}:${out.fleet_passphrase_default === true}:${out.role_tx === true}:${out.local_address || 0}`;
     if (activeGatewaySessionKey.value && activeGatewaySessionKey.value !== sessionKey) {
       clearFleetGatewayCache();
     }
