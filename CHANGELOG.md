@@ -10,6 +10,7 @@ All notable changes to this pre-release project are documented here in current o
 - Maintenance telemetry page bursts are protected from clearing fresh uptime by enforcing a 5-second grace period before clearing.
 
 ### Firmware Fixes
+- Filter out invalid source addresses (`0`, `255`, and the local address) early in receive handling to prevent remote peer cache pollution.
 - Restructured configuration validation: Remote/Receiver nodes can now set and save `mqtt_control_enabled = true` without triggering config validation resets on boot. This allows receiver nodes to successfully authorize LoRa-bridged MQTT commands.
 
 ### MQTT Improvements
@@ -24,6 +25,7 @@ All notable changes to this pre-release project are documented here in current o
 - Prevented the Flasher from caching and re-hydrating old `uptime_ms` values from history into the active row display.
 
 ### Flasher UI Fixes
+- Scope gateway session key mismatch invalidation to the active Fleet gateway, clearing both visible rows and hidden history on gateway session changes, port changes, and local factory resets.
 - Fixed a provisioning issue where resuming or re-running commissioning on the same gateway failed with an error about the commissioned gateway fleet key not being fetched, by updating the fleet key source to `gateway` immediately after a successful `configure_gateway` command.
 - Local USB factory reset now clears the fleet key by default so reset remotes can be rediscovered by EasyPair.
 - Standardized default LoRa Spreading Factor to SF7 to match clean factory/erased firmware nodes, enabling direct out-of-the-box discovery without manual settings adjustments.

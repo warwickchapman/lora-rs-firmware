@@ -521,6 +521,7 @@ const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
+const activeGatewaySessionKey = ref('');
 const isLoraInventoryScanning = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
@@ -2340,6 +2341,14 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
   return '';
 }
 
+function clearFleetGatewayCache() {
+  loraInventory.value = [];
+  loraInventoryScan.value = null;
+  fleetRowHistory.value = {};
+  isLoraInventoryScanning.value = false;
+  stopLoraInventoryPolling(false);
+}
+
 function mergeMonitorPeerRows(rows: LoraInventoryDevice[]) {
   monitorFleetRows.value = rows.slice().sort((a, b) => a.address - b.address);
 }
@@ -2532,10 +2541,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
     if (!status.role_tx) {
       if (source === 'fleet') {
         networkStatusMessage.value = gatewayRequiredMessage('Fleet');
-        loraInventory.value = [];
-        loraInventoryScan.value = null;
-        isLoraInventoryScanning.value = false;
-        stopLoraInventoryPolling(false);
+        clearFleetGatewayCache();
         if (gatewaySelectedPort.value === port) {
           gatewaySelectedPort.value = '';
         }
@@ -3751,6 +3757,7 @@ async function factoryResetSerialDevice() {
     serialAdminStatus.value = null;
     serialAdminConfig.value = null;
     settingsWifiNetworks.value = [];
+    clearFleetGatewayCache();
     pushSerialLog('Factory reset command accepted; device is rebooting and loaded settings were invalidated.');
   } catch (e) {
     const msg = serialFeatureError('Factory reset', e);
@@ -4156,6 +4163,15 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
   state.status = out;
   serialUptimeMs.value = Number(out.uptime_ms || 0);
   state.adminSupported = true;
+
+  if (port && port === gatewaySelectedPort.value) {
+    const sessionKey = `${out.chip_id || ''}:${out.commissioned === true}:${out.fleet_passphrase_default === true}`;
+    if (activeGatewaySessionKey.value && activeGatewaySessionKey.value !== sessionKey) {
+      clearFleetGatewayCache();
+    }
+    activeGatewaySessionKey.value = sessionKey;
+  }
+
   adoptGatewayWifiFromStatus(out, port);
 }
 
@@ -4822,11 +4838,9 @@ watch(gatewaySelectedPort, (port) => {
   saveTabPort('pair', port);
   // Fleet side-effects
   saveTabPort('network', port);
-  loraInventory.value = [];
-  loraInventoryScan.value = null;
-  isLoraInventoryScanning.value = false;
-  stopLoraInventoryPolling(false);
-  
+  clearFleetGatewayCache();
+  activeGatewaySessionKey.value = '';
+
   const targetMode = activeMode.value || 'serial';
   if (port && !isSelectedPortMonitoring.value) {
     ensureDeviceInfoForPort(port, targetMode).then((ok) => {

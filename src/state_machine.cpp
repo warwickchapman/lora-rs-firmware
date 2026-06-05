@@ -2433,6 +2433,9 @@ bool NodeStateMachine::confirmProvisioningByFleetResponse(const ProtocolMessage 
 }
 
 NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t address) {
+  if (address == 0 || address == 255 || address == runtime_.local_address) {
+    return nullptr;
+  }
   for (size_t i = 0; i < peer_count_; ++i) {
     if (peers_[i].in_use && peers_[i].address == address) {
       return &peers_[i];
@@ -3101,6 +3104,11 @@ void NodeStateMachine::tickReceiver() {
 void NodeStateMachine::tickReceive() {
   ProtocolMessage msg{};
   if (!radio_->receive(msg)) return;
+
+  if (msg.src == 0 || msg.src == 255 || msg.src == runtime_.local_address) {
+    lrslog::event("rx_invalid_source", msg.rssi, msg.counter, msg.src);
+    return;
+  }
 
   const bool isWifiProvision = (msg.type == MessageType::WifiProvision);
   const bool isWifiControl = (msg.type == MessageType::WifiControl);
