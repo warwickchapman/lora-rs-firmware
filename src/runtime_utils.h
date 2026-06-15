@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+
 
 #if defined(UNIT_TEST)
 using wl_status_t = int;
@@ -23,5 +25,17 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
 #endif
 bool parseRoleTxFromModeRole(const char *mode, const char *role, bool &roleTx);
 const char *wifiStatusText(wl_status_t st);
+
+uint8_t resolveGatewayTargets(
+    bool isPairedMode,
+    uint8_t localAddress,
+    uint8_t knownPeerCount,
+    const uint8_t *knownPeerAddresses,
+    uint8_t pairedTargetCount,
+    const uint8_t *pairedTargetAddresses,
+    uint8_t remoteAddress,
+    uint8_t *outTargets,
+    uint8_t maxTargets
+);
 
 } // namespace runtime_utils

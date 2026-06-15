@@ -9,6 +9,7 @@
 #include "build_info.h"
 #include "logger.h"
 #include "admin_config_utils.h"
+#include "runtime_utils.h"
 
 namespace {
 constexpr uint8_t kInputPin = 4;
@@ -2292,31 +2293,19 @@ void NodeStateMachine::prePopulateGatewayPeerCache() {
   if (!runtime_.role_tx || settings_ == nullptr) return;
 
   uint8_t targets[Settings::kAddressListCap]{};
-  uint8_t targetCount = 0;
+  const bool isPairedMode = (settings_->mode == "paired");
 
-  // Compiler-friendly lambda for deduplicated, safe target insertion
-  auto addTarget = [&](uint8_t addr) {
-    if (addr >= 1 && addr <= 254 && addr != runtime_.local_address && targetCount < Settings::kAddressListCap) {
-      for (uint8_t i = 0; i < targetCount; ++i) {
-        if (targets[i] == addr) return;
-      }
-      targets[targetCount++] = addr;
-    }
-  };
-
-  if (settings_->known_peer_count > 0) {
-    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
-      addTarget(settings_->known_peer_addresses[i]);
-    }
-  }
-  if (targetCount == 0 && settings_->paired_target_count > 0) {
-    for (size_t i = 0; i < settings_->paired_target_count && i < Settings::kAddressListCap; ++i) {
-      addTarget(settings_->paired_target_addresses[i]);
-    }
-  }
-  if (targetCount == 0 && settings_->remote_address != 0) {
-    addTarget(settings_->remote_address);
-  }
+  uint8_t targetCount = runtime_utils::resolveGatewayTargets(
+    isPairedMode,
+    runtime_.local_address,
+    settings_->known_peer_count,
+    settings_->known_peer_addresses,
+    settings_->paired_target_count,
+    settings_->paired_target_addresses,
+    settings_->remote_address,
+    targets,
+    Settings::kAddressListCap
+  );
 
   for (uint8_t i = 0; i < targetCount; ++i) {
     findOrCreatePeer(targets[i]);
@@ -3038,30 +3027,20 @@ void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
   if (!radioTxBudgetAvailable()) return;
 
   uint8_t targets[Settings::kAddressListCap]{};
-  uint8_t count = settings_->known_peer_count;
-  const uint8_t *source = settings_->known_peer_addresses;
-  if (count == 0) {
-    count = settings_->paired_target_count;
-    source = settings_->paired_target_addresses;
-  }
-  if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
-  uint8_t targetCount = 0;
-  for (uint8_t i = 0; i < count; ++i) {
-    const uint8_t addr = source[i];
-    if (addr == 0 || addr == 255) continue;
-    bool dup = false;
-    for (uint8_t j = 0; j < targetCount; ++j) {
-      if (targets[j] == addr) {
-        dup = true;
-        break;
-      }
-    }
-    if (dup) continue;
-    targets[targetCount++] = addr;
-  }
-  if (targetCount == 0 && runtime_.remote_address >= 1 && runtime_.remote_address <= 254) {
-    targets[targetCount++] = runtime_.remote_address;
-  }
+  const bool isPairedMode = (settings_->mode == "paired");
+
+  uint8_t targetCount = runtime_utils::resolveGatewayTargets(
+    isPairedMode,
+    runtime_.local_address,
+    settings_->known_peer_count,
+    settings_->known_peer_addresses,
+    settings_->paired_target_count,
+    settings_->paired_target_addresses,
+    settings_->remote_address,
+    targets,
+    Settings::kAddressListCap
+  );
+
   if (targetCount == 0) return;
 
   // 2. Dynamically calculate staggering spacing over the full configured cycle

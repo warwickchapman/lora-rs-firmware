@@ -55,4 +55,53 @@ const char *wifiStatusText(wl_status_t st) {
   }
 }
 
+uint8_t resolveGatewayTargets(
+    bool isPairedMode,
+    uint8_t localAddress,
+    uint8_t knownPeerCount,
+    const uint8_t *knownPeerAddresses,
+    uint8_t pairedTargetCount,
+    const uint8_t *pairedTargetAddresses,
+    uint8_t remoteAddress,
+    uint8_t *outTargets,
+    uint8_t maxTargets
+) {
+  if (outTargets == nullptr || maxTargets == 0) return 0;
+
+  uint8_t targetCount = 0;
+
+  auto addTarget = [&](uint8_t addr) {
+    if (addr >= 1 && addr <= 254 && addr != localAddress && targetCount < maxTargets) {
+      for (uint8_t i = 0; i < targetCount; ++i) {
+        if (outTargets[i] == addr) return;
+      }
+      outTargets[targetCount++] = addr;
+    }
+  };
+
+  if (isPairedMode) {
+    if (knownPeerCount > 0 && knownPeerAddresses != nullptr) {
+      for (size_t i = 0; i < knownPeerCount && i < maxTargets; ++i) {
+        addTarget(knownPeerAddresses[i]);
+      }
+    }
+  } else {
+    if (knownPeerCount > 0 && knownPeerAddresses != nullptr) {
+      for (size_t i = 0; i < knownPeerCount && i < maxTargets; ++i) {
+        addTarget(knownPeerAddresses[i]);
+      }
+    }
+    if (targetCount == 0 && pairedTargetCount > 0 && pairedTargetAddresses != nullptr) {
+      for (size_t i = 0; i < pairedTargetCount && i < maxTargets; ++i) {
+        addTarget(pairedTargetAddresses[i]);
+      }
+    }
+    if (targetCount == 0 && remoteAddress != 0) {
+      addTarget(remoteAddress);
+    }
+  }
+
+  return targetCount;
+}
+
 } // namespace runtime_utils
