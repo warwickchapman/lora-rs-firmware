@@ -1882,6 +1882,101 @@ bool NodeStateMachine::isDefaultFleetKey() const {
          isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
 }
 
+static const char *localProvisioningSessionStateText(ProvisioningSessionState s) {
+  switch (s) {
+    case ProvisioningSessionState::Discovering: return "discovering";
+    case ProvisioningSessionState::Ready: return "ready";
+    case ProvisioningSessionState::Provisioning: return "provisioning";
+    case ProvisioningSessionState::Complete: return "complete";
+    case ProvisioningSessionState::Error: return "error";
+    default: return "idle";
+  }
+}
+
+void NodeStateMachine::enterProvisioningQuietMode() {
+  uint32_t scans = fleet_scan_active_ ? 1 : 0;
+  uint32_t maint = (maintenance_debug_pending_ ? 1 : 0) + 
+                   (maintenance_sensor_pending_ ? 1 : 0) + 
+                   (maintenance_version_pending_ ? 1 : 0);
+  uint32_t groups = (tx_group_phase_ != PairedGroupPhase::Idle) ? 1 : 0;
+  
+  uint32_t peerCmds = 0;
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    if (peers_[i].in_use && peers_[i].pending) {
+      peerCmds++;
+    }
+  }
+  
+  uint32_t polls = 0;
+  if (poll_states_ != nullptr) {
+    for (size_t i = 0; i < poll_state_capacity_; ++i) {
+      if (poll_states_[i].poll_pending) {
+        polls++;
+      }
+    }
+  }
+
+  // 1. Cancel active fleet scan
+  fleet_scan_active_ = false;
+
+  // 2. Cancel any pending maintenance pages
+  maintenance_debug_pending_ = false;
+  maintenance_debug_dst_ = 0;
+  maintenance_sensor_pending_ = false;
+  maintenance_sensor_dst_ = 0;
+  maintenance_version_pending_ = false;
+  maintenance_version_dst_ = 0;
+
+  // 3. Reset group command state
+  resetTxGroupState();
+
+  // 4. Clear other transient/pending TX flags in state machine
+  tx_ack_pending_ = false;
+  tx_state_sync_pending_ = false;
+  rx_deferred_ack_pending_ = false;
+  rx_push_pending_ = false;
+
+  // 5. Clear pending peer command and poll states (preserving identity/cache)
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    if (peers_[i].in_use) {
+      peers_[i].pending = false;
+      peers_[i].retry_step = 0;
+      peers_[i].next_retry_ms = 0;
+      peers_[i].pending_counter = 0;
+      peers_[i].pending_deadline_ms = 0;
+      peers_[i].wifi_pending = false;
+    }
+  }
+  if (poll_states_ != nullptr) {
+    for (size_t i = 0; i < poll_state_capacity_; ++i) {
+      poll_states_[i].poll_pending = false;
+      poll_states_[i].poll_retry_step = 0;
+      poll_states_[i].poll_next_retry_ms = 0;
+      poll_states_[i].poll_counter = 0;
+      poll_states_[i].poll_deadline_ms = 0;
+    }
+  }
+
+  addProvLog("Provisioning quiet mode entered");
+  if (scans || maint || groups || peerCmds || polls) {
+    addProvLog("Cancelled: scan=%u maint=%u grp=%u cmd=%u poll=%u",
+               scans, maint, groups, peerCmds, polls);
+  }
+}
+
+void NodeStateMachine::exitProvisioningCoordinatorMode(ProvisioningSessionState endState) {
+  if (prov_.active || prov_.pause_normal_tx) {
+    prov_.active = false;
+    prov_.pause_normal_tx = false;
+    prov_.state = endState;
+    prov_.phase_deadline_ms = 0;
+    prov_.watchdog_last_log_ms = 0;
+
+    LRS_LOGI(API, "event=provisioning_coordinator_exit state=%s", localProvisioningSessionStateText(endState));
+    addProvLog("Provisioning quiet mode exited (state=%s)", localProvisioningSessionStateText(endState));
+  }
+}
+
 bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   if (!runtime_.role_tx || radio_ == nullptr) {
     LRS_LOGW(API,
@@ -1942,18 +2037,17 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
     return false;
   }
   resetProvisioningStorage();
-  peer_count_ = 0;
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    peers_[i] = PeerRuntime{};
-  }
-  resetPollStorage();
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    provisioned_addrs_[i] = ProvisionedAddressEntry{};
-  }
 
+  // Clear provisioning log buffer first so quiet mode logs are kept
   prov_log_head_ = 0;
   prov_log_count_ = 0;
   memset(prov_logs_, 0, sizeof(prov_logs_));
+
+  enterProvisioningQuietMode();
+
+  for (size_t i = 0; i < kMaxPeers; ++i) {
+    provisioned_addrs_[i] = ProvisionedAddressEntry{};
+  }
   addProvLog("Discovery started: nonce=%u count=%u", prov_.session_nonce, estimatedCount);
 
   lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
@@ -1993,18 +2087,15 @@ void NodeStateMachine::provisioningCancel() {
   if (prov_.state == ProvisioningSessionState::Discovering &&
       prov_device_count_ > 0) {
     recomputeProvisioningConflictsAndAssignments();
-    prov_.active = false;
-    prov_.state = ProvisioningSessionState::Ready;
-    prov_.phase_deadline_ms = 0;
-    prov_.pause_normal_tx = false;
-    prov_.watchdog_last_log_ms = 0;
     LRS_LOGI(API,
              "event=prov_discover_ready reason=operator_stop found=%u estimated=%u elapsed_ms=%lu",
              static_cast<unsigned>(prov_device_count_),
              static_cast<unsigned>(prov_.estimated_count),
              static_cast<unsigned long>(millis() - prov_.started_ms));
+    exitProvisioningCoordinatorMode(ProvisioningSessionState::Ready);
     return;
   }
+  exitProvisioningCoordinatorMode(ProvisioningSessionState::Idle);
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
   freeProvisioningStorage();
@@ -2233,6 +2324,13 @@ void NodeStateMachine::prePopulateGatewayPeerCache() {
 }
 
 void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
+  uint8_t prev_assigned[kMaxProvisioningDevices]{};
+  bool prev_conflict[kMaxProvisioningDevices]{};
+  for (size_t i = 0; i < prov_device_count_ && i < kMaxProvisioningDevices; ++i) {
+    prev_assigned[i] = prov_devices_[i].assigned_address;
+    prev_conflict[i] = prov_devices_[i].address_conflict;
+  }
+
   bool used[256]{};
   used[0] = true;
   used[255] = true;
@@ -2368,6 +2466,19 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
              static_cast<unsigned>(d.current_address),
              static_cast<unsigned>(d.assigned_address));
     next++;
+  }
+
+  for (size_t i = 0; i < prov_device_count_; ++i) {
+    ProvisioningDevice &d = prov_devices_[i];
+    if (!d.in_use) continue;
+    if (d.address_conflict && !prev_conflict[i]) {
+      addProvLog("Conflict detected for chip=0x%08lx address=%u",
+                 static_cast<unsigned long>(d.chip_id), d.current_address);
+    }
+    if (d.assigned_address != prev_assigned[i] && d.assigned_address != 0) {
+      addProvLog("Assigned address %u to chip=0x%08lx",
+                 d.assigned_address, static_cast<unsigned long>(d.chip_id));
+    }
   }
 }
 
@@ -2701,6 +2812,7 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 }
 
 void NodeStateMachine::tickPendingMaintenancePages() {
+  if (prov_.active || prov_.pause_normal_tx) return;
   if (ota_pull_active_ || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return;
   if (maintenance_version_pending_) {
     if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
@@ -3990,11 +4102,6 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
     }
     if (prov_.estimated_count > 0 && prov_device_count_ >= static_cast<size_t>(prov_.estimated_count)) {
       recomputeProvisioningConflictsAndAssignments();
-      prov_.active = false;
-      prov_.state = ProvisioningSessionState::Ready;
-      prov_.phase_deadline_ms = 0;
-      prov_.pause_normal_tx = false;
-      prov_.watchdog_last_log_ms = 0;
       LRS_LOGI(API,
                "event=prov_discover_ready reason=target_reached found=%u estimated=%u elapsed_ms=%lu",
                static_cast<unsigned>(prov_device_count_),
@@ -4002,21 +4109,18 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
                static_cast<unsigned long>(now - prov_.started_ms));
       addProvLog("Discovery completed (found %u, target reached)", prov_device_count_);
       lrslog::event("prov_discover_done_target_reached", 0, prov_device_count_, prov_.estimated_count);
+      exitProvisioningCoordinatorMode(ProvisioningSessionState::Ready);
       return;
     }
     if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
       recomputeProvisioningConflictsAndAssignments();
-      prov_.active = false;
-      prov_.state = ProvisioningSessionState::Ready;
-      prov_.phase_deadline_ms = 0;
-      prov_.pause_normal_tx = false;
-      prov_.watchdog_last_log_ms = 0;
       LRS_LOGI(API,
                "event=prov_discover_ready reason=deadline found=%u estimated=%u elapsed_ms=%lu",
                static_cast<unsigned>(prov_device_count_),
                static_cast<unsigned>(prov_.estimated_count),
                static_cast<unsigned long>(now - prov_.started_ms));
       addProvLog("Discovery completed (found %u, deadline reached)", prov_device_count_);
+      exitProvisioningCoordinatorMode(ProvisioningSessionState::Ready);
       return;
     }
   }
@@ -4096,19 +4200,15 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
         d.state == ProvisioningDeviceState::Keying) {
       if (!settings_) {
         d.state = ProvisioningDeviceState::Failed;
-        prov_.state = ProvisioningSessionState::Error;
-        prov_.active = false;
-        prov_.pause_normal_tx = false;
+        exitProvisioningCoordinatorMode(ProvisioningSessionState::Error);
         return;
       }
       const char *fleetKey = settings_->fleet_passphrase.c_str();
       const size_t keyLen = strlen(fleetKey);
       if (keyLen == 0 || keyLen > (kProvChunkBitmapMax * kProvKeyChunkBytes)) {
         d.state = ProvisioningDeviceState::Failed;
-        prov_.state = ProvisioningSessionState::Error;
-        prov_.active = false;
-        prov_.pause_normal_tx = false;
         lrslog::event("prov_key_len_bad", 0, d.chip_id & 0xFFFFU, static_cast<uint8_t>(keyLen & 0xFFU));
+        exitProvisioningCoordinatorMode(ProvisioningSessionState::Error);
         return;
       }
       const uint8_t totalChunks = static_cast<uint8_t>((keyLen + (kProvKeyChunkBytes - 1U)) / kProvKeyChunkBytes);
@@ -4209,9 +4309,7 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
     return;
   }
 
-  prov_.state = ProvisioningSessionState::Complete;
-  prov_.active = false;
-  prov_.pause_normal_tx = false;
+  exitProvisioningCoordinatorMode(ProvisioningSessionState::Complete);
 }
 
 bool NodeStateMachine::radioTxBudgetAvailable() const {

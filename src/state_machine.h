@@ -648,6 +648,8 @@ class NodeStateMachine {
   void tickLed(bool powerSaveActive = false);
   bool tickIdentifyLed(uint32_t now);
   void tickProvisioningCoordinator(uint32_t now);
+  void enterProvisioningQuietMode();
+  void exitProvisioningCoordinatorMode(ProvisioningSessionState endState);
   void tickProvisioningTarget(uint32_t now);
   void refreshRuntimeCfg(const Settings &cfg);
   void captureRemoteTemp(uint8_t tempCode);

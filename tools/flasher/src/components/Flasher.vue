@@ -2530,6 +2530,16 @@ async function refreshMonitorData(background = false) {
 async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor') {
   if (!port) return;
   if (background && gatewaySnapshotPauseCount.value > 0) return;
+
+  if (background && isMonitoring.value && activeMonitorPort.value === port) {
+    if (source === 'fleet') {
+      networkStatusMessage.value = 'Background gateway refresh paused while serial monitor owns this port.';
+    } else {
+      monitorStatusMessage.value = 'Background refresh paused while serial monitor owns this port.';
+    }
+    return;
+  }
+
   try {
     const status = await sendEasyPairCommandOnPort<SerialAdminStatus>(
       port,

@@ -14,6 +14,7 @@ All notable changes to this pre-release project are documented here in current o
 - Allow MessageType::Provisioning packets to bypass self-source validation (msg.src == runtime_.local_address), preventing gateway-side and remote-side packet drops when both devices share factory-default address 254.
 - Filter out invalid source addresses (`0`, `255`, and the local address) early in non-provisioning receive handling to prevent remote peer cache pollution.
 - Restructured configuration validation: Remote/Receiver nodes can now set and save `mqtt_control_enabled = true` without triggering config validation resets on boot. This allows receiver nodes to successfully authorize LoRa-bridged MQTT commands.
+- Fix repeat-session provisioning failure on commissioned gateways. Discovery now enters a quiet coordinator mode, cancelling active scans, pending maintenance pages, group commands, and transient peer command retries/polls while preserving persistent peer identity caches. Normal operations are symmetrically restored via a centralized exit helper.
 
 ### MQTT Improvements
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
