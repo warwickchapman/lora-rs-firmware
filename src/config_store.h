@@ -66,6 +66,7 @@ struct Settings {
   FixedSettingString<65> mqtt_user;
   FixedSettingString<65> mqtt_password;
   FixedSettingString<65> mqtt_topic_root;
+  bool allow_mqtt_secret_export;
 
   bool sensor_temp_enabled;
   uint8_t sensor_temp_pin;

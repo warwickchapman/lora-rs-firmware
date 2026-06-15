@@ -5,6 +5,7 @@
 #include "mqtt_bridge.h"
 #include "radio_protocol.h"
 #include "sensor_manager.h"
+#include "admin_executor.h"
 #include "serial_admin.h"
 #include "state_machine.h"
 
@@ -26,6 +27,7 @@ class App {
   RadioProtocol radio_;
   SensorManager sensors_;
   NodeStateMachine sm_;
+  AdminExecutor admin_executor_;
   SerialAdmin serial_admin_;
 
   bool wifi_sta_connecting_ = false;

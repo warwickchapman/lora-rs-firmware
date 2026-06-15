@@ -1,4 +1,5 @@
 #include "mqtt_bridge.h"
+#include "admin_executor.h"
 
 #include <ArduinoJson.h>
 #include <ctype.h>
@@ -289,11 +290,12 @@ bool parseOtaPullPayload(const uint8_t *payload, unsigned int length, String &ur
 
 MqttBridge *MqttBridge::instance_ = nullptr;
 
-bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm) {
+bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm, AdminExecutor *executor) {
   settings_ = &cfg;
   refreshRuntimeCfg(cfg);
   chip_id_hex_ = chipIdHex;
   sm_ = sm;
+  executor_ = executor;
 
   rebuildTopics();
 
@@ -444,6 +446,8 @@ void MqttBridge::rebuildTopics() {
   snprintf(control_topic_, sizeof(control_topic_), "%s/control", topic_base_);
   snprintf(udp_log_control_topic_, sizeof(udp_log_control_topic_), "%s/udp_log_control", topic_base_);
   snprintf(ota_pull_topic_, sizeof(ota_pull_topic_), "%s/ota_pull", topic_base_);
+  snprintf(admin_command_topic_, sizeof(admin_command_topic_), "%s/admin_command", topic_base_);
+  snprintf(admin_response_topic_, sizeof(admin_response_topic_), "%s/admin_response", topic_base_);
   snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peers/", topic_base_);
   snprintf(legacy_peer_prefix_, sizeof(legacy_peer_prefix_), "%s/peer/", topic_base_);
   snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
@@ -546,6 +550,27 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       lrslog::disableUdpMirror();
     }
     lrslog::event(enabled ? "mqtt_udp_log_control_enable" : "mqtt_udp_log_control_disable", 0, 0, static_cast<uint8_t>(port & 0xFFU));
+    return;
+  }
+
+  if (strcmp(topic, admin_command_topic_) == 0) {
+    if (!runtime_.mqtt_control_enabled) {
+      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+      return;
+    }
+    if (length == 0 || executor_ == nullptr) {
+      return;
+    }
+    String cmdPayload;
+    cmdPayload.reserve(length + 1);
+    for (unsigned int i = 0; i < length; ++i) {
+      cmdPayload += static_cast<char>(payload[i]);
+    }
+    executor_->execute(cmdPayload, [this](const String &response) {
+      if (mqtt_client_.connected()) {
+        mqtt_client_.publish(admin_response_topic_, response.c_str(), false);
+      }
+    }, true);
     return;
   }
 
@@ -772,6 +797,7 @@ bool MqttBridge::connectIfNeeded() {
     mqtt_client_.subscribe(control_topic_);
     mqtt_client_.subscribe(udp_log_control_topic_);
     mqtt_client_.subscribe(ota_pull_topic_);
+    mqtt_client_.subscribe(admin_command_topic_);
     char topic[kMqttTopicBufBytes];
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);

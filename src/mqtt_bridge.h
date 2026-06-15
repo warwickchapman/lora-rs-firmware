@@ -7,9 +7,11 @@
 #include "config_store.h"
 #include "state_machine.h"
 
+class AdminExecutor;
+
 class MqttBridge {
  public:
-  bool begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm);
+  bool begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm, AdminExecutor *executor);
   void applyConfig(const Settings &cfg, const String &chipIdHex);
   void tick(bool wifiConnected);
   bool connected();
@@ -39,12 +41,15 @@ class MqttBridge {
   char control_topic_[160]{};
   char udp_log_control_topic_[160]{};
   char ota_pull_topic_[160]{};
+  char admin_command_topic_[160]{};
+  char admin_response_topic_[160]{};
   char remote_prefix_[160]{};
   char legacy_peer_prefix_[160]{};
   char discovery_topic_[192]{};
   char availability_topic_[160]{};
 
   NodeStateMachine *sm_ = nullptr;
+  AdminExecutor *executor_ = nullptr;
 
   static constexpr size_t kPeerPublishCacheSize = LRS_MAX_PEERS;
   struct PeerPublishCacheEntry {

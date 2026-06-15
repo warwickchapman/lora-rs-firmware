@@ -102,12 +102,11 @@ void App::begin() {
     return (unixTimeS != 0);
   };
   lrslog::setUnixTimeProvider(unixProvider);
-  mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_);
-  serial_admin_.begin(
-      &config_, &sm_,
-      [this](bool restartNetwork, bool restartOtaAuth) {
-        applyUpdatedConfig(restartNetwork, restartOtaAuth);
-      });
+  admin_executor_.begin(&config_, &sm_, [this](bool restartNetwork, bool restartOtaAuth) {
+    applyUpdatedConfig(restartNetwork, restartOtaAuth);
+  });
+  mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_, &admin_executor_);
+  serial_admin_.begin(&admin_executor_);
 
   if (power_save_state_ != PowerSaveRuntimeState::Sleeping) {
     startOta();

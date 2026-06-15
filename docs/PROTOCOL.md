@@ -176,3 +176,35 @@ Gateway-mediated remote OTA requires digest-capable firmware on both the USB gat
 Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`UdpLogControl`/`OtaPullControl`/`FactoryReset`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
 
 Any future change that changes packet size, encrypted payload layout, replay behavior, addressing rules, or Fleet Key derivation is a breaking protocol change and should use a major version boundary or explicit protocol-version signaling.
+
+## Remote MQTT Administration Protocol (Phase 1)
+To allow remote gateway control over LAN or cloud networks:
+- Topics:
+  - Admin command topic: `<root>/lrs-<gateway_chip_id>/admin_command`
+  - Admin response topic: `<root>/lrs-<gateway_chip_id>/admin_response`
+- JSON Schema for commands:
+  ```json
+  {
+    "id": "req-123456",
+    "cmd": "status",
+    "admin_password": "...",
+    "ts": 1717171717,
+    "ttl_ms": 5000
+  }
+  ```
+- Command validation rules on gateway:
+  1. If NTP sync is active, checks that `ts` is within `ttl_ms` of current Unix time to prevent stale execution. If NTP is not yet active, this time check is bypassed to ensure boot rescue availability.
+  2. Protects against duplicate requests using a circular request cache of size 10.
+  3. Validates the `admin_password` against the gateway's configured `admin_password`.
+- JSON Response layout:
+  ```json
+  {
+    "ok": true,
+    "cmd": "status",
+    "id": "req-123456",
+    "...": "command-specific response payload"
+  }
+  ```
+- Credential protection:
+  - The `"get_config"` command refuses to export secrets unless the `allow_mqtt_secret_export` config setting is explicitly set to `true` on the gateway.
+

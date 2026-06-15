@@ -126,6 +126,7 @@ pub fn run() {
         .manage(crate::services::serial_port_coordinator::SerialPortCoordinator::default())
         .manage(crate::commands::network::UdpMonitorState::default())
         .manage(crate::commands::network::FirmwareServerState::default())
+        .manage(crate::services::mqtt::MqttService::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             maybe_offer_move_to_applications(&app.handle().clone());
@@ -153,6 +154,10 @@ pub fn run() {
             crate::commands::network::start_network_udp_monitor,
             crate::commands::network::stop_network_udp_monitor,
             crate::commands::easy_pair::serial_admin_command,
+            crate::commands::mqtt::connect_mqtt_broker,
+            crate::commands::mqtt::disconnect_mqtt_broker,
+            crate::commands::mqtt::publish_mqtt_command,
+            crate::commands::mqtt::get_mqtt_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -344,18 +344,36 @@ const inFlightDeviceInfoReads = ref(new Map<string, InFlightRead>());
 const selectedPort = computed<string>({
   get() {
     if (activeMode.value === 'pair') return gatewaySelectedPort.value;
-    if (activeMode.value === 'network') return gatewaySelectedPort.value;
-    if (activeMode.value === 'monitor') return monitorSelectedPort.value;
-    if (activeMode.value === 'settings') return settingsSelectedPort.value;
+    if (activeMode.value === 'network') {
+      return fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+    }
+    if (activeMode.value === 'monitor') {
+      return monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+    }
+    if (activeMode.value === 'settings') {
+      return settingsTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : settingsSelectedPort.value;
+    }
     return flashSelectedPort.value;
   },
   set(port) {
     if (activeMode.value === 'pair' || activeMode.value === 'network') {
-      gatewaySelectedPort.value = port;
+      if (fleetTransport.value === 'mqtt') {
+        selectedMqttGatewayChipId.value = port;
+      } else {
+        gatewaySelectedPort.value = port;
+      }
     } else if (activeMode.value === 'monitor') {
-      monitorSelectedPort.value = port;
+      if (monitorTransport.value === 'mqtt') {
+        selectedMqttGatewayChipId.value = port;
+      } else {
+        monitorSelectedPort.value = port;
+      }
     } else if (activeMode.value === 'settings') {
-      settingsSelectedPort.value = port;
+      if (settingsTransport.value === 'mqtt') {
+        selectedMqttGatewayChipId.value = port;
+      } else {
+        settingsSelectedPort.value = port;
+      }
     } else {
       flashSelectedPort.value = port;
     }
@@ -511,6 +529,9 @@ const monitorMqttDraftUser = ref('');
 const monitorMqttDraftPassword = ref('');
 const monitorMqttDraftTopicRoot = ref('lora');
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
+const fleetTransport = ref<'serial' | 'mqtt'>('serial');
+const mqttGateways = ref<Record<string, any>>({});
+const selectedMqttGatewayChipId = ref('');
 const isMonitorRefreshing = ref(false);
 const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
@@ -1083,6 +1104,10 @@ let unlistenFlash: UnlistenFn | null = null;
 let unlistenMonitor: UnlistenFn | null = null;
 let unlistenPortsChanged: UnlistenFn | null = null;
 let unlistenNetworkMonitor: UnlistenFn | null = null;
+let unlistenMqttState: UnlistenFn | null = null;
+let unlistenMqttTelemetry: UnlistenFn | null = null;
+let unlistenMqttGateway: UnlistenFn | null = null;
+let unlistenMqttAdminResponse: UnlistenFn | null = null;
 
 function pushSerialLog(line: string) {
   if (!line) return;
@@ -2029,8 +2054,57 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
   };
 }
 
+interface PendingMqttRequest {
+  resolve: (value: any) => void;
+  reject: (err: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+const pendingMqttRequests = new Map<string, PendingMqttRequest>();
+
+async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
+  if (!monitorMqttConnected.value) {
+    throw new Error('MQTT broker is not connected. Connect in the Monitor tab first.');
+  }
+  const reqId = `req-${Math.random().toString(36).substring(2, 11)}`;
+  const topic = `${monitorMqttTopicRoot.value}/lrs-${chipId}/admin_command`;
+  const requestPayload = {
+    id: reqId,
+    cmd,
+    ...payload,
+    ts: Math.floor(Date.now() / 1000),
+    ttl_ms: timeoutMs
+  };
+
+  return new Promise<T>(async (resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingMqttRequests.delete(reqId);
+      reject(new Error(`MQTT command timeout (${timeoutMs}ms)`));
+    }, timeoutMs);
+
+    pendingMqttRequests.set(reqId, { resolve, reject, timer });
+
+    try {
+      await invoke('publish_mqtt_command', {
+        topic,
+        payload: JSON.stringify(requestPayload)
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      pendingMqttRequests.delete(reqId);
+      reject(e);
+    }
+  });
+}
+
 async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
   if (!port) throw new Error('Select the USB gateway first');
+
+  const isMqtt = port.startsWith('lrs-') || /^[0-9a-fA-F]+$/.test(port) || fleetTransport.value === 'mqtt' || monitorTransport.value === 'mqtt' || settingsTransport.value === 'mqtt';
+  if (isMqtt) {
+    const targetChipId = port.replace(/^lrs-/, '');
+    return await sendMqttAdminCommand<T>(targetChipId, cmd, payload, timeoutMs);
+  }
+
   const label = options.label || cmd.replace(/_/g, ' ');
   return await runSerialAdminJob<T>(port, label, options, async () => {
     noteMonitorReleasedForPort(port, 'serial admin command needs this port');
@@ -2043,6 +2117,38 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
 }
 
 async function loadNetworkGateway() {
+  if (fleetTransport.value === 'mqtt') {
+    const chipId = selectedMqttGatewayChipId.value;
+    if (!chipId || isNetworkGatewayLoading.value) return;
+    isNetworkGatewayLoading.value = true;
+    networkStatusMessage.value = `Loading MQTT gateway lrs-${chipId}...`;
+    try {
+      const gw = mqttGateways.value[chipId];
+      const state = serialDeviceState(chipId);
+      if (state) {
+        state.adminSupported = true;
+        state.deviceInfo = {
+          chip_id: chipId,
+          mac: gw?.mac || '',
+          serial: '',
+          password: state.adminPassword || '',
+          local_addr: 254,
+          remote_addr: 0,
+          ssid: gw?.sta_ssid || ''
+        };
+      }
+      await refreshGatewaySnapshot(chipId, false, 'fleet');
+      networkStatusMessage.value = `Gateway loaded over MQTT; firmware ${gw?.fw_version || 'unknown'}.`;
+      startFleetCachePolling();
+    } catch (e) {
+      networkStatusMessage.value = `MQTT Gateway load error: ${e}`;
+      notify(networkStatusMessage.value);
+    } finally {
+      isNetworkGatewayLoading.value = false;
+    }
+    return;
+  }
+
   const port = gatewaySelectedPort.value;
   if (!port || isNetworkGatewayLoading.value) return;
   isNetworkGatewayLoading.value = true;
@@ -2368,7 +2474,8 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
 }
 
 async function refreshLoraInventoryStatus(background = true) {
-  await refreshGatewaySnapshot(gatewaySelectedPort.value, background, 'fleet');
+  const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  await refreshGatewaySnapshot(targetPort, background, 'fleet');
 }
 
 function startLoraInventoryPolling() {
@@ -2380,7 +2487,8 @@ function startLoraInventoryPolling() {
 }
 
 function startFleetCachePolling() {
-  if (activeMode.value !== 'network' || !gatewaySelectedPort.value || isLoraInventoryScanning.value) return;
+  const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  if (activeMode.value !== 'network' || !targetPort || isLoraInventoryScanning.value) return;
   if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
   stopLoraInventoryPolling(false, false);
   networkInventoryPollMode.value = 'cache';
@@ -2577,7 +2685,8 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       { label: 'Gateway peer cache snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
 
-    if (port === gatewaySelectedPort.value) {
+    const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+    if (port === targetPort) {
       loraInventoryScan.value = inventory.scan || null;
       mergeLoraInventoryRows(inventory.devices || []);
       isLoraInventoryScanning.value = !!inventory.scan?.active;
@@ -2587,7 +2696,8 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
         startFleetCachePolling();
       }
     }
-    if (port === monitorSelectedPort.value) {
+    const targetMonitor = monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+    if (port === targetMonitor) {
       mergeMonitorPeerRows(inventory.devices || []);
       monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
     }
@@ -2648,17 +2758,39 @@ function toggleMonitorLoop() {
   });
 }
 
-function toggleMonitorMqttConnection() {
-  monitorMqttHost.value = monitorMqttDraftHost.value.trim() || 'venus.local';
-  monitorMqttPort.value = Number(monitorMqttDraftPort.value || 1883);
-  monitorMqttUser.value = monitorMqttDraftUser.value;
-  monitorMqttPassword.value = monitorMqttDraftPassword.value;
-  monitorMqttTopicRoot.value = monitorMqttDraftTopicRoot.value.trim() || 'lora';
-  monitorTransport.value = 'mqtt';
-  monitorMqttConnected.value = !monitorMqttConnected.value;
-  monitorStatusMessage.value = monitorMqttConnected.value
-    ? 'MQTT monitor configuration saved locally. Subscription backend is not active yet.'
-    : 'MQTT monitor disconnected.';
+async function toggleMonitorMqttConnection() {
+  if (monitorMqttConnected.value) {
+    try {
+      await invoke('disconnect_mqtt_broker');
+      monitorMqttConnected.value = false;
+      monitorStatusMessage.value = 'MQTT monitor disconnected.';
+    } catch (e) {
+      notify(`MQTT disconnect error: ${e}`);
+    }
+  } else {
+    monitorMqttHost.value = monitorMqttDraftHost.value.trim() || 'venus.local';
+    monitorMqttPort.value = Number(monitorMqttDraftPort.value || 1883);
+    monitorMqttUser.value = monitorMqttDraftUser.value;
+    monitorMqttPassword.value = monitorMqttDraftPassword.value;
+    monitorMqttTopicRoot.value = monitorMqttDraftTopicRoot.value.trim() || 'lora';
+    monitorTransport.value = 'mqtt';
+    
+    try {
+      await invoke('connect_mqtt_broker', {
+        config: {
+          host: monitorMqttHost.value,
+          port: monitorMqttPort.value,
+          user: monitorMqttUser.value || null,
+          password: monitorMqttPassword.value || null,
+          topic_root: monitorMqttTopicRoot.value
+        }
+      });
+      monitorMqttConnected.value = true;
+      monitorStatusMessage.value = 'MQTT monitor connected.';
+    } catch (e) {
+      notify(`MQTT connection error: ${e}`);
+    }
+  }
   showMonitorMqttSettings.value = false;
 }
 
@@ -5138,6 +5270,120 @@ onMounted(async () => {
       refreshPorts(true);
     }
   });
+
+  unlistenMqttState = await listen<any>('mqtt-state-changed', (event) => {
+    const state = event.payload;
+    if (state === 'Connected') {
+      monitorMqttConnected.value = true;
+      monitorStatusMessage.value = 'MQTT monitor connected.';
+    } else if (state === 'Connecting') {
+      monitorStatusMessage.value = 'MQTT monitor connecting...';
+    } else if (state === 'Disconnected') {
+      monitorMqttConnected.value = false;
+      monitorStatusMessage.value = 'MQTT monitor disconnected.';
+    } else if (state && typeof state === 'object' && 'Error' in state) {
+      monitorMqttConnected.value = false;
+      monitorStatusMessage.value = `MQTT monitor error: ${state.Error}`;
+    }
+  });
+
+  unlistenMqttGateway = await listen<any>('mqtt-gateway-update', (event) => {
+    const payload = event.payload;
+    mqttGateways.value[payload.chip_id] = payload;
+    if (!selectedMqttGatewayChipId.value) {
+      selectedMqttGatewayChipId.value = payload.chip_id;
+    }
+  });
+
+  unlistenMqttTelemetry = await listen<any>('mqtt-telemetry-update', (event) => {
+    const payload = event.payload;
+    if (fleetTransport.value === 'mqtt' && payload.gateway_id === selectedMqttGatewayChipId.value) {
+      let dev = loraInventory.value.find(d => d.address === payload.address);
+      if (!dev) {
+        dev = { address: payload.address, selected: false };
+        loraInventory.value.push(dev);
+        loraInventory.value.sort((a, b) => a.address - b.address);
+      }
+      const val = payload.value;
+      const f = payload.field;
+      if (f === 'relay') dev.relay_state = (val === '1' || val === 1) ? 1 : 0;
+      else if (f === 'input' || f === 'dry_contact') {
+        dev.input_state = (val === '1' || val === 1) ? 1 : 0;
+        dev.input_state_known = true;
+      }
+      else if (f === 'relay_feedback') dev.relay_feedback = (val === '1' || val === 1) ? 1 : 0;
+      else if (f === 'input_feedback') dev.input_feedback = (val === '1' || val === 1) ? 1 : 0;
+      else if (f === 'temp_c') {
+        if (val === '' || val === null) dev.temp_valid = false;
+        else {
+          dev.temp_valid = true;
+          dev.temp_c = Number(val);
+        }
+      }
+      else if (f === 'tank_status') {
+        dev.tank_enabled = val !== 'disabled';
+        dev.tank_status = String(val);
+      }
+      else if (f === 'tank_depth_mm') {
+        if (val === '' || val === null) dev.tank_valid = false;
+        else {
+          dev.tank_valid = true;
+          dev.tank_depth_mm = Number(val);
+        }
+      }
+      else if (f === 'tank_current_ma') dev.tank_current_ma = Number(val);
+      else if (f === 'tank_voltage_mv') dev.tank_voltage_mv = Number(val);
+      else if (f === 'rssi') dev.rssi = Number(val);
+      else if (f === 'downlink_rssi') {
+        dev.downlink_rssi = Number(val);
+        dev.downlink_rssi_known = true;
+      }
+      else if (f === 'fw_version') dev.fw_version = String(val);
+      else if (f === 'chip_id') dev.chip_id = String(val);
+      else if (f === 'uptime_ms') dev.uptime_ms = Number(val);
+      else if (f === 'role') dev.role = String(val);
+      else if (f === 'mode') dev.mode = String(val);
+      dev.age_ms = 0;
+
+      loraInventory.value = loraInventory.value.map(row => {
+        if (row.address === payload.address) {
+          return classifyFleetRow(row, Date.now());
+        }
+        return row;
+      });
+
+      if (gatewaySelectedPort.value === monitorSelectedPort.value) {
+        mergeMonitorPeerRows(loraInventory.value);
+      }
+    }
+  });
+
+  unlistenMqttAdminResponse = await listen<any>('mqtt-admin-response', (event) => {
+    const payload = event.payload;
+    const res = payload.response;
+    const reqId = res.id;
+    if (reqId) {
+      const pending = pendingMqttRequests.get(reqId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingMqttRequests.delete(reqId);
+        if (res.ok === false) {
+          pending.reject(new Error(res.error || 'command_failed'));
+        } else {
+          pending.resolve(res);
+        }
+      }
+    }
+  });
+
+  invoke<any>('get_mqtt_state').then((state) => {
+    if (state === 'Connected') {
+      monitorMqttConnected.value = true;
+      monitorStatusMessage.value = 'MQTT monitor connected.';
+    }
+  }).catch((e) => {
+    console.error('Failed to get MQTT state:', e);
+  });
 });
 
 watch(region, (next) => {
@@ -5192,6 +5438,10 @@ onUnmounted(() => {
   if (unlistenMonitor) unlistenMonitor();
   if (unlistenNetworkMonitor) unlistenNetworkMonitor();
   if (unlistenPortsChanged) unlistenPortsChanged();
+  if (unlistenMqttState) unlistenMqttState();
+  if (unlistenMqttTelemetry) unlistenMqttTelemetry();
+  if (unlistenMqttGateway) unlistenMqttGateway();
+  if (unlistenMqttAdminResponse) unlistenMqttAdminResponse();
   if (isNetworkUdpMonitoring.value) {
     invoke('stop_network_udp_monitor').catch(() => {});
   }
@@ -6072,14 +6322,20 @@ function toggleSelectAllBulkPorts() {
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Device</label>
               <div class="flex gap-2">
-                <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
+                <select v-if="settingsTransport === 'serial'" v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
                   <option value="" disabled>Select USB device</option>
                   <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                     {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
                   </option>
                   <option v-if="ports.length === 0" disabled>Scanning...</option>
                 </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-9 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
+                <select v-else v-model="selectedMqttGatewayChipId" class="glass-input h-9 flex-1 appearance-none">
+                  <option value="" disabled>Select MQTT gateway</option>
+                  <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
+                    {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
+                  </option>
+                </select>
+                <button v-if="settingsTransport === 'serial'" @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-9 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
                   <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
@@ -6088,14 +6344,14 @@ function toggleSelectAllBulkPorts() {
               <label class="font-medium text-slate-400">Transport</label>
               <select v-model="settingsTransport" class="glass-input h-9 appearance-none">
                 <option value="serial">Serial</option>
-                <option value="mqtt" disabled>MQTT later</option>
+                <option value="mqtt">MQTT</option>
                 <option value="lora" disabled>LoRa gateway later</option>
               </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Admin path</label>
               <div class="glass-input h-9 flex items-center text-slate-400">
-                {{ settingsTransport === 'serial' ? 'USB serial admin' : 'Not available yet' }}
+                {{ settingsTransport === 'serial' ? 'USB serial admin' : (settingsTransport === 'mqtt' ? 'MQTT remote admin' : 'Not available yet') }}
               </div>
             </div>
           </div>
@@ -7071,13 +7327,26 @@ function toggleSelectAllBulkPorts() {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">USB gateway</label>
-              <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+              <label class="font-medium text-slate-400">Connection Mode</label>
+              <select v-model="fleetTransport" class="glass-input h-10 appearance-none">
+                <option value="serial">USB Serial Gateway</option>
+                <option value="mqtt">Remote MQTT Broker</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">{{ fleetTransport === 'serial' ? 'USB gateway' : 'MQTT gateway' }}</label>
+              <select v-if="fleetTransport === 'serial'" v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
                 <option value="" disabled>Select USB gateway</option>
                 <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                   {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
+                </option>
+              </select>
+              <select v-else v-model="selectedMqttGatewayChipId" class="glass-input h-10 flex-1 appearance-none">
+                <option value="" disabled>Select MQTT gateway</option>
+                <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
+                  {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
                 </option>
               </select>
             </div>

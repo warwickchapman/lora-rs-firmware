@@ -5,6 +5,10 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Decoupled admin command execution from `SerialAdmin` to a transport-neutral `AdminExecutor`, allowing identical command capability over physical serial and MQTT connections.
+- Implemented secure remote request validation over MQTT featuring a boot-safe duplicate request cache (circular request ID cache of size 10) and ntp-aware timestamp TTL checks.
+- Enforced credential safety over MQTT by rejecting `"get_config"` secret exports unless the operator has explicitly provisioned `allow_mqtt_secret_export = true`.
+- Wired `AdminExecutor` to `MqttBridge` to execute incoming commands on `<root>/lrs-<chip>/admin_command` and publish responses on `<root>/lrs-<chip>/admin_response`.
 - Raw ESP uptime (`uptime_ms`) is now exclusively populated from raw millisecond telemetry (`kMaintenancePageVersion`) and is no longer assigned from coarse debug minutes telemetry.
 - Gateway cached peer uptime is cleared immediately on standard non-uptime telemetry status packets (Heartbeats, PollResponses, ACKs, MqttStatus) to prevent stale uptime carry-forward.
 - Maintenance telemetry page bursts are protected from clearing fresh uptime by enforcing a 5-second grace period before clearing.
@@ -21,7 +25,10 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
 
 ### Flasher UI Improvements
+- Integrated remote MQTT gateway connection and control support to Fleet (network) and Settings tabs, supporting connection state indicators and dynamic MQTT gateway selection.
+- Created reactive listeners for MQTT telemetry, status, discovery, and transactional response events.
 - Added platform-aware keyboard shortcuts (CMD + 1..5 on macOS, CTRL + 1..5 on Windows/Linux) to switch between Flash, Provision, Fleet, Monitor, and Settings views, complete with editable-target input guards and navigation hover tooltip hints.
+
 - Exposed MQTT control inputs ("Accept gateway MQTT commands" and "Controllers" list) for Remote/Receiver units in the settings tab, clarifying that remote nodes must authorize the Gateway's local LoRa address.
 - Added a warning banner and inline warning status on the Gateway MQTT settings tab if paired input-control is enabled, explaining that physical input overrides block MQTT relay commands to prevent conflicting state loops.
 - Simplified operator views in Fleet and Monitor: displays a single unified `Relay` and `Input` state, removing raw feedback columns and confusing `ack X · fb Y` details.

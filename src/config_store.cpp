@@ -84,6 +84,7 @@ constexpr const char *kAllowedFields[] = {
     "mqtt_user",
     "mqtt_password",
     "mqtt_topic_root",
+    "allow_mqtt_secret_export",
     "sensor_temp_enabled",
     "sensor_temp_pin",
     "sensor_temp_interval_s",
@@ -380,6 +381,7 @@ bool ConfigStore::begin() {
   cfg_.mqtt_user = root["mqtt_user"] | "";
   cfg_.mqtt_password = root["mqtt_password"] | "";
   cfg_.mqtt_topic_root = root["mqtt_topic_root"] | "lora";
+  cfg_.allow_mqtt_secret_export = root["allow_mqtt_secret_export"] | false;
   cfg_.sensor_temp_enabled = root["sensor_temp_enabled"] | false;
   cfg_.sensor_temp_pin = root["sensor_temp_pin"] | 0;
   cfg_.sensor_temp_interval_s = root["sensor_temp_interval_s"] | 10;
@@ -536,6 +538,7 @@ bool ConfigStore::save() {
   doc["mqtt_user"] = cfg_.mqtt_user;
   doc["mqtt_password"] = cfg_.mqtt_password;
   doc["mqtt_topic_root"] = cfg_.mqtt_topic_root;
+  doc["allow_mqtt_secret_export"] = cfg_.allow_mqtt_secret_export;
   doc["sensor_temp_enabled"] = cfg_.sensor_temp_enabled;
   doc["sensor_temp_pin"] = cfg_.sensor_temp_pin;
   doc["sensor_temp_interval_s"] = cfg_.sensor_temp_interval_s;
@@ -817,6 +820,7 @@ void ConfigStore::setDefaults() {
   cfg_.mqtt_user = "";
   cfg_.mqtt_password = "";
   cfg_.mqtt_topic_root = "lora";
+  cfg_.allow_mqtt_secret_export = false;
   cfg_.sensor_temp_enabled = false;
   cfg_.sensor_temp_pin = 0;
   cfg_.sensor_temp_interval_s = 10;
