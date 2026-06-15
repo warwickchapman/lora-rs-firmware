@@ -724,20 +724,36 @@ const deviceInfo = computed<DeviceInfo | null>({
     if (state) state.deviceInfo = info;
   }
 });
+const targetGatewayKey = computed(() => {
+  if (activeMode.value === 'network') {
+    return fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  }
+  if (activeMode.value === 'settings') {
+    return settingsTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : settingsSelectedPort.value;
+  }
+  if (activeMode.value === 'monitor') {
+    return monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+  }
+  if (activeMode.value === 'pair') {
+    return gatewaySelectedPort.value;
+  }
+  return flashSelectedPort.value;
+});
+
 const pairAdminPassword = computed<string>({
   get: () => {
-    const state = serialDeviceState(gatewaySelectedPort.value);
+    const state = serialDeviceState(targetGatewayKey.value);
     return state?.adminPassword || state?.deviceInfo?.password?.trim() || '';
   },
   set: (password) => {
-    const state = serialDeviceState(gatewaySelectedPort.value);
+    const state = serialDeviceState(targetGatewayKey.value);
     if (state) state.adminPassword = password;
   }
 });
 const wifiNetworks = computed<WifiNetwork[]>({
-  get: () => serialDeviceState(gatewaySelectedPort.value)?.wifiNetworks || [],
+  get: () => serialDeviceState(targetGatewayKey.value)?.wifiNetworks || [],
   set: (networks) => {
-    const state = serialDeviceState(gatewaySelectedPort.value);
+    const state = serialDeviceState(targetGatewayKey.value);
     if (state) state.wifiNetworks = networks;
   }
 });
@@ -749,9 +765,9 @@ const settingsWifiNetworks = computed<WifiNetwork[]>({
   }
 });
 const pairWifiSsid = computed<string>({
-  get: () => serialDeviceState(gatewaySelectedPort.value)?.wifiSsid || '',
+  get: () => serialDeviceState(targetGatewayKey.value)?.wifiSsid || '',
   set: (ssid) => {
-    const state = serialDeviceState(gatewaySelectedPort.value);
+    const state = serialDeviceState(targetGatewayKey.value);
     if (state) state.wifiSsid = ssid;
   }
 });
@@ -808,7 +824,7 @@ const monitorContextLabel = computed(() => {
 });
 const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
 const pairDiscoveredDeviceCount = computed(() => pairStatus.value?.devices?.length || 0);
-const fleetGatewayDevice = computed(() => serialDeviceState(gatewaySelectedPort.value));
+const fleetGatewayDevice = computed(() => serialDeviceState(targetGatewayKey.value));
 const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
 const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
 
@@ -1405,6 +1421,7 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
     }
     for (const known of Object.keys(serialDevicesByPort.value)) {
       if (currentNames.includes(known)) continue;
+      if (isMqttGatewayKey(known)) continue;
       
       // Clear physical cached data immediately so a reconnect forces a fresh probe
       const state = serialDevicesByPort.value[known];
@@ -1848,6 +1865,11 @@ function normalizeChipId(raw: string | undefined | null): string {
   return String(raw || '').trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '').toLowerCase();
 }
 
+function isMqttGatewayKey(key: string): boolean {
+  if (!key) return false;
+  return key.startsWith('lrs-') || /^[0-9a-fA-F]{6,8}$/.test(key);
+}
+
 function lrsDeviceName(rawChipId: string | undefined | null): string {
   const chip = normalizeChipId(rawChipId);
   if (!chip) return '-';
@@ -2099,7 +2121,7 @@ async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payloa
 async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
   if (!port) throw new Error('Select the USB gateway first');
 
-  const isMqtt = port.startsWith('lrs-') || /^[0-9a-fA-F]+$/.test(port) || fleetTransport.value === 'mqtt' || monitorTransport.value === 'mqtt' || settingsTransport.value === 'mqtt';
+  const isMqtt = isMqttGatewayKey(port);
   if (isMqtt) {
     const targetChipId = port.replace(/^lrs-/, '');
     return await sendMqttAdminCommand<T>(targetChipId, cmd, payload, timeoutMs);
@@ -2795,7 +2817,7 @@ async function toggleMonitorMqttConnection() {
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
-  const port = gatewaySelectedPort.value;
+  const port = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
   const state = serialDeviceState(port);
   if (!force && state?.status) return state.status;
   try {
@@ -5292,6 +5314,40 @@ onMounted(async () => {
     mqttGateways.value[payload.chip_id] = payload;
     if (!selectedMqttGatewayChipId.value) {
       selectedMqttGatewayChipId.value = payload.chip_id;
+    }
+    const state = serialDeviceState(payload.chip_id);
+    if (state) {
+      const staConnected = !!payload.sta_ip && payload.sta_ip !== '0.0.0.0';
+      const statusObj: SerialAdminStatus = {
+        ok: true,
+        cmd: 'status',
+        fw_version: payload.fw_version || '',
+        chip_id: payload.chip_id,
+        serial: payload.mac || '',
+        uptime_ms: Number(payload.uptime_ms || 0),
+        heap_free: state.status?.heap_free || 0,
+        heap_frag_pct: state.status?.heap_frag_pct || 0,
+        heap_max_block: state.status?.heap_max_block || 0,
+        mode: state.status?.mode || '',
+        role: payload.role === 'tx' ? 'gateway' : (payload.role || ''),
+        role_tx: payload.role === 'tx',
+        local_address: payload.addr || state.status?.local_address || 254,
+        remote_address: payload.remote_addr || state.status?.remote_address || 0,
+        commissioned: true,
+        fleet_passphrase_default: state.status?.fleet_passphrase_default || false,
+        wifi: {
+          admin_enabled: true,
+          sta_ssid: payload.sta_ssid || '',
+          sta_connected: staConnected,
+          status: staConnected ? 'connected' : 'disconnected',
+          ip: payload.sta_ip || '',
+          rssi: state.status?.wifi?.rssi || 0,
+          ap_active: !!payload.ap_ip
+        }
+      };
+      state.status = statusObj;
+      state.adminSupported = true;
+      adoptGatewayWifiFromStatus(statusObj, payload.chip_id);
     }
   });
 

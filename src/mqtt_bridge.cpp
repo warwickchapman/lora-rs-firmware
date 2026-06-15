@@ -554,11 +554,28 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 
   if (strcmp(topic, admin_command_topic_) == 0) {
-    if (!runtime_.mqtt_control_enabled) {
-      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+    if (length == 0 || executor_ == nullptr) {
       return;
     }
-    if (length == 0 || executor_ == nullptr) {
+    if (!runtime_.mqtt_control_enabled) {
+      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
+      JsonDocument reqDoc;
+      deserializeJson(reqDoc, payload, length);
+      const char *reqId = reqDoc["id"] | "";
+      const char *cmd = reqDoc["cmd"] | "";
+
+      JsonDocument respDoc;
+      respDoc["ok"] = false;
+      respDoc["cmd"] = cmd;
+      if (reqId[0] != '\0') {
+        respDoc["id"] = reqId;
+      }
+      respDoc["error"] = "mqtt_control_disabled";
+      String respStr;
+      serializeJson(respDoc, respStr);
+      if (mqtt_client_.connected()) {
+        mqtt_client_.publish(admin_response_topic_, respStr.c_str(), false);
+      }
       return;
     }
     String cmdPayload;
