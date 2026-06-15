@@ -626,6 +626,7 @@ const isSerialSystemAction = ref(false);
 const showSerialWifiPassword = ref(false);
 const showSerialMqttPassword = ref(false);
 const showSerialFleetKey = ref(false);
+const showSettingsAdminPassword = ref(false);
 const serialFactoryKeepFleet = ref(false);
 const serialFactoryKeepWifi = ref(true);
 
@@ -747,6 +748,16 @@ const pairAdminPassword = computed<string>({
   },
   set: (password) => {
     const state = serialDeviceState(targetGatewayKey.value);
+    if (state) state.adminPassword = password;
+  }
+});
+const settingsAdminPassword = computed<string>({
+  get: () => {
+    const state = serialDeviceState(selectedPort.value);
+    return state?.adminPassword || state?.deviceInfo?.password?.trim() || '';
+  },
+  set: (password) => {
+    const state = serialDeviceState(selectedPort.value);
     if (state) state.adminPassword = password;
   }
 });
@@ -965,7 +976,12 @@ const bulkResetDisabled = computed(() =>
 );
 const serialAdminPassword = computed(() => deviceInfo.value?.password?.trim() || '');
 const serialAdminBusy = computed(() => isSerialAdminLoading.value || isSerialAdminSaving.value || isSerialSystemAction.value);
-const serialAdminDisabled = computed(() => !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isSelectedPortMonitoring.value || isLoadingInfo.value || serialAdminBusy.value);
+const serialAdminDisabled = computed(() => {
+  if (settingsTransport.value === 'mqtt') {
+    return !selectedPort.value || isFlashing.value || serialAdminBusy.value;
+  }
+  return !selectedPort.value || !hasActiveDeviceInfo.value || isFlashing.value || isSelectedPortMonitoring.value || isLoadingInfo.value || serialAdminBusy.value;
+});
 const serialStatusSummary = computed(() => {
   const st = serialAdminStatus.value;
   if (!st && serialAdminConfig.value) return 'Settings loaded. Refresh status to inspect live firmware health.';
@@ -3702,14 +3718,18 @@ async function triggerIdentify() {
 async function refreshSerialAdminStatus(port: unknown = selectedPort.value) {
   const targetPort = typeof port === 'string' ? port : selectedPort.value;
   if (!targetPort) {
-    notify('Select a USB device first');
+    if (settingsTransport.value === 'mqtt') {
+      notify('Select an MQTT gateway first');
+    } else {
+      notify('Select a USB device first');
+    }
     return;
   }
   isSerialAdminLoading.value = true;
-  pushSerialLog('Refreshing local admin status...');
+  pushSerialLog(settingsTransport.value === 'mqtt' ? 'Refreshing MQTT admin status...' : 'Refreshing local admin status...');
   try {
     const state = serialDeviceState(targetPort);
-    if (state && !state.adminSupported) {
+    if (settingsTransport.value !== 'mqtt' && state && !state.adminSupported) {
       await probeSerialAdminSupport(targetPort);
     }
     const out = await sendEasyPairCommandOnPort<SerialAdminStatus>(targetPort, 'status', {}, 5000, { label: 'Refresh status' });
@@ -3731,19 +3751,32 @@ async function refreshSerialAdminStatus(port: unknown = selectedPort.value) {
 async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
   const targetPort = typeof port === 'string' ? port : selectedPort.value;
   if (!targetPort) {
-    notify('Select a USB device first');
+    if (settingsTransport.value === 'mqtt') {
+      notify('Select an MQTT gateway first');
+    } else {
+      notify('Select a USB device first');
+    }
     return;
   }
   const state = serialDeviceState(targetPort);
-  const password = state?.deviceInfo?.password?.trim() || '';
-  if (!password) {
-    notify('Get device info first to use the factory password');
-    return;
+  let password = '';
+  if (settingsTransport.value === 'mqtt') {
+    password = state?.adminPassword?.trim() || '';
+    if (!password) {
+      notify('Enter the remote admin password first');
+      return;
+    }
+  } else {
+    password = state?.deviceInfo?.password?.trim() || '';
+    if (!password) {
+      notify('Get device info first to use the factory password');
+      return;
+    }
   }
   isSerialAdminLoading.value = true;
-  pushSerialLog('Loading local device configuration...');
+  pushSerialLog('Loading device configuration...');
   try {
-    if (state && !state.adminSupported) {
+    if (settingsTransport.value !== 'mqtt' && state && !state.adminSupported) {
       await probeSerialAdminSupport(targetPort);
     }
     const out = await sendEasyPairCommandOnPort<{ ok: boolean; cmd: string; config: SerialAdminConfig }>(targetPort, 'get_config', {
@@ -3753,7 +3786,7 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
     if (state) {
       state.config = normalizeSerialAdminConfig(out.config, state.status);
     }
-    pushSerialLog('Local configuration loaded. Password fields stay blank unless you enter new values.');
+    pushSerialLog('Configuration loaded. Password fields stay blank unless you enter new values.');
   } catch (e) {
     const msg = serialFeatureError('Config load', e);
     pushSerialLog(msg);
@@ -3765,10 +3798,14 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
 
 async function fetchSerialDeviceSettings() {
   if (!selectedPort.value) {
-    notify('Select a USB device first');
+    if (settingsTransport.value === 'mqtt') {
+      notify('Select an MQTT gateway first');
+    } else {
+      notify('Select a USB device first');
+    }
     return;
   }
-  if (!hasActiveDeviceInfo.value) {
+  if (settingsTransport.value !== 'mqtt' && !hasActiveDeviceInfo.value) {
     const ok = await readDeviceInfo();
     if (!ok) return;
   }
@@ -3843,20 +3880,33 @@ function serialConfigPatch(): Record<string, any> {
 async function saveSerialAdminConfig() {
   const port = selectedPort.value;
   if (!port) {
-    notify('No USB port selected');
+    if (settingsTransport.value === 'mqtt') {
+      notify('No MQTT gateway selected');
+    } else {
+      notify('No USB port selected');
+    }
     return;
   }
   if (!serialAdminConfig.value) {
     notify('Load config first');
     return;
   }
-  const password = serialAdminPassword.value;
-  if (!password) {
-    notify('Get device info first to use the factory password');
-    return;
+  let password = '';
+  if (settingsTransport.value === 'mqtt') {
+    password = settingsAdminPassword.value;
+    if (!password) {
+      notify('Enter the remote admin password first');
+      return;
+    }
+  } else {
+    password = serialAdminPassword.value;
+    if (!password) {
+      notify('Get device info first to use the factory password');
+      return;
+    }
   }
   isSerialAdminSaving.value = true;
-  pushSerialLog('Saving local device configuration...');
+  pushSerialLog(settingsTransport.value === 'mqtt' ? 'Saving remote configuration...' : 'Saving local device configuration...');
   try {
     const out = await sendEasyPairCommandOnPort<any>(port, 'set_config', {
       admin_password: password,
@@ -3868,6 +3918,7 @@ async function saveSerialAdminConfig() {
       rebooting ? 'admin password changed; device is rebooting' : ''
     ].filter(Boolean);
     pushSerialLog(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
+    notify(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
     if (rebooting) {
       const state = serialDeviceState(port);
       if (state) {
@@ -3876,11 +3927,22 @@ async function saveSerialAdminConfig() {
       }
     } else {
       if (selectedPort.value === port) {
-        await refreshSerialAdminStatus(port);
-        await loadSerialAdminConfig(port);
+        if (settingsTransport.value === 'mqtt' || out.network_restarted) {
+          pushSerialLog('Networking or transport may be restarting. Click "Refresh status" or "Fetch settings" manually once the device settles.');
+          setTimeout(async () => {
+            try {
+              await refreshSerialAdminStatus(port);
+              await loadSerialAdminConfig(port);
+            } catch (err) {
+              pushSerialLog('Auto-refresh deferred: ' + (err instanceof Error ? err.message : String(err)));
+            }
+          }, 3000);
+        } else {
+          await refreshSerialAdminStatus(port);
+          await loadSerialAdminConfig(port);
+        }
       }
     }
-    notify(`Configuration saved${effects.length ? `; ${effects.join('; ')}` : ''}.`);
   } catch (e) {
     const msg = serialFeatureError('Config save', e);
     pushSerialLog(msg);
@@ -6359,7 +6421,7 @@ function toggleSelectAllBulkPorts() {
                   <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
                 </svg>
               </button>
-              <button @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+              <button v-if="settingsTransport !== 'mqtt'" @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 {{ isLoadingInfo ? 'Reading...' : 'Read identity' }}
               </button>
               <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
@@ -6374,7 +6436,7 @@ function toggleSelectAllBulkPorts() {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_10rem_10rem]">
+          <div :class="['grid grid-cols-1 gap-2', settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_8rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem_10rem]']">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Device</label>
               <div class="flex gap-2">
@@ -6404,10 +6466,45 @@ function toggleSelectAllBulkPorts() {
                 <option value="lora" disabled>LoRa gateway later</option>
               </select>
             </div>
-            <div class="flex flex-col gap-1.5 text-xs">
+            <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">Admin password</label>
+              <div class="flex gap-2 relative">
+                <input
+                  v-model="settingsAdminPassword"
+                  :type="showSettingsAdminPassword ? 'text' : 'password'"
+                  class="glass-input h-9 flex-1 pr-10 font-mono text-xs"
+                  placeholder="Enter admin password"
+                />
+                <button
+                  type="button"
+                  @click="showSettingsAdminPassword = !showSettingsAdminPassword"
+                  class="absolute right-2 top-2.5 text-slate-400 hover:text-slate-200"
+                  style="background: transparent; border: none; padding: 0;"
+                >
+                  <svg v-if="showSettingsAdminPassword" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                </button>
+              </div>
+            </div>
+            <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">MQTT config</label>
+              <button
+                @click="openMonitorMqttSettings"
+                class="glass-input h-9 hover:bg-slate-700/70 text-xs font-bold whitespace-nowrap"
+              >
+                Broker config
+              </button>
+            </div>
+            <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">MQTT broker</label>
+              <span :class="['inline-flex h-9 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+                {{ monitorMqttConnected ? 'Connected' : 'Offline' }}
+              </span>
+            </div>
+            <div v-else class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Admin path</label>
               <div class="glass-input h-9 flex items-center text-slate-400">
-                {{ settingsTransport === 'serial' ? 'USB serial admin' : (settingsTransport === 'mqtt' ? 'MQTT remote admin' : 'Not available yet') }}
+                USB serial admin
               </div>
             </div>
           </div>
@@ -6430,8 +6527,11 @@ function toggleSelectAllBulkPorts() {
               Factory default: this device is not commissioned yet. Use Provision before treating it as an operational transmitter or receiver.
             </div>
 
-            <div v-if="!hasActiveDeviceInfo && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
+            <div v-if="!hasActiveDeviceInfo && settingsTransport !== 'mqtt' && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
               Select a USB device and read device info before loading or saving settings.
+            </div>
+            <div v-if="settingsTransport === 'mqtt' && !serialAdminConfig && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
+              Select an MQTT gateway and fetch settings to edit configuration.
             </div>
 
             <div v-if="settingsTab === 'general'" class="flex flex-col gap-3">
@@ -7288,8 +7388,8 @@ function toggleSelectAllBulkPorts() {
         <div class="glass-card w-full max-w-2xl overflow-hidden text-left">
           <div class="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-3 py-2">
             <div>
-              <h2 class="text-sm font-bold text-cyan-300">Monitor MQTT Settings</h2>
-              <p class="mt-0.5 text-xs text-slate-500">Used when Monitor transport is set to MQTT.</p>
+              <h2 class="text-sm font-bold text-cyan-300">MQTT Broker Settings</h2>
+              <p class="mt-0.5 text-xs text-slate-500">Used when remote administration or monitoring transport is set to MQTT.</p>
             </div>
             <button
               @click="closeMonitorMqttSettings"

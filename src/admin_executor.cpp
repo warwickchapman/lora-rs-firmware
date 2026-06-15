@@ -787,9 +787,6 @@ void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer) {
     sendError("set_config", error.c_str(), id, writer);
     return;
   }
-  if (on_apply_)
-    on_apply_(networkChanged, otaAuthChanged);
-
   JsonDocument out;
   out["cmd"] = "set_config";
   if (id[0] != '\0')
@@ -797,6 +794,11 @@ void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer) {
   out["network_restarted"] = networkChanged;
   out["rebooting"] = otaAuthChanged;
   sendOk(out, writer);
+
+  if (on_apply_) {
+    delay(50); // Allow TX buffers to flush response
+    on_apply_(networkChanged, otaAuthChanged);
+  }
 }
 
 void AdminExecutor::handleFactoryReset(JsonDocument &doc, ResponseWriter writer) {
