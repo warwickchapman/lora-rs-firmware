@@ -931,15 +931,18 @@ const fleetGatewayIsFactoryDefault = computed(() => {
 const hasAnyRemoteIp = computed(() => {
   return loraInventory.value.some(d => !!d.ip);
 });
-const fleetGatewayFlashDisabled = computed(() =>
-  !gatewaySelectedPort.value ||
-  fleetGatewayFlashPhase.value !== 'idle' ||
-  isNetworkGatewayLoading.value ||
-  isLoraInventoryScanning.value ||
-  remoteOtaBusyAddress.value !== null ||
-  isFirmwareServerStarting.value ||
-  isPairBusy.value
-);
+const fleetGatewayFlashDisabled = computed(() => {
+  const { port, password, isMqtt } = fleetGatewayCommandTarget();
+  if (!port) return true;
+  if (isMqtt && !monitorMqttConnected.value) return true;
+  if (isMqtt && !password) return true;
+  return fleetGatewayFlashPhase.value !== 'idle' ||
+    isNetworkGatewayLoading.value ||
+    isLoraInventoryScanning.value ||
+    remoteOtaBusyAddress.value !== null ||
+    isFirmwareServerStarting.value ||
+    isPairBusy.value;
+});
 const loraInventoryProgressLabel = computed(() => {
   const scan = loraInventoryScan.value;
   if (!scan) return 'Idle';
@@ -3599,20 +3602,23 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
 }
 
 function fleetGatewayFlashUnavailableReason(): string {
-  if (!gatewaySelectedPort.value) return 'Select a USB gateway first';
+  const { port, isMqtt } = fleetGatewayCommandTarget();
+  if (!port) return isMqtt ? 'Select an MQTT gateway first' : 'Select a USB gateway first';
+  if (isMqtt && !monitorMqttConnected.value) return 'MQTT broker is not connected. Connect in the Monitor tab first.';
+  if (isMqtt && !fleetGatewayCommandTarget().password) return 'Enter the gateway admin password';
   if (fleetGatewayFlashPhase.value !== 'idle') return 'Gateway flash is already running';
   if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
   if (isLoraInventoryScanning.value) return 'Stop the fleet scan before flashing the gateway';
   if (remoteOtaBusyAddress.value !== null) return 'Wait for the remote flash command to finish';
   if (isFirmwareServerStarting.value) return 'Firmware server is starting';
   if (isPairBusy.value) return 'Provisioning is active';
-  return 'Upgrade the selected USB gateway';
+  return isMqtt ? 'Upgrade the selected MQTT gateway via OTA' : 'Upgrade the selected USB gateway';
 }
 
 async function flashFleetGateway() {
-  const port = gatewaySelectedPort.value;
+  const { port, password, isMqtt } = fleetGatewayCommandTarget();
   if (!port) {
-    notify('Select a USB gateway first');
+    notify(isMqtt ? 'Select an MQTT gateway first' : 'Select a USB gateway first');
     return;
   }
   if (fleetGatewayFlashDisabled.value) {
@@ -3621,63 +3627,117 @@ async function flashFleetGateway() {
   }
   const firmwareOptions = networkOtaFirmwareOptions();
   if (!firmwareOptions) return;
-  const label = fleetGatewayIdentity.value?.ssid || fleetGatewayIdentity.value?.serial || port;
+  const label = isMqtt ? `lrs-${port}` : (fleetGatewayIdentity.value?.ssid || fleetGatewayIdentity.value?.serial || port);
   const currentFw = fleetGatewayStatus.value?.fw_version || 'unknown';
   const targetFw = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
     ? `${flasherAppVersion.value} (local build)`
     : selectedVersion.value;
 
-  const confirmed = await confirmOperatorAction(
-    `Upgrade the USB gateway ${label} on ${port}?\n\n` +
-    `• Current version: ${currentFw}\n` +
-    `• Upgrade version: ${targetFw}\n\n` +
-    `This will reboot the gateway and pause Fleet operations while upgrading.`,
-    { confirmText: 'Upgrade gateway', danger: true }
-  );
+  const confirmMsg = isMqtt
+    ? `Upgrade the MQTT gateway ${label} via OTA?\n\n` +
+      `• Current version: ${currentFw}\n` +
+      `• Upgrade version: ${targetFw}\n\n` +
+      `This will trigger the gateway to download the update and reboot. Gateway operations will temporarily pause.`
+    : `Upgrade the USB gateway ${label} on ${port}?\n\n` +
+      `• Current version: ${currentFw}\n` +
+      `• Upgrade version: ${targetFw}\n\n` +
+      `This will reboot the gateway and pause Fleet operations while upgrading.`;
+
+  const confirmed = await confirmOperatorAction(confirmMsg, { confirmText: 'Upgrade gateway', danger: true });
   if (!confirmed) {
     return;
   }
+
   isFlashing.value = true;
   fleetGatewayFlashPhase.value = 'flashing';
-  noteMonitorReleasedForPort(port, 'gateway firmware flash needs this port');
-  networkStatusMessage.value = `Flashing USB gateway on ${port}...`;
-  pushNetworkLog(`Flashing USB gateway on ${port} with ${firmwareOptions.firmware_path}.`);
-  try {
-    const out = await invoke<string>('flash_firmware', {
-      port,
-      firmwarePath: firmwareOptions.firmware_path,
-      region: firmwareOptions.region,
-      eraseFirst: false
-    });
-    pushNetworkLog(out || `Gateway flash completed on ${port}.`);
-    fleetGatewayFlashPhase.value = 'rebooting';
-    networkStatusMessage.value = 'Gateway flash complete; gateway is rebooting.';
-    notify('Gateway flash complete');
-    await new Promise(resolve => setTimeout(resolve, 4000));
-    fleetGatewayFlashPhase.value = 'waiting';
-    networkStatusMessage.value = 'Waiting for gateway serial admin after reboot...';
-    await waitForSerialAdminHello(port, 18000);
-    fleetGatewayFlashPhase.value = 'updated';
-    networkStatusMessage.value = 'Gateway rebooted; refreshing status.';
-    await loadNetworkGateway();
-    window.setTimeout(() => {
-      if (fleetGatewayFlashPhase.value === 'updated') {
-        fleetGatewayFlashPhase.value = 'idle';
-      }
-    }, 8000);
-  } catch (e) {
-    fleetGatewayFlashPhase.value = 'failed';
-    const msg = `Gateway flash failed: ${e}`;
-    networkStatusMessage.value = msg;
-    pushNetworkLog(msg);
-    notify(msg);
-    window.setTimeout(() => {
-      if (fleetGatewayFlashPhase.value === 'failed') {
-        fleetGatewayFlashPhase.value = 'idle';
-      }
-    }, 15000);
-  } finally {
-    isFlashing.value = false;
+
+  if (isMqtt) {
+    networkStatusMessage.value = `Triggering OTA upgrade for MQTT gateway ${label}...`;
+    pushNetworkLog(`Triggering OTA upgrade for MQTT gateway ${label} with ${firmwareOptions.firmware_path}.`);
+    try {
+      const info = await ensureRemoteFlashFirmwareServer();
+      const otaUrl = info.urls.find(u => !u.includes('127.0.0.1') && !u.includes('localhost'));
+      if (!otaUrl) throw new Error('No LAN firmware server URL available for the MQTT gateway');
+
+      await sendEasyPairCommandOnPort<any>(port, 'ota_pull', {
+        admin_password: password,
+        url: otaUrl,
+        sha256: info.sha256
+      }, 8000);
+
+      fleetGatewayFlashPhase.value = 'rebooting';
+      networkStatusMessage.value = 'OTA command accepted; gateway is downloading & rebooting.';
+      notify('Gateway OTA upgrade triggered');
+      await new Promise(resolve => setTimeout(resolve, 4000));
+
+      fleetGatewayFlashPhase.value = 'waiting';
+      networkStatusMessage.value = 'Waiting for gateway to reconnect to MQTT...';
+      await waitForMqttGatewayUpdate(port, selectedFirmwareCandidateVersion(), 60000);
+
+      fleetGatewayFlashPhase.value = 'updated';
+      networkStatusMessage.value = 'Gateway upgraded and reconnected over MQTT.';
+      notify('Gateway OTA upgrade successful');
+      await loadNetworkGateway();
+      window.setTimeout(() => {
+        if (fleetGatewayFlashPhase.value === 'updated') {
+          fleetGatewayFlashPhase.value = 'idle';
+        }
+      }, 8000);
+    } catch (e) {
+      fleetGatewayFlashPhase.value = 'failed';
+      const msg = `MQTT Gateway OTA failed: ${e}`;
+      networkStatusMessage.value = msg;
+      pushNetworkLog(msg);
+      notify(msg);
+      window.setTimeout(() => {
+        if (fleetGatewayFlashPhase.value === 'failed') {
+          fleetGatewayFlashPhase.value = 'idle';
+        }
+      }, 15000);
+    } finally {
+      isFlashing.value = false;
+    }
+  } else {
+    noteMonitorReleasedForPort(port, 'gateway firmware flash needs this port');
+    networkStatusMessage.value = `Flashing USB gateway on ${port}...`;
+    pushNetworkLog(`Flashing USB gateway on ${port} with ${firmwareOptions.firmware_path}.`);
+    try {
+      const out = await invoke<string>('flash_firmware', {
+        port,
+        firmwarePath: firmwareOptions.firmware_path,
+        region: firmwareOptions.region,
+        eraseFirst: false
+      });
+      pushNetworkLog(out || `Gateway flash completed on ${port}.`);
+      fleetGatewayFlashPhase.value = 'rebooting';
+      networkStatusMessage.value = 'Gateway flash complete; gateway is rebooting.';
+      notify('Gateway flash complete');
+      await new Promise(resolve => setTimeout(resolve, 4000));
+      fleetGatewayFlashPhase.value = 'waiting';
+      networkStatusMessage.value = 'Waiting for gateway serial admin after reboot...';
+      await waitForSerialAdminHello(port, 18000);
+      fleetGatewayFlashPhase.value = 'updated';
+      networkStatusMessage.value = 'Gateway rebooted; refreshing status.';
+      await loadNetworkGateway();
+      window.setTimeout(() => {
+        if (fleetGatewayFlashPhase.value === 'updated') {
+          fleetGatewayFlashPhase.value = 'idle';
+        }
+      }, 8000);
+    } catch (e) {
+      fleetGatewayFlashPhase.value = 'failed';
+      const msg = `Gateway flash failed: ${e}`;
+      networkStatusMessage.value = msg;
+      pushNetworkLog(msg);
+      notify(msg);
+      window.setTimeout(() => {
+        if (fleetGatewayFlashPhase.value === 'failed') {
+          fleetGatewayFlashPhase.value = 'idle';
+        }
+      }, 15000);
+    } finally {
+      isFlashing.value = false;
+    }
   }
 }
 
@@ -3711,6 +3771,23 @@ async function waitForSerialAdminHello(port: string, timeoutMs = 18000): Promise
   const state = serialDeviceState(port);
   if (state) state.adminSupported = false;
   throw lastError || new Error('timed out waiting for hello response');
+}
+
+async function waitForMqttGatewayUpdate(chipId: string, targetVersion: string, timeoutMs = 60000): Promise<boolean> {
+  const started = Date.now();
+  const cleanTarget = targetVersion.replace(/^Local:\s*/i, '').trim();
+  while (Date.now() - started < timeoutMs) {
+    const currentFw = serialDeviceState(chipId)?.status?.fw_version;
+    if (currentFw) {
+      const p1 = parseVersion(currentFw);
+      const p2 = parseVersion(cleanTarget);
+      if (p1 && p2 && compareParsedVersions(p1, p2) >= 0) {
+        return true;
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  throw new Error('MQTT Gateway OTA timeout waiting for reconnection/version update');
 }
 
 function serialFeatureError(feature: string, err: unknown): string {
@@ -7702,7 +7779,7 @@ function toggleSelectAllBulkPorts() {
             <div class="flex flex-wrap items-center gap-2">
               <button
                 @click="loadNetworkGateway"
-                :disabled="isNetworkGatewayLoading || !selectedPort"
+                :disabled="isNetworkGatewayLoading || (fleetTransport === 'mqtt' ? !selectedMqttGatewayChipId : !gatewaySelectedPort)"
                 class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
               >
                 {{ isNetworkGatewayLoading ? 'Loading...' : 'Load gateway' }}

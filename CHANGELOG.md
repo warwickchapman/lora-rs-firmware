@@ -25,6 +25,8 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
 
 ### Flasher UI Improvements
+- Added MQTT Gateway OTA upgrade support: when Fleet connection mode is MQTT, the "Upgrade gateway" button initiates a local firmware file server, dispatches the `ota_pull` admin command to the gateway over MQTT, and monitors MQTT discovery reports for successful version updates.
+- Fixed the "Load gateway" button disabling logic in Fleet mode to correctly evaluate selected MQTT gateways.
 - Integrated remote MQTT gateway connection and control support to Fleet (network) and Settings tabs, supporting connection state indicators and dynamic MQTT gateway selection.
 - Created reactive listeners for MQTT telemetry, status, discovery, and transactional response events.
 - Added platform-aware keyboard shortcuts (CMD + 1..5 on macOS, CTRL + 1..5 on Windows/Linux) to switch between Flash, Provision, Fleet, Monitor, and Settings views, complete with editable-target input guards and navigation hover tooltip hints.
