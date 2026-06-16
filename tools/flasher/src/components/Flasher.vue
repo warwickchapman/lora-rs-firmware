@@ -356,7 +356,13 @@ const selectedPort = computed<string>({
     return flashSelectedPort.value;
   },
   set(port) {
-    if (activeMode.value === 'pair' || activeMode.value === 'network') {
+    if (activeMode.value === 'pair') {
+      if (pairTransport.value === 'mqtt') {
+        selectedMqttGatewayChipId.value = port;
+      } else {
+        gatewaySelectedPort.value = port;
+      }
+    } else if (activeMode.value === 'network') {
       if (fleetTransport.value === 'mqtt') {
         selectedMqttGatewayChipId.value = port;
       } else {
@@ -530,9 +536,16 @@ const monitorMqttDraftPassword = ref('');
 const monitorMqttDraftTopicRoot = ref('lora');
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const fleetTransport = ref<'serial' | 'mqtt'>('serial');
+const pairTransport = ref<'serial' | 'mqtt'>('serial');
+const pairGatewayLoaded = ref(false);
 const mqttGateways = ref<Record<string, any>>({});
 const selectedMqttGatewayChipId = ref('');
-const pairGatewayKey = computed(() => gatewaySelectedPort.value);
+const pairGatewayKey = computed(() => {
+  return pairTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+});
+watch([pairGatewayKey, pairTransport], () => {
+  pairGatewayLoaded.value = false;
+});
 const isMonitorRefreshing = ref(false);
 const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
@@ -752,6 +765,9 @@ const pairAdminPassword = computed<string>({
     if (state) state.adminPassword = password;
   }
 });
+watch(pairAdminPassword, () => {
+  pairGatewayLoaded.value = false;
+});
 const settingsAdminPassword = computed<string>({
   get: () => {
     const state = serialDeviceState(selectedPort.value);
@@ -931,12 +947,15 @@ const loraInventoryProgressLabel = computed(() => {
   const next = scan.next_address || scan.start_address || 1;
   return `Scanning ${next}-${scan.end_address || LRS_REMOTE_SCAN_CAP}, ${scan.sent || 0} probes sent`;
 });
-const gatewayReady = computed(() =>
-  !!pairGatewayKey.value &&
-  !!serialDeviceState(pairGatewayKey.value)?.deviceInfo &&
-  !!serialDeviceState(pairGatewayKey.value)?.adminSupported &&
-  !!pairPassword()
-);
+const gatewayReady = computed(() => {
+  const key = pairGatewayKey.value;
+  if (!key || !pairGatewayLoaded.value || !pairPassword()) return false;
+  if (pairTransport.value === 'mqtt') {
+    return true;
+  }
+  const state = serialDeviceState(key);
+  return !!state?.deviceInfo && !!state?.adminSupported;
+});
 function portGatewayReady(port: string): boolean {
   const state = serialDeviceState(port);
   return !!port && !!state?.deviceInfo && !!state.adminSupported && !!adminPasswordForPort(port);
@@ -1756,7 +1775,7 @@ function markPairFleetKeyManual() {
 function requireProvisionFleetKeyAuthority() {
   const status = serialDeviceState(pairGatewayKey.value)?.status;
   const isCommissioned = status?.commissioned === true && status?.fleet_passphrase_default !== true;
-  if (isCommissioned && pairFleetKeySource.value !== 'gateway') {
+  if (isCommissioned && pairFleetKeySource.value !== 'gateway' && pairFleetKeySource.value !== 'manual') {
     throw new Error('commissioned gateway fleet key was not fetched from the gateway; load gateway again');
   }
   if (!isCommissioned && !pairFleetKey.value.trim()) {
@@ -4084,6 +4103,69 @@ async function loadEasyPairGateway(isAuto = false) {
   loadGatewayInFlight = true;
   isGatewayLoading.value = true;
 
+  if (pairTransport.value === 'mqtt') {
+    const chipId = key.replace(/^lrs-/, '');
+    pushPairLog(`Loading MQTT gateway lrs-${chipId}...`);
+    try {
+      const gw = mqttGateways.value[chipId];
+      const state = serialDeviceState(chipId);
+      if (state) {
+        state.adminSupported = true;
+        state.deviceInfo = {
+          chip_id: chipId,
+          mac: gw?.mac || '',
+          serial: '',
+          password: state.adminPassword || '',
+          local_addr: 254,
+          remote_addr: 0,
+          ssid: gw?.sta_ssid || ''
+        };
+      }
+      await refreshGatewayStatusForPair();
+      const password = pairPassword();
+      if (password) {
+        pushPairLog('Fetching gateway configuration over MQTT...');
+        try {
+          const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
+            admin_password: password,
+            include_secrets: true
+          }, 15000);
+          const retrievedKey = out.config?.fleet_passphrase?.trim() || '';
+          const isCommissioned = serialDeviceState(chipId)?.status?.commissioned;
+          const isDefaultKey = serialDeviceState(chipId)?.status?.fleet_passphrase_default;
+
+          if (isCommissioned && retrievedKey && retrievedKey !== 'lora-default-passphrase' && isDefaultKey === false) {
+            pairFleetKey.value = retrievedKey;
+            pairFleetKeySource.value = 'gateway';
+            pushPairLog(`Retrieved commissioned fleet key from gateway.`);
+          } else if (isCommissioned && isDefaultKey === false && !retrievedKey) {
+            pairFleetKeySource.value = 'manual';
+            pushPairLog('Gateway is commissioned but fleet key is hidden. Please input the fleet key to proceed.');
+          } else if (!isCommissioned || isDefaultKey === true) {
+            generatePairFleetKey(true);
+            pairFleetKeySource.value = 'factory_generated';
+            pushPairLog('Gateway is factory/uncommissioned; generated a new fleet key for first commissioning.');
+          } else {
+            clearPairFleetKey();
+            pushPairLog('Gateway fleet key could not be verified; fleet key field cleared.');
+          }
+          pairGatewayLoaded.value = true;
+        } catch (configErr) {
+          pushPairLog('Gateway config fetch failed: ' + configErr);
+        }
+      }
+    } catch (e) {
+      pushPairLog('Gateway check failed: ' + e);
+      if (!isAuto) {
+        notify('Gateway check failed: ' + e);
+      }
+    } finally {
+      loadGatewayInFlight = false;
+      isGatewayLoading.value = false;
+    }
+    return;
+  }
+
   pushPairLog('Loading USB gateway...');
   try {
     const ok = await ensureDeviceInfoForPort(key, 'pair');
@@ -4120,10 +4202,13 @@ async function loadEasyPairGateway(isAuto = false) {
           clearPairFleetKey();
           pushPairLog('Gateway fleet key could not be verified; fleet key field cleared.');
         }
+        pairGatewayLoaded.value = true;
       } catch (configErr) {
         clearPairFleetKey();
         pushPairLog('Gateway config fetch failed: ' + configErr);
       }
+    } else {
+      pairGatewayLoaded.value = true;
     }
   } catch (e) {
     const state = serialDeviceState(key);
@@ -5954,10 +6039,17 @@ function toggleSelectAllBulkPorts() {
           </div>
 
           <div v-if="pairPanelTab === 'pair'" class="flex flex-col gap-3">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">USB gateway</label>
-              <div class="flex gap-2">
+              <label class="font-medium text-slate-400">Connection Mode</label>
+              <select v-model="pairTransport" class="glass-input h-10 appearance-none">
+                <option value="serial">USB Serial Gateway</option>
+                <option value="mqtt">Remote MQTT Broker</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5 text-xs">
+              <label class="font-medium text-slate-400">{{ pairTransport === 'serial' ? 'USB gateway' : 'MQTT gateway' }}</label>
+              <div v-if="pairTransport === 'serial'" class="flex gap-2">
                 <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
                   <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                     {{ port.port_name }}
@@ -5968,6 +6060,12 @@ function toggleSelectAllBulkPorts() {
                   <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
+              <select v-else v-model="selectedPort" class="glass-input h-10 flex-1 appearance-none">
+                <option value="" disabled>Select MQTT gateway</option>
+                <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
+                  {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
+                </option>
+              </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Scan count</label>
