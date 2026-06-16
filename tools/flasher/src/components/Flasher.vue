@@ -539,6 +539,7 @@ const fleetTransport = ref<'serial' | 'mqtt'>('serial');
 const pairTransport = ref<'serial' | 'mqtt'>('serial');
 const pairGatewayLoaded = ref(false);
 const mqttGateways = ref<Record<string, any>>({});
+const lastMqttDiscoveryMs = ref<Record<string, number>>({});
 const selectedMqttGatewayChipId = ref('');
 const pairGatewayKey = computed(() => {
   return pairTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
@@ -2528,7 +2529,6 @@ async function refreshLoraInventoryStatus(background = true) {
 }
 
 function startLoraInventoryPolling() {
-  if (fleetTransport.value === 'mqtt') return;
   stopLoraInventoryPolling(false, false);
   networkInventoryPollMode.value = 'scan';
   networkInventoryPollTimer.value = window.setInterval(() => {
@@ -3642,11 +3642,21 @@ async function flashFleetGateway() {
       const otaUrl = info.urls.find(u => !u.includes('127.0.0.1') && !u.includes('localhost'));
       if (!otaUrl) throw new Error('No LAN firmware server URL available for the MQTT gateway');
 
-      await sendEasyPairCommandOnPort<any>(port, 'ota_pull', {
-        admin_password: password,
-        url: otaUrl,
-        sha256: info.sha256
-      }, 25000);
+      const cmdSentTime = Date.now();
+      try {
+        await sendEasyPairCommandOnPort<any>(port, 'ota_pull', {
+          admin_password: password,
+          url: otaUrl,
+          sha256: info.sha256
+        }, 35000);
+      } catch (e) {
+        const errText = String(e || '');
+        if (errText.includes('timeout')) {
+          pushNetworkLog('MQTT command response timed out, but gateway may have started downloading. Transitioning to verify phase...');
+        } else {
+          throw e;
+        }
+      }
 
       fleetGatewayFlashPhase.value = 'rebooting';
       networkStatusMessage.value = 'OTA command accepted; gateway is downloading & rebooting.';
@@ -3655,7 +3665,7 @@ async function flashFleetGateway() {
 
       fleetGatewayFlashPhase.value = 'waiting';
       networkStatusMessage.value = 'Waiting for gateway to reconnect to MQTT...';
-      await waitForMqttGatewayUpdate(port, selectedFirmwareCandidateVersion(), 60000);
+      await waitForMqttGatewayUpdate(port, selectedFirmwareCandidateVersion(), cmdSentTime, 65000);
 
       fleetGatewayFlashPhase.value = 'updated';
       networkStatusMessage.value = 'Gateway upgraded and reconnected over MQTT.';
@@ -3756,16 +3766,19 @@ async function waitForSerialAdminHello(port: string, timeoutMs = 18000): Promise
   throw lastError || new Error('timed out waiting for hello response');
 }
 
-async function waitForMqttGatewayUpdate(chipId: string, targetVersion: string, timeoutMs = 60000): Promise<boolean> {
+async function waitForMqttGatewayUpdate(chipId: string, targetVersion: string, startTime: number, timeoutMs = 60000): Promise<boolean> {
   const started = Date.now();
   const cleanTarget = targetVersion.replace(/^Local:\s*/i, '').trim();
   while (Date.now() - started < timeoutMs) {
-    const currentFw = serialDeviceState(chipId)?.status?.fw_version;
-    if (currentFw) {
-      const p1 = parseVersion(currentFw);
-      const p2 = parseVersion(cleanTarget);
-      if (p1 && p2 && compareParsedVersions(p1, p2) >= 0) {
-        return true;
+    const lastDiscovery = lastMqttDiscoveryMs.value[chipId] || 0;
+    if (lastDiscovery >= startTime) {
+      const currentFw = serialDeviceState(chipId)?.status?.fw_version;
+      if (currentFw) {
+        const p1 = parseVersion(currentFw);
+        const p2 = parseVersion(cleanTarget);
+        if (p1 && p2 && compareParsedVersions(p1, p2) >= 0) {
+          return true;
+        }
       }
     }
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -5561,6 +5574,7 @@ onMounted(async () => {
   unlistenMqttGateway = await listen<any>('mqtt-gateway-update', (event) => {
     const payload = event.payload;
     mqttGateways.value[payload.chip_id] = payload;
+    lastMqttDiscoveryMs.value[payload.chip_id] = Date.now();
     if (!selectedMqttGatewayChipId.value) {
       selectedMqttGatewayChipId.value = payload.chip_id;
     }

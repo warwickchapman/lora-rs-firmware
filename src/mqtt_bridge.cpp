@@ -329,7 +329,6 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
   status_publish_in_progress_ = false;
   status_publish_locals_done_ = false;
   status_publish_peer_index_ = 0;
-  old_peer_cleaned_ = false;
 }
 
 void MqttBridge::tick(bool wifiConnected) {
@@ -449,7 +448,6 @@ void MqttBridge::rebuildTopics() {
   snprintf(admin_command_topic_, sizeof(admin_command_topic_), "%s/admin_command", topic_base_);
   snprintf(admin_response_topic_, sizeof(admin_response_topic_), "%s/admin_response", topic_base_);
   snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peers/", topic_base_);
-  snprintf(legacy_peer_prefix_, sizeof(legacy_peer_prefix_), "%s/peer/", topic_base_);
   snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
   snprintf(availability_topic_, sizeof(availability_topic_), "%s/availability", topic_base_);
 
@@ -734,45 +732,15 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
       "heap_frag_pct",   "relay_feedback",
   };
 
-  char addrHexPrefixed[5];
-  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%02X", addr);
-  char addrUnpadded[4];
-  snprintf(addrUnpadded, sizeof(addrUnpadded), "%u", static_cast<unsigned>(addr));
-  char addrPadded[4];
-  snprintf(addrPadded, sizeof(addrPadded), "%02u", static_cast<unsigned>(addr));
-
-  auto clearForSegment = [&](const char *segment) {
-    char topic[kMqttTopicBufBytes];
-    for (const char *leaf : leaves) {
-      if (buildPeerTopic(topic, sizeof(topic), segment, leaf)) {
-        mqtt_client_.publish(topic, "", true);
-      }
-    }
-  };
-
-  // 1. Clear: peers/<NN>/...
-  clearForSegment(addrPadded);
-
-  // 2. Clear: peers/<N>/...
-  clearForSegment(addrUnpadded);
-
-  // 3. Clear: peers/0xNN/...
-  clearForSegment(addrHexPrefixed);
-
-  // 4. Clear: peer/0xNN/...
-  char topic[kMqttTopicBufBytes];
-  for (const char *leaf : leaves) {
-    int n = snprintf(topic, sizeof(topic), "%s%s/%s", legacy_peer_prefix_, addrHexPrefixed, leaf);
-    if (n > 0 && static_cast<size_t>(n) < sizeof(topic)) {
-      mqtt_client_.publish(topic, "", true);
-    }
-  }
-
-  // 5. Clear: peers/<NN_lrs-chipid>/... (when chip ID is known)
   if (chipId != 0) {
     char canonicalSeg[24];
     if (formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId)) {
-      clearForSegment(canonicalSeg);
+      char topic[kMqttTopicBufBytes];
+      for (const char *leaf : leaves) {
+        if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, leaf)) {
+          mqtt_client_.publish(topic, "", true);
+        }
+      }
     }
   }
 }
@@ -828,7 +796,6 @@ bool MqttBridge::connectIfNeeded() {
   }
   publishDiscovery();
   mqtt_client_.publish(availability_topic_, "online", true);
-  old_peer_cleaned_ = false;
   return true;
 }
 
@@ -1117,10 +1084,7 @@ void MqttBridge::publishStatus() {
   if ((now - last_discovery_publish_ms_) >= kDiscoveryPublishIntervalMs) {
     publishDiscovery();
   }
-  if (!old_peer_cleaned_) {
-    clearLegacyPeerRetainedTopics();
-    old_peer_cleaned_ = true;
-  }
+
 }
 
 void MqttBridge::publishDiscovery() {
@@ -1159,49 +1123,4 @@ void MqttBridge::publishDiscovery() {
   }
 }
 
-void MqttBridge::clearLegacyPeerRetainedTopics() {
-  if (!mqtt_client_.connected() || sm_ == nullptr) return;
 
-  const char *leaves[] = {
-      "relay",           "input",              "dry_contact",      "ack_state",        "addr_hex",
-      "addr_dec",        "uplink_rssi_dbm",    "downlink_rssi_dbm", "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
-      "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
-      "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
-      "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",
-      "heap_frag_pct",   "relay_feedback",
-  };
-
-  const size_t nodeCount = sm_->peerCount();
-  for (size_t i = 0; i < nodeCount; ++i) {
-    PeerStatusSnapshot node{};
-    if (!sm_->peerByIndex(i, node)) continue;
-    const uint8_t addr = node.address;
-
-    char addrHexPrefixed[5];
-    snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%02X", addr);
-    char addrUnpadded[4];
-    snprintf(addrUnpadded, sizeof(addrUnpadded), "%u", static_cast<unsigned>(addr));
-    char addrPadded[4];
-    snprintf(addrPadded, sizeof(addrPadded), "%02u", static_cast<unsigned>(addr));
-
-    // All legacy address formats to clear under the current peers/ prefix
-    const char *legacySegs[] = {addrHexPrefixed, addrUnpadded, addrPadded};
-
-    char topic[kMqttTopicBufBytes];
-    for (const char *leaf : leaves) {
-      // Clear old peer/ path (hex-addressed)
-      int n = snprintf(topic, sizeof(topic), "%s%s/%s", legacy_peer_prefix_, addrHexPrefixed, leaf);
-      if (n > 0 && static_cast<size_t>(n) < sizeof(topic)) {
-        mqtt_client_.publish(topic, "", true);
-      }
-      // Clear legacy address formats under current peers/ path
-      for (const char *seg : legacySegs) {
-        if (buildPeerTopic(topic, sizeof(topic), seg, leaf)) {
-          mqtt_client_.publish(topic, "", true);
-        }
-      }
-    }
-    yield();
-  }
-  lrslog::event("mqtt_legacy_peer_cleared", 0, static_cast<uint32_t>(nodeCount), 0);
-}
