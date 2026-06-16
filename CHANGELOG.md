@@ -23,6 +23,8 @@ All notable changes to this pre-release project are documented here in current o
 
 ### MQTT Improvements
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
+- Removed legacy MQTT topic-clearing and boot-time Sweeper logic from the gateway firmware (`mqtt_bridge.cpp`/`mqtt_bridge.h`) to prevent empty legacy directories (`peer/0x01`, `peers/01`, `peers/0x01`, `peers/1`) from appearing in MQTT Explorer. Canonical `peers/<NN_lrs-chipid>/...` cleanup is preserved for explicit forget/remove actions.
+
 
 ### Flasher UI Improvements
 - Added MQTT Gateway OTA upgrade support: when Fleet connection mode is MQTT, the "Upgrade gateway" button initiates a local firmware file server, dispatches the `ota_pull` admin command to the gateway over MQTT, and monitors MQTT discovery reports for successful version updates.
