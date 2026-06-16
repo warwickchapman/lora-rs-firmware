@@ -136,12 +136,10 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 | `relay_feedback` | `0`/`1` | Hardware GPIO readback of relay driver. |
 | `type` | `tx`/`rx` | Device role. |
 | `addr` | `0xNN` | LoRa address (hex). |
-| `temp_c` | float | Local temperature sensor (empty string if not available). |
-| `remote_temp_c` | float | Legacy single-remote temperature (empty string if not available). |
-| `tank_status` | string | `disabled`, `ok`, `fault_open`, `fault_short`, etc. |
-| `tank_depth_mm` | int | Tank depth in mm (empty string if disabled/invalid). |
-| `tank_current_ma` | float | 4–20 mA loop current (empty string if disabled/invalid). |
-| `tank_voltage_mv` | int | ADC reference voltage in mV (empty string if disabled/invalid). |
+| `sensor/<kind>/<instance>/value` | string | Normalized value (float or int) for the given sensor. |
+| `sensor/<kind>/<instance>/state` | string | State for the given sensor (`ok`, `missing`, `fault`, etc.). |
+| `diagnostics/tank_current_ma` | float | 4–20 mA loop current diagnostic (empty string if disabled/invalid). |
+| `diagnostics/tank_voltage_mv` | int | ADC reference voltage in mV (empty string if disabled/invalid). |
 | `last_updated` | int | `millis()` at publish time — use to detect stale data. |
 | `uptime_ms` | int | Gateway uptime in milliseconds. |
 | `heap_free` | int | Free heap bytes (diagnostic). |
@@ -167,11 +165,8 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 | `input` | `0`/`1` | Remote dry contact state (from sensors telemetry, change-detected). |
 | `dry_contact` | `0`/`1` | Alias for `input`. |
 | `ack_state` | string | `acked`, `pending`, `timeout`, `unknown`. |
-| `temp_c` | float | Remote temperature (empty string if not available). |
-| `tank_status` | string | `disabled`, `ok`, `fault_open`, `fault_short`, etc. |
-| `tank_depth_mm` | int | Tank depth in mm (empty string if disabled/invalid). |
-| `tank_current_ma` | float | 4–20 mA loop current (empty string if disabled/invalid). |
-| `tank_voltage_mv` | int | ADC voltage in mV (empty string if disabled/invalid). |
+| `sensor/<kind>/<instance>/value` | string | Remote sensor normalized value. |
+| `sensor/<kind>/<instance>/state` | string | Remote sensor state. |
 | `wifi` | `0`/`1` | Remote WiFi enabled state (empty string if unknown). |
 | `uptime_ms` | int | Remote uptime in milliseconds (from version telemetry; cleared/published as empty when non-uptime status packet is received). |
 | `uplink_rssi_dbm` | int | RSSI of last received packet from this peer (dBm). |

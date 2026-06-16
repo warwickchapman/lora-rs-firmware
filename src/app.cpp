@@ -206,11 +206,7 @@ void App::tick() {
     phaseSlowWarn("tick_time_sync", phaseStartMs);
     phaseStartMs = millis();
   }
-  const TempSensorStatus &ts = sensors_.tempStatus();
-  sm_.setLocalTemperature(config_.settings().sensor_temp_enabled, ts.valid, ts.celsius);
-  const TankSensorStatus &tank = sensors_.tankStatus();
-  sm_.setLocalTank(tank.enabled, tank.valid, tank.state, tank.depth_mm,
-                   tank.current_centi_ma, tank.voltage_mv);
+  sm_.setLocalSensors(sensors_.readings(), sensors_.tankStatus().current_centi_ma, sensors_.tankStatus().voltage_mv);
   if (emitStartupBreadcrumb) {
     LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu",
              static_cast<unsigned long>(millis()));

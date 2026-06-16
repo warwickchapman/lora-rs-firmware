@@ -92,17 +92,15 @@ Per-device topics include:
 - `<root>/lrs-<chipid>/input`
 - `<root>/lrs-<chipid>/dry_contact`
 - `<root>/lrs-<chipid>/relay`
-- `<root>/lrs-<chipid>/temp_c`
-- `<root>/lrs-<chipid>/tank_status`
-- `<root>/lrs-<chipid>/tank_depth_mm`
-- `<root>/lrs-<chipid>/tank_current_ma`
-- `<root>/lrs-<chipid>/tank_voltage_mv`
+- `<root>/lrs-<chipid>/sensor/<kind>/<instance>/value`
+- `<root>/lrs-<chipid>/sensor/<kind>/<instance>/state`
+- `<root>/lrs-<chipid>/diagnostics/tank_current_ma`
+- `<root>/lrs-<chipid>/diagnostics/tank_voltage_mv`
 - `<root>/lrs-<chipid>/addr`
 - `<root>/lrs-<chipid>/control`
 
 Gateway peer topics use `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer) with matching
-sensor leaves such as `input`, `dry_contact`, `temp_c`, `tank_status`,
-`tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv`.
+sensor leaves such as `input`, `dry_contact`, `sensor/<kind>/<instance>/value`, and `sensor/<kind>/<instance>/state`.
 
 ## Recovery
 USB serial is the guaranteed local maintenance path.

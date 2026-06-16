@@ -7,6 +7,7 @@
 #include "config_store.h"
 #include "radio_protocol.h"
 #include "sensor_status.h"
+#include "sensor_registry.h"
 
 #ifndef LRS_PROVISIONING_MAX_DEVICES
 #define LRS_PROVISIONING_MAX_DEVICES 12
@@ -59,15 +60,7 @@ struct PeerStatusSnapshot {
   uint8_t relay_state = 0;
   uint8_t input_state = 0;
   bool input_state_known = false;
-  bool temp_valid = false;
-  bool temp_enabled = false;
-  int8_t temp_c = 0;
-  bool tank_enabled = false;
-  bool tank_valid = false;
-  TankSensorState tank_state = TankSensorState::Disabled;
-  uint16_t tank_depth_mm = 0;
-  uint16_t tank_current_centi_ma = 0;
-  uint16_t tank_voltage_mv = 0;
+  SensorRegistry sensors;
   int uplink_rssi = -127;
   bool downlink_rssi_valid = false;
   int downlink_rssi = -127;
@@ -186,21 +179,11 @@ class NodeStateMachine {
   int lastPacketRssi() const;
   uint32_t lastPacketMs() const;
   uint32_t lastTxMs() const;
-  void setLocalTemperature(bool enabled, bool valid, float celsius);
-  void setLocalTank(bool enabled, bool valid, TankSensorState state,
-                    uint16_t depthMm, uint16_t currentCentiMa,
-                    uint16_t voltageMv);
-  bool localTemperatureValid() const;
-  float localTemperatureC() const;
-  bool localTankEnabled() const;
-  bool localTankValid() const;
-  TankSensorState localTankState() const;
-  uint16_t localTankDepthMm() const;
+  void setLocalSensors(const SensorRegistry &registry, uint16_t tankCurrentCentiMa = 0, uint16_t tankVoltageMv = 0);
+  const SensorRegistry &localSensors() const;
   uint16_t localTankCurrentCentiMa() const;
   uint16_t localTankVoltageMv() const;
-  bool remoteTemperatureValid() const;
-  float remoteTemperatureC() const;
-  uint32_t remoteTemperatureMs() const;
+  uint8_t localTempCodeToSend() const;
   void setAuthoritativeUnixTime(uint32_t unixTimeS);
   bool sharedUnixTimeValid() const;
   uint32_t sharedUnixTime() const;
@@ -327,15 +310,7 @@ class NodeStateMachine {
   int last_packet_rssi_ = -127;
   uint32_t last_led_toggle_ms_ = 0;
   bool led_on_ = false;
-  uint8_t local_temp_code_ = 0xFF;
-  bool remote_temp_valid_ = false;
-  int8_t remote_temp_c_ = 0;
-  uint32_t remote_temp_ms_ = 0;
-  bool local_temp_enabled_ = false;
-  bool local_tank_enabled_ = false;
-  bool local_tank_valid_ = false;
-  TankSensorState local_tank_state_ = TankSensorState::Disabled;
-  uint16_t local_tank_depth_mm_ = 0;
+  SensorRegistry local_sensors_;
   uint16_t local_tank_current_centi_ma_ = 0;
   uint16_t local_tank_voltage_mv_ = 0;
   bool shared_time_valid_ = false;
@@ -385,6 +360,7 @@ class NodeStateMachine {
   uint8_t maintenance_debug_dst_ = 0;
   bool maintenance_sensor_pending_ = false;
   uint8_t maintenance_sensor_dst_ = 0;
+  uint8_t maintenance_sensor_page_index_ = 0;
   bool maintenance_version_pending_ = false;
   uint8_t maintenance_version_dst_ = 0;
   uint32_t last_maint_page_tx_ms_ = 0;
@@ -395,15 +371,8 @@ class NodeStateMachine {
     uint8_t relay_state = 0;
     uint8_t input_state = 0;
     bool input_state_known = false;
-    bool temp_valid = false;
-    bool temp_enabled = false;
-    int8_t temp_c = 0;
-    bool tank_enabled = false;
-    bool tank_valid = false;
-    TankSensorState tank_state = TankSensorState::Disabled;
-    uint16_t tank_depth_mm = 0;
-    uint16_t tank_current_centi_ma = 0;
-    uint16_t tank_voltage_mv = 0;
+    SensorRegistry sensors;
+    uint32_t sensors_updated_ms = 0;
     int uplink_rssi = -127;
     bool downlink_rssi_valid = false;
     int downlink_rssi = -127;
@@ -652,7 +621,6 @@ class NodeStateMachine {
   void exitProvisioningCoordinatorMode(ProvisioningSessionState endState);
   void tickProvisioningTarget(uint32_t now);
   void refreshRuntimeCfg(const Settings &cfg);
-  void captureRemoteTemp(uint8_t tempCode);
   uint8_t txFlags() const;
   void updateSharedTimeFromPeer(uint32_t unixTimeS, bool authoritative);
   uint32_t currentUnixTimeS(uint32_t nowMs) const;

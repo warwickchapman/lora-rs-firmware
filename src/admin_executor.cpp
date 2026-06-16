@@ -716,20 +716,31 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
     out["last_packet_ms"] = sm_->lastPacketMs();
     out["last_tx_ms"] = sm_->lastTxMs();
     out["peer_count"] = sm_->peerCount();
-    out["local_temp_valid"] = sm_->localTemperatureValid();
-    if (sm_->localTemperatureValid())
-      out["local_temp_c"] = sm_->localTemperatureC();
-    out["local_tank_enabled"] = sm_->localTankEnabled();
-    out["local_tank_valid"] = sm_->localTankValid();
-    out["local_tank_status"] = tankSensorStateText(sm_->localTankState());
-    out["local_tank_depth_mm"] = sm_->localTankDepthMm();
-    out["local_tank_current_centi_ma"] = sm_->localTankCurrentCentiMa();
-    out["local_tank_current_ma"] =
-        static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f;
-    out["local_tank_voltage_mv"] = sm_->localTankVoltageMv();
-    out["remote_temp_valid"] = sm_->remoteTemperatureValid();
-    if (sm_->remoteTemperatureValid())
-      out["remote_temp_c"] = sm_->remoteTemperatureC();
+    JsonArray sensorsArr = out["sensors"].to<JsonArray>();
+    const SensorRegistry &localReg = sm_->localSensors();
+    for (uint8_t i = 0; i < localReg.count(); ++i) {
+      SensorReading r{};
+      if (localReg.byIndex(i, r)) {
+        JsonObject sObj = sensorsArr.add<JsonObject>();
+        sObj["kind"] = sensorKindToString(r.kind);
+        sObj["state"] = sensorStateToString(r.state);
+        sObj["instance"] = r.instance;
+        if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+          if (r.scale == 0) {
+            sObj["value"] = r.value;
+          } else {
+            float divisor = 1.0f;
+            for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+            sObj["value"] = static_cast<float>(r.value) / divisor;
+          }
+        }
+        sObj["unit"] = sensorKindToUnit(r.kind);
+      }
+    }
+
+    JsonObject diagObj = out["diagnostics"].to<JsonObject>();
+    diagObj["tank_current_ma"] = static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f;
+    diagObj["tank_voltage_mv"] = sm_->localTankVoltageMv();
   }
   sendOk(out, writer);
 }
@@ -1207,20 +1218,24 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
       if (p.input_state_known) {
         row["input_state"] = p.input_state;
       }
-      row["temp_enabled"] = p.temp_enabled;
-      if (p.temp_valid) {
-        row["temp_valid"] = true;
-        row["temp_c"] = p.temp_c;
-      }
-      if (p.tank_enabled) {
-        row["tank_enabled"] = true;
-        row["tank_valid"] = p.tank_valid;
-        row["tank_status"] = tankSensorStateText(p.tank_state);
-        if (p.tank_valid) {
-          row["tank_depth_mm"] = p.tank_depth_mm;
-          row["tank_current_centi_ma"] = p.tank_current_centi_ma;
-          row["tank_current_ma"] = static_cast<float>(p.tank_current_centi_ma) / 100.0f;
-          row["tank_voltage_mv"] = p.tank_voltage_mv;
+      JsonArray sensorsArr = row["sensors"].to<JsonArray>();
+      for (uint8_t j = 0; j < p.sensors.count(); ++j) {
+        SensorReading r{};
+        if (p.sensors.byIndex(j, r)) {
+          JsonObject sObj = sensorsArr.add<JsonObject>();
+          sObj["kind"] = sensorKindToString(r.kind);
+          sObj["state"] = sensorStateToString(r.state);
+          sObj["instance"] = r.instance;
+          if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+            if (r.scale == 0) {
+              sObj["value"] = r.value;
+            } else {
+              float divisor = 1.0f;
+              for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+              sObj["value"] = static_cast<float>(r.value) / divisor;
+            }
+          }
+          sObj["unit"] = sensorKindToUnit(r.kind);
         }
       }
     }

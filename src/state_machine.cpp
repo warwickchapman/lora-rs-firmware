@@ -45,7 +45,7 @@ constexpr uint8_t kWifiControlBroadcastAddress = 255;
 constexpr uint8_t kWifiControlOpSet = 1;
 constexpr uint8_t kWifiControlOpStatus = 2;
 constexpr uint8_t kUdpLogControlOpSet = 1;
-constexpr uint8_t kMaintenancePayloadVersion = 1;
+constexpr uint8_t kMaintenancePayloadVersion = 2;
 constexpr uint8_t kMaintenancePageIdentity = 0;
 constexpr uint8_t kMaintenancePageDebug = 1;
 constexpr uint8_t kMaintenancePageSensors = 2;
@@ -621,32 +621,44 @@ uint8_t NodeStateMachine::localDryContactState() const { return digitalRead(kInp
 int NodeStateMachine::lastPacketRssi() const { return last_packet_rssi_; }
 uint32_t NodeStateMachine::lastPacketMs() const { return last_packet_ms_; }
 uint32_t NodeStateMachine::lastTxMs() const { return last_tx_ms_; }
-void NodeStateMachine::setLocalTemperature(bool enabled, bool valid, float celsius) {
-  local_temp_enabled_ = enabled;
-  local_temp_code_ = encodeTempCode(valid, celsius);
+void NodeStateMachine::setLocalSensors(const SensorRegistry &registry, uint16_t tankCurrentCentiMa, uint16_t tankVoltageMv) {
+  local_sensors_ = registry;
+  local_tank_current_centi_ma_ = tankCurrentCentiMa;
+  local_tank_voltage_mv_ = tankVoltageMv;
+  SensorReading dc{};
+  dc.kind = SensorKind::DryContact;
+  dc.state = SensorState::Ok;
+  dc.instance = 0;
+  dc.value = input_state_;
+  dc.scale = 0;
+  local_sensors_.upsert(dc);
 }
-void NodeStateMachine::setLocalTank(bool enabled, bool valid, TankSensorState state,
-                                    uint16_t depthMm, uint16_t currentCentiMa,
-                                    uint16_t voltageMv) {
-  local_tank_enabled_ = enabled;
-  local_tank_valid_ = valid;
-  local_tank_state_ = state;
-  local_tank_depth_mm_ = depthMm;
-  local_tank_current_centi_ma_ = currentCentiMa;
-  local_tank_voltage_mv_ = voltageMv;
+
+const SensorRegistry &NodeStateMachine::localSensors() const {
+  return local_sensors_;
+}
+uint16_t NodeStateMachine::localTankCurrentCentiMa() const {
+  return local_tank_current_centi_ma_;
+}
+uint16_t NodeStateMachine::localTankVoltageMv() const {
+  return local_tank_voltage_mv_;
+}
+uint8_t NodeStateMachine::localTempCodeToSend() const {
+  SensorReading r{};
+  if (local_sensors_.find(SensorKind::TemperatureC, 0, r)) {
+    if (r.state == SensorState::Ok) {
+      int32_t val = r.value;
+      if (r.scale == 1) {
+        val /= 10;
+      }
+      if (val >= -128 && val <= 127) {
+        return static_cast<uint8_t>(static_cast<int8_t>(val));
+      }
+    }
+  }
+  return 0xFFU;
 }
 void NodeStateMachine::setMqttConnected(bool connected) { mqtt_connected_ = connected; }
-bool NodeStateMachine::localTemperatureValid() const { return local_temp_code_ != 0xFF; }
-float NodeStateMachine::localTemperatureC() const { return static_cast<float>(static_cast<int8_t>(local_temp_code_)); }
-bool NodeStateMachine::localTankEnabled() const { return local_tank_enabled_; }
-bool NodeStateMachine::localTankValid() const { return local_tank_valid_; }
-TankSensorState NodeStateMachine::localTankState() const { return local_tank_state_; }
-uint16_t NodeStateMachine::localTankDepthMm() const { return local_tank_depth_mm_; }
-uint16_t NodeStateMachine::localTankCurrentCentiMa() const { return local_tank_current_centi_ma_; }
-uint16_t NodeStateMachine::localTankVoltageMv() const { return local_tank_voltage_mv_; }
-bool NodeStateMachine::remoteTemperatureValid() const { return remote_temp_valid_; }
-float NodeStateMachine::remoteTemperatureC() const { return static_cast<float>(remote_temp_c_); }
-uint32_t NodeStateMachine::remoteTemperatureMs() const { return remote_temp_ms_; }
 bool NodeStateMachine::sharedUnixTimeValid() const { return shared_time_valid_; }
 uint32_t NodeStateMachine::sharedUnixTime() const { return currentUnixTimeS(millis()); }
 RxControlSource NodeStateMachine::lastRxControlSource() const { return last_rx_control_source_; }
@@ -661,15 +673,7 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.relay_state = node.relay_state;
   out.input_state = node.input_state;
   out.input_state_known = node.input_state_known;
-  out.temp_valid = node.temp_valid;
-  out.temp_enabled = node.temp_enabled;
-  out.temp_c = node.temp_c;
-  out.tank_enabled = node.tank_enabled;
-  out.tank_valid = node.tank_valid;
-  out.tank_state = node.tank_state;
-  out.tank_depth_mm = node.tank_depth_mm;
-  out.tank_current_centi_ma = node.tank_current_centi_ma;
-  out.tank_voltage_mv = node.tank_voltage_mv;
+  out.sensors = node.sensors;
   out.uplink_rssi = node.uplink_rssi;
   out.downlink_rssi_valid = node.downlink_rssi_valid;
   out.downlink_rssi = node.downlink_rssi;
@@ -724,7 +728,7 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
   yield();  // Feed ESP8266 watchdog before retry/start-sync LoRa sends during startup loops.
-  if (!radio_->send(type, relayState, inputState, txFlags(), last_counter_, runtime_.local_address, runtime_.remote_address, local_temp_code_,
+  if (!radio_->send(type, relayState, inputState, txFlags(), last_counter_, runtime_.local_address, runtime_.remote_address, localTempCodeToSend(),
                     0, 0xFF, 0xFFFF, unixTimeS)) {
     link_state_ = LinkState::Idle;
     tx_command_pending_ = false;
@@ -868,7 +872,7 @@ bool NodeStateMachine::sendTxGroupChangeToAddress(uint8_t addr, const char *even
   const uint32_t now = millis();
   last_counter_++;
   if (!radio_->send(MessageType::Change, tx_group_desired_relay_state_, tx_group_desired_input_state_, txFlags(), last_counter_,
-                    runtime_.local_address, addr, local_temp_code_, 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
+                    runtime_.local_address, addr, localTempCodeToSend(), 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
     return false;
   }
   last_tx_ms_ = now;
@@ -901,7 +905,7 @@ bool NodeStateMachine::sendTxGroupPollToAddress(uint8_t addr, const char *eventN
   const uint32_t now = millis();
   last_counter_++;
   if (!radio_->send(MessageType::PollRequest, 0, input_state_, txFlags() | kFlagGroupPollCorrelation, last_counter_,
-                    runtime_.local_address, addr, local_temp_code_, 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
+                    runtime_.local_address, addr, localTempCodeToSend(), 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
     return false;
   }
   last_tx_ms_ = now;
@@ -1057,7 +1061,7 @@ void NodeStateMachine::tickDeferredAck(uint32_t now) {
   if (!radioTxBudgetAvailable()) return;
   last_counter_++;
   if (!radio_->send(MessageType::Ack, rx_deferred_ack_relay_, rx_deferred_ack_input_, txFlags(), last_counter_, runtime_.local_address,
-                    rx_deferred_ack_dst_, local_temp_code_, 0, 0xFF, 0xFFFF, rx_deferred_ack_command_id_)) {
+                    rx_deferred_ack_dst_, localTempCodeToSend(), 0, 0xFF, 0xFFFF, rx_deferred_ack_command_id_)) {
     return;
   }
   last_tx_ms_ = now;
@@ -1172,7 +1176,7 @@ bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayStat
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(millis());
   if (!radio_->send(MessageType::Mqtt, targetRelay, input_state_, txFlags(), last_counter_, runtime_.local_address, dstAddress,
-                    local_temp_code_,
+                    localTempCodeToSend(),
                     0, 0xFF, 0xFFFF, unixTimeS)) {
     return false;
   }
@@ -1293,7 +1297,7 @@ bool NodeStateMachine::mqttSetPeerWifi(uint8_t dstAddress, bool enabled) {
   const uint32_t unixTimeS = currentUnixTimeS(millis());
   if (!radio_->send(MessageType::WifiControl, kWifiControlOpSet, enabled ? 1 : 0,
                     txFlags(), sentCounter, runtime_.local_address, dstAddress,
-                    local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
+                    localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
     return false;
   }
   const uint32_t now = millis();
@@ -1316,7 +1320,7 @@ bool NodeStateMachine::sendBroadcastWifiDisable() {
   const uint32_t unixTimeS = currentUnixTimeS(millis());
   if (!radio_->send(MessageType::WifiControl, kWifiControlOpSet, 0, txFlags(),
                     sentCounter, runtime_.local_address, kWifiControlBroadcastAddress,
-                    local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
+                    localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
     return false;
   }
   last_tx_ms_ = millis();
@@ -1456,7 +1460,7 @@ bool NodeStateMachine::sendWifiControlStatus(uint8_t dstAddress, bool enabled, u
   last_counter_++;
   if (!radio_->send(MessageType::WifiControl, kWifiControlOpStatus, enabled ? 1 : 0,
                     txFlags(), last_counter_, runtime_.local_address, dstAddress,
-                    local_temp_code_, 0, 0xFF, 0xFFFF, commandCounter)) {
+                    localTempCodeToSend(), 0, 0xFF, 0xFFFF, commandCounter)) {
     return false;
   }
   last_tx_ms_ = millis();
@@ -2634,7 +2638,7 @@ bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(millis());
   if (!radio_->send(MessageType::PollRequest, 0, input_state_, txFlags(), last_counter_, runtime_.local_address, dstAddress,
-                    local_temp_code_,
+                    localTempCodeToSend(),
                     0, 0xFF, 0xFFFF, unixTimeS)) {
     return false;
   }
@@ -2710,6 +2714,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   maintenance_version_dst_ = dstAddress;
   maintenance_sensor_pending_ = true;
   maintenance_sensor_dst_ = dstAddress;
+  maintenance_sensor_page_index_ = 0;
   if (runtime_.maintenance_debug_telemetry_enabled) {
     maintenance_debug_pending_ = true;
     maintenance_debug_dst_ = dstAddress;
@@ -2752,13 +2757,32 @@ bool NodeStateMachine::sendMaintenanceSensorStatus(uint8_t dstAddress) {
   uint8_t payload[12]{};
   payload[0] = kMaintenancePayloadVersion;
   payload[1] = kMaintenancePageSensors;
-  payload[2] = localDryContactState();
-  payload[3] = local_temp_code_;
-  payload[4] = static_cast<uint8_t>(local_tank_state_);
-  encodeU16LE(payload + 5, local_tank_depth_mm_);
-  encodeU16LE(payload + 7, local_tank_current_centi_ma_);
-  encodeU16LE(payload + 9, local_tank_voltage_mv_);
-  payload[11] = (local_tank_enabled_ ? 0x01U : 0U) | (local_tank_valid_ ? 0x02U : 0U) | (local_temp_enabled_ ? 0x04U : 0U);
+  payload[2] = maintenance_sensor_page_index_;
+  payload[3] = local_sensors_.count();
+
+  auto packReading = [this](uint8_t index, uint8_t *dest) {
+    SensorReading r{};
+    if (local_sensors_.byIndex(index, r)) {
+      int32_t val = r.value;
+      SensorState st = r.state;
+      if (val < -32768) {
+        val = -32768;
+      } else if (val > 32767) {
+        val = 32767;
+        st = SensorState::Overrange;
+      }
+      int16_t val16 = static_cast<int16_t>(val);
+      dest[0] = (static_cast<uint8_t>(r.kind) << 4) | (r.instance & 0x0F);
+      dest[1] = (static_cast<uint8_t>(st) << 4) | (r.scale & 0x0F);
+      dest[2] = static_cast<uint8_t>(val16 & 0xFFU);
+      dest[3] = static_cast<uint8_t>((val16 >> 8) & 0xFFU);
+    } else {
+      memset(dest, 0, 4);
+    }
+  };
+
+  packReading(maintenance_sensor_page_index_ * 2, payload + 4);
+  packReading(maintenance_sensor_page_index_ * 2 + 1, payload + 8);
 
   last_counter_++;
   if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
@@ -2768,7 +2792,16 @@ bool NodeStateMachine::sendMaintenanceSensorStatus(uint8_t dstAddress) {
   last_tx_ms_ = millis();
   last_maint_page_tx_ms_ = last_tx_ms_;
   markRadioTxSentThisTick();
-  lrslog::event("maint_sensor_status_tx", 0, last_counter_, dstAddress);
+  lrslog::event("maint_sensor_status_tx", maintenance_sensor_page_index_, last_counter_, dstAddress);
+
+  if ((maintenance_sensor_page_index_ + 1) * 2 >= local_sensors_.count()) {
+    maintenance_sensor_pending_ = false;
+    maintenance_sensor_dst_ = 0;
+    maintenance_sensor_page_index_ = 0;
+  } else {
+    maintenance_sensor_page_index_++;
+  }
+
   return true;
 }
 
@@ -2904,24 +2937,41 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->uptime_received_ms = millis();
     lrslog::event("maint_version_rx", msg.rssi, msg.counter, node->address);
   } else if (p[1] == kMaintenancePageSensors) {
-    node->input_state = p[2] ? 1 : 0;
-    node->input_state_known = true;
-    node->input_feedback = node->input_state;
-    if (p[3] == 0xFFU) {
-      node->temp_valid = false;
-      node->temp_c = 0;
-    } else {
-      node->temp_valid = true;
-      node->temp_c = static_cast<int8_t>(p[3]);
+    const uint8_t pageIdx = p[2];
+    if (pageIdx == 0) {
+      node->sensors.clear();
     }
-    const uint8_t sensorFlags = p[11];
-    node->tank_enabled = (sensorFlags & 0x01U) != 0U;
-    node->tank_valid = (sensorFlags & 0x02U) != 0U;
-    node->temp_enabled = (sensorFlags & 0x04U) != 0U;
-    node->tank_state = decodeTankState(p[4]);
-    node->tank_depth_mm = decodeU16LE(p + 5);
-    node->tank_current_centi_ma = decodeU16LE(p + 7);
-    node->tank_voltage_mv = decodeU16LE(p + 9);
+
+    auto unpackReading = [](const uint8_t *src, SensorReading &out) -> bool {
+      uint8_t kindVal = src[0] >> 4;
+      uint8_t instVal = src[0] & 0x0F;
+      if (kindVal == 0) return false;
+      out.kind = static_cast<SensorKind>(kindVal);
+      out.instance = instVal;
+      out.state = static_cast<SensorState>(src[1] >> 4);
+      out.scale = src[1] & 0x0F;
+      int16_t val16 = static_cast<int16_t>(src[2] | (static_cast<uint16_t>(src[3]) << 8));
+      out.value = val16;
+      return true;
+    };
+
+    SensorReading rA{}, rB{};
+    if (unpackReading(p + 4, rA)) {
+      node->sensors.upsert(rA);
+    }
+    if (unpackReading(p + 8, rB)) {
+      node->sensors.upsert(rB);
+    }
+    node->sensors_updated_ms = millis();
+
+    SensorReading dc{};
+    if (node->sensors.find(SensorKind::DryContact, 0, dc)) {
+      if (dc.state == SensorState::Ok) {
+        node->input_state = dc.value ? 1 : 0;
+        node->input_state_known = true;
+        node->input_feedback = node->input_state;
+      }
+    }
   } else if (p[1] == kMaintenancePageDebug) {
     node->maintenance_debug_known = true;
     node->heap_free = static_cast<uint32_t>(p[2]) |
@@ -3166,7 +3216,7 @@ void NodeStateMachine::tickTransmitter() {
         const uint32_t unixTimeS = currentUnixTimeS(now);
         if (radio_->send(MessageType::Heartbeat, input_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
                          runtime_.remote_address,
-                         local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
+                         localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
           last_tx_ms_ = now;
           markRadioTxSentThisTick();
           {
@@ -3228,7 +3278,7 @@ void NodeStateMachine::tickReceiver() {
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
   if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), txFlags(), last_counter_, runtime_.local_address,
-                   runtime_.remote_address, local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
+                   runtime_.remote_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
     last_tx_ms_ = now;
     markRadioTxSentThisTick();
     rx_last_push_ms_ = now;
@@ -3384,7 +3434,6 @@ void NodeStateMachine::tickReceive() {
     handleMaintenanceStatus(msg);
     return;
   }
-  captureRemoteTemp(msg.temp_code);
   if (msg.type == MessageType::Heartbeat || msg.type == MessageType::PollResponse || msg.type == MessageType::MqttStatus) {
     updateSharedTimeFromPeer(msg.unix_time_s, (msg.flags & kFlagTimeAuthoritative) != 0U);
   }
@@ -3412,8 +3461,13 @@ void NodeStateMachine::tickReceive() {
         node->input_state_known = true;
 
         if (msg.temp_code != 0xFF) {
-          node->temp_valid = true;
-          node->temp_c = static_cast<int8_t>(msg.temp_code);
+          SensorReading tempReading{};
+          tempReading.kind = SensorKind::TemperatureC;
+          tempReading.instance = 0;
+          tempReading.state = SensorState::Ok;
+          tempReading.value = static_cast<int8_t>(msg.temp_code);
+          tempReading.scale = 0;
+          node->sensors.upsert(tempReading);
         }
 
         if ((msg.sensor_mask & 0x04U) != 0U) {
@@ -3504,8 +3558,13 @@ void NodeStateMachine::tickReceive() {
       node->last_seen_ms = millis();
       node->last_cmd_counter = msg.counter;
       if (msg.temp_code != 0xFF) {
-        node->temp_valid = true;
-        node->temp_c = static_cast<int8_t>(msg.temp_code);
+        SensorReading tempReading{};
+        tempReading.kind = SensorKind::TemperatureC;
+        tempReading.instance = 0;
+        tempReading.state = SensorState::Ok;
+        tempReading.value = static_cast<int8_t>(msg.temp_code);
+        tempReading.scale = 0;
+        node->sensors.upsert(tempReading);
       }
       if ((msg.sensor_mask & 0x04) != 0) {
         node->downlink_rssi_valid = true;
@@ -3582,7 +3641,7 @@ void NodeStateMachine::tickReceive() {
     last_counter_++;
     if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), replyFlags, last_counter_, runtime_.local_address,
                      msg.src,
-                     local_temp_code_, sensorMask, wifiState, downlinkRssiEnc, replyUnixTime)) {
+                     localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, replyUnixTime)) {
       last_tx_ms_ = millis();
       markRadioTxSentThisTick();
       {
@@ -3630,7 +3689,7 @@ void NodeStateMachine::tickReceive() {
       const uint32_t unixTimeS = currentUnixTimeS(millis());
       last_counter_++;
       if (radio_->send(MessageType::MqttStatus, relay_state_, localDryContactState(), txFlags(), last_counter_, runtime_.local_address,
-                       msg.src, local_temp_code_, sensorMask, wifiState, downlinkRssiEnc, unixTimeS)) {
+                       msg.src, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, unixTimeS)) {
         last_tx_ms_ = millis();
         markRadioTxSentThisTick();
       }

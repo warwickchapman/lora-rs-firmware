@@ -96,15 +96,11 @@ Otherwise packet is dropped and logged.
 - TX may send `PollRequest` to RX.
 - RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
 - TX may send `MaintenanceRequest` to RX.
-- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages. Page `0`
-  carries identity/connectivity (`version`, `page`, flags, chip ID, firmware
-  version, IP). Page `3` follows in a later radio tick with dev-build suffix and
-  uptime. Page `2` follows in a later radio tick with sensor state:
-  dry-contact input, rounded DS18B20 temperature, tank status, tank depth in mm,
-  tank current in centi-mA, tank voltage in mV, and tank enabled/valid flags.
-  When debug telemetry is enabled, page `1` follows in a later
-  radio tick with heap free, max heap block, heap fragmentation, relay feedback,
-  and input feedback.
+- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `2`). 
+  - Page `0` (Identity) carries identity and connectivity.
+  - Page `3` (Version) carries the firmware build number and uptime.
+  - Page `2` (Sensors) carries page-indexed generic sensor readings from the local `SensorRegistry` (up to 2 readings per 4-byte slot per page; packs `kind`, `instance`, `state`, `scale`, and clamped `int16` values).
+  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, relay feedback, and input feedback).
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.

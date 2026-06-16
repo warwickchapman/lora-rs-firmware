@@ -4,6 +4,7 @@
 
 #include "config_store.h"
 #include "sensor_status.h"
+#include "sensor_registry.h"
 
 struct TempSensorStatus {
   bool enabled = false;
@@ -39,6 +40,7 @@ class SensorManager {
   void tick();
   const TempSensorStatus &tempStatus() const;
   const TankSensorStatus &tankStatus() const;
+  const SensorRegistry &readings() const;
 
  private:
   struct RuntimeCfg {
@@ -65,6 +67,7 @@ class SensorManager {
   uint16_t temp_conversion_wait_ms_ = 750;
   TempSensorStatus temp_;
   TankSensorStatus tank_;
+  SensorRegistry registry_;
 
   void tickTemperature(uint32_t now);
   void tickTank(uint32_t now);

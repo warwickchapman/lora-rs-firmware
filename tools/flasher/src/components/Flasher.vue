@@ -101,6 +101,14 @@ interface NetworkInterface {
   netmask: string;
 }
 
+interface SensorReading {
+  kind: 'dry_contact' | 'temperature' | 'tank_level';
+  state: 'disabled' | 'missing' | 'fault' | 'ok' | 'overrange';
+  instance: number;
+  value?: number;
+  unit?: string;
+}
+
 interface LoraInventoryDevice {
   address: number;
   chip_id?: string;
@@ -118,25 +126,12 @@ interface LoraInventoryDevice {
   mqtt_connected?: boolean;
   power_save_listen_only?: boolean;
   power_save_active?: boolean;
-  maintenance_debug_known?: boolean;
-  heap_free?: number;
-  heap_max_block?: number;
-  heap_frag_pct?: number;
   relay_state?: number;
   relay_feedback?: number;
   input_state?: number;
   input_state_known?: boolean;
   input_feedback?: number;
-  temp_enabled?: boolean;
-  temp_valid?: boolean;
-  temp_c?: number;
-  tank_enabled?: boolean;
-  tank_valid?: boolean;
-  tank_status?: string;
-  tank_depth_mm?: number;
-  tank_current_ma?: number;
-  tank_current_centi_ma?: number;
-  tank_voltage_mv?: number;
+  sensors?: SensorReading[];
   debug_uptime_ms?: number;
   rssi?: number;
   downlink_rssi_known?: boolean;
@@ -221,15 +216,11 @@ interface SerialAdminStatus {
   relay_feedback?: number;
   input_state?: number;
   peer_count?: number;
-  local_temp_valid?: boolean;
-  local_temp_c?: number;
-  local_tank_enabled?: boolean;
-  local_tank_valid?: boolean;
-  local_tank_status?: string;
-  local_tank_depth_mm?: number;
-  local_tank_current_ma?: number;
-  local_tank_current_centi_ma?: number;
-  local_tank_voltage_mv?: number;
+  sensors?: SensorReading[];
+  diagnostics?: {
+    tank_current_ma?: number;
+    tank_voltage_mv?: number;
+  };
 }
 
 interface SerialAdminConfig {
@@ -2631,31 +2622,24 @@ function remoteRelayLabel(row: LoraInventoryDevice): string {
 }
 
 function remoteTempLabel(row: LoraInventoryDevice): string {
-  return row.temp_valid && row.temp_c !== undefined && row.temp_c !== null ? `${row.temp_c} °C` : '-';
+  const s = row.sensors?.find(x => x.kind === 'temperature');
+  if (!s || s.state === 'disabled') return '-';
+  if (s.state === 'ok') return `${s.value} °C`;
+  return s.state;
 }
 
 function tankLabel(row: LoraInventoryDevice): string {
-  if (!row.tank_enabled) return '-';
-  if (row.tank_status === 'fault_low') return 'Fault low';
-  if (row.tank_status === 'overrange') return 'Overrange';
-  if (row.tank_valid && row.tank_depth_mm !== undefined && row.tank_depth_mm !== null) {
-    return `${row.tank_depth_mm} mm`;
-  }
+  const s = row.sensors?.find(x => x.kind === 'tank_level');
+  if (!s || s.state === 'disabled') return '-';
+  if (s.state === 'ok') return `${s.value} mm`;
+  if (s.state === 'overrange') return 'Overrange';
+  if (s.state === 'fault') return 'Fault';
+  if (s.state === 'missing') return 'Missing';
   return 'waiting';
 }
 
 function tankDetailLabel(row: LoraInventoryDevice): string {
-  if (!row.tank_enabled) return '';
-  const parts: string[] = [];
-  if (row.tank_current_ma !== undefined && row.tank_current_ma !== null) {
-    parts.push(`${Number(row.tank_current_ma).toFixed(2)} mA`);
-  } else if (row.tank_current_centi_ma !== undefined && row.tank_current_centi_ma !== null) {
-    parts.push(`${(Number(row.tank_current_centi_ma) / 100).toFixed(2)} mA`);
-  }
-  if (row.tank_voltage_mv !== undefined && row.tank_voltage_mv !== null) {
-    parts.push(`${row.tank_voltage_mv} mV`);
-  }
-  return parts.join(' / ');
+  return '';
 }
 
 function adoptMonitorMqttFromStatus(st: SerialAdminStatus | null) {
@@ -7290,9 +7274,9 @@ function toggleSelectAllBulkPorts() {
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/input</span> (or <span class="text-slate-300">/dry_contact</span>): Dry contact state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay_feedback</span>: Live physical relay feedback sense state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/temp_c</span> / <span class="text-slate-300">/remote_temp_c</span>: DS18B20 temperatures</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/tank_depth_mm</span>: Calibrated water level measurement</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/heap_free</span> / <span class="text-slate-300">/heap_frag_pct</span>: Controller health</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Normalized reading value</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Sensor status state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/diagnostics/tank_current_ma</span> / <span class="text-slate-300">/tank_voltage_mv</span>: Tank diagnostics</li>
                         </ul>
                       </div>
                       <div>
@@ -7302,8 +7286,8 @@ function toggleSelectAllBulkPorts() {
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote unit dry contact state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/tank_status</span>: Tank telemetry state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/tank_depth_mm</span>: Tank depth level</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Peer sensor value</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Peer sensor state</li>
                         </ul>
                       </div>
                     </div>
@@ -7523,10 +7507,21 @@ function toggleSelectAllBulkPorts() {
                 <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.link_state || '-' }}</div>
                 <div class="mt-1 text-slate-400">peer {{ monitorGatewayStatus?.peer_count ?? '-' }}</div>
               </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temperature</div>
-                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.local_temp_valid ? `${monitorGatewayStatus.local_temp_c} °C` : '-' }}</div>
-                <div class="mt-1 text-slate-400">local sensor</div>
+              <template v-if="monitorGatewayStatus?.sensors && monitorGatewayStatus.sensors.length > 0">
+                <div v-for="s in monitorGatewayStatus.sensors" :key="`${s.kind}-${s.instance}`" class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                  <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+                    {{ s.kind === 'temperature' ? 'Temperature' : (s.kind === 'tank_level' ? 'Tank Level' : (s.kind === 'dry_contact' ? 'Dry Contact' : s.kind)) }} [{{ s.instance }}]
+                  </div>
+                  <div class="mt-2 text-lg font-bold text-slate-100">
+                    {{ s.state === 'ok' ? `${s.value} ${s.unit === 'c' ? '°C' : (s.unit || '')}` : (s.state === 'overrange' ? 'Overrange' : s.state) }}
+                  </div>
+                  <div class="mt-1 text-slate-400">local sensor</div>
+                </div>
+              </template>
+              <div v-else class="rounded border border-slate-800 bg-slate-950/25 p-3">
+                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Sensors</div>
+                <div class="mt-2 text-lg font-bold text-slate-100">-</div>
+                <div class="mt-1 text-slate-400">no active sensors</div>
               </div>
             </div>
           </div>

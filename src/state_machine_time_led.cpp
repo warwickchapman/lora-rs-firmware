@@ -21,13 +21,6 @@ void NodeStateMachine::setAuthoritativeUnixTime(uint32_t unixTimeS) {
   lrslog::event("time_sync_ntp", 0, unixTimeS, 0);
 }
 
-void NodeStateMachine::captureRemoteTemp(uint8_t tempCode) {
-  if (tempCode == 0xFF) return;
-  remote_temp_valid_ = true;
-  remote_temp_c_ = static_cast<int8_t>(tempCode);
-  remote_temp_ms_ = millis();
-}
-
 uint8_t NodeStateMachine::txFlags() const {
   uint8_t flags = shared_time_authoritative_ ? kFlagTimeAuthoritative : 0U;
   if (runtime_.role_tx && runtime_.input_control_paired_lora_enabled) {

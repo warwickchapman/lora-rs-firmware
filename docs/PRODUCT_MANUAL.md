@@ -112,11 +112,10 @@ MQTT deployment note:
 
 ## 10. Sensor Support (Current)
 Implemented now:
-- Local DS18B20 reading
-- DS18B20 temperature encoded in LoRa packet and shown as remote telemetry on peer
-- Dry-contact state represented in LoRa sensor fields
-- KIT0139-style 4-20 mA tank level on A0 using the board-calibrated 3553 mV ADC range, 120 ohm sense resistor, and 5000 mm water range
-- Remote dry-contact, temperature, and tank values shown in Flasher Monitor/Fleet and published in the gateway MQTT peer tree
+- Generic, instance-aware `SensorRegistry` supporting up to 6 configured sensor slots.
+- Local environmental/measurement sensors (DS18B20 temperature, 4-20 mA tank level) and control inputs (dry contact).
+- Sensor status and readings carried over LoRa via paginated version 2 `MaintenanceStatus` telemetry.
+- Dynamic rendering of all reporting sensors in the Flasher Monitor/Fleet views and publication to the gateway MQTT registry topics (`sensor/<kind>/<instance>/value`).
 
 Planned (not yet implemented):
 - Tank calibration UI and alarm thresholds

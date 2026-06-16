@@ -5,6 +5,8 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Refactored the sensor subsystem to use a generic, instance-aware `SensorRegistry` (maximum of 6 sensors) supporting multiple environmental/measurement sensors (DS18B20 temperature, tank level) and control inputs (dry contact), simplifying payload encoding and decoupling acquisition.
+- Upgraded the MaintenanceStatus payload version to 2, implementing paginated LoRa transmission for compact and flexible remote sensor telemetry.
 - Decoupled admin command execution from `SerialAdmin` to a transport-neutral `AdminExecutor`, allowing identical command capability over physical serial and MQTT connections.
 - Implemented secure remote request validation over MQTT featuring a boot-safe duplicate request cache (circular request ID cache of size 10) and ntp-aware timestamp TTL checks.
 - Enforced credential safety over MQTT by rejecting `"get_config"` secret exports unless the operator has explicitly provisioned `allow_mqtt_secret_export = true`.
@@ -23,11 +25,13 @@ All notable changes to this pre-release project are documented here in current o
 - Fix repeat-session provisioning failure on commissioned gateways. Discovery now enters a quiet coordinator mode, cancelling active scans, pending maintenance pages, group commands, and transient peer command retries/polls while preserving persistent peer identity caches. Normal operations are symmetrically restored via a centralized exit helper.
 
 ### MQTT Improvements
+- Updated MQTT schema to publish normalized `sensor/<kind>/<instance>/value` and `sensor/<kind>/<instance>/state` topics, moving local tank diagnostics to diagnostic subpaths.
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
 - Removed legacy MQTT topic-clearing and boot-time Sweeper logic from the gateway firmware (`mqtt_bridge.cpp`/`mqtt_bridge.h`) to prevent empty legacy directories (`peer/0x01`, `peers/01`, `peers/0x01`, `peers/1`) from appearing in MQTT Explorer. Canonical `peers/<NN_lrs-chipid>/...` cleanup is preserved for explicit forget/remove actions.
 
 
 ### Flasher UI Improvements
+- Replaced static dashboard sensor cards with dynamic sensor rendering mapped from the generic `SensorRegistry`.
 - Added MQTT Gateway OTA upgrade support: when Fleet connection mode is MQTT, the "Upgrade gateway" button initiates a local firmware file server, dispatches the `ota_pull` admin command to the gateway over MQTT, and monitors MQTT discovery reports for successful version updates.
 - Fixed the "Load gateway" button disabling logic in Fleet mode to correctly evaluate selected MQTT gateways.
 - Integrated remote MQTT gateway connection and control support to Fleet (network) and Settings tabs, supporting connection state indicators and dynamic MQTT gateway selection.

@@ -839,36 +839,43 @@ void MqttBridge::publishStatus() {
     snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
     if (buildLocalTopic(topic, sizeof(topic), "addr")) publishRetained(topic, addrHexPrefixed);
 
-    char tempBuf[16];
-    if (sm_->localTemperatureValid()) {
-      dtostrf(sm_->localTemperatureC(), 0, 1, tempBuf);
-      if (buildLocalTopic(topic, sizeof(topic), "temp_c")) publishRetained(topic, tempBuf);
-    } else {
-      if (buildLocalTopic(topic, sizeof(topic), "temp_c")) publishRetained(topic, "");
+    const SensorRegistry &localReg = sm_->localSensors();
+    for (uint8_t i = 0; i < localReg.count(); ++i) {
+      SensorReading r{};
+      if (localReg.byIndex(i, r)) {
+        char valBuf[32];
+        char topicSuffix[64];
+        snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
+        if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+          if (r.scale == 0) {
+            snprintf(valBuf, sizeof(valBuf), "%d", static_cast<int>(r.value));
+          } else {
+            float divisor = 1.0f;
+            for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+            dtostrf(static_cast<float>(r.value) / divisor, 0, r.scale, valBuf);
+          }
+          if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, valBuf);
+        } else {
+          if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, "");
+        }
+        snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
+        if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, sensorStateToString(r.state));
+      }
     }
 
-    if (sm_->remoteTemperatureValid()) {
-      dtostrf(sm_->remoteTemperatureC(), 0, 1, tempBuf);
-      if (buildLocalTopic(topic, sizeof(topic), "remote_temp_c")) publishRetained(topic, tempBuf);
-    } else {
-      if (buildLocalTopic(topic, sizeof(topic), "remote_temp_c")) publishRetained(topic, "");
-    }
+    SensorReading tankReading{};
+    const bool tankValid = sm_->localSensors().find(SensorKind::TankLevel, 0, tankReading) &&
+                           (tankReading.state == SensorState::Ok || tankReading.state == SensorState::Overrange);
 
-    char tankBuf[24];
-    if (buildLocalTopic(topic, sizeof(topic), "tank_status")) {
-      publishRetained(topic, sm_->localTankEnabled() ? tankSensorStateText(sm_->localTankState()) : "disabled");
-    }
-    if (sm_->localTankEnabled() && sm_->localTankValid()) {
-      snprintf(tankBuf, sizeof(tankBuf), "%u", static_cast<unsigned>(sm_->localTankDepthMm()));
-      if (buildLocalTopic(topic, sizeof(topic), "tank_depth_mm")) publishRetained(topic, tankBuf);
-      dtostrf(static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f, 0, 2, tankBuf);
-      if (buildLocalTopic(topic, sizeof(topic), "tank_current_ma")) publishRetained(topic, tankBuf);
-      snprintf(tankBuf, sizeof(tankBuf), "%u", static_cast<unsigned>(sm_->localTankVoltageMv()));
-      if (buildLocalTopic(topic, sizeof(topic), "tank_voltage_mv")) publishRetained(topic, tankBuf);
+    if (tankValid) {
+      char diagBuf[16];
+      dtostrf(static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f, 0, 2, diagBuf);
+      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_current_ma")) publishRetained(topic, diagBuf);
+      snprintf(diagBuf, sizeof(diagBuf), "%u", static_cast<unsigned>(sm_->localTankVoltageMv()));
+      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_voltage_mv")) publishRetained(topic, diagBuf);
     } else {
-      if (buildLocalTopic(topic, sizeof(topic), "tank_depth_mm")) publishRetained(topic, "");
-      if (buildLocalTopic(topic, sizeof(topic), "tank_current_ma")) publishRetained(topic, "");
-      if (buildLocalTopic(topic, sizeof(topic), "tank_voltage_mv")) publishRetained(topic, "");
+      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_current_ma")) publishRetained(topic, "");
+      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_voltage_mv")) publishRetained(topic, "");
     }
 
     char updatedMs[16];
@@ -944,11 +951,16 @@ void MqttBridge::publishStatus() {
             peerCache->input_published = true;
             peerCache->input_value = 0xFF; // sentinel: stale
           }
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_status")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, "");
+          for (uint8_t j = 0; j < node.sensors.count(); ++j) {
+            SensorReading r{};
+            if (node.sensors.byIndex(j, r)) {
+              char topicSuffix[64];
+              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
+              if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
+              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
+              if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
+            }
+          }
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay_feedback")) publishRetainedTopic(topic, "");
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, "");
@@ -961,26 +973,27 @@ void MqttBridge::publishStatus() {
             peerCache->input_published = true;
             peerCache->input_value = inputValue;
           }
-          if (node.temp_valid) {
-            dtostrf(static_cast<float>(node.temp_c), 0, 1, numBuf);
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, numBuf);
-          } else {
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "temp_c")) publishRetainedTopic(topic, "");
-          }
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_status")) {
-            publishRetainedTopic(topic, node.tank_enabled ? tankSensorStateText(node.tank_state) : "disabled");
-          }
-          if (node.tank_enabled && node.tank_valid) {
-            snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_depth_mm));
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, numBuf);
-            dtostrf(static_cast<float>(node.tank_current_centi_ma) / 100.0f, 0, 2, numBuf);
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, numBuf);
-            snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.tank_voltage_mv));
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, numBuf);
-          } else {
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_depth_mm")) publishRetainedTopic(topic, "");
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_current_ma")) publishRetainedTopic(topic, "");
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "tank_voltage_mv")) publishRetainedTopic(topic, "");
+          for (uint8_t j = 0; j < node.sensors.count(); ++j) {
+            SensorReading r{};
+            if (node.sensors.byIndex(j, r)) {
+              char valBuf[32];
+              char topicSuffix[64];
+              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
+              if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+                if (r.scale == 0) {
+                  snprintf(valBuf, sizeof(valBuf), "%d", static_cast<int>(r.value));
+                } else {
+                  float divisor = 1.0f;
+                  for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+                  dtostrf(static_cast<float>(r.value) / divisor, 0, r.scale, valBuf);
+                }
+                if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, valBuf);
+              } else {
+                if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
+              }
+              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
+              if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, sensorStateToString(r.state));
+            }
           }
           if (node.wifi_state_known) {
             if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, node.wifi_enabled ? "1" : "0");

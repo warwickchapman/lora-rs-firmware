@@ -75,10 +75,59 @@ void SensorManager::applyConfig(const Settings &cfg) {
   setupBus();
 }
 
+const SensorRegistry &SensorManager::readings() const { return registry_; }
+
 void SensorManager::tick() {
   const uint32_t now = millis();
   tickTemperature(now);
   tickTank(now);
+
+  registry_.clear();
+
+  // Temperature
+  SensorReading t_reading{};
+  t_reading.kind = SensorKind::TemperatureC;
+  t_reading.instance = 0;
+  t_reading.scale = 1;
+  if (!temp_.enabled) {
+    t_reading.state = SensorState::Disabled;
+    t_reading.value = 0;
+  } else if (!temp_.detected) {
+    t_reading.state = SensorState::Missing;
+    t_reading.value = 0;
+  } else if (!temp_.valid) {
+    t_reading.state = SensorState::Fault;
+    t_reading.value = 0;
+  } else {
+    t_reading.state = SensorState::Ok;
+    t_reading.value = static_cast<int32_t>(temp_.celsius * 10.0f + (temp_.celsius >= 0.0f ? 0.5f : -0.5f));
+  }
+  registry_.upsert(t_reading);
+
+  // Tank Level
+  SensorReading tank_reading{};
+  tank_reading.kind = SensorKind::TankLevel;
+  tank_reading.instance = 0;
+  tank_reading.scale = 0;
+  if (!tank_.enabled) {
+    tank_reading.state = SensorState::Disabled;
+    tank_reading.value = 0;
+  } else if (!tank_.valid) {
+    if (tank_.state == TankSensorState::FaultLow) {
+      tank_reading.state = SensorState::Fault;
+    } else {
+      tank_reading.state = SensorState::Missing;
+    }
+    tank_reading.value = 0;
+  } else {
+    if (tank_.state == TankSensorState::Overrange) {
+      tank_reading.state = SensorState::Overrange;
+    } else {
+      tank_reading.state = SensorState::Ok;
+    }
+    tank_reading.value = tank_.depth_mm;
+  }
+  registry_.upsert(tank_reading);
 }
 
 void SensorManager::tickTemperature(uint32_t now) {
