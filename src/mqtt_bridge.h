@@ -39,8 +39,7 @@ class MqttBridge {
   char topic_base_[128]{};
   char relay_topic_[160]{};
   char control_topic_[160]{};
-  char udp_log_control_topic_[160]{};
-  char ota_pull_topic_[160]{};
+  char ota_status_topic_[160]{};
   char admin_command_topic_[160]{};
   char admin_response_topic_[160]{};
   char remote_prefix_[160]{};
@@ -92,4 +91,5 @@ class MqttBridge {
   bool connectIfNeeded();
   void publishStatus();
   void publishDiscovery();
+  void publishOtaStatus(const String &status);
 };

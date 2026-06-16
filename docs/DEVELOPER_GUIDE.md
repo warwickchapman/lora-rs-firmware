@@ -144,6 +144,7 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 | `heap_free` | int | Free heap bytes (diagnostic). |
 | `heap_max_block` | int | Largest contiguous free block (diagnostic). |
 | `heap_frag_pct` | int | Heap fragmentation percentage (diagnostic). |
+| `ota_status` | string | Gateway OTA upgrade status (`downloading`, `failed:<code>`, `rebooting`, or empty/cleared). |
 
 ### Peer status topics
 

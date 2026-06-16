@@ -179,6 +179,7 @@ To allow remote gateway control over LAN or cloud networks:
 - Topics:
   - Admin command topic: `<root>/lrs-<gateway_chip_id>/admin_command`
   - Admin response topic: `<root>/lrs-<gateway_chip_id>/admin_response`
+  - OTA status topic: `<root>/lrs-<gateway_chip_id>/ota_status` (retained, publishes `"downloading"`, `"failed:<code>"`, `"rebooting"`)
 - JSON Schema for commands:
   ```json
   {

@@ -11,12 +11,16 @@ class AdminExecutor {
 public:
   using ResponseWriter = std::function<void(const String& response)>;
 
+  using OtaStatusPublisher = std::function<void(const String& status)>;
+  void setOtaStatusPublisher(OtaStatusPublisher publisher) { ota_status_publisher_ = publisher; }
+
   bool begin(ConfigStore *config, NodeStateMachine *sm,
              std::function<void(bool, bool)> onApply);
   void execute(const String &jsonCommand, ResponseWriter writer, bool isMqtt = false);
   bool addPeerToConfig(uint32_t chipId, uint8_t address);
 
 private:
+  OtaStatusPublisher ota_status_publisher_ = nullptr;
 
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
@@ -33,6 +37,7 @@ private:
 
   bool isDuplicateRequest(const String &id);
   void cacheRequest(const String &id);
+  static void otaStatusCallback(const char *status, void *ctx);
 
   // Command handlers
   void handleCommand(JsonDocument &doc, ResponseWriter writer, bool isMqtt);

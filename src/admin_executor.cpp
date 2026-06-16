@@ -1575,6 +1575,13 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
   sendOk(out, writer);
 }
 
+void AdminExecutor::otaStatusCallback(const char *status, void *ctx) {
+  auto *self = static_cast<AdminExecutor *>(ctx);
+  if (self && self->ota_status_publisher_) {
+    self->ota_status_publisher_(status);
+  }
+}
+
 void AdminExecutor::handleOtaPull(JsonDocument &doc, ResponseWriter writer) {
   const char *id = requestId(doc);
   if (!requireAdmin(doc)) {
@@ -1584,9 +1591,16 @@ void AdminExecutor::handleOtaPull(JsonDocument &doc, ResponseWriter writer) {
   const char *url = doc["url"] | "";
   const char *sha256 = doc["sha256"] | "";
   String error;
-  if (!otaPullFromUrl(url, sha256, error)) {
+  if (!otaPullFromUrl(url, sha256, error, AdminExecutor::otaStatusCallback, this)) {
+    if (ota_status_publisher_) {
+      ota_status_publisher_("failed:" + error);
+    }
     sendError("ota_pull", error.c_str(), id, writer);
     return;
+  }
+
+  if (ota_status_publisher_) {
+    ota_status_publisher_("rebooting");
   }
 
   JsonDocument out;

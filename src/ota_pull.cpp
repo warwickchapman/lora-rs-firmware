@@ -30,7 +30,8 @@ bool hexDigestEquals(const uint8_t digest[32], const char *hex) {
 }
 }
 
-bool otaPullFromUrl(const char *url, const char *sha256Hex, String &error) {
+bool otaPullFromUrl(const char *url, const char *sha256Hex, String &error,
+                    OtaStatusCallback cb, void *ctx) {
   if (url == nullptr || url[0] == '\0') {
     error = "missing_url";
     return false;
@@ -46,6 +47,10 @@ bool otaPullFromUrl(const char *url, const char *sha256Hex, String &error) {
   if (!isSha256Hex(sha256Hex)) {
     error = "invalid_sha256";
     return false;
+  }
+
+  if (cb != nullptr) {
+    cb("downloading", ctx);
   }
 
   WiFiClient client;

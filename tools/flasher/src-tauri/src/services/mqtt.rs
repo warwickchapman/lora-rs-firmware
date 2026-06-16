@@ -47,6 +47,12 @@ pub struct MqttAdminResponsePayload {
     pub response: serde_json::Value,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct MqttOtaStatusPayload {
+    pub chip_id: String,
+    pub status: String,
+}
+
 pub struct MqttService {
     client: Arc<Mutex<Option<AsyncClient>>>,
     state: Arc<Mutex<MqttConnectionState>>,
@@ -116,6 +122,7 @@ impl MqttService {
         let telemetry_filter = format!("{}/+/peers/+/+", topic_root);
         let discovery_filter = format!("{}/discovery/+", topic_root);
         let response_filter = format!("{}/+/admin_response", topic_root);
+        let status_filter = format!("{}/+/ota_status", topic_root);
 
         let sub_client = client.clone();
         tokio::spawn(async move {
@@ -123,6 +130,7 @@ impl MqttService {
             let _ = sub_client.subscribe(telemetry_filter, QoS::AtMostOnce).await;
             let _ = sub_client.subscribe(discovery_filter, QoS::AtMostOnce).await;
             let _ = sub_client.subscribe(response_filter, QoS::AtMostOnce).await;
+            let _ = sub_client.subscribe(status_filter, QoS::AtMostOnce).await;
         });
 
         // Store client
@@ -200,6 +208,16 @@ impl MqttService {
                     response: json_val,
                 });
             }
+            return;
+        }
+
+        // Check ota status topic: <topic_root>/lrs-<chip_id>/ota_status
+        if parts.len() >= 3 && parts[0] == topic_root && parts[2] == "ota_status" {
+            let chip_id = parts[1].trim_start_matches("lrs-").to_string();
+            let _ = app.emit("mqtt-ota-status-update", MqttOtaStatusPayload {
+                chip_id,
+                status: payload_str.clone(),
+            });
             return;
         }
 

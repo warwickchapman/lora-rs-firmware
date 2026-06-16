@@ -491,6 +491,8 @@ const isLoadingInfo = computed(() => inFlightDeviceInfoReads.value.has(selectedP
 const isRefreshingPorts = ref(false);
 const isFetchingFirmware = ref(false);
 const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
+const mqttOtaStatus = ref<Record<string, { status: string; timestamp: number }>>({});
+let unlistenMqttOtaStatus: (() => void) | null = null;
 const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
@@ -3119,6 +3121,65 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
   }
 }
 
+const isGatewayUdpLogsLoading = ref(false);
+const gatewayUdpLogsExpiry = ref(0);
+let gatewayUdpLogsInterval: number | null = null;
+
+async function enableGatewayUdpLogs() {
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+
+  isGatewayUdpLogsLoading.value = true;
+  try {
+    const hosts = await invoke<string[]>('local_udp_log_hosts');
+    const host = hosts[0];
+    if (!host) throw new Error('No reachable Flasher LAN address found');
+
+    if (!isNetworkUdpMonitoring.value) {
+      await startNetworkUdpListener();
+    }
+
+    await sendEasyPairCommandOnPort(port, 'udp_log_control', {
+      admin_password: password,
+      enabled: true,
+      host,
+      port: 5514,
+      ttl_s: 300
+    }, 8000);
+
+    networkUdpTarget.value = 'gateway';
+    networkStatusMessage.value = `UDP logging enabled for gateway to ${host}:5514 for 300s.`;
+    notify('Gateway UDP logging enabled for 300s');
+
+    gatewayUdpLogsExpiry.value = 300;
+    if (gatewayUdpLogsInterval) window.clearInterval(gatewayUdpLogsInterval);
+    gatewayUdpLogsInterval = window.setInterval(() => {
+      if (gatewayUdpLogsExpiry.value > 0) {
+        gatewayUdpLogsExpiry.value--;
+      } else {
+        if (gatewayUdpLogsInterval) {
+          window.clearInterval(gatewayUdpLogsInterval);
+          gatewayUdpLogsInterval = null;
+        }
+      }
+    }, 1000);
+  } catch (e) {
+    const msg = serialFeatureError('Gateway UDP logs', e);
+    networkStatusMessage.value = msg;
+    pushNetworkLog(msg);
+    notify(msg);
+  } finally {
+    isGatewayUdpLogsLoading.value = false;
+  }
+}
+
 async function flashLoraRemote(device: LoraInventoryDevice) {
   const { port, password } = fleetGatewayCommandTarget();
   if (!port) {
@@ -3693,6 +3754,7 @@ async function flashFleetGateway() {
       if (!otaUrl) throw new Error('No LAN firmware server URL available for the MQTT gateway');
 
       const cmdSentTime = Date.now();
+      delete mqttOtaStatus.value[port];
       try {
         await sendEasyPairCommandOnPort<any>(port, 'ota_pull', {
           admin_password: password,
@@ -3820,6 +3882,12 @@ async function waitForMqttGatewayUpdate(chipId: string, targetVersion: string, s
   const started = Date.now();
   const cleanTarget = targetVersion.replace(/^Local:\s*/i, '').trim();
   while (Date.now() - started < timeoutMs) {
+    const otaStat = mqttOtaStatus.value[chipId];
+    if (otaStat && otaStat.timestamp >= startTime) {
+      if (otaStat.status.startsWith('failed:')) {
+        throw new Error(`OTA pull failed: ${otaStat.status.substring(7)}`);
+      }
+    }
     const lastDiscovery = lastMqttDiscoveryMs.value[chipId] || 0;
     if (lastDiscovery >= startTime) {
       const currentFw = serialDeviceState(chipId)?.status?.fw_version;
@@ -5733,6 +5801,14 @@ onMounted(async () => {
     }
   });
 
+  unlistenMqttOtaStatus = await listen<any>('mqtt-ota-status-update', (event) => {
+    const payload = event.payload;
+    mqttOtaStatus.value[payload.chip_id] = {
+      status: payload.status,
+      timestamp: Date.now()
+    };
+  });
+
   unlistenMqttAdminResponse = await listen<any>('mqtt-admin-response', (event) => {
     const payload = event.payload;
     const res = payload.response;
@@ -5823,6 +5899,7 @@ onUnmounted(() => {
   if (unlistenMqttTelemetry) unlistenMqttTelemetry();
   if (unlistenMqttGateway) unlistenMqttGateway();
   if (unlistenMqttAdminResponse) unlistenMqttAdminResponse();
+  if (unlistenMqttOtaStatus) unlistenMqttOtaStatus();
   if (isNetworkUdpMonitoring.value) {
     invoke('stop_network_udp_monitor').catch(() => {});
   }
@@ -7274,15 +7351,6 @@ function toggleSelectAllBulkPorts() {
                             <button @click="copyToClipboard('{\&quot;addr\&quot;: 1, \&quot;relay\&quot;: 1}', 'MQTT control payload')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
                           </div>
                         </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Trigger Gateway OTA Update</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/ota_pull</code>
-                          <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
-                            <code class="font-mono text-cyan-400 text-[10px]">{"url": "...", "sha256": "..."}</code>
-                            <button @click="copyToClipboard('{\&quot;url\&quot;: \&quot;http://192.168.1.100/fw.bin\&quot;, \&quot;sha256\&quot;: \&quot;\&quot;}', 'MQTT OTA pull')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
-                          </div>
-                        </div>
                       </div>
                     </div>
 
@@ -7336,6 +7404,7 @@ function toggleSelectAllBulkPorts() {
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Normalized reading value</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Sensor status state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/diagnostics/tank_current_ma</span> / <span class="text-slate-300">/tank_voltage_mv</span>: Tank diagnostics</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/ota_status</span>: Retained OTA status (<code class="text-cyan-400">downloading</code>, <code class="text-cyan-400">failed:&lt;code&gt;</code>, <code class="text-cyan-400">rebooting</code>)</li>
                         </ul>
                       </div>
                       <div>
@@ -7850,6 +7919,13 @@ function toggleSelectAllBulkPorts() {
                 title="Identify selected USB gateway"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
+              </button>
+              <button
+                @click="enableGatewayUdpLogs"
+                :disabled="isGatewayUdpLogsLoading || (fleetTransport === 'mqtt' ? !selectedMqttGatewayChipId : !gatewaySelectedPort)"
+                class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
+              >
+                {{ gatewayUdpLogsExpiry > 0 ? `Logs active (${gatewayUdpLogsExpiry}s)` : 'Enable Gateway Logs' }}
               </button>
               <button
                 v-if="isGatewayUpgradeAvailable || isFlashing"
