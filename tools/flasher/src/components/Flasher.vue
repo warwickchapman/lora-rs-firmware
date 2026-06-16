@@ -132,6 +132,20 @@ interface LoraInventoryDevice {
   input_state_known?: boolean;
   input_feedback?: number;
   sensors?: SensorReading[];
+  maintenance_debug_known?: boolean;
+  heap_free?: number;
+  heap_max_block?: number;
+  heap_frag_pct?: number;
+  temp_enabled?: boolean;
+  temp_valid?: boolean;
+  temp_c?: number;
+  tank_enabled?: boolean;
+  tank_valid?: boolean;
+  tank_status?: string;
+  tank_depth_mm?: number;
+  tank_current_ma?: number;
+  tank_current_centi_ma?: number;
+  tank_voltage_mv?: number;
   debug_uptime_ms?: number;
   rssi?: number;
   downlink_rssi_known?: boolean;
@@ -1053,11 +1067,12 @@ const fleetGatewayBadgeClass = computed(() => {
   return 'border-slate-700 bg-slate-800/50 text-slate-400';
 });
 const fleetGatewaySummary = computed(() => {
-  if (fleetGatewayFlashPhase.value === 'flashing') return 'Writing firmware over USB serial.';
-  if (fleetGatewayFlashPhase.value === 'rebooting') return 'Flash completed; gateway is resetting.';
-  if (fleetGatewayFlashPhase.value === 'waiting') return 'Waiting for serial admin to return after reboot.';
-  if (fleetGatewayFlashPhase.value === 'updated') return 'Gateway responded after flash; status refreshed.';
-  if (fleetGatewayFlashPhase.value === 'failed') return 'Gateway flash did not complete; check activity log.';
+  const isMqtt = fleetTransport.value === 'mqtt';
+  if (fleetGatewayFlashPhase.value === 'flashing') return isMqtt ? 'Serving firmware binary for OTA pull...' : 'Writing firmware over USB serial.';
+  if (fleetGatewayFlashPhase.value === 'rebooting') return isMqtt ? 'OTA pull triggered; gateway is resetting.' : 'Flash completed; gateway is resetting.';
+  if (fleetGatewayFlashPhase.value === 'waiting') return isMqtt ? 'Waiting for gateway to reconnect to MQTT...' : 'Waiting for serial admin to return after reboot.';
+  if (fleetGatewayFlashPhase.value === 'updated') return isMqtt ? 'Gateway upgraded and reconnected over MQTT.' : 'Gateway responded after flash; status refreshed.';
+  if (fleetGatewayFlashPhase.value === 'failed') return isMqtt ? 'Gateway OTA upgrade did not complete; check activity log.' : 'Gateway flash did not complete; check activity log.';
   const status = fleetGatewayStatus.value;
   if (status) {
     const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
@@ -1066,7 +1081,7 @@ const fleetGatewaySummary = computed(() => {
   if (fleetGatewayIdentity.value) {
     return `Identity loaded · addr ${fleetGatewayIdentity.value.local_addr}->${fleetGatewayIdentity.value.remote_addr}`;
   }
-  return 'Select or load the USB gateway to inspect and flash it.';
+  return isMqtt ? 'Select or load the MQTT gateway to inspect and upgrade it.' : 'Select or load the USB gateway to inspect and flash it.';
 });
 const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
@@ -2083,10 +2098,10 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     mqtt_user: stringValue(cfg.mqtt_user, ''),
     mqtt_password: '',
     mqtt_topic_root: stringValue(cfg.mqtt_topic_root, mqtt?.topic_root || 'lora'),
-    sensor_temp_enabled: boolValue(cfg.sensor_temp_enabled, !!status?.local_temp_valid),
+    sensor_temp_enabled: boolValue(cfg.sensor_temp_enabled, !!status?.sensors?.some(s => s.kind === 'temperature' && s.state !== 'disabled')),
     sensor_temp_pin: numberValue(cfg.sensor_temp_pin, 0),
     sensor_temp_interval_s: numberValue(cfg.sensor_temp_interval_s, 10),
-    sensor_tank_enabled: boolValue(cfg.sensor_tank_enabled, !!status?.local_tank_enabled),
+    sensor_tank_enabled: boolValue(cfg.sensor_tank_enabled, !!status?.sensors?.some(s => s.kind === 'tank_level' && s.state !== 'disabled')),
     sensor_tank_range_mm: numberValue(cfg.sensor_tank_range_mm, 5000),
     sensor_tank_vref_mv: numberValue(cfg.sensor_tank_vref_mv, 3553),
     sensor_tank_sense_ohms: numberValue(cfg.sensor_tank_sense_ohms, 120),
@@ -2638,7 +2653,7 @@ function tankLabel(row: LoraInventoryDevice): string {
   return 'waiting';
 }
 
-function tankDetailLabel(row: LoraInventoryDevice): string {
+function tankDetailLabel(_row: LoraInventoryDevice): string {
   return '';
 }
 
