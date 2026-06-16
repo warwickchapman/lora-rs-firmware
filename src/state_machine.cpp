@@ -766,13 +766,24 @@ void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t
 
 bool NodeStateMachine::isPairedTargetAddress(uint8_t addr) const {
   if (addr == 0 || addr == 255 || settings_ == nullptr) return false;
-  uint8_t count = settings_->paired_target_count;
-  if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
-  if (count == 0) {
-    return addr == runtime_.remote_address;
-  }
-  for (uint8_t i = 0; i < count; ++i) {
-    if (settings_->paired_target_addresses[i] == addr) return true;
+
+  uint8_t targets[Settings::kAddressListCap]{};
+  const bool isPairedMode = (settings_->mode == "paired");
+
+  uint8_t targetCount = runtime_utils::resolveGatewayTargets(
+      isPairedMode,
+      runtime_.local_address,
+      settings_->known_peer_count,
+      settings_->known_peer_addresses,
+      settings_->paired_target_count,
+      settings_->paired_target_addresses,
+      settings_->remote_address,
+      targets,
+      Settings::kAddressListCap
+  );
+
+  for (uint8_t i = 0; i < targetCount; ++i) {
+    if (targets[i] == addr) return true;
   }
   return false;
 }
@@ -785,46 +796,26 @@ bool NodeStateMachine::buildTxGroupTargets() {
   tx_group_retry_bitmap_ = 0;
 
   if (settings_ == nullptr) return false;
-  auto addTarget = [this](uint8_t addr) {
-    if (addr == 0 || addr == 255) return;
-    if (addr == runtime_.local_address) return;
-    if (tx_group_target_count_ >= Settings::kAddressListCap) return;
-    bool dup = false;
-    for (uint8_t j = 0; j < tx_group_target_count_; ++j) {
-      if (tx_group_targets[j] == addr) {
-        dup = true;
-        break;
-      }
-    }
-    if (dup) return;
-    tx_group_targets[tx_group_target_count_] = addr;
-    tx_group_expected_bitmap_ |= (1UL << tx_group_target_count_);
-    tx_group_target_count_++;
-  };
 
-  uint8_t rawCount = settings_->paired_target_count;
-  if (rawCount > Settings::kAddressListCap) rawCount = Settings::kAddressListCap;
+  const bool isPairedMode = (settings_->mode == "paired");
 
-  for (uint8_t i = 0; i < rawCount && tx_group_target_count_ < Settings::kAddressListCap; ++i) {
-    addTarget(settings_->paired_target_addresses[i]);
+  tx_group_target_count_ = runtime_utils::resolveGatewayTargets(
+      isPairedMode,
+      runtime_.local_address,
+      settings_->known_peer_count,
+      settings_->known_peer_addresses,
+      settings_->paired_target_count,
+      settings_->paired_target_addresses,
+      settings_->remote_address,
+      tx_group_targets,
+      Settings::kAddressListCap
+  );
+
+  // Re-establish expectation bitmap based on count
+  for (uint8_t i = 0; i < tx_group_target_count_; ++i) {
+    tx_group_expected_bitmap_ |= (1UL << i);
   }
 
-  uint8_t knownCount = settings_->known_peer_count;
-  if (knownCount > Settings::kAddressListCap) knownCount = Settings::kAddressListCap;
-  for (uint8_t i = 0; i < knownCount && tx_group_target_count_ < Settings::kAddressListCap; ++i) {
-    addTarget(settings_->known_peer_addresses[i]);
-  }
-
-  for (size_t i = 0; i < peer_count_ && tx_group_target_count_ < Settings::kAddressListCap; ++i) {
-    if (!peers_[i].in_use) continue;
-    addTarget(peers_[i].address);
-  }
-
-  if (tx_group_target_count_ == 0 && runtime_.remote_address >= 1 && runtime_.remote_address <= 254) {
-    tx_group_targets[0] = runtime_.remote_address;
-    tx_group_expected_bitmap_ = 0x1UL;
-    tx_group_target_count_ = 1;
-  }
   return tx_group_target_count_ > 0;
 }
 
