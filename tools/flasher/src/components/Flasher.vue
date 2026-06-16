@@ -154,6 +154,22 @@ interface LoraInventoryDevice {
   power_save_deferred?: boolean;
 }
 
+interface LoraAdoptionCandidate {
+  address: number;
+  chip_id?: string;
+  rssi: number;
+  last_seen_ms: number;
+  age_ms?: number;
+  reason: 'ok' | 'known_chip_moved' | 'conflict' | 'out_of_range' | 'full';
+  state: 'seen_address_only' | 'identified' | 'readdressing' | 'adopted' | 'failed' | 'reset_requested';
+}
+
+interface LoraAdoptionStatus {
+  active: boolean;
+  chip_id?: string;
+  assigned_address: number;
+}
+
 interface LoraInventoryStatus {
   ok: boolean;
   cmd: string;
@@ -166,6 +182,8 @@ interface LoraInventoryStatus {
     now_ms: number;
   };
   devices?: LoraInventoryDevice[];
+  candidates?: LoraAdoptionCandidate[];
+  adoption?: LoraAdoptionStatus;
 }
 
 interface WifiNetwork {
@@ -554,6 +572,8 @@ const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const networkUdpTarget = ref('');
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
+const loraCandidates = ref<LoraAdoptionCandidate[]>([]);
+const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
 const activeGatewaySessionKey = ref('');
 const processedEasyPairLogLines = ref<Set<string>>(new Set());
 const isLoraInventoryScanning = ref(false);
@@ -2487,6 +2507,8 @@ function fleetRowStatusLabel(device: LoraInventoryDevice): string {
 function clearFleetGatewayCache() {
   loraInventory.value = [];
   loraInventoryScan.value = null;
+  loraCandidates.value = [];
+  loraAdoptionStatus.value = null;
   fleetRowHistory.value = {};
   isLoraInventoryScanning.value = false;
   stopLoraInventoryPolling(false);
@@ -2725,6 +2747,8 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
     if (port === targetPort) {
       loraInventoryScan.value = inventory.scan || null;
       mergeLoraInventoryRows(inventory.devices || []);
+      loraCandidates.value = inventory.candidates || [];
+      loraAdoptionStatus.value = inventory.adoption || null;
       isLoraInventoryScanning.value = !!inventory.scan?.active;
       networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
       if (!inventory.scan?.active && networkInventoryPollMode.value === 'scan') {
@@ -3430,6 +3454,47 @@ async function executeRemoteReboot(device: LoraInventoryDevice) {
     };
   } catch (e) {
     const msg = serialFeatureError(`Remote reboot`, e);
+    notify(msg);
+  }
+}
+
+async function adoptCandidate(candidate: LoraAdoptionCandidate) {
+  const isMqtt = fleetTransport.value === 'mqtt';
+  const port = isMqtt ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  const password = pairAdminPassword.value;
+  
+  if (!port) {
+    notify(isMqtt ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  
+  const label = candidate.chip_id ? `remote chip ${candidate.chip_id}` : `remote at address ${candidate.address}`;
+  if (!await confirmOperatorAction(`Adopt candidate ${label}?`, { confirmText: 'Adopt remote', danger: false })) {
+    return;
+  }
+  
+  try {
+    notify(`Adopting candidate ${label}...`);
+    await sendEasyPairCommandOnPort(port, 'adopt_candidate', {
+      admin_password: password,
+      chip_id: candidate.chip_id
+    }, 8000);
+    notify(`Adoption request sent for candidate ${label}.`);
+    
+    // Ensure active polling starts/continues
+    if (isMqtt) {
+      startLoraInventoryPolling();
+    } else {
+      startFleetCachePolling();
+    }
+    
+    await refreshLoraInventoryStatus(false);
+  } catch (e) {
+    const msg = serialFeatureError(`Candidate adoption`, e);
     notify(msg);
   }
 }
@@ -5292,6 +5357,16 @@ watch(selectedPort, (port) => {
     monitorFleetRows.value = [];
     stopMonitorPolling();
   }
+});
+
+watch(selectedMqttGatewayChipId, () => {
+  clearFleetGatewayCache();
+  activeGatewaySessionKey.value = '';
+});
+
+watch(fleetTransport, () => {
+  clearFleetGatewayCache();
+  activeGatewaySessionKey.value = '';
 });
 
 watch(gatewaySelectedPort, (port) => {
@@ -8011,7 +8086,88 @@ function toggleSelectAllBulkPorts() {
             <div ref="networkUdpLogContainer" :class="['overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400', networkUdpLogsExpanded ? 'min-h-0 flex-1 rounded border border-slate-800 bg-slate-950/60 p-2' : 'max-h-44']">
               <div v-for="(log, i) in filteredNetworkLogs.slice(-200)" :key="i">{{ log }}</div>
               <div v-if="filteredNetworkLogs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discovered Candidates -->
+        <div v-if="loraCandidates.length > 0" class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-bold text-slate-300">Discovered Candidates</h2>
+              <div class="mt-1 text-xs text-slate-500">Unconfigured same-key remotes heard by the gateway.</div>
             </div>
+            <div class="text-xs text-slate-500">{{ loraCandidates.length }} candidate{{ loraCandidates.length === 1 ? '' : 's' }} discovered</div>
+          </div>
+          
+          <div class="overflow-auto custom-scrollbar rounded-md border border-slate-800 max-h-64">
+            <table class="w-full border-collapse text-xs">
+              <thead class="bg-slate-950/95 text-slate-500 sticky top-0">
+                <tr class="border-b border-slate-800">
+                  <th class="px-2 py-1.5 text-left font-semibold">Address</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Device</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Age</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Reason</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">State</th>
+                  <th class="px-2 py-1.5 text-left font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="c in loraCandidates"
+                  :key="c.chip_id || c.address"
+                  class="border-b border-slate-900/80 hover:bg-white/5 transition-colors"
+                >
+                  <td class="px-2 py-1.5 font-mono text-slate-300">
+                    <span class="inline-flex min-w-8 items-center justify-center rounded border px-2 py-1 text-[10px] font-bold border-slate-700 bg-slate-800/20 text-slate-400">
+                      {{ c.address }}
+                    </span>
+                  </td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">
+                    {{ c.chip_id ? lrsDeviceName(c.chip_id) : 'Unknown (querying...)' }}
+                  </td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ c.rssi }} dBm</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ c.age_ms != null ? `${Math.round(c.age_ms / 1000)}s` : '-' }}</td>
+                  <td class="px-2 py-1.5">
+                    <span :class="['rounded border px-2 py-0.5 text-[10px] font-semibold',
+                      c.reason === 'ok' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' :
+                      c.reason === 'conflict' ? 'border-rose-500/20 bg-rose-500/5 text-rose-400' :
+                      c.reason === 'out_of_range' ? 'border-amber-500/20 bg-amber-500/5 text-amber-400' :
+                      c.reason === 'known_chip_moved' ? 'border-sky-500/20 bg-sky-500/5 text-sky-400' :
+                      'border-slate-800 bg-slate-900/50 text-slate-500'
+                    ]">
+                      {{ c.reason }}
+                    </span>
+                  </td>
+                  <td class="px-2 py-1.5 font-mono">
+                    <span :class="['text-[10px] font-bold',
+                      c.state === 'adopted' ? 'text-emerald-400' :
+                      c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
+                      c.state === 'reset_requested' ? 'text-amber-400 animate-pulse' :
+                      c.state === 'failed' ? 'text-rose-400' :
+                      'text-slate-400'
+                    ]">
+                      {{ c.state }}
+                    </span>
+                  </td>
+                  <td class="px-2 py-1.5 flex items-center gap-2">
+                    <button
+                      v-if="['identified', 'failed'].includes(c.state) && c.chip_id"
+                      @click="adoptCandidate(c)"
+                      class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center justify-center select-none"
+                    >
+                      Adopt
+                    </button>
+                    <span v-else-if="c.state === 'seen_address_only'" class="text-slate-500 text-[10px] animate-pulse">waiting for identity</span>
+                    <span v-else-if="c.state === 'readdressing'" class="text-sky-400 text-[10px] animate-pulse">adopting</span>
+                    <span v-else-if="c.state === 'reset_requested'" class="text-amber-400 text-[10px] animate-pulse">reset requested</span>
+                    <span v-else-if="c.state === 'failed' && !c.chip_id" class="text-rose-500 text-[10px]">failed</span>
+                    <span v-else class="text-slate-500 text-[10px]">-</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
