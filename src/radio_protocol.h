@@ -23,7 +23,9 @@ enum class MessageType : uint8_t {
   Reboot = 'B',
   SensorConfig = 'K',
   FleetKeyControl = 'Z',
+  Readdress = 'D',
 };
+
 
 struct ProtocolMessage {
   MessageType type;

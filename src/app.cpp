@@ -336,6 +336,51 @@ void App::tick() {
     }
   }
   {
+    uint8_t newAddress = 0;
+    uint8_t gwAddr = 0;
+    if (sm_.consumePendingReaddress(newAddress, gwAddr)) {
+      if (newAddress == 0) {
+        lrslog::event("readdress_exec_reset", 0, 0, 0);
+        if (config_.factoryReset(false, true)) {
+          if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
+            lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
+            LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
+          }
+          delay(100);
+          ESP.restart();
+          return;
+        } else {
+          lrslog::event("readdress_save_fail", 0, newAddress, 0);
+        }
+      } else {
+        auto &cfg = config_.settings();
+        cfg.local_address = newAddress;
+        lrslog::event("readdress_exec", 0, newAddress, 0);
+        if (config_.save()) {
+          if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
+            lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
+            LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
+          }
+          applyUpdatedConfig(false, false);
+        } else {
+          lrslog::event("readdress_save_fail", 0, newAddress, 0);
+        }
+      }
+    }
+  }
+  {
+    uint32_t syncChipId = 0;
+    uint8_t syncAddress = 0;
+    if (sm_.consumePendingPeerSync(syncChipId, syncAddress)) {
+      if (admin_executor_.addPeerToConfig(syncChipId, syncAddress)) {
+        lrslog::event("peer_sync_success", 0, syncAddress, syncChipId);
+      } else {
+        lrslog::event("peer_sync_fail", 0, syncAddress, syncChipId);
+      }
+    }
+  }
+
+  {
     bool sensorTempEnabled = false;
     bool sensorTankEnabled = false;
     bool sensorPowerSaveEnabled = false;

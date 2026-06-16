@@ -48,6 +48,30 @@ void clearAddressList(uint8_t *list, uint8_t &count) {
   memset(list, 0, Settings::kAddressListCap);
 }
 
+const char* candidateReasonToString(CandidateReason r) {
+  switch (r) {
+    case CandidateReason::Ok: return "ok";
+    case CandidateReason::KnownChipMoved: return "known_chip_moved";
+    case CandidateReason::Conflict: return "conflict";
+    case CandidateReason::OutOfRange: return "out_of_range";
+    case CandidateReason::Full: return "full";
+    default: return "unknown";
+  }
+}
+
+const char* candidateStateToString(CandidateState s) {
+  switch (s) {
+    case CandidateState::SeenAddressOnly: return "seen_address_only";
+    case CandidateState::Identified: return "identified";
+    case CandidateState::Readdressing: return "readdressing";
+    case CandidateState::Adopted: return "adopted";
+    case CandidateState::Failed: return "failed";
+    case CandidateState::ResetRequested: return "reset_requested";
+    default: return "unknown";
+  }
+}
+
+
 void writeAddressArray(JsonDocument &doc, const char *key, const uint8_t *values,
                        uint8_t count, uint8_t cap) {
   JsonArray arr = doc[key].to<JsonArray>();
@@ -1332,7 +1356,39 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
     }
   }
 
+  JsonArray candidates = out["candidates"].to<JsonArray>();
+  size_t cCount = sm_->candidateCount();
+  for (size_t i = 0; i < cCount; ++i) {
+    DiscoveryCandidate c{};
+    if (sm_->candidateByIndex(i, c)) {
+      JsonObject row = candidates.add<JsonObject>();
+      row["address"] = c.address;
+      if (c.chip_id != 0) {
+        char chipBuf[9];
+        snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(c.chip_id & 0xFFFFFFUL));
+        row["chip_id"] = chipBuf;
+      }
+      row["rssi"] = c.rssi;
+      row["last_seen_ms"] = c.last_seen_ms;
+      if (c.last_seen_ms != 0) {
+        row["age_ms"] = now - c.last_seen_ms;
+      }
+      row["reason"] = candidateReasonToString(c.reason);
+      row["state"] = candidateStateToString(c.state);
+    }
+  }
+
+  if (sm_->isAdoptionActive()) {
+    JsonObject adoptObj = out["adoption"].to<JsonObject>();
+    adoptObj["active"] = true;
+    char chipBuf[9];
+    snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(sm_->adoptionChipId() & 0xFFFFFFUL));
+    adoptObj["chip_id"] = chipBuf;
+    adoptObj["assigned_address"] = sm_->adoptionAddress();
+  }
+
   if (shouldLog) {
+
     size_t jsonSize = measureJson(out);
 #if defined(ESP8266)
     LRS_LOGI(API, "lora_inventory_status HEAP after: free=%lu max_block=%lu frag=%u size=%u",
@@ -2005,6 +2061,12 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     return;
   }
 
+  if (strcmp(cmd, "adopt_candidate") == 0) {
+    handleAdoptCandidate(doc, writer);
+    return;
+  }
+
+
   if (strcmp(cmd, "start_discovery") == 0) {
     if (!requireAdmin(doc)) {
       sendError(cmd, "auth_failed", id, writer);
@@ -2091,3 +2153,109 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
 
   sendError(cmd, "unknown_cmd", id, writer);
 }
+
+void AdminExecutor::handleAdoptCandidate(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  const char *cmd = "adopt_candidate";
+  if (!requireAdmin(doc)) {
+    sendError(cmd, "auth_failed", id, writer);
+    return;
+  }
+  if (config_ == nullptr || sm_ == nullptr) {
+    sendError(cmd, "runtime_unavailable", id, writer);
+    return;
+  }
+  
+  uint32_t chipId = 0;
+  if (doc["chip_id"].is<const char*>()) {
+    chipId = strtoul(doc["chip_id"].as<const char*>(), nullptr, 16);
+  } else {
+    chipId = doc["chip_id"] | 0;
+  }
+  
+  if (chipId == 0) {
+    sendError(cmd, "invalid_chip_id", id, writer);
+    return;
+  }
+  
+  DiscoveryCandidate c{};
+  if (!sm_->candidateByChipId(chipId, c)) {
+    sendError(cmd, "candidate_not_found", id, writer);
+    return;
+  }
+  
+  if (c.state != CandidateState::Identified && c.state != CandidateState::Failed) {
+    sendError(cmd, "candidate_not_adoptable", id, writer);
+    return;
+  }
+  
+  const auto &cfg = config_->settings();
+  uint8_t assignedAddress = runtime_utils::resolveAdoptionAddress(c.address, chipId, cfg.known_peer_count, cfg.known_peer_addresses, cfg.known_peer_chip_ids);
+  bool isReset = (assignedAddress == 0);
+  
+  if (sm_->startAdoption(chipId, assignedAddress, isReset)) {
+    JsonDocument out;
+    out["cmd"] = cmd;
+    if (id[0] != '\0') out["id"] = id;
+    
+    char chipBuf[9];
+    snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(chipId & 0xFFFFFFUL));
+    out["chip_id"] = chipBuf;
+    out["assigned_address"] = assignedAddress;
+    out["reset_requested"] = isReset;
+    sendOk(out, writer);
+  } else {
+    sendError(cmd, "adoption_start_failed", id, writer);
+  }
+}
+
+bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
+  if (config_ == nullptr) return false;
+  auto &cfg = config_->settings();
+  
+  int existingIdx = -1;
+  for (size_t i = 0; i < cfg.known_peer_count; ++i) {
+    if (cfg.known_peer_chip_ids[i] == chipId) {
+      existingIdx = static_cast<int>(i);
+      break;
+    }
+  }
+  
+  if (existingIdx >= 0) {
+    const uint8_t oldAddr = cfg.known_peer_addresses[existingIdx];
+    if (oldAddr != address) {
+      cfg.known_peer_addresses[existingIdx] = address;
+      for (size_t i = 0; i < cfg.paired_target_count; ++i) {
+        if (cfg.paired_target_addresses[i] == oldAddr) {
+          cfg.paired_target_addresses[i] = address;
+        }
+      }
+      if (cfg.remote_address == oldAddr) {
+        cfg.remote_address = address;
+      }
+    }
+  } else {
+    if (cfg.known_peer_count >= Settings::kAddressListCap) {
+      return false;
+    }
+    cfg.known_peer_addresses[cfg.known_peer_count] = address;
+    cfg.known_peer_chip_ids[cfg.known_peer_count] = chipId;
+    cfg.known_peer_count++;
+    
+    if (cfg.paired_target_count < Settings::kAddressListCap) {
+      cfg.paired_target_addresses[cfg.paired_target_count++] = address;
+    }
+    if (cfg.remote_address == 0 && cfg.paired_target_count > 0) {
+      cfg.remote_address = cfg.paired_target_addresses[0];
+    }
+  }
+  
+  if (config_->save()) {
+    if (on_apply_) {
+      on_apply_(false, false);
+    }
+    return true;
+  }
+  return false;
+}
+

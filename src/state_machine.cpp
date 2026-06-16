@@ -403,7 +403,26 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
 void NodeStateMachine::applyConfig(const Settings &cfg) {
   settings_ = &cfg;
   refreshRuntimeCfg(cfg);
+  
+  // Filter out any candidates that are now configured
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id != 0) {
+      bool configured = false;
+      for (size_t j = 0; j < cfg.known_peer_count; ++j) {
+        if (cfg.known_peer_chip_ids[j] == discovery_candidates_[i].chip_id) {
+          configured = true;
+          break;
+        }
+      }
+      if (configured) {
+        discovery_candidates_[i] = DiscoveryCandidate{};
+      }
+    }
+  }
+  evaluateAllCandidateReasons();
+
   link_state_ = LinkState::Idle;
+
   wait_ack_since_ms_ = millis();
   last_heartbeat_ms_ = millis();
   tx_ack_pending_ = false;
@@ -2909,6 +2928,13 @@ void NodeStateMachine::tickPendingMaintenancePages() {
 bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   if (!runtime_.role_tx) return false;
   if (settings_ != nullptr && settings_->mode == "paired" && !isConfiguredOperationalPeer(msg.src)) {
+    const uint8_t *p = msg.raw_payload;
+    if (p[0] == kMaintenancePayloadVersion && p[1] == kMaintenancePageIdentity) {
+      const uint32_t reportedChipId = static_cast<uint32_t>(p[3]) |
+                                      (static_cast<uint32_t>(p[4]) << 8) |
+                                      (static_cast<uint32_t>(p[5]) << 16);
+      recordDiscoveryCandidate(msg.src, reportedChipId, msg.rssi);
+    }
     return false;
   }
   PeerRuntime *node = findOrCreatePeer(msg.src);
@@ -3264,7 +3290,9 @@ void NodeStateMachine::tickTransmitter() {
   tickPeerPolling(now);
   tickPeerMaintenance(now);
   tickFleetScan(now);
+  tickCandidatesAndAdoption(now);
   startupTxPhaseTrace("after_peer_polling");
+
 
   if (link_state_ == LinkState::WaitAck && (now - wait_ack_since_ms_) >= runtime_.ack_timeout_ms) {
     relay_state_ = 0;
@@ -3338,6 +3366,7 @@ void NodeStateMachine::tickReceive() {
   const bool isUdpLogControl = (msg.type == MessageType::UdpLogControl);
   const bool isOtaPullControl = (msg.type == MessageType::OtaPullControl);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
+  const bool isReaddress = (msg.type == MessageType::Readdress);
   const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
                               msg.type == MessageType::MaintenanceStatus);
   if (isProvisioning) {
@@ -3346,7 +3375,7 @@ void NodeStateMachine::tickReceive() {
   }
   const bool isChange = (msg.type == MessageType::Change);
   if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl &&
-      !isMaintenance && !isChange && msg.dst != runtime_.local_address) {
+      !isMaintenance && !isChange && !isReaddress && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -3378,7 +3407,7 @@ void NodeStateMachine::tickReceive() {
     const bool heartbeat = (msg.type == MessageType::Heartbeat);
     const bool change = (msg.type == MessageType::Change);
     const bool isAck = (msg.type == MessageType::Ack);
-    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !heartbeat && !change && !isAck && !fromPaired) {
+    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !heartbeat && !change && !isAck && !isReaddress && !fromPaired) {
       lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
@@ -3396,6 +3425,8 @@ void NodeStateMachine::tickReceive() {
       // Allow fleet scans from any same-key TX even when this RX is paired to a different remote source.
     } else if (msg.type == MessageType::MaintenanceRequest) {
       // Allow bounded same-key maintenance inventory without exposing secrets.
+    } else if (msg.type == MessageType::Readdress) {
+      // Allow readdress requests from gateway same-key.
     } else if (msg.type == MessageType::WifiControl) {
       // Same-key broadcast/targeted WiFi control is accepted so a TX can recover
       // or disable managed remotes even when pairing is being reworked.
@@ -3424,12 +3455,21 @@ void NodeStateMachine::tickReceive() {
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
                                                                   isOtaPullControl || isFactoryReset || isMaintenance ||
-                                                                  isReboot || isSensorConfig || isFleetKeyControl);
+                                                                  isReboot || isSensorConfig || isFleetKeyControl || isReaddress);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
   last_packet_ms_ = millis();
   last_packet_rssi_ = msg.rssi;
+  
+  if (runtime_.role_tx && settings_ != nullptr && settings_->mode == "paired") {
+    if (msg.src != 0 && msg.src != 255 && msg.src != runtime_.local_address) {
+      if (!isConfiguredOperationalPeer(msg.src)) {
+        recordDiscoveryCandidate(msg.src, 0, msg.rssi);
+      }
+    }
+  }
+
   if (isWifiProvision) {
     handleWifiProvisionFrame(msg);
     return;
@@ -3462,10 +3502,15 @@ void NodeStateMachine::tickReceive() {
     handleFleetKeyControlFrame(msg);
     return;
   }
+  if (isReaddress) {
+    handleReaddressFrame(msg);
+    return;
+  }
   if (msg.type == MessageType::MaintenanceStatus) {
     handleMaintenanceStatus(msg);
     return;
   }
+
   if (msg.type == MessageType::Heartbeat || msg.type == MessageType::PollResponse || msg.type == MessageType::MqttStatus) {
     updateSharedTimeFromPeer(msg.unix_time_s, (msg.flags & kFlagTimeAuthoritative) != 0U);
   }
@@ -4634,3 +4679,357 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
 
   return false;
 }
+
+size_t NodeStateMachine::candidateCount() const {
+  size_t count = 0;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use) {
+      count++;
+    }
+  }
+  return count;
+}
+
+bool NodeStateMachine::candidateByIndex(size_t index, DiscoveryCandidate &out) const {
+  size_t count = 0;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use) {
+      if (count == index) {
+        out = discovery_candidates_[i];
+        return true;
+      }
+      count++;
+    }
+  }
+  return false;
+}
+
+bool NodeStateMachine::candidateByChipId(uint32_t chipId, DiscoveryCandidate &out) const {
+  if (chipId == 0) return false;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == chipId) {
+      out = discovery_candidates_[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+void NodeStateMachine::recordDiscoveryCandidate(uint8_t address, uint32_t chipId, int rssi) {
+  const uint32_t now = millis();
+  
+  if (chipId != 0 && settings_ != nullptr) {
+    for (size_t i = 0; i < settings_->known_peer_count; ++i) {
+      if (settings_->known_peer_chip_ids[i] == chipId) {
+        removeDiscoveryCandidate(chipId);
+        return;
+      }
+    }
+  }
+  
+  int matchIdx = -1;
+  if (chipId != 0) {
+    for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+      if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == chipId) {
+        matchIdx = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+  
+  if (matchIdx < 0) {
+    for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+      if (discovery_candidates_[i].in_use && discovery_candidates_[i].address == address) {
+        if (chipId == 0 || discovery_candidates_[i].chip_id == 0) {
+          matchIdx = static_cast<int>(i);
+          break;
+        }
+      }
+    }
+  }
+  
+  if (matchIdx >= 0) {
+    DiscoveryCandidate &c = discovery_candidates_[matchIdx];
+    c.address = address;
+    c.rssi = rssi;
+    c.last_seen_ms = now;
+    
+    if (chipId != 0 && c.chip_id == 0) {
+      c.chip_id = chipId;
+      c.state = CandidateState::Identified;
+      c.reason = evaluateCandidateReason(address, chipId);
+      lrslog::event("candidate_identified", 0, address, chipId);
+    } else if (chipId != 0) {
+      c.reason = evaluateCandidateReason(address, chipId);
+    }
+    return;
+  }
+  
+  int emptyIdx = -1;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (!discovery_candidates_[i].in_use) {
+      emptyIdx = static_cast<int>(i);
+      break;
+    }
+  }
+  
+  if (emptyIdx >= 0) {
+    DiscoveryCandidate &c = discovery_candidates_[emptyIdx];
+    c.in_use = true;
+    c.address = address;
+    c.chip_id = chipId;
+    c.rssi = rssi;
+    c.last_seen_ms = now;
+    
+    if (chipId == 0) {
+      c.state = CandidateState::SeenAddressOnly;
+      c.reason = evaluateCandidateReason(address, 0);
+      lrslog::event("candidate_seen", 0, address, 0);
+    } else {
+      c.state = CandidateState::Identified;
+      c.reason = evaluateCandidateReason(address, chipId);
+      lrslog::event("candidate_identified", 0, address, chipId);
+    }
+  }
+}
+
+void NodeStateMachine::removeDiscoveryCandidate(uint32_t chipId) {
+  if (chipId == 0) return;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == chipId) {
+      discovery_candidates_[i] = DiscoveryCandidate{};
+      break;
+    }
+  }
+}
+
+CandidateReason NodeStateMachine::evaluateCandidateReason(uint8_t address, uint32_t chipId) const {
+  if (settings_ == nullptr) return CandidateReason::Ok;
+  return runtime_utils::evaluateCandidateReason(address, chipId, settings_->known_peer_count, settings_->known_peer_addresses, settings_->known_peer_chip_ids);
+}
+
+void NodeStateMachine::evaluateAllCandidateReasons() {
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use) {
+      discovery_candidates_[i].reason = evaluateCandidateReason(discovery_candidates_[i].address, discovery_candidates_[i].chip_id);
+    }
+  }
+}
+
+bool NodeStateMachine::startAdoption(uint32_t chipId, uint8_t assignedAddress, bool isReset) {
+  int cIdx = -1;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == chipId) {
+      cIdx = static_cast<int>(i);
+      break;
+    }
+  }
+  if (cIdx < 0) return false;
+  
+  DiscoveryCandidate &c = discovery_candidates_[cIdx];
+  if (c.state != CandidateState::Identified && c.state != CandidateState::Failed) {
+    return false;
+  }
+  
+  c.state = isReset ? CandidateState::ResetRequested : CandidateState::Readdressing;
+  c.last_seen_ms = millis();
+  
+  adoption_active_ = true;
+  adoption_chip_id_ = chipId;
+  adoption_address_ = assignedAddress;
+  adoption_dst_addr_ = c.address;
+  adoption_sent_ms_ = millis();
+  adoption_retry_count_ = 0;
+  adoption_is_reset_ = isReset;
+  
+  bool sent = sendPeerReaddress(adoption_dst_addr_, adoption_chip_id_, adoption_address_, 0);
+  if (!sent) {
+    c.state = CandidateState::Identified;
+    adoption_active_ = false;
+    return false;
+  }
+  return true;
+
+}
+
+void NodeStateMachine::cancelAdoption() {
+  if (!adoption_active_) return;
+  
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == adoption_chip_id_) {
+      if (discovery_candidates_[i].state == CandidateState::Readdressing ||
+          discovery_candidates_[i].state == CandidateState::ResetRequested) {
+        discovery_candidates_[i].state = CandidateState::Identified;
+      }
+      break;
+    }
+  }
+  
+  adoption_active_ = false;
+  lrslog::event("candidate_adoption_cancelled", 0, 0, adoption_chip_id_);
+}
+
+bool NodeStateMachine::sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, uint8_t newAddress, uint8_t op) {
+  if (!radioTxBudgetAvailable()) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  uint8_t payload[12]{};
+  payload[0] = static_cast<uint8_t>(chipId & 0xFFU);
+  payload[1] = static_cast<uint8_t>((chipId >> 8) & 0xFFU);
+  payload[2] = static_cast<uint8_t>((chipId >> 16) & 0xFFU);
+  payload[3] = static_cast<uint8_t>((chipId >> 24) & 0xFFU);
+  payload[4] = newAddress;
+  payload[5] = op;
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::Readdress, last_counter_,
+                       runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  if (op == 0) {
+    if (newAddress == 0) {
+      lrslog::event("candidate_key_reset_sent", 0, last_counter_, dstAddress);
+    } else {
+      lrslog::event("candidate_readdressing", 0, last_counter_, dstAddress);
+    }
+  }
+  return true;
+}
+
+bool NodeStateMachine::consumePendingPeerSync(uint32_t &chipId, uint8_t &address) {
+  if (!peer_sync_pending_) return false;
+  chipId = peer_sync_chip_id_;
+  address = peer_sync_address_;
+  peer_sync_pending_ = false;
+  return true;
+}
+
+bool NodeStateMachine::hasPendingReaddress() const {
+  return readdress_pending_;
+}
+
+bool NodeStateMachine::consumePendingReaddress(uint8_t &outNewAddress, uint8_t &outGwAddr) {
+  if (!readdress_pending_) return false;
+  outNewAddress = readdress_pending_new_address_;
+  outGwAddr = readdress_pending_gw_addr_;
+  readdress_pending_ = false;
+  return true;
+}
+
+
+void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
+  if (adoption_active_) {
+    if (static_cast<int32_t>(now - adoption_sent_ms_) >= 500) {
+      if (adoption_retry_count_ < 3) {
+        adoption_retry_count_++;
+        adoption_sent_ms_ = now;
+        sendPeerReaddress(adoption_dst_addr_, adoption_chip_id_, adoption_address_, 0);
+      } else {
+        adoption_active_ = false;
+        for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+          if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == adoption_chip_id_) {
+            discovery_candidates_[i].state = CandidateState::Failed;
+            discovery_candidates_[i].last_seen_ms = now;
+            break;
+          }
+        }
+        lrslog::event("candidate_readdress_failed", 0, 0, adoption_chip_id_);
+      }
+    }
+  }
+  
+  static uint32_t last_candidate_probe_ms = 0;
+  if (static_cast<int32_t>(now - last_candidate_probe_ms) >= 5000) {
+    for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+      DiscoveryCandidate &c = discovery_candidates_[i];
+      if (c.in_use && c.state == CandidateState::SeenAddressOnly) {
+        uint32_t sentCounter = 0;
+        if (sendMaintenanceRequest(c.address, &sentCounter)) {
+          last_candidate_probe_ms = now;
+          lrslog::event("candidate_maint_probe", 0, sentCounter, c.address);
+          break;
+        }
+      }
+    }
+  }
+}
+
+bool NodeStateMachine::handleReaddressFrame(const ProtocolMessage &msg) {
+  const uint8_t *p = msg.raw_payload;
+  const uint32_t targetChipId = static_cast<uint32_t>(p[0]) |
+                                (static_cast<uint32_t>(p[1]) << 8) |
+                                (static_cast<uint32_t>(p[2]) << 16) |
+                                (static_cast<uint32_t>(p[3]) << 24);
+  const uint8_t newAddress = p[4];
+  const uint8_t op = p[5];
+  
+  if (runtime_.role_tx) {
+    if (op == 1) { // Confirm
+      if (runtime_utils::validateGatewayConfirm(targetChipId, newAddress, msg.src,
+                                                adoption_active_, adoption_chip_id_,
+                                                adoption_address_, adoption_dst_addr_)) {
+        adoption_active_ = false;
+        // Find and update candidate
+        for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+          if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == targetChipId) {
+            discovery_candidates_[i].state = CandidateState::Adopted;
+            discovery_candidates_[i].address = newAddress;
+            discovery_candidates_[i].last_seen_ms = millis();
+            break;
+          }
+        }
+        lrslog::event("candidate_adopted", 0, newAddress, targetChipId);
+        
+        if (newAddress != 0) {
+          // Queue sync to config
+          peer_sync_pending_ = true;
+          peer_sync_chip_id_ = targetChipId;
+          peer_sync_address_ = newAddress;
+        } else {
+          // Reset successful, remove candidate from list so it doesn't linger
+          removeDiscoveryCandidate(targetChipId);
+        }
+        return true;
+      }
+    }
+  } else {
+    if (op == 0) { // Request
+      const uint32_t myChipId = ESP.getChipId() & 0xFFFFFFUL;
+      if (targetChipId == myChipId) {
+        // Queue readdress change for app.cpp to consume
+        readdress_pending_ = true;
+        readdress_pending_new_address_ = newAddress;
+        readdress_pending_gw_addr_ = msg.src;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool NodeStateMachine::sendReaddressConfirm(uint8_t gwAddr, uint8_t newAddress) {
+  if (radio_ == nullptr || gwAddr == 0 || gwAddr == 255) return false;
+  
+  uint32_t myChipId = ESP.getChipId() & 0xFFFFFFUL;
+  uint8_t payload[12]{};
+  payload[0] = static_cast<uint8_t>(myChipId & 0xFFU);
+  payload[1] = static_cast<uint8_t>((myChipId >> 8) & 0xFFU);
+  payload[2] = static_cast<uint8_t>((myChipId >> 16) & 0xFFU);
+  payload[3] = static_cast<uint8_t>((myChipId >> 24) & 0xFFU);
+  payload[4] = newAddress;
+  payload[5] = 1; // Confirm
+  
+  uint8_t srcAddress = (newAddress == 0) ? runtime_.local_address : newAddress;
+  
+  last_counter_++;
+  bool ok = radio_->sendRaw(MessageType::Readdress, last_counter_, srcAddress, gwAddr, payload);
+  if (ok) {
+    last_tx_ms_ = millis();
+    markRadioTxSentThisTick();
+    lrslog::event("readdress_confirm_tx", 0, last_counter_, newAddress);
+  }
+  return ok;
+}
+
+
+

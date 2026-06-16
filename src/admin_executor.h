@@ -14,8 +14,10 @@ public:
   bool begin(ConfigStore *config, NodeStateMachine *sm,
              std::function<void(bool, bool)> onApply);
   void execute(const String &jsonCommand, ResponseWriter writer, bool isMqtt = false);
+  bool addPeerToConfig(uint32_t chipId, uint8_t address);
 
 private:
+
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
@@ -60,4 +62,6 @@ private:
   void handleOtaPull(JsonDocument &doc, ResponseWriter writer);
   void handleSetGatewayTargets(JsonDocument &doc, ResponseWriter writer);
   void handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter writer);
+  void handleAdoptCandidate(JsonDocument &doc, ResponseWriter writer);
 };
+

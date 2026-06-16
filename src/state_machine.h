@@ -8,6 +8,8 @@
 #include "radio_protocol.h"
 #include "sensor_status.h"
 #include "sensor_registry.h"
+#include "runtime_utils.h"
+
 
 #ifndef LRS_PROVISIONING_MAX_DEVICES
 #define LRS_PROVISIONING_MAX_DEVICES 12
@@ -220,6 +222,26 @@ class NodeStateMachine {
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
   bool fleetScanSnapshot(FleetScanSnapshot &out) const;
+  size_t candidateCount() const;
+  bool candidateByIndex(size_t index, DiscoveryCandidate &out) const;
+  bool candidateByChipId(uint32_t chipId, DiscoveryCandidate &out) const;
+  void recordDiscoveryCandidate(uint8_t address, uint32_t chipId, int rssi);
+  void removeDiscoveryCandidate(uint32_t chipId);
+  CandidateReason evaluateCandidateReason(uint8_t address, uint32_t chipId) const;
+  void evaluateAllCandidateReasons();
+  bool startAdoption(uint32_t chipId, uint8_t assignedAddress, bool isReset);
+  void cancelAdoption();
+  bool consumePendingPeerSync(uint32_t &chipId, uint8_t &address);
+  bool hasPendingReaddress() const;
+  bool consumePendingReaddress(uint8_t &outNewAddress, uint8_t &outGwAddr);
+  bool sendReaddressConfirm(uint8_t gwAddr, uint8_t newAddress);
+  bool handleReaddressFrame(const ProtocolMessage &msg);
+
+  bool isAdoptionActive() const { return adoption_active_; }
+  uint32_t adoptionChipId() const { return adoption_chip_id_; }
+  uint8_t adoptionAddress() const { return adoption_address_; }
+  bool sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, uint8_t newAddress, uint8_t op);
+
   bool sendFleetWifiProvision(const String &ssid, const String &password, uint8_t targetAddress = 255);
   bool hasPendingWifiProvision() const;
   bool consumePendingWifiProvision(String &ssid, String &password, uint8_t &src);
@@ -431,7 +453,23 @@ class NodeStateMachine {
   // may still be sent to uncached peers as transient fire-and-forget operations.
   PeerRuntime peers_[kMaxPeers]{};
   size_t peer_count_ = 0;
+  DiscoveryCandidate discovery_candidates_[Settings::kAddressListCap]{};
+  bool adoption_active_ = false;
+  uint32_t adoption_chip_id_ = 0;
+  uint8_t adoption_address_ = 0;
+  uint8_t adoption_dst_addr_ = 0;
+  uint32_t adoption_sent_ms_ = 0;
+  uint8_t adoption_retry_count_ = 0;
+  bool adoption_is_reset_ = false;
+  bool peer_sync_pending_ = false;
+  uint32_t peer_sync_chip_id_ = 0;
+  uint8_t peer_sync_address_ = 0;
+  bool readdress_pending_ = false;
+  uint8_t readdress_pending_new_address_ = 0;
+  uint8_t readdress_pending_gw_addr_ = 0;
   PollRuntime *poll_states_ = nullptr;
+
+
   size_t poll_state_capacity_ = 0;
 
   bool fleet_scan_active_ = false;
@@ -616,7 +654,9 @@ class NodeStateMachine {
   void tickReceiver();
   void tickReceive();
   void tickFleetScan(uint32_t now);
+  void tickCandidatesAndAdoption(uint32_t now);
   void tickLed(bool powerSaveActive = false);
+
   bool tickIdentifyLed(uint32_t now);
   void tickProvisioningCoordinator(uint32_t now);
   void enterProvisioningQuietMode();

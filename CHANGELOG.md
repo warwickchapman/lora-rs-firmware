@@ -5,7 +5,15 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Implemented Phase 2 Step 1 for Replacement Gateway Discovery & Explicit Peer Adoption:
+  - Added volatile discovery candidate tracking capped at 12 entries (`Settings::kAddressListCap`) with explicit lifecycle states (`SeenAddressOnly`, `Identified`, `Readdressing`, `Adopted`, `Failed`, `ResetRequested`).
+  - Introduced `MessageType::Readdress = 'D'` protocol message (payload: 4-byte `chip_id` LE, 1-byte address/reset, 1-byte op) with wrong-source/destination exclusions.
+  - Implemented chip-scoped readdressing and reset commands, allowing gateway to safely adopt remotes and resolve conflicts/out-of-range addresses without affecting existing peer configurations.
+  - Implemented transaction retry and timeout logic (4 total transmissions over 500ms intervals) for gateway-side adoption.
+  - Exposed candidate lists and adoption status in the `lora_inventory_status` response.
+  - Added native unit tests verifying candidate lifecycle, reason evaluation, conflict/out-of-range readdressing, and full-fleet safety reset guarding.
 - Gated incoming telemetry peer creation in paired gateway mode using a new target resolver helper `isConfiguredOperationalPeer`, preventing unconfigured same-key telemetry from populating the operational peer cache.
+
 - Rebuilt `lora_inventory_status` response to list only configured target addresses in `1..12` instead of dumping all `peer_count_` cache slots.
 - Compacted `lora_inventory_status` JSON output by omitting default/falsy boolean flags and empty strings/IPs.
 - Added rate-limited (30s) ESP heap metrics and JSON size telemetry logging before and after response generation.

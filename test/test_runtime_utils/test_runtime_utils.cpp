@@ -287,6 +287,232 @@ void test_inventory_status_excludes_unconfigured_cached_peers() {
   TEST_ASSERT_EQUAL_UINT8(6, devices[1]);
 }
 
+void test_candidate_lifecycle() {
+  DiscoveryCandidate c{};
+  TEST_ASSERT_EQUAL(CandidateState::SeenAddressOnly, c.state);
+  TEST_ASSERT_EQUAL_UINT32(0, c.chip_id);
+  
+  // Transition to Identified
+  c.chip_id = 0x8829ca;
+  c.state = CandidateState::Identified;
+  TEST_ASSERT_EQUAL(CandidateState::Identified, c.state);
+  TEST_ASSERT_EQUAL_UINT32(0x8829ca, c.chip_id);
+  
+  // Transition to Readdressing
+  c.state = CandidateState::Readdressing;
+  TEST_ASSERT_EQUAL(CandidateState::Readdressing, c.state);
+  
+  // Transition to Adopted
+  c.state = CandidateState::Adopted;
+  TEST_ASSERT_EQUAL(CandidateState::Adopted, c.state);
+}
+
+void test_candidate_ok() {
+  uint8_t known_peers[12] = {5, 6};
+  uint32_t known_peer_chip_ids[12] = {111, 222};
+  
+  CandidateReason reason = runtime_utils::evaluateCandidateReason(
+      7, 0x333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL(CandidateReason::Ok, reason);
+  
+  uint8_t resolved = runtime_utils::resolveAdoptionAddress(
+      7, 0x333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL_UINT8(7, resolved);
+}
+
+void test_candidate_conflict_readdress() {
+  uint8_t known_peers[12] = {5, 6};
+  uint32_t known_peer_chip_ids[12] = {111, 222};
+  
+  // Candidate at address 5 has conflict (since chip_id 0x333 != 111)
+  CandidateReason reason = runtime_utils::evaluateCandidateReason(
+      5, 0x333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL(CandidateReason::Conflict, reason);
+  
+  // Readdress conflict: should assign the next free address in 1..12.
+  // Address 1, 2, 3, 4 are free, so it should assign 1!
+  uint8_t resolved = runtime_utils::resolveAdoptionAddress(
+      5, 0x333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL_UINT8(1, resolved);
+  
+  // Let's test with all addresses up to 5 taken
+  uint8_t known_peers2[12] = {1, 2, 3, 4, 5, 6};
+  uint32_t known_peer_chip_ids2[12] = {11, 22, 33, 44, 55, 66};
+  uint8_t resolved2 = runtime_utils::resolveAdoptionAddress(
+      5, 0x333, 6, known_peers2, known_peer_chip_ids2
+  );
+  // Next free address after 1..6 is 7
+  TEST_ASSERT_EQUAL_UINT8(7, resolved2);
+}
+
+void test_candidate_out_of_range_readdress() {
+  uint8_t known_peers[12] = {5, 6};
+  uint32_t known_peer_chip_ids[12] = {111, 222};
+  
+  // Candidate at address 16 is out of range
+  CandidateReason reason = runtime_utils::evaluateCandidateReason(
+      16, 0x333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL(CandidateReason::OutOfRange, reason);
+  
+  // Readdress out-of-range: should assign next free (which is 1)
+  uint8_t resolved = runtime_utils::resolveAdoptionAddress(
+      16, 0x333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL_UINT8(1, resolved);
+}
+
+void test_full_fleet_dangerous_reset_guarded() {
+  // Configured peers fill the entire list of 12 peers
+  uint8_t known_peers[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  uint32_t known_peer_chip_ids[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  
+  // Candidate chip 0x999 tries to adopt at address 5 (which is configured for chip 5)
+  CandidateReason reason = runtime_utils::evaluateCandidateReason(
+      5, 0x999, 12, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL(CandidateReason::Conflict, reason);
+  
+  // Since fleet is full (all 1..12 are taken), resolveAdoptionAddress should return 0 (reset request)
+  uint8_t resolved = runtime_utils::resolveAdoptionAddress(
+      5, 0x999, 12, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL_UINT8(0, resolved);
+}
+
+void test_remote_two_stage_confirm_success() {
+  bool outSendConfirm = false;
+  uint8_t outConfirmAddress = 99;
+  RemoteReaddressState state = runtime_utils::transitionRemoteReaddress(
+      RemoteReaddressState::Idle,
+      true,  // rxRequest
+      5,     // rxNewAddress
+      false, // saveSucceeded (not done yet)
+      outSendConfirm,
+      outConfirmAddress
+  );
+  TEST_ASSERT_EQUAL(RemoteReaddressState::PendingSave, state);
+  TEST_ASSERT_FALSE(outSendConfirm);
+
+  state = runtime_utils::transitionRemoteReaddress(
+      state,
+      false, // rxRequest
+      5,     // rxNewAddress
+      true,  // saveSucceeded
+      outSendConfirm,
+      outConfirmAddress
+  );
+  TEST_ASSERT_EQUAL(RemoteReaddressState::Completed, state);
+  TEST_ASSERT_TRUE(outSendConfirm);
+  TEST_ASSERT_EQUAL_UINT8(5, outConfirmAddress);
+}
+
+void test_remote_two_stage_confirm_save_fail() {
+  bool outSendConfirm = false;
+  uint8_t outConfirmAddress = 99;
+  RemoteReaddressState state = runtime_utils::transitionRemoteReaddress(
+      RemoteReaddressState::Idle,
+      true,  // rxRequest
+      5,     // rxNewAddress
+      false, // saveSucceeded
+      outSendConfirm,
+      outConfirmAddress
+  );
+  TEST_ASSERT_EQUAL(RemoteReaddressState::PendingSave, state);
+  TEST_ASSERT_FALSE(outSendConfirm);
+
+  state = runtime_utils::transitionRemoteReaddress(
+      state,
+      false, // rxRequest
+      5,     // rxNewAddress
+      false, // saveSucceeded (failed!)
+      outSendConfirm,
+      outConfirmAddress
+  );
+  TEST_ASSERT_EQUAL(RemoteReaddressState::Failed, state);
+  TEST_ASSERT_FALSE(outSendConfirm);
+}
+
+void test_remote_two_stage_reset_confirm_success() {
+  bool outSendConfirm = false;
+  uint8_t outConfirmAddress = 99;
+  RemoteReaddressState state = runtime_utils::transitionRemoteReaddress(
+      RemoteReaddressState::Idle,
+      true,  // rxRequest
+      0,     // rxNewAddress (reset)
+      false, // saveSucceeded
+      outSendConfirm,
+      outConfirmAddress
+  );
+  TEST_ASSERT_EQUAL(RemoteReaddressState::PendingReset, state);
+  TEST_ASSERT_FALSE(outSendConfirm);
+
+  state = runtime_utils::transitionRemoteReaddress(
+      state,
+      false, // rxRequest
+      0,     // rxNewAddress
+      true,  // saveSucceeded
+      outSendConfirm,
+      outConfirmAddress
+  );
+  TEST_ASSERT_EQUAL(RemoteReaddressState::Completed, state);
+  TEST_ASSERT_TRUE(outSendConfirm);
+  TEST_ASSERT_EQUAL_UINT8(0, outConfirmAddress);
+}
+
+void test_gateway_confirm_validation() {
+  // Successful readdress confirm
+  TEST_ASSERT_TRUE(runtime_utils::validateGatewayConfirm(
+      0x123, 5, 5, true, 0x123, 5, 16
+  ));
+
+  // Mismatched confirm address
+  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
+      0x123, 6, 5, true, 0x123, 5, 16
+  ));
+
+  // Mismatched source address for readdress (should be 5, not old 16)
+  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
+      0x123, 5, 16, true, 0x123, 5, 16
+  ));
+
+  // Successful reset confirm (source must be old address 16 since new address is 0)
+  TEST_ASSERT_TRUE(runtime_utils::validateGatewayConfirm(
+      0x123, 0, 16, true, 0x123, 0, 16
+  ));
+
+  // Mismatched source address for reset (should be old address 16, not 5)
+  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
+      0x123, 0, 5, true, 0x123, 0, 16
+  ));
+
+  // Adoption inactive
+  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
+      0x123, 5, 5, false, 0x123, 5, 16
+  ));
+}
+
+void test_start_adoption_reverts_on_tx_fail() {
+  CandidateState cState = CandidateState::Identified;
+  bool adoptionActive = false;
+  
+  // TX fails on first attempt
+  bool ok = runtime_utils::transitionAdoptionStart(cState, adoptionActive, false, false);
+  TEST_ASSERT_FALSE(ok);
+  TEST_ASSERT_EQUAL(CandidateState::Identified, cState);
+  TEST_ASSERT_FALSE(adoptionActive);
+
+  // TX succeeds
+  ok = runtime_utils::transitionAdoptionStart(cState, adoptionActive, false, true);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_EQUAL(CandidateState::Readdressing, cState);
+  TEST_ASSERT_TRUE(adoptionActive);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_paired_transmitter_is_tx);
@@ -305,5 +531,16 @@ int main(int argc, char **argv) {
   RUN_TEST(test_operational_peer_rejected_when_out_of_range);
   RUN_TEST(test_operational_peer_rejected_when_empty_fleet);
   RUN_TEST(test_inventory_status_excludes_unconfigured_cached_peers);
+  RUN_TEST(test_candidate_lifecycle);
+  RUN_TEST(test_candidate_ok);
+  RUN_TEST(test_candidate_conflict_readdress);
+  RUN_TEST(test_candidate_out_of_range_readdress);
+  RUN_TEST(test_full_fleet_dangerous_reset_guarded);
+  RUN_TEST(test_remote_two_stage_confirm_success);
+  RUN_TEST(test_remote_two_stage_confirm_save_fail);
+  RUN_TEST(test_remote_two_stage_reset_confirm_success);
+  RUN_TEST(test_gateway_confirm_validation);
+  RUN_TEST(test_start_adoption_reverts_on_tx_fail);
   return UNITY_END();
 }
+
