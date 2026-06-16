@@ -726,8 +726,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
       "relay",           "input",              "ack_state",
       "addr_hex",        "addr_dec",
       "uplink_rssi_dbm", "downlink_rssi_dbm",  "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
-      "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
-      "tank_depth_mm",   "tank_current_ma",    "tank_voltage_mv",  "forget",           "poll_now",
+      "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "forget",           "poll_now",
       "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",
       "heap_frag_pct",   "relay_feedback",
   };

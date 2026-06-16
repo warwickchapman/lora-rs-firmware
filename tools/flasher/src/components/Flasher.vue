@@ -1859,26 +1859,30 @@ async function ensureRemoteFlashFirmwareServer(): Promise<FirmwareServerInfo> {
 
 async function revalidateFirmwareServerAfterNetworkChange() {
   if (!firmwareServerRevalidatePending.value) return;
-  firmwareServerRevalidatePending.value = false;
-  if (firmwareServerInfo.value) {
-    const nextInterfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
-    const currentUrls = firmwareServerInfo.value.urls;
-    const stillValid = currentUrls.some(url => {
-      try {
-        const parsed = new URL(url);
-        return nextInterfaces.some(i => i.ip === parsed.hostname);
-      } catch (_) {
-        return false;
-      }
-    });
-    if (!stillValid) {
-      pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
-      await stopFirmwareServer();
-      const firmwareOptions = networkOtaFirmwareOptions();
-      if (firmwareOptions) {
-        await startFirmwareServerWithOptions(firmwareOptions);
+  try {
+    if (firmwareServerInfo.value) {
+      const nextInterfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
+      const currentUrls = firmwareServerInfo.value.urls;
+      const stillValid = currentUrls.some(url => {
+        try {
+          const parsed = new URL(url);
+          return nextInterfaces.some(i => i.ip === parsed.hostname);
+        } catch (_) {
+          return false;
+        }
+      });
+      if (!stillValid) {
+        pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
+        await stopFirmwareServer();
+        const firmwareOptions = networkOtaFirmwareOptions();
+        if (firmwareOptions) {
+          await startFirmwareServerWithOptions(firmwareOptions);
+        }
       }
     }
+    firmwareServerRevalidatePending.value = false;
+  } catch (e) {
+    pushNetworkLog('Failed to revalidate firmware server: ' + e);
   }
 }
 

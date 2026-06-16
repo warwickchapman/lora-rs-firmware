@@ -152,8 +152,7 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 
 > **Stale data protection:** When `ack_state` is `timeout`, all operational topics
-> (`relay`, `input`, `temp_c`, `tank_*`, `wifi`, `relay_feedback`,
-> `input_feedback`) are published as empty strings so automations do not act on
+> (`relay`, `input`, `wifi`, `relay_feedback`, `input_feedback`) are published as empty strings so automations do not act on
 > stale values. Status/metadata/polling topics continue updating normally.
 
 **Operational** — use these for automations and integrations:
