@@ -3646,7 +3646,7 @@ async function flashFleetGateway() {
         admin_password: password,
         url: otaUrl,
         sha256: info.sha256
-      }, 8000);
+      }, 25000);
 
       fleetGatewayFlashPhase.value = 'rebooting';
       networkStatusMessage.value = 'OTA command accepted; gateway is downloading & rebooting.';
