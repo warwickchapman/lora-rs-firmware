@@ -581,22 +581,40 @@ void AdminExecutor::execute(const String &jsonCommand, ResponseWriter writer, bo
   const char *id = requestId(doc);
 
   if (isMqtt) {
-    if (isDuplicateRequest(id)) {
+    if (id == nullptr || id[0] == '\0' || cmd == nullptr || cmd[0] == '\0' ||
+        doc["ts"].isNull() || doc["ttl_ms"].isNull() ||
+        (doc["admin_password"].isNull() && doc["password"].isNull())) {
+      sendError(cmd ? cmd : "unknown", "invalid_envelope", id ? id : nullptr, writer);
       return;
     }
-    cacheRequest(id);
+
+    if (!requireAdmin(doc)) {
+      sendError(cmd, "auth_failed", id, writer);
+      return;
+    }
 
     if (sm_ != nullptr && sm_->sharedUnixTimeValid()) {
-      if (!doc["ts"].isNull() && !doc["ttl_ms"].isNull()) {
-        uint32_t ts = doc["ts"].as<uint32_t>();
-        uint32_t ttl = doc["ttl_ms"].as<uint32_t>();
-        uint32_t nowUnix = sm_->sharedUnixTime();
-        if (nowUnix > ts && (nowUnix - ts) * 1000 > ttl) {
+      uint32_t ts = doc["ts"].as<uint32_t>();
+      uint32_t ttl = doc["ttl_ms"].as<uint32_t>();
+      uint32_t nowUnix = sm_->sharedUnixTime();
+      if (ts > nowUnix && (ts - nowUnix) > 60) {
+        sendError(cmd, "request_future", id, writer);
+        return;
+      }
+      if (nowUnix > ts) {
+        const uint64_t ageMs = static_cast<uint64_t>(nowUnix - ts) * 1000ULL;
+        const uint64_t allowedMs = static_cast<uint64_t>(ttl) + 15000ULL;
+        if (ageMs > allowedMs) {
           sendError(cmd, "request_expired", id, writer);
           return;
         }
       }
     }
+
+    if (isDuplicateRequest(id)) {
+      return;
+    }
+    cacheRequest(id);
   }
 
   handleCommand(doc, writer, isMqtt);

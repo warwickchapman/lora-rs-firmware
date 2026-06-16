@@ -173,6 +173,9 @@ Any future change that changes packet size, encrypted payload layout, replay beh
 
 ## Remote MQTT Administration Protocol (Phase 1)
 To allow remote gateway control over LAN or cloud networks:
+- Durable Transport Specifications:
+  - **Packet Size Ceiling**: A fixed maximum packet size of **2944 bytes** is established. All inbound commands and outbound responses must remain under this ceiling to fit PubSubClient's allocated heap buffer on the ESP8266. Future expansion of configuration fields must utilize segmented commands or slimmer structures rather than buffer expansion.
+  - **Retention Rules**: Command messages (`admin_command`) and response messages (`admin_response`) must be published as non-retained (`retained=false`) to avoid executing stale operations on reconnect. Operational status and telemetry topics remain retained.
 - Topics:
   - Admin command topic: `<root>/lrs-<gateway_chip_id>/admin_command`
   - Admin response topic: `<root>/lrs-<gateway_chip_id>/admin_response`
@@ -186,10 +189,15 @@ To allow remote gateway control over LAN or cloud networks:
     "ttl_ms": 5000
   }
   ```
-- Command validation rules on gateway:
-  1. If NTP sync is active, checks that `ts` is within `ttl_ms` of current Unix time to prevent stale execution. If NTP is not yet active, this time check is bypassed to ensure boot rescue availability.
-  2. Protects against duplicate requests using a circular request cache of size 10.
-  3. Validates the `admin_password` against the gateway's configured `admin_password`.
+- Command validation sequence on gateway:
+  1. **Strict Envelope Gate**: Verify presence of required fields (`id`, `cmd`, `admin_password`, `ts`, `ttl_ms`). Reject malformed envelopes with `"invalid_envelope"`.
+  2. **Authorization Gate**: Validates the `admin_password` against the gateway's configured password.
+  3. **Clock-Skew / Expiry Gate**: If NTP or shared time is active:
+     - **Future Skew**: If host timestamp `ts` is more than **60 seconds in the future** relative to the gateway's current Unix time, reject with `"request_future"`.
+     - **Stale Expiry**: If `(nowUnix - ts) * 1000 > (ttl_ms + 15000)` (incorporating a **15-second clock-skew grace window**), reject with `"request_expired"`.
+     - If NTP is not yet active, timing checks are bypassed to guarantee local boot rescue.
+  4. **Duplicate Cache Filter**: Checks the request ID against a circular deduplication cache of size 10 to protect against replay attacks. Malformed, unauthorized, stale, or future requests are rejected prior to this check to avoid duplicate cache poisoning.
+  5. **Command Dispatch**: Pass the validated request to the execution handoff.
 - JSON Response layout:
   ```json
   {
@@ -201,4 +209,5 @@ To allow remote gateway control over LAN or cloud networks:
   ```
 - Credential protection:
   - The `"get_config"` command refuses to export secrets unless the `allow_mqtt_secret_export` config setting is explicitly set to `true` on the gateway.
+
 

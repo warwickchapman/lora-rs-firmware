@@ -302,7 +302,9 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   instance_ = this;
   // Keep connection attempts short so MQTT outages do not stall control loop timing.
   mqtt_client_.setSocketTimeout(1);
-  mqtt_client_.setBufferSize(768);
+  if (!mqtt_client_.setBufferSize(2944)) {
+    LRS_LOGW(SYS, "failed to set buffer size to 2944 bytes");
+  }
   mqtt_client_.setCallback(MqttBridge::staticCallback);
   resetPeerPublishCache();
   resetFibonacci();
@@ -577,9 +579,10 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
     String cmdPayload;
-    cmdPayload.reserve(length + 1);
-    for (unsigned int i = 0; i < length; ++i) {
-      cmdPayload += static_cast<char>(payload[i]);
+    if (cmdPayload.reserve(length + 1)) {
+      for (unsigned int i = 0; i < length; ++i) {
+        cmdPayload += static_cast<char>(payload[i]);
+      }
     }
     executor_->execute(cmdPayload, [this](const String &response) {
       if (mqtt_client_.connected()) {
