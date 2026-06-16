@@ -640,10 +640,8 @@ uint8_t NodeStateMachine::localInputState() const { return digitalRead(kInputPin
 int NodeStateMachine::lastPacketRssi() const { return last_packet_rssi_; }
 uint32_t NodeStateMachine::lastPacketMs() const { return last_packet_ms_; }
 uint32_t NodeStateMachine::lastTxMs() const { return last_tx_ms_; }
-void NodeStateMachine::setLocalSensors(const SensorRegistry &registry, uint16_t tankCurrentCentiMa, uint16_t tankVoltageMv) {
+void NodeStateMachine::setLocalSensors(const SensorRegistry &registry) {
   local_sensors_ = registry;
-  local_tank_current_centi_ma_ = tankCurrentCentiMa;
-  local_tank_voltage_mv_ = tankVoltageMv;
   SensorReading dc{};
   dc.kind = SensorKind::Input;
   dc.state = SensorState::Ok;
@@ -655,12 +653,6 @@ void NodeStateMachine::setLocalSensors(const SensorRegistry &registry, uint16_t 
 
 const SensorRegistry &NodeStateMachine::localSensors() const {
   return local_sensors_;
-}
-uint16_t NodeStateMachine::localTankCurrentCentiMa() const {
-  return local_tank_current_centi_ma_;
-}
-uint16_t NodeStateMachine::localTankVoltageMv() const {
-  return local_tank_voltage_mv_;
 }
 uint8_t NodeStateMachine::localTempCodeToSend() const {
   SensorReading r{};

@@ -93,8 +93,6 @@ Per-device topics include:
 - `<root>/lrs-<chipid>/relay`
 - `<root>/lrs-<chipid>/sensor/<kind>/<instance>/value`
 - `<root>/lrs-<chipid>/sensor/<kind>/<instance>/state`
-- `<root>/lrs-<chipid>/diagnostics/tank_current_ma`
-- `<root>/lrs-<chipid>/diagnostics/tank_voltage_mv`
 - `<root>/lrs-<chipid>/addr`
 - `<root>/lrs-<chipid>/control`
 

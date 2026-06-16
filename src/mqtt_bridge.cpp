@@ -809,20 +809,6 @@ void MqttBridge::publishStatus() {
       }
     }
 
-    SensorReading tankReading{};
-    const bool tankValid = sm_->localSensors().find(SensorKind::TankLevel, 0, tankReading) &&
-                           (tankReading.state == SensorState::Ok || tankReading.state == SensorState::Overrange);
-
-    if (tankValid) {
-      char diagBuf[16];
-      dtostrf(static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f, 0, 2, diagBuf);
-      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_current_ma")) publishRetained(topic, diagBuf);
-      snprintf(diagBuf, sizeof(diagBuf), "%u", static_cast<unsigned>(sm_->localTankVoltageMv()));
-      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_voltage_mv")) publishRetained(topic, diagBuf);
-    } else {
-      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_current_ma")) publishRetained(topic, "");
-      if (buildLocalTopic(topic, sizeof(topic), "diagnostics/tank_voltage_mv")) publishRetained(topic, "");
-    }
 
     char updatedMs[16];
     snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));

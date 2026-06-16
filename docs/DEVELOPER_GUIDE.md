@@ -137,8 +137,6 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 | `addr` | `0xNN` | LoRa address (hex). |
 | `sensor/<kind>/<instance>/value` | string | Normalized value (float or int) for the given sensor. |
 | `sensor/<kind>/<instance>/state` | string | State for the given sensor (`ok`, `missing`, `fault`, etc.). |
-| `diagnostics/tank_current_ma` | float | 4–20 mA loop current diagnostic (empty string if disabled/invalid). |
-| `diagnostics/tank_voltage_mv` | int | ADC reference voltage in mV (empty string if disabled/invalid). |
 | `last_updated` | int | `millis()` at publish time — use to detect stale data. |
 | `uptime_ms` | int | Gateway uptime in milliseconds. |
 | `heap_free` | int | Free heap bytes (diagnostic). |

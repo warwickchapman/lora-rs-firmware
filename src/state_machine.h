@@ -181,10 +181,8 @@ class NodeStateMachine {
   int lastPacketRssi() const;
   uint32_t lastPacketMs() const;
   uint32_t lastTxMs() const;
-  void setLocalSensors(const SensorRegistry &registry, uint16_t tankCurrentCentiMa = 0, uint16_t tankVoltageMv = 0);
+  void setLocalSensors(const SensorRegistry &registry);
   const SensorRegistry &localSensors() const;
-  uint16_t localTankCurrentCentiMa() const;
-  uint16_t localTankVoltageMv() const;
   uint8_t localTempCodeToSend() const;
   void setAuthoritativeUnixTime(uint32_t unixTimeS);
   bool sharedUnixTimeValid() const;
@@ -335,8 +333,6 @@ class NodeStateMachine {
   uint32_t last_led_toggle_ms_ = 0;
   bool led_on_ = false;
   SensorRegistry local_sensors_;
-  uint16_t local_tank_current_centi_ma_ = 0;
-  uint16_t local_tank_voltage_mv_ = 0;
   bool shared_time_valid_ = false;
   bool shared_time_authoritative_ = false;
   uint32_t shared_time_sync_unix_s_ = 0;

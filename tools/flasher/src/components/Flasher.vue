@@ -239,10 +239,6 @@ interface SerialAdminStatus {
   input_state?: number;
   peer_count?: number;
   sensors?: SensorReading[];
-  diagnostics?: {
-    tank_current_ma?: number;
-    tank_voltage_mv?: number;
-  };
 }
 
 interface SerialAdminConfig {
@@ -7403,7 +7399,6 @@ function toggleSelectAllBulkPorts() {
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay_feedback</span>: Live physical relay feedback sense state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Normalized reading value</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Sensor status state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/diagnostics/tank_current_ma</span> / <span class="text-slate-300">/tank_voltage_mv</span>: Tank diagnostics</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/ota_status</span>: Retained OTA status (<code class="text-cyan-400">downloading</code>, <code class="text-cyan-400">failed:&lt;code&gt;</code>, <code class="text-cyan-400">rebooting</code>)</li>
                         </ul>
                       </div>

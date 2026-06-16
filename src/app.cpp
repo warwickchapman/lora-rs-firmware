@@ -206,7 +206,7 @@ void App::tick() {
     phaseSlowWarn("tick_time_sync", phaseStartMs);
     phaseStartMs = millis();
   }
-  sm_.setLocalSensors(sensors_.readings(), sensors_.tankStatus().current_centi_ma, sensors_.tankStatus().voltage_mv);
+  sm_.setLocalSensors(sensors_.readings());
   if (emitStartupBreadcrumb) {
     LRS_LOGD(SYS, "event=startup_tick phase=sm_enter ms=%lu",
              static_cast<unsigned long>(millis()));

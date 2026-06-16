@@ -780,10 +780,6 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
         sObj["unit"] = sensorKindToUnit(r.kind);
       }
     }
-
-    JsonObject diagObj = out["diagnostics"].to<JsonObject>();
-    diagObj["tank_current_ma"] = static_cast<float>(sm_->localTankCurrentCentiMa()) / 100.0f;
-    diagObj["tank_voltage_mv"] = sm_->localTankVoltageMv();
   }
   sendOk(out, writer);
 }
