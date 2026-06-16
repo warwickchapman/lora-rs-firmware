@@ -717,6 +717,7 @@ class NodeStateMachine {
   uint8_t txGroupTargetIndexForAddress(uint8_t addr) const;
   uint32_t txGroupMissingBitmap() const;
   bool txGroupHasMissingTargets() const;
+  bool isGroupActive() const;
   void resetTxGroupState();
   void startTxGroupCommand(uint8_t relayState, uint8_t inputState);
   void tickTxGroupCommand(uint32_t now);

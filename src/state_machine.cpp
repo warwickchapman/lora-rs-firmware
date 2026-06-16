@@ -835,6 +835,12 @@ uint32_t NodeStateMachine::txGroupMissingBitmap() const { return tx_group_expect
 
 bool NodeStateMachine::txGroupHasMissingTargets() const { return txGroupMissingBitmap() != 0; }
 
+bool NodeStateMachine::isGroupActive() const {
+  return runtime_.input_control_paired_lora_enabled &&
+         (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks ||
+          tx_group_phase_ == PairedGroupPhase::PollMissingSequential);
+}
+
 void NodeStateMachine::resetTxGroupState() {
   tx_command_pending_ = false;
   tx_pending_command_counter_ = 0;
@@ -1424,6 +1430,7 @@ bool NodeStateMachine::sendQueuedOtaPullControlFrame() {
 
 void NodeStateMachine::tickPendingOtaPullControl(uint32_t now) {
   if (!ota_pull_tx_.active) return;
+  if (isGroupActive()) return;
   if (static_cast<int32_t>(now - ota_pull_tx_.next_tx_ms) < 0) return;
   if (!sendQueuedOtaPullControlFrame()) {
     ota_pull_tx_.next_tx_ms = now + kOtaPullControlFrameSpacingMs;
@@ -2955,6 +2962,9 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
     if (static_cast<int32_t>(now - node.next_retry_ms) < 0) {
       continue;
     }
+    if (isGroupActive()) {
+      continue;
+    }
     if (!radioTxBudgetAvailable()) {
       return;
     }
@@ -3003,6 +3013,9 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
     if (static_cast<int32_t>(now - poll.next_poll_ms) < 0) {
       continue;
     }
+    if (isGroupActive()) {
+      continue;
+    }
     if (!radioTxBudgetAvailable()) {
       return;
     }
@@ -3024,6 +3037,7 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
 void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
   if (!runtime_.role_tx || settings_ == nullptr || fleet_scan_active_) return;
   if (static_cast<int32_t>(now - next_peer_maintenance_ms_) < 0) return;
+  if (isGroupActive()) return;
   if (!radioTxBudgetAvailable()) return;
 
   uint8_t targets[Settings::kAddressListCap]{};
@@ -3070,6 +3084,7 @@ void NodeStateMachine::tickFleetScan(uint32_t now) {
   }
   if (!fleet_scan_active_) return;
   if (static_cast<int32_t>(now - fleet_scan_next_ms_) < 0) return;
+  if (isGroupActive()) return;
   if (!radioTxBudgetAvailable()) return;
   if (fleet_scan_next_address_ < fleet_scan_start_address_ || fleet_scan_next_address_ > fleet_scan_end_address_) {
     fleet_scan_active_ = false;
@@ -3124,8 +3139,6 @@ void NodeStateMachine::tickTransmitter() {
       tx_state_sync_pending_ = false;
       resetTxGroupState();
       startTxGroupCommand(input_state_, input_state_);
-      tickTxGroupCommand(now);
-      return;
     }
   }
 
@@ -3133,38 +3146,34 @@ void NodeStateMachine::tickTransmitter() {
       (tx_group_phase_ == PairedGroupPhase::Idle || tx_group_phase_ == PairedGroupPhase::Complete)) {
     tx_state_sync_pending_ = false;
     startTxGroupCommand(input_state_, input_state_);
-    tickTxGroupCommand(now);
-    return;
   }
 
-  if (runtime_.input_control_paired_lora_enabled &&
-      (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::PollMissingSequential)) {
+  const bool groupActive = isGroupActive();
+
+  if (groupActive) {
     tickTxGroupCommand(now);
-    return;
   }
 
-  if (runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
+  if (!groupActive && runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
     last_heartbeat_ms_ = now;
     if (runtime_.input_control_paired_lora_enabled) {
       resetTxGroupState();
       startTxGroupCommand(input_state_, input_state_);
       tickTxGroupCommand(now);
-      return;
-    }
-    if (!radioTxBudgetAvailable()) {
-      return;
-    }
-    last_counter_++;
-    const uint32_t unixTimeS = currentUnixTimeS(now);
-    if (radio_->send(MessageType::Heartbeat, input_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
-                     runtime_.remote_address,
-                     local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
-      last_tx_ms_ = now;
-      markRadioTxSentThisTick();
-      {
-        lrslog::event("tx_heartbeat", 0, last_counter_, input_state_);
+    } else {
+      if (radioTxBudgetAvailable()) {
+        last_counter_++;
+        const uint32_t unixTimeS = currentUnixTimeS(now);
+        if (radio_->send(MessageType::Heartbeat, input_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
+                         runtime_.remote_address,
+                         local_temp_code_, 0, 0xFF, 0xFFFF, unixTimeS)) {
+          last_tx_ms_ = now;
+          markRadioTxSentThisTick();
+          {
+            lrslog::event("tx_heartbeat", 0, last_counter_, input_state_);
+          }
+        }
       }
-      return;
     }
   }
 

@@ -15,6 +15,7 @@ All notable changes to this pre-release project are documented here in current o
 - Added a BSS-allocated circular buffer (up to 16 entries) for gateway-side provisioning events. Expose these logs in the `provisioning_status` serial-admin endpoint with millisecond timestamps.
 
 ### Firmware Fixes
+- Decoupled the transmitter and telemetry schedulers to prevent active paired group-command sync states from starving background task ticks. Added a transmission suppression guard to prevent background radio queries from colliding with the critical group ACK/poll response windows.
 - In paired mode, treat an empty known peer list as an empty fleet, preventing target resolution from falling back to default remote address `1` or other default targets. Standalone mode preserves legacy point-to-point fallback behavior.
 - Allow MessageType::Provisioning packets to bypass self-source validation (msg.src == runtime_.local_address), preventing gateway-side and remote-side packet drops when both devices share factory-default address 254.
 - Filter out invalid source addresses (`0`, `255`, and the local address) early in non-provisioning receive handling to prevent remote peer cache pollution.
