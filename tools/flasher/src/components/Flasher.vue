@@ -6608,18 +6608,18 @@ function toggleSelectAllBulkPorts() {
 
       <div v-if="activeMode === 'settings'" class="flex flex-col h-full min-h-0 overflow-hidden gap-3 text-left">
         <div class="glass-card flex flex-col gap-3 p-3 shrink-0">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div class="min-w-0">
               <h2 class="text-base font-bold text-cyan-300">Settings</h2>
               <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-center justify-end gap-2">
               <button
                 v-if="identifyAvailable"
                 @click="triggerIdentify"
                 :disabled="identifyDisabled"
                 :class="[
-                  'glass-input m-0 h-8 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                  'glass-input m-0 h-10 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed',
                   { 'identify-led-active text-cyan-300': isIdentifying }
                 ]"
                 title="Identify selected USB device"
@@ -6632,16 +6632,16 @@ function toggleSelectAllBulkPorts() {
                   <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
                 </svg>
               </button>
-              <button v-if="settingsTransport !== 'mqtt'" @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+              <button v-if="settingsTransport !== 'mqtt'" @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 {{ isLoadingInfo ? 'Reading...' : 'Read identity' }}
               </button>
-              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 {{ isSerialAdminLoading ? 'Loading...' : 'Refresh status' }}
               </button>
-              <button @click="fetchSerialDeviceSettings" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy" class="primary-btn m-0 h-8 px-3 text-xs font-bold disabled:opacity-60">
+              <button @click="fetchSerialDeviceSettings" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy" class="primary-btn m-0 h-10 px-4 text-xs font-bold disabled:opacity-60">
                 {{ isSerialAdminLoading ? 'Fetching...' : 'Fetch settings' }}
               </button>
-              <button @click="copySerialAdminConfigJson" :disabled="!serialAdminConfig" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
+              <button @click="copySerialAdminConfigJson" :disabled="!serialAdminConfig" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
                 Copy config JSON
               </button>
             </div>
