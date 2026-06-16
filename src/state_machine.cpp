@@ -711,6 +711,41 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   return true;
 }
 
+bool NodeStateMachine::peerByAddress(uint8_t address, PeerStatusSnapshot &out) const {
+  for (size_t i = 0; i < peer_count_; ++i) {
+    if (peers_[i].in_use && peers_[i].address == address) {
+      return peerByIndex(i, out);
+    }
+  }
+  return false;
+}
+
+bool NodeStateMachine::isConfiguredOperationalPeer(uint8_t address) const {
+  if (settings_ == nullptr) return false;
+  if (!runtime_.role_tx || settings_->mode != "paired") return false;
+  if (address < 1 || address > 12) return false;
+
+  uint8_t targets[Settings::kAddressListCap]{};
+  uint8_t targetCount = runtime_utils::resolveGatewayTargets(
+    true,
+    runtime_.local_address,
+    settings_->known_peer_count,
+    settings_->known_peer_addresses,
+    settings_->paired_target_count,
+    settings_->paired_target_addresses,
+    settings_->remote_address,
+    targets,
+    Settings::kAddressListCap
+  );
+
+  for (uint8_t i = 0; i < targetCount; ++i) {
+    if (targets[i] == address) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
   if ((runtime_.role_tx && runtime_.input_control_paired_lora_enabled) || (!runtime_.role_tx && paired_input_slave_mode_)) {
     lrslog::event("relay_local_mqtt_blocked", 0, last_counter_, relayState ? 1 : 0);
@@ -999,6 +1034,9 @@ void NodeStateMachine::finishTxGroupPartial() {
 }
 
 void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi) {
+  if (runtime_.role_tx && settings_ != nullptr && settings_->mode == "paired") {
+    if (!isConfiguredOperationalPeer(src)) return;
+  }
   PeerRuntime *node = findOrCreatePeer(src);
   if (node == nullptr) return;
   (void)inputState;
@@ -2870,6 +2908,9 @@ void NodeStateMachine::tickPendingMaintenancePages() {
 
 bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   if (!runtime_.role_tx) return false;
+  if (settings_ != nullptr && settings_->mode == "paired" && !isConfiguredOperationalPeer(msg.src)) {
+    return false;
+  }
   PeerRuntime *node = findOrCreatePeer(msg.src);
   if (node == nullptr) return false;
   if (node->uptime_ms > 0 && millis() - node->uptime_received_ms >= 5000) {
@@ -3430,7 +3471,10 @@ void NodeStateMachine::tickReceive() {
   }
 
   if (runtime_.role_tx) {
-    PeerRuntime *node = findOrCreatePeer(msg.src);
+    PeerRuntime *node = nullptr;
+    if (settings_ == nullptr || settings_->mode != "paired" || isConfiguredOperationalPeer(msg.src)) {
+      node = findOrCreatePeer(msg.src);
+    }
     if (node != nullptr) {
       node->uplink_rssi = msg.rssi;
       node->last_seen_ms = millis();
@@ -3529,7 +3573,10 @@ void NodeStateMachine::tickReceive() {
       if (confirmProvisioningByFleetResponse(msg)) {
         return;
       }
-      PeerRuntime *node = findOrCreatePeer(msg.src);
+      PeerRuntime *node = nullptr;
+      if (settings_ == nullptr || settings_->mode != "paired" || isConfiguredOperationalPeer(msg.src)) {
+        node = findOrCreatePeer(msg.src);
+      }
       if (node == nullptr) {
         lrslog::event("mqtt_remote_node_limit", msg.rssi, msg.counter, msg.relay_state);
         return;
@@ -3869,7 +3916,10 @@ bool NodeStateMachine::handleWifiControlFrame(const ProtocolMessage &msg) {
       lrslog::event("wifi_control_tx_bad_op", msg.rssi, msg.counter, op);
       return false;
     }
-    PeerRuntime *node = findOrCreatePeer(msg.src);
+    PeerRuntime *node = nullptr;
+    if (settings_ == nullptr || settings_->mode != "paired" || isConfiguredOperationalPeer(msg.src)) {
+      node = findOrCreatePeer(msg.src);
+    }
     if (node == nullptr) {
       lrslog::event("wifi_control_peer_limit", msg.rssi, msg.counter, msg.src);
       return false;

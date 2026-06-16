@@ -190,6 +190,8 @@ class NodeStateMachine {
   RxControlSource lastRxControlSource() const;
   size_t peerCount() const;
   bool peerByIndex(size_t index, PeerStatusSnapshot &out) const;
+  bool peerByAddress(uint8_t address, PeerStatusSnapshot &out) const;
+  bool isConfiguredOperationalPeer(uint8_t address) const;
   void mqttSetLocalRelay(uint8_t relayState);
   bool mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState);
   bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);

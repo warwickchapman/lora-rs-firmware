@@ -10,6 +10,7 @@
 #include "sensor_status.h"
 #include "settings_backup.h"
 #include "mqtt_bridge.h"
+#include "runtime_utils.h"
 
 using namespace admin_config_utils;
 
@@ -1145,6 +1146,19 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
     return;
   }
 
+  static uint32_t lastLogMs = 0;
+  const uint32_t nowMs = millis();
+  bool shouldLog = (lastLogMs == 0 || nowMs - lastLogMs >= 30000UL);
+  if (shouldLog) {
+    lastLogMs = nowMs;
+#if defined(ESP8266)
+    LRS_LOGI(API, "lora_inventory_status HEAP before: free=%lu max_block=%lu frag=%u",
+             (unsigned long)ESP.getFreeHeap(),
+             (unsigned long)ESP.getMaxFreeBlockSize(),
+             (unsigned)ESP.getHeapFragmentation());
+#endif
+  }
+
   JsonDocument out;
   out["cmd"] = "lora_inventory_status";
   if (id[0] != '\0')
@@ -1154,7 +1168,9 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
   FleetScanSnapshot scan{};
   sm_->fleetScanSnapshot(scan);
   JsonObject s = out["scan"].to<JsonObject>();
-  s["active"] = scan.active;
+  if (scan.active) {
+    s["active"] = true;
+  }
   s["start_address"] = scan.start_address;
   s["end_address"] = scan.end_address;
   s["next_address"] = scan.next_address;
@@ -1165,111 +1181,170 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
   s["now_ms"] = now;
 
   JsonArray devices = out["devices"].to<JsonArray>();
-  const size_t count = sm_->peerCount();
-  for (size_t i = 0; i < count; ++i) {
-    PeerStatusSnapshot p{};
-    if (!sm_->peerByIndex(i, p))
+
+  uint8_t targets[Settings::kAddressListCap]{};
+  uint8_t targetCount = 0;
+
+  if (config_ != nullptr) {
+    const auto &cfg = config_->settings();
+    if (cfg.role_tx) {
+      const bool isPairedMode = (cfg.mode == "paired");
+      targetCount = runtime_utils::resolveGatewayTargets(
+        isPairedMode,
+        cfg.local_address,
+        cfg.known_peer_count,
+        cfg.known_peer_addresses,
+        cfg.paired_target_count,
+        cfg.paired_target_addresses,
+        cfg.remote_address,
+        targets,
+        Settings::kAddressListCap
+      );
+    }
+  }
+
+  for (uint8_t i = 0; i < targetCount; ++i) {
+    const uint8_t addr = targets[i];
+    if (addr < 1 || addr > 12) {
       continue;
+    }
+
+    PeerStatusSnapshot p{};
+    bool hasCached = sm_->peerByAddress(addr, p);
+
     JsonObject row = devices.add<JsonObject>();
-    row["address"] = p.address;
+    row["address"] = addr;
     row["role"] = "remote";
     row["mode"] = "paired";
-    row["wifi_enabled_known"] = p.wifi_state_known;
-    row["wifi_enabled"] = p.wifi_enabled;
-    row["wifi_connected_known"] = p.wifi_connected_known;
-    row["wifi_connected"] = p.wifi_connected;
-    if (p.wifi_connected && p.ip[0] != 0) {
-      char ipBuf[16];
-      snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
-      row["ip"] = ipBuf;
-    } else {
-      row["ip"] = "";
-    }
-    row["mqtt_known"] = p.mqtt_state_known;
-    row["mqtt_enabled"] = p.mqtt_enabled;
-    row["mqtt_connected"] = p.mqtt_connected;
-    row["power_save_listen_only"] = p.power_save_listen_only;
-    row["power_save_active"] = p.power_save_active;
-    if (p.chip_id != 0) {
-      char chipBuf[9];
-      snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
-      row["chip_id"] = chipBuf;
-      if (p.fw_major != 0 || p.fw_minor != 0 || p.fw_patch != 0) {
-        char fwBuf[24];
-        if (p.fw_build > 0) {
-          snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
-          row["fw_build"] = p.fw_build;
-        } else {
-          snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
+
+    if (hasCached) {
+      if (p.wifi_state_known) {
+        row["wifi_enabled_known"] = true;
+      }
+      if (p.wifi_enabled) {
+        row["wifi_enabled"] = true;
+      }
+      if (p.wifi_connected_known) {
+        row["wifi_connected_known"] = true;
+      }
+      if (p.wifi_connected) {
+        row["wifi_connected"] = true;
+      }
+      if (p.wifi_connected && p.ip[0] != 0) {
+        char ipBuf[16];
+        snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
+        row["ip"] = ipBuf;
+      }
+      if (p.mqtt_state_known) {
+        row["mqtt_known"] = true;
+      }
+      if (p.mqtt_enabled) {
+        row["mqtt_enabled"] = true;
+      }
+      if (p.mqtt_connected) {
+        row["mqtt_connected"] = true;
+      }
+      if (p.power_save_listen_only) {
+        row["power_save_listen_only"] = true;
+      }
+      if (p.power_save_active) {
+        row["power_save_active"] = true;
+      }
+      if (p.chip_id != 0) {
+        char chipBuf[9];
+        snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
+        row["chip_id"] = chipBuf;
+        if (p.fw_major != 0 || p.fw_minor != 0 || p.fw_patch != 0) {
+          char fwBuf[24];
+          if (p.fw_build > 0) {
+            snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
+            row["fw_build"] = p.fw_build;
+          } else {
+            snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
+          }
+          row["fw_version"] = fwBuf;
         }
-        row["fw_version"] = fwBuf;
-      } else {
-        row["fw_version"] = "";
       }
-    } else {
-      row["chip_id"] = "";
-      row["fw_version"] = "";
-    }
-    if (p.uptime_ms > 0)
-      row["uptime_ms"] = p.uptime_ms;
-    if (p.last_seen_ms != 0) {
-      row["relay_state"] = p.relay_state;
-      row["input_state_known"] = p.input_state_known;
-      if (p.input_state_known) {
-        row["input_state"] = p.input_state;
+      if (p.uptime_ms > 0) {
+        row["uptime_ms"] = p.uptime_ms;
       }
-      JsonArray sensorsArr = row["sensors"].to<JsonArray>();
-      for (uint8_t j = 0; j < p.sensors.count(); ++j) {
-        SensorReading r{};
-        if (p.sensors.byIndex(j, r)) {
-          JsonObject sObj = sensorsArr.add<JsonObject>();
-          sObj["kind"] = sensorKindToString(r.kind);
-          sObj["state"] = sensorStateToString(r.state);
-          sObj["instance"] = r.instance;
-          if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
-            if (r.scale == 0) {
-              sObj["value"] = r.value;
-            } else {
-              float divisor = 1.0f;
-              for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
-              sObj["value"] = static_cast<float>(r.value) / divisor;
+      if (p.last_seen_ms != 0) {
+        row["relay_state"] = p.relay_state;
+        if (p.input_state_known) {
+          row["input_state_known"] = true;
+          row["input_state"] = p.input_state;
+        }
+        if (p.sensors.count() > 0) {
+          JsonArray sensorsArr = row["sensors"].to<JsonArray>();
+          for (uint8_t j = 0; j < p.sensors.count(); ++j) {
+            SensorReading r{};
+            if (p.sensors.byIndex(j, r)) {
+              JsonObject sObj = sensorsArr.add<JsonObject>();
+              sObj["kind"] = sensorKindToString(r.kind);
+              sObj["state"] = sensorStateToString(r.state);
+              sObj["instance"] = r.instance;
+              if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+                if (r.scale == 0) {
+                  sObj["value"] = r.value;
+                } else {
+                  float divisor = 1.0f;
+                  for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+                  sObj["value"] = static_cast<float>(r.value) / divisor;
+                }
+              }
+              sObj["unit"] = sensorKindToUnit(r.kind);
             }
           }
-          sObj["unit"] = sensorKindToUnit(r.kind);
         }
       }
-    }
-    if (p.maintenance_debug_known) {
-      row["maintenance_debug_known"] = true;
-      row["heap_free"] = p.heap_free;
-      row["heap_max_block"] = p.heap_max_block;
-      row["heap_frag_pct"] = p.heap_frag_pct;
-      row["relay_feedback"] = p.relay_feedback;
-      row["input_feedback"] = p.input_feedback;
-      row["debug_uptime_ms"] = p.debug_uptime_ms;
-    }
-    row["rssi"] = p.uplink_rssi;
-    if (p.downlink_rssi_valid) {
-      row["downlink_rssi_known"] = true;
-      row["downlink_rssi"] = p.downlink_rssi;
-    }
-    if (p.last_seen_ms != 0) {
-      row["last_seen_ms"] = p.last_seen_ms;
-      row["age_ms"] = now - p.last_seen_ms;
-    }
-    if (p.poll_pending)
-      row["poll_pending"] = true;
-    const bool otaEligible = p.wifi_connected_known && p.wifi_connected &&
-                             p.ip[0] != 0;
-    row["ota_eligible"] = otaEligible;
-    if (otaEligible) {
-      row["ota_reason"] = "ready";
-    } else if (p.wifi_connected_known) {
-      row["ota_reason"] = p.wifi_connected ? "ip_missing" : "wifi_offline";
+      if (p.maintenance_debug_known) {
+        row["maintenance_debug_known"] = true;
+        row["heap_free"] = p.heap_free;
+        row["heap_max_block"] = p.heap_max_block;
+        row["heap_frag_pct"] = p.heap_frag_pct;
+        row["relay_feedback"] = p.relay_feedback;
+        row["input_feedback"] = p.input_feedback;
+        row["debug_uptime_ms"] = p.debug_uptime_ms;
+      }
+      row["rssi"] = p.uplink_rssi;
+      if (p.downlink_rssi_valid) {
+        row["downlink_rssi_known"] = true;
+        row["downlink_rssi"] = p.downlink_rssi;
+      }
+      if (p.last_seen_ms != 0) {
+        row["last_seen_ms"] = p.last_seen_ms;
+        row["age_ms"] = now - p.last_seen_ms;
+      }
+      if (p.poll_pending) {
+        row["poll_pending"] = true;
+      }
+      const bool otaEligible = p.wifi_connected_known && p.wifi_connected && p.ip[0] != 0;
+      if (otaEligible) {
+        row["ota_eligible"] = true;
+        row["ota_reason"] = "ready";
+      } else if (p.wifi_connected_known) {
+        row["ota_reason"] = p.wifi_connected ? "ip_missing" : "wifi_offline";
+      } else {
+        row["ota_reason"] = "wifi_status_unknown";
+      }
     } else {
       row["ota_reason"] = "wifi_status_unknown";
     }
   }
+
+  if (shouldLog) {
+    size_t jsonSize = measureJson(out);
+#if defined(ESP8266)
+    LRS_LOGI(API, "lora_inventory_status HEAP after: free=%lu max_block=%lu frag=%u size=%u",
+             (unsigned long)ESP.getFreeHeap(),
+             (unsigned long)ESP.getMaxFreeBlockSize(),
+             (unsigned)ESP.getHeapFragmentation(),
+             (unsigned)jsonSize);
+#else
+    LRS_LOGI(API, "lora_inventory_status size=%u", (unsigned)jsonSize);
+#endif
+  }
+
   sendOk(out, writer);
 }
 

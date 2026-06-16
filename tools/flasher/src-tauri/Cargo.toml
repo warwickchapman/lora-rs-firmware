@@ -1,6 +1,6 @@
 [package]
 name = "thanda-lora-flasher"
-version = "0.9.3-dev.33"
+version = "0.9.3-dev.36"
 description = "Desktop flasher for Thanda LoRa devices with serial auto-detection, firmware release download, and guided ESP8266 flashing."
 authors = ["Warwick Chapman"]
 edition = "2021"

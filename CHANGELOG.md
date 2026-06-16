@@ -5,6 +5,10 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Gated incoming telemetry peer creation in paired gateway mode using a new target resolver helper `isConfiguredOperationalPeer`, preventing unconfigured same-key telemetry from populating the operational peer cache.
+- Rebuilt `lora_inventory_status` response to list only configured target addresses in `1..12` instead of dumping all `peer_count_` cache slots.
+- Compacted `lora_inventory_status` JSON output by omitting default/falsy boolean flags and empty strings/IPs.
+- Added rate-limited (30s) ESP heap metrics and JSON size telemetry logging before and after response generation.
 - Refactored the sensor subsystem to use a generic, instance-aware `SensorRegistry` (maximum of 6 sensors) supporting multiple environmental/measurement sensors (DS18B20 temperature, tank level) and control inputs (dry contact), simplifying payload encoding and decoupling acquisition.
 - Upgraded the MaintenanceStatus payload version to 2, implementing paginated LoRa transmission for compact and flexible remote sensor telemetry.
 - Decoupled admin command execution from `SerialAdmin` to a transport-neutral `AdminExecutor`, allowing identical command capability over physical serial and MQTT connections.
