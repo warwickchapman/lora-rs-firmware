@@ -564,6 +564,7 @@ const isLoraInventoryScanning = ref(false);
 const isNetworkGatewayLoading = ref(false);
 const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const networkInventoryPollMode = ref<'cache' | 'scan' | null>(null);
+const isFleetScanPollingActive = ref(false);
 const fleetForceScanCooldownUntilMs = ref(0);
 const fleetClockMs = ref(Date.now());
 const fleetClockTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
@@ -2531,9 +2532,16 @@ async function refreshLoraInventoryStatus(background = true) {
 function startLoraInventoryPolling() {
   stopLoraInventoryPolling(false, false);
   networkInventoryPollMode.value = 'scan';
-  networkInventoryPollTimer.value = window.setInterval(() => {
-    refreshLoraInventoryStatus();
-  }, FLEET_SCAN_POLL_INTERVAL_MS);
+  const interval = fleetTransport.value === 'mqtt' ? 4000 : FLEET_SCAN_POLL_INTERVAL_MS;
+  networkInventoryPollTimer.value = window.setInterval(async () => {
+    if (isFleetScanPollingActive.value) return;
+    isFleetScanPollingActive.value = true;
+    try {
+      await refreshLoraInventoryStatus();
+    } finally {
+      isFleetScanPollingActive.value = false;
+    }
+  }, interval);
 }
 
 function startFleetCachePolling() {
