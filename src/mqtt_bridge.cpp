@@ -723,7 +723,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
   clearPeerPublishCache(addr);
 
   const char *leaves[] = {
-      "relay",           "input",              "dry_contact",      "ack_state",
+      "relay",           "input",              "ack_state",
       "addr_hex",        "addr_dec",
       "uplink_rssi_dbm", "downlink_rssi_dbm",  "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "temp_c",           "tank_status",
@@ -828,7 +828,6 @@ void MqttBridge::publishStatus() {
     char topic[kMqttTopicBufBytes];
     const bool localInput = sm_->localDryContactState() != 0;
     if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
-    if (buildLocalTopic(topic, sizeof(topic), "dry_contact")) publishRetained(topic, localInput ? "1" : "0");
     publishRetained(relay_topic_, sm_->relayState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "relay_feedback")) publishRetained(topic, sm_->relayFeedbackState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
@@ -947,7 +946,6 @@ void MqttBridge::publishStatus() {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, "");
           if (!peerCache->input_published || peerCache->input_value != 0xFF) {
             if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, "");
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "dry_contact")) publishRetainedTopic(topic, "");
             peerCache->input_published = true;
             peerCache->input_value = 0xFF; // sentinel: stale
           }
@@ -969,7 +967,6 @@ void MqttBridge::publishStatus() {
           const uint8_t inputValue = node.input_state ? 1 : 0;
           if (!peerCache->input_published || peerCache->input_value != inputValue) {
             if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "dry_contact")) publishRetainedTopic(topic, inputValue ? "1" : "0");
             peerCache->input_published = true;
             peerCache->input_value = inputValue;
           }

@@ -90,7 +90,6 @@ Discovery topic:
 
 Per-device topics include:
 - `<root>/lrs-<chipid>/input`
-- `<root>/lrs-<chipid>/dry_contact`
 - `<root>/lrs-<chipid>/relay`
 - `<root>/lrs-<chipid>/sensor/<kind>/<instance>/value`
 - `<root>/lrs-<chipid>/sensor/<kind>/<instance>/state`
@@ -100,7 +99,7 @@ Per-device topics include:
 - `<root>/lrs-<chipid>/control`
 
 Gateway peer topics use `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer) with matching
-sensor leaves such as `input`, `dry_contact`, `sensor/<kind>/<instance>/value`, and `sensor/<kind>/<instance>/state`.
+sensor leaves such as `input`, `sensor/<kind>/<instance>/value`, and `sensor/<kind>/<instance>/state`.
 
 ## Recovery
 USB serial is the guaranteed local maintenance path.

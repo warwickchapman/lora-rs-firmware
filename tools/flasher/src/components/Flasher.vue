@@ -102,7 +102,7 @@ interface NetworkInterface {
 }
 
 interface SensorReading {
-  kind: 'dry_contact' | 'temperature' | 'tank_level';
+  kind: 'input' | 'temperature' | 'tank_level';
   state: 'disabled' | 'missing' | 'fault' | 'ok' | 'overrange';
   instance: number;
   value?: number;
@@ -136,16 +136,6 @@ interface LoraInventoryDevice {
   heap_free?: number;
   heap_max_block?: number;
   heap_frag_pct?: number;
-  temp_enabled?: boolean;
-  temp_valid?: boolean;
-  temp_c?: number;
-  tank_enabled?: boolean;
-  tank_valid?: boolean;
-  tank_status?: string;
-  tank_depth_mm?: number;
-  tank_current_ma?: number;
-  tank_current_centi_ma?: number;
-  tank_voltage_mv?: number;
   debug_uptime_ms?: number;
   rssi?: number;
   downlink_rssi_known?: boolean;
@@ -410,6 +400,7 @@ const remoteOtaBusyAddress = ref<number | null>(null);
 const otaQueue = ref<LoraInventoryDevice[]>([]);
 const remoteUdpBusyAddress = ref<number | null>(null);
 const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
+const firmwareServerRevalidatePending = ref(false);
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
 const filteredNetworkLogs = computed(() => {
@@ -1866,6 +1857,31 @@ async function ensureRemoteFlashFirmwareServer(): Promise<FirmwareServerInfo> {
   return firmwareServerInfo.value;
 }
 
+async function revalidateFirmwareServerAfterNetworkChange() {
+  if (!firmwareServerRevalidatePending.value) return;
+  firmwareServerRevalidatePending.value = false;
+  if (firmwareServerInfo.value) {
+    const nextInterfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
+    const currentUrls = firmwareServerInfo.value.urls;
+    const stillValid = currentUrls.some(url => {
+      try {
+        const parsed = new URL(url);
+        return nextInterfaces.some(i => i.ip === parsed.hostname);
+      } catch (_) {
+        return false;
+      }
+    });
+    if (!stillValid) {
+      pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
+      await stopFirmwareServer();
+      const firmwareOptions = networkOtaFirmwareOptions();
+      if (firmwareOptions) {
+        await startFirmwareServerWithOptions(firmwareOptions);
+      }
+    }
+  }
+}
+
 async function stopFirmwareServer() {
   try {
     const stopped = await invoke<string>('stop_firmware_file_server');
@@ -2368,18 +2384,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const inputState = inputStateKnown ? row.input_state : undefined;
   const inputFeedback = (row.input_feedback !== undefined && row.input_feedback !== null) ? row.input_feedback : undefined;
   
-  const tempEnabled = (row.temp_enabled !== undefined && row.temp_enabled !== null) ? row.temp_enabled : history.temp_enabled;
-  const tempValid = (row.temp_valid !== undefined && row.temp_valid !== null) ? row.temp_valid : history.temp_valid;
-  const tempC = (row.temp_valid) ? row.temp_c : (tempValid ? history.temp_c : undefined);
-  
-  const tankEnabled = (row.tank_enabled !== undefined && row.tank_enabled !== null) ? row.tank_enabled : history.tank_enabled;
-  const tankValid = (row.tank_valid !== undefined && row.tank_valid !== null) ? row.tank_valid : history.tank_valid;
-  const tankStatus = row.tank_status || history.tank_status;
-  const tankDepthMm = row.tank_depth_mm || history.tank_depth_mm;
-  const tankCurrentMa = row.tank_current_ma || history.tank_current_ma;
-  const tankCurrentCentiMa = row.tank_current_centi_ma || history.tank_current_centi_ma;
-  const tankVoltageMv = row.tank_voltage_mv || history.tank_voltage_mv;
-  
   const rssi = (row.rssi !== undefined && row.rssi !== null && row.rssi !== 0 && row.rssi !== -127) ? row.rssi : history.rssi;
 
   fleetRowHistory.value[row.address] = {
@@ -2409,16 +2413,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     input_state: inputState,
     input_state_known: inputStateKnown,
     input_feedback: inputFeedback,
-    temp_enabled: tempEnabled,
-    temp_valid: tempValid,
-    temp_c: tempC,
-    tank_enabled: tankEnabled,
-    tank_valid: tankValid,
-    tank_status: tankStatus,
-    tank_depth_mm: tankDepthMm,
-    tank_current_ma: tankCurrentMa,
-    tank_current_centi_ma: tankCurrentCentiMa,
-    tank_voltage_mv: tankVoltageMv,
     rssi,
     lastTelemetryTimestamp,
     rowState,
@@ -2454,16 +2448,6 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     input_state: inputState,
     input_state_known: inputStateKnown,
     input_feedback: inputFeedback,
-    temp_enabled: tempEnabled,
-    temp_valid: tempValid,
-    temp_c: tempC,
-    tank_enabled: tankEnabled,
-    tank_valid: tankValid,
-    tank_status: tankStatus,
-    tank_depth_mm: tankDepthMm,
-    tank_current_ma: tankCurrentMa,
-    tank_current_centi_ma: tankCurrentCentiMa,
-    tank_voltage_mv: tankVoltageMv,
     rssi: rssi ?? row.rssi,
     age_ms: ageMs,
     row_state: rowState,
@@ -3337,8 +3321,8 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
     activeTab: tab,
     wifi_ssid: ssid,
     wifi_password: getCachedWifiPassword(ssid) || pairAdminPassword.value || '',
-    sensor_temp_enabled: !!device.temp_enabled || !!device.temp_valid || (device.temp_c !== undefined && device.temp_c !== null),
-    sensor_tank_enabled: !!device.tank_enabled,
+    sensor_temp_enabled: !!device.sensors?.some(s => s.kind === 'temperature' && s.state !== 'disabled'),
+    sensor_tank_enabled: !!device.sensors?.some(s => s.kind === 'tank_level' && s.state !== 'disabled'),
     power_save_listen_only: !!device.power_save_listen_only,
     fleet_key: '',
     fleet_key_confirmed: false,
@@ -5400,22 +5384,27 @@ onMounted(async () => {
         flasherInterfaces.value = nextInterfaces;
         
         if (firmwareServerInfo.value) {
-          const currentUrls = firmwareServerInfo.value.urls;
-          const stillValid = currentUrls.some(url => {
-            try {
-              const parsed = new URL(url);
-              return nextInterfaces.some(i => i.ip === parsed.hostname);
-            } catch (_) {
-              return false;
-            }
-          });
-          
-          if (!stillValid) {
-            pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
-            await stopFirmwareServer();
-            const firmwareOptions = networkOtaFirmwareOptions();
-            if (firmwareOptions) {
-              await startFirmwareServerWithOptions(firmwareOptions);
+          if (isFlashing.value || fleetGatewayFlashPhase.value !== 'idle') {
+            pushNetworkLog('Host network interfaces changed, but deferring firmware server validation/restart until active flash/upgrade completes.');
+            firmwareServerRevalidatePending.value = true;
+          } else {
+            const currentUrls = firmwareServerInfo.value.urls;
+            const stillValid = currentUrls.some(url => {
+              try {
+                const parsed = new URL(url);
+                return nextInterfaces.some(i => i.ip === parsed.hostname);
+              } catch (_) {
+                return false;
+              }
+            });
+            
+            if (!stillValid) {
+              pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
+              await stopFirmwareServer();
+              const firmwareOptions = networkOtaFirmwareOptions();
+              if (firmwareOptions) {
+                await startFirmwareServerWithOptions(firmwareOptions);
+              }
             }
           }
         }
@@ -5633,32 +5622,12 @@ onMounted(async () => {
       const val = payload.value;
       const f = payload.field;
       if (f === 'relay') dev.relay_state = (val === '1' || val === 1) ? 1 : 0;
-      else if (f === 'input' || f === 'dry_contact') {
+      else if (f === 'input') {
         dev.input_state = (val === '1' || val === 1) ? 1 : 0;
         dev.input_state_known = true;
       }
       else if (f === 'relay_feedback') dev.relay_feedback = (val === '1' || val === 1) ? 1 : 0;
       else if (f === 'input_feedback') dev.input_feedback = (val === '1' || val === 1) ? 1 : 0;
-      else if (f === 'temp_c') {
-        if (val === '' || val === null) dev.temp_valid = false;
-        else {
-          dev.temp_valid = true;
-          dev.temp_c = Number(val);
-        }
-      }
-      else if (f === 'tank_status') {
-        dev.tank_enabled = val !== 'disabled';
-        dev.tank_status = String(val);
-      }
-      else if (f === 'tank_depth_mm') {
-        if (val === '' || val === null) dev.tank_valid = false;
-        else {
-          dev.tank_valid = true;
-          dev.tank_depth_mm = Number(val);
-        }
-      }
-      else if (f === 'tank_current_ma') dev.tank_current_ma = Number(val);
-      else if (f === 'tank_voltage_mv') dev.tank_voltage_mv = Number(val);
       else if (f === 'rssi' || f === 'uplink_rssi_dbm') dev.rssi = Number(val);
       else if (f === 'downlink_rssi' || f === 'downlink_rssi_dbm') {
         dev.downlink_rssi = Number(val);
@@ -5721,6 +5690,12 @@ onMounted(async () => {
   }).catch((e) => {
     console.error('Failed to get MQTT state:', e);
   });
+});
+
+watch(fleetGatewayFlashPhase, (newPhase) => {
+  if (newPhase === 'idle') {
+    revalidateFirmwareServerAfterNetworkChange();
+  }
 });
 
 watch(region, (next) => {
@@ -7287,7 +7262,7 @@ function toggleSelectAllBulkPorts() {
                       <div>
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Local Gateway Status Topics:</div>
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/input</span> (or <span class="text-slate-300">/dry_contact</span>): Dry contact state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/input</span>: Input state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay_feedback</span>: Live physical relay feedback sense state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Normalized reading value</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Sensor status state</li>
@@ -7525,7 +7500,7 @@ function toggleSelectAllBulkPorts() {
               <template v-if="monitorGatewayStatus?.sensors && monitorGatewayStatus.sensors.length > 0">
                 <div v-for="s in monitorGatewayStatus.sensors" :key="`${s.kind}-${s.instance}`" class="rounded border border-slate-800 bg-slate-950/25 p-3">
                   <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
-                    {{ s.kind === 'temperature' ? 'Temperature' : (s.kind === 'tank_level' ? 'Tank Level' : (s.kind === 'dry_contact' ? 'Dry Contact' : s.kind)) }} [{{ s.instance }}]
+                    {{ s.kind === 'temperature' ? 'Temperature' : (s.kind === 'tank_level' ? 'Tank Level' : (s.kind === 'input' ? 'Input' : s.kind)) }} [{{ s.instance }}]
                   </div>
                   <div class="mt-2 text-lg font-bold text-slate-100">
                     {{ s.state === 'ok' ? `${s.value} ${s.unit === 'c' ? '°C' : (s.unit || '')}` : (s.state === 'overrange' ? 'Overrange' : s.state) }}

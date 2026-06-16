@@ -34,7 +34,7 @@ void test_sensor_registry_full_capacity() {
   TEST_ASSERT_EQUAL_UINT8(SensorRegistry::MAX_SENSORS, reg.count());
 
   // Attempt 7th upsert (should fail)
-  SensorReading rExtra{999, SensorKind::DryContact, SensorState::Ok, 0, 0};
+  SensorReading rExtra{999, SensorKind::Input, SensorState::Ok, 0, 0};
   TEST_ASSERT_FALSE(reg.upsert(rExtra));
   TEST_ASSERT_EQUAL_UINT8(SensorRegistry::MAX_SENSORS, reg.count());
 }
@@ -43,13 +43,13 @@ void test_sensor_registry_find() {
   SensorRegistry reg;
   reg.clear();
 
-  SensorReading r1{1, SensorKind::DryContact, SensorState::Ok, 0, 0};
+  SensorReading r1{1, SensorKind::Input, SensorState::Ok, 0, 0};
   SensorReading r2{245, SensorKind::TemperatureC, SensorState::Ok, 0, 1};
   TEST_ASSERT_TRUE(reg.upsert(r1));
   TEST_ASSERT_TRUE(reg.upsert(r2));
 
   SensorReading out{};
-  TEST_ASSERT_TRUE(reg.find(SensorKind::DryContact, 0, out));
+  TEST_ASSERT_TRUE(reg.find(SensorKind::Input, 0, out));
   TEST_ASSERT_EQUAL_INT32(1, out.value);
 
   TEST_ASSERT_FALSE(reg.find(SensorKind::TankLevel, 0, out));

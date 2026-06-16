@@ -6,7 +6,7 @@
 #endif
 
 enum class SensorKind : uint8_t {
-  DryContact = 1,
+  Input = 1,
   TemperatureC = 2,
   TankLevel = 3,
 };
@@ -31,8 +31,8 @@ static_assert(sizeof(SensorReading) == 8, "SensorReading must stay compact");
 
 inline const char* sensorKindToString(SensorKind kind) {
   switch (kind) {
-    case SensorKind::DryContact:
-      return "dry_contact";
+    case SensorKind::Input:
+      return "input";
     case SensorKind::TemperatureC:
       return "temperature";
     case SensorKind::TankLevel:
@@ -61,7 +61,7 @@ inline const char* sensorStateToString(SensorState state) {
 
 inline const char* sensorKindToUnit(SensorKind kind) {
   switch (kind) {
-    case SensorKind::DryContact:
+    case SensorKind::Input:
       return "bool";
     case SensorKind::TemperatureC:
       return "c";

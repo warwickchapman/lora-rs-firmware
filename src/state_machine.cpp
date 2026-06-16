@@ -645,7 +645,7 @@ void NodeStateMachine::setLocalSensors(const SensorRegistry &registry, uint16_t 
   local_tank_current_centi_ma_ = tankCurrentCentiMa;
   local_tank_voltage_mv_ = tankVoltageMv;
   SensorReading dc{};
-  dc.kind = SensorKind::DryContact;
+  dc.kind = SensorKind::Input;
   dc.state = SensorState::Ok;
   dc.instance = 0;
   dc.value = input_state_;
@@ -3023,7 +3023,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->sensors_updated_ms = millis();
 
     SensorReading dc{};
-    if (node->sensors.find(SensorKind::DryContact, 0, dc)) {
+    if (node->sensors.find(SensorKind::Input, 0, dc)) {
       if (dc.state == SensorState::Ok) {
         node->input_state = dc.value ? 1 : 0;
         node->input_state_known = true;

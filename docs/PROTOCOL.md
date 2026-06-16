@@ -138,9 +138,7 @@ Targeting rules:
 - `addr` as JSON string is parsed as hex (example: `"0x28"` or `"28"`).
 - TX publishes local `addr` topic value as `0xNN`.
 - TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer).
-- Peer status leaves include `input`, `dry_contact`, `temp_c`, `tank_status`,
-  `tank_depth_mm`, `tank_current_ma`, and `tank_voltage_mv` when that telemetry
-  is known from maintenance status.
+- Peer status leaves include operational topics such as `relay`, `input`, `ack_state`, `sensor/<kind>/<instance>/value`, and `sensor/<kind>/<instance>/state`.
 - TX accepts peer control leaves:
   - `poll_interval_s`
   - `poll_now`

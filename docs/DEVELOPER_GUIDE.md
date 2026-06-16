@@ -131,7 +131,6 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 | Topic | Type | Description |
 |-------|------|-------------|
 | `input` | `0`/`1` | Dry contact / digital input state. |
-| `dry_contact` | `0`/`1` | Alias for `input`. |
 | `relay` | `0`/`1` | Local relay state. |
 | `relay_feedback` | `0`/`1` | Hardware GPIO readback of relay driver. |
 | `type` | `tx`/`rx` | Device role. |
@@ -153,7 +152,7 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 
 > **Stale data protection:** When `ack_state` is `timeout`, all operational topics
-> (`relay`, `input`, `dry_contact`, `temp_c`, `tank_*`, `wifi`, `relay_feedback`,
+> (`relay`, `input`, `temp_c`, `tank_*`, `wifi`, `relay_feedback`,
 > `input_feedback`) are published as empty strings so automations do not act on
 > stale values. Status/metadata/polling topics continue updating normally.
 
@@ -163,7 +162,6 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 |-------|------|-------------|
 | `relay` | `0`/`1` | Remote relay state. |
 | `input` | `0`/`1` | Remote dry contact state (from sensors telemetry, change-detected). |
-| `dry_contact` | `0`/`1` | Alias for `input`. |
 | `ack_state` | string | `acked`, `pending`, `timeout`, `unknown`. |
 | `sensor/<kind>/<instance>/value` | string | Remote sensor normalized value. |
 | `sensor/<kind>/<instance>/state` | string | Remote sensor state. |
