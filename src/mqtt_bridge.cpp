@@ -1066,6 +1066,35 @@ void MqttBridge::publishStatus() {
         } else {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, "");
         }
+
+        // --- Additional Peer Telemetry Leaves ---
+        snprintf(numBuf, sizeof(numBuf), "%08lx", static_cast<unsigned long>(node.chip_id));
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "chip_id")) publishRetainedTopic(topic, numBuf);
+
+        if (node.fw_major != 0 || node.fw_minor != 0 || node.fw_patch != 0) {
+          if (node.fw_build > 0) {
+            snprintf(numBuf, sizeof(numBuf), "%u.%u.%u~%u", node.fw_major, node.fw_minor, node.fw_patch, node.fw_build);
+          } else {
+            snprintf(numBuf, sizeof(numBuf), "%u.%u.%u", node.fw_major, node.fw_minor, node.fw_patch);
+          }
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, numBuf);
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, "");
+        }
+
+        if (node.wifi_connected && node.ip[0] != 0) {
+          snprintf(numBuf, sizeof(numBuf), "%u.%u.%u.%u", node.ip[0], node.ip[1], node.ip[2], node.ip[3]);
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, numBuf);
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, "");
+        }
+
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "power_save_listen_only")) {
+          publishRetainedTopic(topic, node.power_save_listen_only ? "1" : "0");
+        }
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "power_save_active")) {
+          publishRetainedTopic(topic, node.power_save_active ? "1" : "0");
+        }
       };
 
       publishRemote(addrSeg);

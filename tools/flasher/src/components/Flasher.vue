@@ -343,7 +343,7 @@ interface InFlightRead {
 const inFlightDeviceInfoReads = ref(new Map<string, InFlightRead>());
 const selectedPort = computed<string>({
   get() {
-    if (activeMode.value === 'pair') return gatewaySelectedPort.value;
+    if (activeMode.value === 'pair') return pairGatewayKey.value;
     if (activeMode.value === 'network') {
       return fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
     }
@@ -532,6 +532,7 @@ const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const fleetTransport = ref<'serial' | 'mqtt'>('serial');
 const mqttGateways = ref<Record<string, any>>({});
 const selectedMqttGatewayChipId = ref('');
+const pairGatewayKey = computed(() => gatewaySelectedPort.value);
 const isMonitorRefreshing = ref(false);
 const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
@@ -736,7 +737,7 @@ const targetGatewayKey = computed(() => {
     return monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
   }
   if (activeMode.value === 'pair') {
-    return gatewaySelectedPort.value;
+    return pairGatewayKey.value;
   }
   return flashSelectedPort.value;
 });
@@ -931,9 +932,9 @@ const loraInventoryProgressLabel = computed(() => {
   return `Scanning ${next}-${scan.end_address || LRS_REMOTE_SCAN_CAP}, ${scan.sent || 0} probes sent`;
 });
 const gatewayReady = computed(() =>
-  !!gatewaySelectedPort.value &&
-  !!serialDeviceState(gatewaySelectedPort.value)?.deviceInfo &&
-  !!serialDeviceState(gatewaySelectedPort.value)?.adminSupported &&
+  !!pairGatewayKey.value &&
+  !!serialDeviceState(pairGatewayKey.value)?.deviceInfo &&
+  !!serialDeviceState(pairGatewayKey.value)?.adminSupported &&
   !!pairPassword()
 );
 function portGatewayReady(port: string): boolean {
@@ -1753,7 +1754,7 @@ function markPairFleetKeyManual() {
 }
 
 function requireProvisionFleetKeyAuthority() {
-  const status = serialDeviceState(gatewaySelectedPort.value)?.status;
+  const status = serialDeviceState(pairGatewayKey.value)?.status;
   const isCommissioned = status?.commissioned === true && status?.fleet_passphrase_default !== true;
   if (isCommissioned && pairFleetKeySource.value !== 'gateway') {
     throw new Error('commissioned gateway fleet key was not fetched from the gateway; load gateway again');
@@ -1867,7 +1868,14 @@ async function stopFirmwareServer() {
 }
 
 function pairPassword(): string {
-  return adminPasswordForPort(gatewaySelectedPort.value);
+  return adminPasswordForPort(pairGatewayKey.value);
+}
+
+function fleetGatewayCommandTarget() {
+  const isMqtt = fleetTransport.value === 'mqtt';
+  const port = isMqtt ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  const password = adminPasswordForPort(port);
+  return { port, password, isMqtt };
 }
 
 function adminPasswordForPort(port: string): string {
@@ -1942,7 +1950,7 @@ async function refreshProvisionedSerialDeviceCaches() {
 }
 
 async function sendPairCommand<T = any>(cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
-  return sendEasyPairCommandOnPort<T>(gatewaySelectedPort.value, cmd, payload, timeoutMs, options);
+  return sendEasyPairCommandOnPort<T>(pairGatewayKey.value, cmd, payload, timeoutMs, options);
 }
 
 function noteMonitorReleasedForPort(port: string, reason: string) {
@@ -2874,9 +2882,9 @@ function fleetScanErrorMessage(err: unknown): string {
 }
 
 async function startLoraInventoryScan() {
-  const port = gatewaySelectedPort.value;
+  const { port } = fleetGatewayCommandTarget();
   if (!port) {
-    notify('Select the USB gateway first');
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
     return;
   }
   const remaining = fleetForceScanCooldownRemainingMs.value;
@@ -2890,7 +2898,7 @@ async function startLoraInventoryScan() {
 async function beginLoraInventoryScan(port: string, showErrors = true) {
   await withGatewayForeground(port, async () => {
     if (!portGatewayReady(port)) await loadNetworkGateway();
-    const password = adminPasswordForPort(port);
+    const { password } = fleetGatewayCommandTarget();
     if (!password) {
       if (showErrors) notify('Unable to read the gateway admin password from device details');
       return;
@@ -2924,8 +2932,11 @@ async function beginLoraInventoryScan(port: string, showErrors = true) {
 }
 
 async function cancelLoraInventoryScan() {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3015,8 +3026,7 @@ async function refreshFleetOtaFollowup(address: number) {
     return;
   }
   try {
-    const port = gatewaySelectedPort.value;
-    const password = adminPasswordForPort(port);
+    const { port, password } = fleetGatewayCommandTarget();
     if (!password) throw new Error('missing gateway password');
     await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
       admin_password: password,
@@ -3051,8 +3061,11 @@ function startFleetOtaFollowup(device: LoraInventoryDevice) {
 
 async function startFleetUdpLogs(device: LoraInventoryDevice) {
   if (remoteUdpBusyAddress.value != null) return;
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3093,8 +3106,11 @@ async function startFleetUdpLogs(device: LoraInventoryDevice) {
 }
 
 async function flashLoraRemote(device: LoraInventoryDevice) {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3241,8 +3257,15 @@ async function processOtaQueue() {
   if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
 
   const device = otaQueue.value[0];
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
 
   let success = false;
   try {
@@ -3312,8 +3335,11 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
 }
 
 async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, password_value: string) {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3336,8 +3362,11 @@ async function executeRemoteWifi(device: LoraInventoryDevice, ssid: string, pass
 
 
 async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: boolean, tankEnabled: boolean, powerSaveEnabled: boolean) {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3382,8 +3411,11 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
 
 async function executeRemoteReboot(device: LoraInventoryDevice) {
   activeDropdownAddress.value = null;
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3422,8 +3454,11 @@ function openFactoryResetModal(device: LoraInventoryDevice) {
 }
 
 async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet: boolean, keepWifi: boolean) {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3469,8 +3504,11 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
 }
 
 async function executeForgetRemote(device: LoraInventoryDevice) {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -3498,8 +3536,11 @@ async function executeForgetRemote(device: LoraInventoryDevice) {
 
 
 async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: string) {
-  const port = gatewaySelectedPort.value;
-  const password = adminPasswordForPort(port);
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
   if (!password) {
     notify('Enter the gateway admin password');
     return;
@@ -4036,23 +4077,24 @@ async function factoryResetSerialDevice() {
 let loadGatewayInFlight = false;
 async function loadEasyPairGateway(isAuto = false) {
   if (activeMode.value !== 'pair') return;
-  const port = gatewaySelectedPort.value;
-  if (!port) return;
+  const key = pairGatewayKey.value;
+  if (!key) return;
   // Prevent concurrent calls from multiple watchers firing on startup
   if (loadGatewayInFlight) return;
   loadGatewayInFlight = true;
   isGatewayLoading.value = true;
+
   pushPairLog('Loading USB gateway...');
   try {
-    const ok = await ensureDeviceInfoForPort(port, 'pair');
-    const state = serialDeviceState(port);
+    const ok = await ensureDeviceInfoForPort(key, 'pair');
+    const state = serialDeviceState(key);
     if (!ok || !state || !state.deviceInfo) {
       throw new Error('Unable to read device details');
     }
     state.adminPassword = state.deviceInfo.password || '';
     pushPairLog('Waiting for serial admin to become ready...');
-    const hello = await waitForSerialAdminHello(port);
-    pushPairLog(`Gateway ready on ${port}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
+    const hello = await waitForSerialAdminHello(key);
+    pushPairLog(`Gateway ready on ${key}; firmware ${hello.fw_version || 'unknown'}, max remotes ${hello.max_remotes || 12}.`);
     await refreshGatewayStatusForPair();
     const password = pairPassword();
     if (password) {
@@ -4063,8 +4105,8 @@ async function loadEasyPairGateway(isAuto = false) {
           include_secrets: true
         }, 15000);
         const retrievedKey = out.config?.fleet_passphrase?.trim() || '';
-        const isCommissioned = serialDeviceState(port)?.status?.commissioned;
-        const isDefaultKey = serialDeviceState(port)?.status?.fleet_passphrase_default;
+        const isCommissioned = serialDeviceState(key)?.status?.commissioned;
+        const isDefaultKey = serialDeviceState(key)?.status?.fleet_passphrase_default;
         
         if (isCommissioned && retrievedKey && retrievedKey !== 'lora-default-passphrase' && isDefaultKey === false) {
           pairFleetKey.value = retrievedKey;
@@ -4084,7 +4126,7 @@ async function loadEasyPairGateway(isAuto = false) {
       }
     }
   } catch (e) {
-    const state = serialDeviceState(port);
+    const state = serialDeviceState(key);
     if (state) state.adminPassword = '';
     pushPairLog('Gateway check failed: ' + e);
     if (!isAuto) {
@@ -4477,7 +4519,7 @@ function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.
 }
 
 async function refreshGatewayStatusForPair(): Promise<boolean> {
-  const port = gatewaySelectedPort.value;
+  const port = pairGatewayKey.value;
   if (!port) return false;
   try {
     const status = await sendPairCommand<SerialAdminStatus>('status', {}, 5000);
@@ -5451,8 +5493,8 @@ onMounted(async () => {
       }
       else if (f === 'tank_current_ma') dev.tank_current_ma = Number(val);
       else if (f === 'tank_voltage_mv') dev.tank_voltage_mv = Number(val);
-      else if (f === 'rssi') dev.rssi = Number(val);
-      else if (f === 'downlink_rssi') {
+      else if (f === 'rssi' || f === 'uplink_rssi_dbm') dev.rssi = Number(val);
+      else if (f === 'downlink_rssi' || f === 'downlink_rssi_dbm') {
         dev.downlink_rssi = Number(val);
         dev.downlink_rssi_known = true;
       }
@@ -5461,6 +5503,17 @@ onMounted(async () => {
       else if (f === 'uptime_ms') dev.uptime_ms = Number(val);
       else if (f === 'role') dev.role = String(val);
       else if (f === 'mode') dev.mode = String(val);
+      else if (f === 'ip') {
+        dev.ip = String(val);
+        dev.wifi_connected = !!val && val !== '0.0.0.0';
+        dev.wifi_connected_known = true;
+      }
+      else if (f === 'power_save_listen_only') {
+        dev.power_save_listen_only = val === '1' || val === 1 || val === true;
+      }
+      else if (f === 'power_save_active') {
+        dev.power_save_active = val === '1' || val === 1 || val === true;
+      }
       dev.age_ms = 0;
 
       loraInventory.value = loraInventory.value.map(row => {
