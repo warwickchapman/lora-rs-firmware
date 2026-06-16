@@ -889,30 +889,11 @@ const isGatewayUpgradeAvailable = computed(() => {
   const currentFw = fleetGatewayStatus.value?.fw_version;
   if (!currentFw || !selectedVersion.value) return false;
 
-  // Verify firmware selection is present/valid
-  if (selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX) && !selectedLocalPath.value) {
-    return false;
+  if (selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)) {
+    return true;
   }
 
-  let candidateStr = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
-    ? flasherAppVersion.value
-    : selectedVersion.value;
-
-  if (selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX) && selectedLocalPath.value) {
-    const fileMatch = selectedLocalPath.value.match(/(\d+\.\d+\.\d+)(?:~(\d+))?/);
-    if (fileMatch) {
-      candidateStr = fileMatch[0];
-    } else {
-      // The ~68 update was a flasher-only release. If using a generic local firmware.bin
-      // and flasher version is ~68, cap/treat candidate firmware version as 0.9.2~67.
-      const pFlasher = parseVersion(flasherAppVersion.value);
-      if (pFlasher && pFlasher.major === 0 && pFlasher.minor === 9 && pFlasher.patch === 2 && pFlasher.dev === 68) {
-        candidateStr = '0.9.2~67';
-      }
-    }
-  }
-
-  const p1 = parseVersion(candidateStr);
+  const p1 = parseVersion(selectedVersion.value);
   const p2 = parseVersion(currentFw);
   if (!p1 || !p2) return false;
 
@@ -2547,6 +2528,7 @@ async function refreshLoraInventoryStatus(background = true) {
 }
 
 function startLoraInventoryPolling() {
+  if (fleetTransport.value === 'mqtt') return;
   stopLoraInventoryPolling(false, false);
   networkInventoryPollMode.value = 'scan';
   networkInventoryPollTimer.value = window.setInterval(() => {
@@ -2555,7 +2537,8 @@ function startLoraInventoryPolling() {
 }
 
 function startFleetCachePolling() {
-  const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  if (fleetTransport.value === 'mqtt') return;
+  const targetPort = gatewaySelectedPort.value;
   if (activeMode.value !== 'network' || !targetPort || isLoraInventoryScanning.value) return;
   if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
   stopLoraInventoryPolling(false, false);
