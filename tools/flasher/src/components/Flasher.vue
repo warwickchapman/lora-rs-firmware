@@ -600,16 +600,6 @@ const fleetRowHistory = ref<Record<number, {
   input_state?: number;
   input_state_known?: boolean;
   input_feedback?: number;
-  temp_enabled?: boolean;
-  temp_valid?: boolean;
-  temp_c?: number;
-  tank_enabled?: boolean;
-  tank_valid?: boolean;
-  tank_status?: string;
-  tank_depth_mm?: number;
-  tank_current_ma?: number;
-  tank_current_centi_ma?: number;
-  tank_voltage_mv?: number;
   rssi?: number;
   lastTelemetryTimestamp?: number;
   knownRebootUntilMs?: number;

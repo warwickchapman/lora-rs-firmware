@@ -825,7 +825,7 @@ void MqttBridge::publishStatus() {
 
   if (!status_publish_locals_done_) {
     char topic[kMqttTopicBufBytes];
-    const bool localInput = sm_->localDryContactState() != 0;
+    const bool localInput = sm_->localInputState() != 0;
     if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
     publishRetained(relay_topic_, sm_->relayState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "relay_feedback")) publishRetained(topic, sm_->relayFeedbackState() ? "1" : "0");

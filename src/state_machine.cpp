@@ -296,7 +296,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   digitalWrite(kRelayPin, LOW);
   digitalWrite(kLedPin, HIGH);
 
-  input_state_ = localDryContactState();
+  input_state_ = localInputState();
   last_input_raw_ = input_state_;
   relay_state_ = digitalRead(kRelayPin);
 
@@ -636,7 +636,7 @@ LinkState NodeStateMachine::linkState() const { return link_state_; }
 uint8_t NodeStateMachine::relayState() const { return relay_state_; }
 uint8_t NodeStateMachine::relayFeedbackState() const { return digitalRead(kRelayPin) ? 1 : 0; }
 uint8_t NodeStateMachine::inputState() const { return input_state_; }
-uint8_t NodeStateMachine::localDryContactState() const { return digitalRead(kInputPin) ? 1 : 0; }
+uint8_t NodeStateMachine::localInputState() const { return digitalRead(kInputPin) ? 1 : 0; }
 int NodeStateMachine::lastPacketRssi() const { return last_packet_rssi_; }
 uint32_t NodeStateMachine::lastPacketMs() const { return last_packet_ms_; }
 uint32_t NodeStateMachine::lastTxMs() const { return last_tx_ms_; }
@@ -2869,7 +2869,7 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
   payload[5] = static_cast<uint8_t>((heapMaxBlock >> 8) & 0xFFU);
   payload[6] = lrslog::heapFragPercent();
   payload[7] = relayFeedbackState();
-  payload[8] = localDryContactState();
+  payload[8] = localInputState();
   uint32_t uptimeMinutes = millis() / 60000UL;
   if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
   payload[9] = static_cast<uint8_t>(uptimeMinutes & 0xFFU);
@@ -3235,7 +3235,7 @@ void NodeStateMachine::tickTransmitter() {
     tx_ack_pending_ = false;
   }
 
-  int inputLogical = static_cast<int>(localDryContactState());
+  int inputLogical = static_cast<int>(localInputState());
   if (inputLogical != last_input_raw_) {
     last_debounce_ms_ = now;
     last_input_raw_ = inputLogical;
@@ -3308,7 +3308,7 @@ void NodeStateMachine::tickReceiver() {
   const uint32_t now = millis();
   applyReceiverFailsafe(now);
   tickDeferredAck(now);
-  int inputLogical = static_cast<int>(localDryContactState());
+  int inputLogical = static_cast<int>(localInputState());
   if (inputLogical != last_input_raw_) {
     last_debounce_ms_ = now;
     last_input_raw_ = inputLogical;
@@ -3337,7 +3337,7 @@ void NodeStateMachine::tickReceiver() {
 
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
-  if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), txFlags(), last_counter_, runtime_.local_address,
+  if (radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
                    runtime_.remote_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
     last_tx_ms_ = now;
     markRadioTxSentThisTick();
@@ -3722,7 +3722,7 @@ void NodeStateMachine::tickReceive() {
     }
 
     last_counter_++;
-    if (radio_->send(MessageType::PollResponse, relay_state_, localDryContactState(), replyFlags, last_counter_, runtime_.local_address,
+    if (radio_->send(MessageType::PollResponse, relay_state_, localInputState(), replyFlags, last_counter_, runtime_.local_address,
                      msg.src,
                      localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, replyUnixTime)) {
       last_tx_ms_ = millis();
@@ -3771,7 +3771,7 @@ void NodeStateMachine::tickReceive() {
       const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
       const uint32_t unixTimeS = currentUnixTimeS(millis());
       last_counter_++;
-      if (radio_->send(MessageType::MqttStatus, relay_state_, localDryContactState(), txFlags(), last_counter_, runtime_.local_address,
+      if (radio_->send(MessageType::MqttStatus, relay_state_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
                        msg.src, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, unixTimeS)) {
         last_tx_ms_ = millis();
         markRadioTxSentThisTick();

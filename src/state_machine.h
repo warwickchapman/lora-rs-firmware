@@ -177,7 +177,7 @@ class NodeStateMachine {
   uint8_t relayState() const;
   uint8_t relayFeedbackState() const;
   uint8_t inputState() const;
-  uint8_t localDryContactState() const;
+  uint8_t localInputState() const;
   int lastPacketRssi() const;
   uint32_t lastPacketMs() const;
   uint32_t lastTxMs() const;
