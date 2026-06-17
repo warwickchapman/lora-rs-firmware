@@ -3748,7 +3748,7 @@ async function flashFleetGateway() {
   if (isMqtt) {
     networkStatusMessage.value = `Triggering OTA upgrade for MQTT gateway ${label}...`;
     pushNetworkLog(`Triggering OTA upgrade for MQTT gateway ${label} with ${firmwareOptions.firmware_path}.`);
-    let reachedReboot = false;
+    let otaCommandAcceptedOrIndeterminate = false;
     try {
       const info = await ensureRemoteFlashFirmwareServer();
       const otaUrl = info.urls.find(u => !u.includes('127.0.0.1') && !u.includes('localhost'));
@@ -3771,7 +3771,7 @@ async function flashFleetGateway() {
         }
       }
 
-      reachedReboot = true;
+      otaCommandAcceptedOrIndeterminate = true;
       fleetGatewayFlashPhase.value = 'rebooting';
       networkStatusMessage.value = 'Network reconnecting...';
       notify('Gateway OTA upgrade triggered');
@@ -3791,7 +3791,7 @@ async function flashFleetGateway() {
         }
       }, 8000);
     } catch (e) {
-      if (reachedReboot && String(e || '').includes('timeout waiting for reconnection')) {
+      if (otaCommandAcceptedOrIndeterminate && String(e || '').includes('timeout waiting for reconnection')) {
         fleetGatewayFlashPhase.value = 'unknown';
         const msg = 'Gateway rebooted, but network reconnect timed out. Upgrade status unknown.';
         networkStatusMessage.value = msg;
