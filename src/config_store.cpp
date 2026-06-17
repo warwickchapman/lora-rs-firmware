@@ -889,6 +889,7 @@ bool ConfigStore::consumePostOtaWifiFastMarker() {
   bool deleted = LittleFS.remove("/post_ota_wifi_fast");
   if (!deleted) {
     LRS_LOGE(FS, "event=post_ota_wifi_fast_marker_consume_failed reason=remove_failed");
+    return false;
   }
   return true;
 }

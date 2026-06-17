@@ -1600,7 +1600,9 @@ void AdminExecutor::handleOtaPull(JsonDocument &doc, ResponseWriter writer) {
   }
 
   if (config_ != nullptr) {
-    config_->writePostOtaWifiFastMarker();
+    if (!config_->writePostOtaWifiFastMarker()) {
+      LRS_LOGE(SYS, "event=post_ota_wifi_fast_marker_write_failed");
+    }
   }
 
   JsonDocument out;

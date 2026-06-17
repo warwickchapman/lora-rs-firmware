@@ -54,12 +54,6 @@ void App::begin() {
     LRS_LOGE(FS, "event=config_store_init_failed");
   }
 
-  post_ota_wifi_fast_mode_ = config_.consumePostOtaWifiFastMarker();
-  if (post_ota_wifi_fast_mode_) {
-    post_ota_wifi_fast_started_ms_ = millis();
-    LRS_LOGW(WIFI, "event=post_ota_wifi_fast_start timeout_limit_s=600");
-  }
-
   {
     // Post-OTA resets are scheduled before reboot, then executed here once the
     // new firmware has booted and the config store is available.
@@ -80,6 +74,12 @@ void App::begin() {
                keepFleetKey ? 1U : 0U,
                keepWifiCredentials ? 1U : 0U);
     }
+  }
+
+  post_ota_wifi_fast_mode_ = config_.consumePostOtaWifiFastMarker();
+  if (post_ota_wifi_fast_mode_) {
+    post_ota_wifi_fast_started_ms_ = millis();
+    LRS_LOGW(WIFI, "event=post_ota_wifi_fast_start timeout_limit_s=600");
   }
 
   const auto &cfg = config_.settings();
