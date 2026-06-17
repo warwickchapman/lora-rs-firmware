@@ -59,12 +59,16 @@ class App {
   int32_t sta_target_channel_ = 0;
   int32_t sta_last_sdk_status_ = 0;
   uint32_t sta_last_connect_time_ms_ = 0;
+  bool post_ota_wifi_fast_mode_ = false;
+  uint32_t post_ota_wifi_fast_started_ms_ = 0;
+  uint8_t post_ota_wifi_fast_attempts_ = 0;
 
   void startNetworking();
   void updateNetworking();
   void ensureApEnabled();
   void maybeDisableAp();
   void beginStaConnect();
+  void beginStaConnectDirect();
   void startStaScan();
   void finishStaScan(int scanCount);
   void failStaConnectAttempt(const char *reason, wl_status_t status);

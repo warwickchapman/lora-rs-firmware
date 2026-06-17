@@ -53,6 +53,13 @@ void App::begin() {
   if (!fsReady) {
     LRS_LOGE(FS, "event=config_store_init_failed");
   }
+
+  post_ota_wifi_fast_mode_ = config_.consumePostOtaWifiFastMarker();
+  if (post_ota_wifi_fast_mode_) {
+    post_ota_wifi_fast_started_ms_ = millis();
+    LRS_LOGW(WIFI, "event=post_ota_wifi_fast_start timeout_limit_s=600");
+  }
+
   {
     // Post-OTA resets are scheduled before reboot, then executed here once the
     // new firmware has booted and the config store is available.
@@ -570,6 +577,12 @@ void App::updateNetworking() {
     return;
   }
 
+  if (post_ota_wifi_fast_mode_ && (millis() - post_ota_wifi_fast_started_ms_ >= 600000)) {
+    post_ota_wifi_fast_mode_ = false;
+    resetStaReconnectFibonacci();
+    LRS_LOGW(WIFI, "event=post_ota_wifi_fast_timeout");
+  }
+
   auto &cfg = config_.settings();
   if (!cfg.wifi_admin_enabled) {
     stopWifiForAdminDisable();
@@ -618,6 +631,13 @@ void App::updateNetworking() {
                cfg.wifi_sta_ssid.c_str(), WiFi.localIP().toString().c_str(),
                rssi, sta_last_sdk_status_, static_cast<unsigned long>(sta_last_connect_time_ms_),
                static_cast<long>(sta_target_channel_));
+      if (post_ota_wifi_fast_mode_) {
+        post_ota_wifi_fast_mode_ = false;
+        resetStaReconnectFibonacci();
+        LRS_LOGW(WIFI, "event=post_ota_wifi_fast_success duration_ms=%lu attempts=%u",
+                 static_cast<unsigned long>(millis() - post_ota_wifi_fast_started_ms_),
+                 static_cast<unsigned>(post_ota_wifi_fast_attempts_));
+      }
       startNtpClient();
       maybeDisableAp();
       return;
@@ -644,6 +664,13 @@ void App::updateNetworking() {
       LRS_LOGI(WIFI, "event=sta_connected ssid=%s ip=%s rssi=%d sdk_status=%d",
                cfg.wifi_sta_ssid.c_str(), WiFi.localIP().toString().c_str(),
                rssi, sta_last_sdk_status_);
+      if (post_ota_wifi_fast_mode_) {
+        post_ota_wifi_fast_mode_ = false;
+        resetStaReconnectFibonacci();
+        LRS_LOGW(WIFI, "event=post_ota_wifi_fast_success duration_ms=%lu attempts=%u",
+                 static_cast<unsigned long>(millis() - post_ota_wifi_fast_started_ms_),
+                 static_cast<unsigned>(post_ota_wifi_fast_attempts_));
+      }
       startNtpClient();
     }
     maybeDisableAp();
@@ -662,7 +689,7 @@ void App::updateNetworking() {
     wifi_sta_retry_ms_ = millis();
   }
 
-  const uint32_t reconnectDelayMs = sta_reconnect_fib_curr_s_ * 1000UL;
+  const uint32_t reconnectDelayMs = post_ota_wifi_fast_mode_ ? 3000UL : (sta_reconnect_fib_curr_s_ * 1000UL);
   if (cfg.wifi_sta_ssid.length() >= 1 &&
       millis() - wifi_sta_retry_ms_ >= reconnectDelayMs) {
     const uint32_t freeHeap = lrslog::heapFree();
@@ -678,15 +705,27 @@ void App::updateNetworking() {
           static_cast<int32_t>(nowMs - sta_reconnect_heap_block_log_ms_) >=
               static_cast<int32_t>(kStaReconnectHeapLogIntervalMs)) {
         sta_reconnect_heap_block_log_ms_ = nowMs;
-        LRS_LOGW(WIFI,
-                 "event=sta_reconnect_deferred reason=critical_low_heap "
-                 "heap_free=%lu max_free_block=%lu min_free=%lu "
-                 "min_max_block=%lu reconnect_delay_ms=%lu",
-                 static_cast<unsigned long>(freeHeap),
-                 static_cast<unsigned long>(maxBlock),
-                 static_cast<unsigned long>(kStaReconnectCriticalMinFreeHeapBytes),
-                 static_cast<unsigned long>(kStaReconnectCriticalMinMaxBlockBytes),
-                 static_cast<unsigned long>(reconnectDelayMs));
+        if (post_ota_wifi_fast_mode_) {
+          LRS_LOGW(WIFI,
+                   "event=post_ota_wifi_fast_deferred reason=critical_low_heap "
+                   "heap_free=%lu max_free_block=%lu min_free=%lu "
+                   "min_max_block=%lu reconnect_delay_ms=%lu",
+                   static_cast<unsigned long>(freeHeap),
+                   static_cast<unsigned long>(maxBlock),
+                   static_cast<unsigned long>(kStaReconnectCriticalMinFreeHeapBytes),
+                   static_cast<unsigned long>(kStaReconnectCriticalMinMaxBlockBytes),
+                   static_cast<unsigned long>(reconnectDelayMs));
+        } else {
+          LRS_LOGW(WIFI,
+                   "event=sta_reconnect_deferred reason=critical_low_heap "
+                   "heap_free=%lu max_free_block=%lu min_free=%lu "
+                   "min_max_block=%lu reconnect_delay_ms=%lu",
+                   static_cast<unsigned long>(freeHeap),
+                   static_cast<unsigned long>(maxBlock),
+                   static_cast<unsigned long>(kStaReconnectCriticalMinFreeHeapBytes),
+                   static_cast<unsigned long>(kStaReconnectCriticalMinMaxBlockBytes),
+                   static_cast<unsigned long>(reconnectDelayMs));
+        }
       }
       if (shouldEnableSoftAp()) {
         ensureApEnabled();
@@ -850,7 +889,30 @@ void App::beginStaConnect() {
   if (cached_sta_hostname_.length() == 0) {
     refreshCachedStaHostname();
   }
-  startStaScan();
+  if (post_ota_wifi_fast_mode_ && post_ota_wifi_fast_attempts_ < 2) {
+    ++post_ota_wifi_fast_attempts_;
+    LRS_LOGI(WIFI, "event=post_ota_wifi_fast_direct_connect attempt=%u", static_cast<unsigned>(post_ota_wifi_fast_attempts_));
+    beginStaConnectDirect();
+  } else {
+    if (post_ota_wifi_fast_mode_) {
+      ++post_ota_wifi_fast_attempts_;
+      LRS_LOGI(WIFI, "event=sta_connect_start_fast_scan attempt=%u", static_cast<unsigned>(post_ota_wifi_fast_attempts_));
+    }
+    startStaScan();
+  }
+}
+
+void App::beginStaConnectDirect() {
+  auto &cfg = config_.settings();
+  resetWifiStaAttempt();
+  applyWifiRuntimeSettings();
+  WiFi.hostname(cached_sta_hostname_);
+  WiFi.scanDelete();
+  wifi_sta_connecting_ = true;
+  wifi_sta_connect_attempt_started_ms_ = millis();
+  wifi_sta_started_ms_ = wifi_sta_connect_attempt_started_ms_;
+  wifi_sta_retry_ms_ = wifi_sta_connect_attempt_started_ms_;
+  WiFi.begin(cfg.wifi_sta_ssid.c_str(), cfg.wifi_sta_password.c_str());
 }
 
 void App::startStaScan() {

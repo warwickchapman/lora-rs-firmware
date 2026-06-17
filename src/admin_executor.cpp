@@ -1599,6 +1599,10 @@ void AdminExecutor::handleOtaPull(JsonDocument &doc, ResponseWriter writer) {
     ota_status_publisher_("rebooting");
   }
 
+  if (config_ != nullptr) {
+    config_->writePostOtaWifiFastMarker();
+  }
+
   JsonDocument out;
   out["cmd"] = "ota_pull";
   if (id[0] != '\0')

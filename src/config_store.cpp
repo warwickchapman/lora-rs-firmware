@@ -872,3 +872,23 @@ void ConfigStore::ensureProvisionedDefaults() {
   cfg_.mode = kModePaired;
   cfg_.role = cfg_.role_tx ? kRoleTransmitter : kRoleReceiver;
 }
+
+bool ConfigStore::writePostOtaWifiFastMarker() {
+  LittleFS.remove("/post_ota_wifi_fast");
+  File f = LittleFS.open("/post_ota_wifi_fast", "w");
+  if (!f) return false;
+  f.write('1');
+  f.close();
+  return true;
+}
+
+bool ConfigStore::consumePostOtaWifiFastMarker() {
+  if (!LittleFS.exists("/post_ota_wifi_fast")) {
+    return false;
+  }
+  bool deleted = LittleFS.remove("/post_ota_wifi_fast");
+  if (!deleted) {
+    LRS_LOGE(FS, "event=post_ota_wifi_fast_marker_consume_failed reason=remove_failed");
+  }
+  return true;
+}

@@ -93,6 +93,8 @@ class ConfigStore {
   bool factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials = false);
   bool schedulePostOtaFactoryReset(bool keepSharedFleetKey = false, bool keepWifiCredentials = false);
   bool consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials);
+  bool writePostOtaWifiFastMarker();
+  bool consumePostOtaWifiFastMarker();
 
   const String &chipIdHex() const;
   String defaultLanHostname() const;

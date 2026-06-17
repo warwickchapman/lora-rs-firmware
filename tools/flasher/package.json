@@ -1,7 +1,7 @@
 {
   "name": "thanda-lora-flasher",
   "private": true,
-  "version": "0.9.3-dev.51",
+  "version": "0.9.3-dev.52",
   "type": "module",
   "scripts": {
     "sync:version": "python3 sync_version.py",
