@@ -14,6 +14,7 @@ constexpr char kConfigPath[] = "/config.json";
 constexpr char kConfigTmpPath[] = "/config.tmp";
 constexpr char kPostOtaActionPath[] = "/post_ota_action.json";
 constexpr char kPostOtaActionTmpPath[] = "/post_ota_action.tmp";
+constexpr char kPostOtaWifiFastMarkerPath[] = "/post_ota_wifi_fast";
 constexpr size_t kConfigMaxBytes = 8192;
 constexpr size_t kPostOtaActionMaxBytes = 256;
 constexpr uint16_t kConfigSchemaVersion = 3;
@@ -874,8 +875,8 @@ void ConfigStore::ensureProvisionedDefaults() {
 }
 
 bool ConfigStore::writePostOtaWifiFastMarker() {
-  LittleFS.remove("/post_ota_wifi_fast");
-  File f = LittleFS.open("/post_ota_wifi_fast", "w");
+  LittleFS.remove(kPostOtaWifiFastMarkerPath);
+  File f = LittleFS.open(kPostOtaWifiFastMarkerPath, "w");
   if (!f) return false;
   f.write('1');
   f.close();
@@ -883,10 +884,10 @@ bool ConfigStore::writePostOtaWifiFastMarker() {
 }
 
 bool ConfigStore::consumePostOtaWifiFastMarker() {
-  if (!LittleFS.exists("/post_ota_wifi_fast")) {
+  if (!LittleFS.exists(kPostOtaWifiFastMarkerPath)) {
     return false;
   }
-  bool deleted = LittleFS.remove("/post_ota_wifi_fast");
+  bool deleted = LittleFS.remove(kPostOtaWifiFastMarkerPath);
   if (!deleted) {
     LRS_LOGE(FS, "event=post_ota_wifi_fast_marker_consume_failed reason=remove_failed");
     return false;
