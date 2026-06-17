@@ -10,7 +10,7 @@ const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type SerialJobPriority = 'user' | 'background';
-type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed';
+type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed' | 'unknown';
 
 interface SerialJobOptions {
   label?: string;
@@ -1041,6 +1041,7 @@ const fleetGatewayStatusLabel = computed(() => {
   if (fleetGatewayFlashPhase.value === 'waiting') return 'gateway waiting';
   if (fleetGatewayFlashPhase.value === 'updated') return 'gateway updated';
   if (fleetGatewayFlashPhase.value === 'failed') return 'gateway flash failed';
+  if (fleetGatewayFlashPhase.value === 'unknown') return 'network status unknown';
   if (fleetGatewayIsFactoryDefault.value) return 'gateway factory default';
   if (fleetGatewayReady.value) return 'gateway ready';
   return 'gateway not loaded';
@@ -1051,6 +1052,7 @@ const fleetGatewayBadgeLabel = computed(() => {
   if (fleetGatewayFlashPhase.value === 'waiting') return 'waiting...';
   if (fleetGatewayFlashPhase.value === 'updated') return 'updated';
   if (fleetGatewayFlashPhase.value === 'failed') return 'flash failed';
+  if (fleetGatewayFlashPhase.value === 'unknown') return 'status unknown';
   if (fleetGatewayStatus.value) return 'status loaded';
   if (fleetGatewayIdentity.value) return 'identity loaded';
   return 'not loaded';
@@ -1061,6 +1063,7 @@ const fleetGatewayBadgeClass = computed(() => {
   }
   if (fleetGatewayFlashPhase.value === 'updated') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (fleetGatewayFlashPhase.value === 'failed') return 'border-rose-500/40 bg-rose-500/10 text-rose-300';
+  if (fleetGatewayFlashPhase.value === 'unknown') return 'border-amber-500/40 bg-amber-500/15 text-amber-200';
   if (fleetGatewayStatus.value) return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (fleetGatewayIdentity.value) return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
   return 'border-slate-700 bg-slate-800/50 text-slate-400';
@@ -1069,9 +1072,10 @@ const fleetGatewaySummary = computed(() => {
   const isMqtt = fleetTransport.value === 'mqtt';
   if (fleetGatewayFlashPhase.value === 'flashing') return isMqtt ? 'Serving firmware binary for OTA pull...' : 'Writing firmware over USB serial.';
   if (fleetGatewayFlashPhase.value === 'rebooting') return isMqtt ? 'OTA pull triggered; gateway is resetting.' : 'Flash completed; gateway is resetting.';
-  if (fleetGatewayFlashPhase.value === 'waiting') return isMqtt ? 'Waiting for gateway to reconnect to MQTT...' : 'Waiting for serial admin to return after reboot.';
+  if (fleetGatewayFlashPhase.value === 'waiting') return isMqtt ? 'Network reconnecting...' : 'Waiting for serial admin to return after reboot.';
   if (fleetGatewayFlashPhase.value === 'updated') return isMqtt ? 'Gateway upgraded and reconnected over MQTT.' : 'Gateway responded after flash; status refreshed.';
   if (fleetGatewayFlashPhase.value === 'failed') return isMqtt ? 'Gateway OTA upgrade did not complete; check activity log.' : 'Gateway flash did not complete; check activity log.';
+  if (fleetGatewayFlashPhase.value === 'unknown') return 'Gateway rebooted, but network reconnect timed out; upgrade status unknown.';
   const status = fleetGatewayStatus.value;
   if (status) {
     const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
@@ -3744,6 +3748,7 @@ async function flashFleetGateway() {
   if (isMqtt) {
     networkStatusMessage.value = `Triggering OTA upgrade for MQTT gateway ${label}...`;
     pushNetworkLog(`Triggering OTA upgrade for MQTT gateway ${label} with ${firmwareOptions.firmware_path}.`);
+    let reachedReboot = false;
     try {
       const info = await ensureRemoteFlashFirmwareServer();
       const otaUrl = info.urls.find(u => !u.includes('127.0.0.1') && !u.includes('localhost'));
@@ -3766,14 +3771,15 @@ async function flashFleetGateway() {
         }
       }
 
+      reachedReboot = true;
       fleetGatewayFlashPhase.value = 'rebooting';
-      networkStatusMessage.value = 'OTA command accepted; gateway is downloading & rebooting.';
+      networkStatusMessage.value = 'Network reconnecting...';
       notify('Gateway OTA upgrade triggered');
       await new Promise(resolve => setTimeout(resolve, 4000));
 
       fleetGatewayFlashPhase.value = 'waiting';
-      networkStatusMessage.value = 'Waiting for gateway to reconnect to MQTT...';
-      await waitForMqttGatewayUpdate(port, selectedFirmwareCandidateVersion(), cmdSentTime, 65000);
+      networkStatusMessage.value = 'Network reconnecting...';
+      await waitForMqttGatewayUpdate(port, selectedFirmwareCandidateVersion(), cmdSentTime, 600000); // 10 minutes
 
       fleetGatewayFlashPhase.value = 'updated';
       networkStatusMessage.value = 'Gateway upgraded and reconnected over MQTT.';
@@ -3785,16 +3791,29 @@ async function flashFleetGateway() {
         }
       }, 8000);
     } catch (e) {
-      fleetGatewayFlashPhase.value = 'failed';
-      const msg = `MQTT Gateway OTA failed: ${e}`;
-      networkStatusMessage.value = msg;
-      pushNetworkLog(msg);
-      notify(msg);
-      window.setTimeout(() => {
-        if (fleetGatewayFlashPhase.value === 'failed') {
-          fleetGatewayFlashPhase.value = 'idle';
-        }
-      }, 15000);
+      if (reachedReboot && String(e || '').includes('timeout waiting for reconnection')) {
+        fleetGatewayFlashPhase.value = 'unknown';
+        const msg = 'Gateway rebooted, but network reconnect timed out. Upgrade status unknown.';
+        networkStatusMessage.value = msg;
+        pushNetworkLog(msg);
+        notify('Gateway network reconnect timeout');
+        window.setTimeout(() => {
+          if (fleetGatewayFlashPhase.value === 'unknown') {
+            fleetGatewayFlashPhase.value = 'idle';
+          }
+        }, 15000);
+      } else {
+        fleetGatewayFlashPhase.value = 'failed';
+        const msg = `MQTT Gateway OTA failed: ${e}`;
+        networkStatusMessage.value = msg;
+        pushNetworkLog(msg);
+        notify(msg);
+        window.setTimeout(() => {
+          if (fleetGatewayFlashPhase.value === 'failed') {
+            fleetGatewayFlashPhase.value = 'idle';
+          }
+        }, 15000);
+      }
     } finally {
       isFlashing.value = false;
     }
