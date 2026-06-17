@@ -1108,8 +1108,25 @@ const pairWifiSsidInScan = computed(() =>
   wifiNetworks.value.some(n => n.ssid === pairWifiSsid.value.trim())
 );
 const gatewayWifiStatusText = computed(() => {
-  if (gatewayWifiReady.value) return `Gateway connected at ${serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadyIp}`;
-  return 'Connect the gateway before sending credentials to remotes.';
+  const state = serialDeviceState(gatewaySelectedPort.value);
+  const ssid = state?.gatewayWifiReadySsid;
+  const ip = state?.gatewayWifiReadyIp;
+  if (ssid && ip) {
+    return `Gateway WiFi: connected to ${ssid} at ${ip}.`;
+  }
+  return 'Gateway WiFi: not connected. You can still send credentials to remotes over LoRa.';
+});
+const gatewayWifiHelpText = computed(() => {
+  const state = serialDeviceState(gatewaySelectedPort.value);
+  const ssid = state?.gatewayWifiReadySsid;
+  const ip = state?.gatewayWifiReadyIp;
+  if (ssid && ip) {
+    if (ssid === pairWifiSsid.value.trim()) {
+      return 'Gateway WiFi is already connected to this network. Enter the WiFi password if you need to send it to remotes.';
+    }
+    return `Gateway is connected to ${ssid}. You can save a new network on the gateway or send credentials to remotes.`;
+  }
+  return 'Save WiFi credentials on the gateway or send them to remotes over LoRa.';
 });
 const activityBusy = computed(() => isMonitoring.value || isFlashing.value || isNetworkUdpMonitoring.value || isFirmwareServerStarting.value || isPairBusy.value || isGatewayLoading.value || isWifiScanning.value || isWifiApplying.value || isFleetWifiSending.value || isIdentifying.value || serialAdminBusy.value);
 const activityFullscreen = computed(() =>
@@ -1807,18 +1824,6 @@ function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCod
     firmware_path: firmwarePath,
     region: isLocal ? null : region.value
   };
-}
-
-async function startNetworkUdpListener() {
-  try {
-    const started = await invoke<string>('start_network_udp_monitor');
-    isNetworkUdpMonitoring.value = true;
-    networkUdpTarget.value = 'admin-enabled devices';
-    pushNetworkLog(started);
-  } catch (e) {
-    pushNetworkLog('UDP monitor error: ' + e);
-    notify('UDP monitor error: ' + e);
-  }
 }
 
 async function stopNetworkUdpMonitor() {
@@ -2976,10 +2981,6 @@ function firmwareServerTarget(info: FirmwareServerInfo): { host: string; port: n
     host: parsed.hostname,
     port: Number(parsed.port || info.port)
   };
-}
-
-function fleetLogsAvailable(device: LoraInventoryDevice): boolean {
-  return !!device.wifi_connected_known && !!device.wifi_connected && !!device.ip;
 }
 
 function fleetDeviceUdpLabel(device: LoraInventoryDevice): string {
@@ -4577,9 +4578,6 @@ async function scanGatewayWifi() {
       .filter(n => n && n.ssid)
       .sort((a, b) => Number(b.rssi || -999) - Number(a.rssi || -999));
     wifiNetworks.value = networks;
-    if (!networks.some(n => n.ssid === pairWifiSsid.value)) {
-      clearGatewayWifiReady();
-    }
     if (!pairWifiSsid.value && networks.length > 0) {
       pairWifiSsid.value = networks[0].ssid;
     }
@@ -4697,7 +4695,6 @@ function adoptGatewayWifiFromStatus(out: SerialAdminStatus, port = selectedPort.
     return false;
   }
 
-  if (port === gatewaySelectedPort.value) pairWifiSsid.value = ssid;
   const state = serialDeviceState(port);
   if (!state) return false;
   state.gatewayWifiReadySsid = ssid;
@@ -6237,7 +6234,7 @@ function toggleSelectAllBulkPorts() {
             <div>
               <h2 class="text-base font-bold text-slate-300">WiFi</h2>
               <p class="mt-1 text-xs text-slate-400">
-                {{ gatewayWifiReady ? 'Gateway WiFi is already connected. Enter the WiFi password if you need to send it to remotes.' : 'Read gateway status, scan if needed, then send the same credentials to remotes.' }}
+                {{ gatewayWifiHelpText }}
               </p>
             </div>
             <button
@@ -6253,7 +6250,7 @@ function toggleSelectAllBulkPorts() {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">WiFi network</label>
-              <select v-model="pairWifiSsid" @change="clearGatewayWifiReady" class="glass-input h-10 appearance-none">
+              <select v-model="pairWifiSsid" class="glass-input h-10 appearance-none">
                 <option v-for="network in wifiNetworks" :key="`${network.ssid}-${network.bssid}`" :value="network.ssid">
                   {{ network.ssid }} · {{ wifiSignalLabel(network.rssi) }} · ch {{ network.channel }}
                 </option>
@@ -6276,23 +6273,25 @@ function toggleSelectAllBulkPorts() {
           </div>
 
           <div class="flex flex-col gap-2">
-            <p :class="['text-xs', gatewayWifiReady ? 'text-emerald-300' : 'text-slate-400']">{{ gatewayWifiStatusText }}</p>
-            <button
-              v-if="!gatewayWifiReady"
-              @click="connectGatewayWifi"
-              :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid"
-              class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-            >
-              {{ isWifiApplying ? 'Connecting Gateway...' : 'Connect Gateway' }}
-            </button>
-            <button
-              v-else
-              @click="sendWifiToRemotes"
-              :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid"
-              class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-            >
-              {{ isFleetWifiSending ? 'Sending...' : 'Send to Remotes' }}
-            </button>
+            <p :class="['text-xs', (serialDeviceState(gatewaySelectedPort)?.gatewayWifiReadySsid && serialDeviceState(gatewaySelectedPort)?.gatewayWifiReadyIp) ? 'text-emerald-300' : 'text-slate-400']">
+              {{ gatewayWifiStatusText }}
+            </p>
+            <div class="flex gap-3 mt-1">
+              <button
+                @click="connectGatewayWifi"
+                :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid"
+                class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60 flex-1"
+              >
+                {{ isWifiApplying ? 'Saving Gateway...' : 'Save on Gateway' }}
+              </button>
+              <button
+                @click="sendWifiToRemotes"
+                :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid"
+                class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60 flex-1"
+              >
+                {{ isFleetWifiSending ? 'Sending...' : 'Send to Remotes' }}
+              </button>
+            </div>
           </div>
           </div>
         </div>
