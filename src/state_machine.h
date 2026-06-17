@@ -666,7 +666,6 @@ class NodeStateMachine {
   void resetRadioTxBudgetForTick();
   void finishRadioTxBudgetForTick();
   void markRadioTxSentThisTick();
-  void sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent, bool resetRetryWindow = true);
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
   void tickPeerMaintenance(uint32_t now);

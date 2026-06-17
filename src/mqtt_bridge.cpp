@@ -470,10 +470,6 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
 
     bool targetRelay = payload[0] == '1';
     sm_->mqttSetLocalRelay(targetRelay ? 1 : 0);
-
-    {
-      lrslog::event("mqtt_relay_topic", 0, 0, targetRelay ? 1 : 0);
-    }
     return;
   }
 

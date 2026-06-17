@@ -764,51 +764,9 @@ void NodeStateMachine::mqttSetLocalRelay(uint8_t relayState) {
   }
   relay_state_ = relayState ? 1 : 0;
   digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
-  {
-    lrslog::event("mqtt_local_relay", 0, last_counter_, relay_state_);
-  }
+  lrslog::event("mqtt_local_relay", 0, last_counter_, relay_state_);
 }
 
-void NodeStateMachine::sendTxState(MessageType type, uint8_t relayState, uint8_t inputState, const char *logEvent, bool resetRetryWindow) {
-  const uint32_t now = millis();
-  last_counter_++;
-  const uint32_t unixTimeS = currentUnixTimeS(now);
-  yield();  // Feed ESP8266 watchdog before retry/start-sync LoRa sends during startup loops.
-  if (!radio_->send(type, relayState, inputState, txFlags(), last_counter_, runtime_.local_address, runtime_.remote_address, localTempCodeToSend(),
-                    0, 0xFF, 0xFFFF, unixTimeS)) {
-    link_state_ = LinkState::Idle;
-    tx_command_pending_ = false;
-    tx_pending_command_counter_ = 0;
-    tx_retry_step_ = 0;
-    tx_next_retry_ms_ = 0;
-    tx_command_retry_deadline_ms_ = 0;
-    return;
-  }
-  last_tx_ms_ = now;
-  markRadioTxSentThisTick();
-  wait_ack_since_ms_ = now;
-  link_state_ = LinkState::WaitAck;
-
-  tx_command_pending_ = true;
-  tx_pending_command_counter_ = last_counter_;
-  if (resetRetryWindow || tx_command_retry_deadline_ms_ == 0) {
-    tx_command_retry_deadline_ms_ = now + runtime_.tx_command_retry_timeout_ms;
-  }
-  tx_pending_relay_state_ = relayState ? 1 : 0;
-  tx_pending_input_state_ = inputState ? 1 : 0;
-  const uint8_t idx = tx_retry_step_ < (sizeof(kAckRetryScheduleMs) / sizeof(kAckRetryScheduleMs[0]))
-                          ? tx_retry_step_
-                          : (sizeof(kAckRetryScheduleMs) / sizeof(kAckRetryScheduleMs[0])) - 1;
-  tx_next_retry_ms_ = now + jitteredDelayMs(kAckRetryScheduleMs[idx], kAckRetryJitterPct);
-  if (tx_retry_step_ < ((sizeof(kAckRetryScheduleMs) / sizeof(kAckRetryScheduleMs[0])) - 1)) {
-    tx_retry_step_++;
-  }
-
-  if (logEvent != nullptr) {
-    lrslog::event(logEvent, 0, last_counter_, relayState ? 1 : 0);
-  }
-  yield();  // LoRa send path yields too, but yield again after scheduling/logging to avoid tight retry loops.
-}
 
 bool NodeStateMachine::isPairedTargetAddress(uint8_t addr) const {
   if (addr == 0 || addr == 255 || settings_ == nullptr) return false;
@@ -2936,6 +2894,8 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   }
   const uint8_t *p = msg.raw_payload;
   if (p[0] != kMaintenancePayloadVersion) {
+    LRS_LOGW(LORA, "event=maint_status_unsupported_detail type=%c src=%u dst=%u version=%u page=%u rssi=%d counter=%lu",
+             static_cast<char>(msg.type), msg.src, msg.dst, p[0], p[1], msg.rssi, static_cast<unsigned long>(msg.counter));
     lrslog::event("maint_status_unsupported", msg.rssi, msg.counter, p[0]);
     return false;
   }
@@ -3286,7 +3246,7 @@ void NodeStateMachine::tickTransmitter() {
   startupTxPhaseTrace("after_peer_polling");
 
 
-  if (link_state_ == LinkState::WaitAck && (now - wait_ack_since_ms_) >= runtime_.ack_timeout_ms) {
+  if (!isGroupActive() && link_state_ == LinkState::WaitAck && (now - wait_ack_since_ms_) >= runtime_.ack_timeout_ms) {
     relay_state_ = 0;
     digitalWrite(kRelayPin, LOW);
     link_state_ = LinkState::Timeout;
