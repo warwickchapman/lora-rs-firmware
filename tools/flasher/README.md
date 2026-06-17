@@ -44,7 +44,7 @@ Fleet mode is a LoRa/MQTT admin helper:
 - shows the MQTT `ota_pull` payload shape for online devices; payloads must include both `url` and `sha256`
 - listens for UDP logs on fixed port `5514`
 
-The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can also be commanded through MQTT admin. A USB-connected gateway can forward `udp_log_control` and `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot emit UDP logs or pull firmware.
+The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can also be commanded through MQTT admin. A USB-connected gateway can forward `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot pull firmware.
 
 ## Provision foundation
 

@@ -25,7 +25,6 @@ Packed fields:
 - `PollResponse` (`'R'`)
 - `WifiProvision` (`'W'`)
 - `WifiControl` (`'Y'`)
-- `UdpLogControl` (`'U'`)
 - `OtaPullControl` (`'O'`)
 - `FactoryReset` (`'X'`)
 - `Provisioning` (`'V'`)
@@ -125,8 +124,7 @@ Otherwise packet is dropped and logged.
 - `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
 - `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.
 
-Targeting rules:
-- `Reboot`, `SensorConfig`, `FleetKeyControl`, `UdpLogControl`, `OtaPullControl`, and `FactoryReset` must be addressed to the target device's LoRa address.
+- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, and `FactoryReset` must be addressed to the target device's LoRa address.
 - Broadcast is reserved for controlled provisioning-style flows. Do not use broadcast for destructive or lockout-prone maintenance commands.
 - Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, or factory-reset commands.
 
@@ -167,14 +165,15 @@ Upgrade paired nodes together.
 
 Gateway-mediated remote OTA requires digest-capable firmware on both the USB gateway and target remote; older one-packet OTA trigger firmware will not interoperate with the SHA256-segmented trigger.
 
-Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`UdpLogControl`/`OtaPullControl`/`FactoryReset`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
+Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
 
 Any future change that changes packet size, encrypted payload layout, replay behavior, addressing rules, or Fleet Key derivation is a breaking protocol change and should use a major version boundary or explicit protocol-version signaling.
 
 ## Remote MQTT Administration Protocol (Phase 1)
 To allow remote gateway control over LAN or cloud networks:
 - Durable Transport Specifications:
-  - **Packet Size Ceiling**: A fixed maximum packet size of **2944 bytes** is established. All inbound commands and outbound responses must remain under this ceiling to fit PubSubClient's allocated heap buffer on the ESP8266. Future expansion of configuration fields must utilize segmented commands or slimmer structures rather than buffer expansion.
+  - **Packet Size Ceiling**: A fixed maximum packet size of **1024 bytes** is established. All inbound commands and outbound responses must remain under this ceiling to fit PubSubClient's allocated heap buffer on the ESP8266.
+  - **Compact Operational Config**: MQTT `get_config` and `set_config` operations must adhere to a compact/partial config schema containing only operational parameters (e.g. Wi-Fi SSID, MQTT host/port, sensor enable flags). Secrets, large arrays, and roll-keys are restricted from MQTT read/write. Full configuration read/writes remain serial-only.
   - **Retention Rules**: Command messages (`admin_command`) and response messages (`admin_response`) must be published as non-retained (`retained=false`) to avoid executing stale operations on reconnect. Operational status and telemetry topics remain retained.
 - Topics:
   - Admin command topic: `<root>/lrs-<gateway_chip_id>/admin_command`
@@ -209,6 +208,6 @@ To allow remote gateway control over LAN or cloud networks:
   }
   ```
 - Credential protection:
-  - The `"get_config"` command refuses to export secrets unless the `allow_mqtt_secret_export` config setting is explicitly set to `true` on the gateway.
+  - Secrets are completely excluded from get_config responses sent over MQTT. Secret exports are only available over USB serial mode.
 
 

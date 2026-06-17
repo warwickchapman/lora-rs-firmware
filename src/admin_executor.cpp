@@ -8,7 +8,6 @@
 #include "ota_pull.h"
 #include "admin_config_utils.h"
 #include "sensor_status.h"
-#include "settings_backup.h"
 #include "mqtt_bridge.h"
 #include "runtime_utils.h"
 
@@ -179,7 +178,6 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["mqtt_password"] = includeSecrets ? cfg.mqtt_password : "";
   doc["mqtt_password_set"] = cfg.mqtt_password.length() > 0;
   doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
-  doc["allow_mqtt_secret_export"] = cfg.allow_mqtt_secret_export;
   doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
   doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
   doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
@@ -197,12 +195,36 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["factory_serial"] = cfg.factory_serial;
 }
 
+void writeSettingsCompactJson(JsonDocument &doc, ConfigStore &config) {
+  const auto &cfg = config.settings();
+  doc["schema_version"] = cfg.schema_version;
+  doc["commissioned"] = cfg.commissioned;
+  doc["mode"] = cfg.mode;
+  doc["role"] = cfg.role;
+  doc["role_tx"] = cfg.role_tx;
+  doc["local_address"] = cfg.local_address;
+  doc["remote_address"] = cfg.remote_address;
+  doc["lora_frequency_hz"] = cfg.lora_frequency_hz;
+  doc["lora_tx_power"] = cfg.lora_tx_power;
+  doc["lora_spreading_factor"] = cfg.lora_spreading_factor;
+  doc["lora_bandwidth_hz"] = cfg.lora_bandwidth_hz;
+  doc["lora_coding_rate"] = cfg.lora_coding_rate;
+  doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
+  doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
+  doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
+  doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
+  doc["mqtt_host"] = cfg.mqtt_host;
+  doc["mqtt_port"] = cfg.mqtt_port;
+  doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
+  doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
+  doc["sensor_tank_enabled"] = cfg.sensor_tank_enabled;
+}
+
 bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
                         String &error, bool &networkChanged,
                         bool &otaAuthChanged) {
   auto &cfg = config.settings();
-  SettingsBackup backup;
-  captureSettingsBackup(cfg, backup);
+  Settings backup = cfg;
   FixedSettingString<33> prevStaSsid = cfg.wifi_sta_ssid;
   FixedSettingString<65> prevStaPassword = cfg.wifi_sta_password;
   FixedSettingString<65> prevLanHost = cfg.lan_hostname;
@@ -221,7 +243,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   FixedSettingString<33> prevAdminPassword = cfg.admin_password;
 
   auto fail = [&](const String &msg) {
-    restoreSettingsBackup(backup, cfg);
+    cfg = backup;
     error = msg;
     return false;
   };
@@ -341,7 +363,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       cfg.mqtt_password = posted;
   }
   cfg.mqtt_topic_root = doc["mqtt_topic_root"] | cfg.mqtt_topic_root.c_str();
-  cfg.allow_mqtt_secret_export = parseBoolField(doc["allow_mqtt_secret_export"], cfg.allow_mqtt_secret_export);
   cfg.sensor_temp_enabled =
       parseBoolField(doc["sensor_temp_enabled"], cfg.sensor_temp_enabled);
   cfg.sensor_temp_pin =
@@ -795,7 +816,7 @@ void AdminExecutor::handleGetConfig(JsonDocument &doc, ResponseWriter writer, bo
     return;
   }
   bool includeSecrets = parseBoolField(doc["include_secrets"], false);
-  if (isMqtt && !config_->settings().allow_mqtt_secret_export) {
+  if (isMqtt) {
     includeSecrets = false;
   }
   JsonDocument out;
@@ -804,14 +825,18 @@ void AdminExecutor::handleGetConfig(JsonDocument &doc, ResponseWriter writer, bo
     out["id"] = id;
   JsonObject config = out["config"].to<JsonObject>();
   JsonDocument cfgDoc;
-  writeSettingsJson(cfgDoc, *config_, includeSecrets);
+  if (isMqtt) {
+    writeSettingsCompactJson(cfgDoc, *config_);
+  } else {
+    writeSettingsJson(cfgDoc, *config_, includeSecrets);
+  }
   for (JsonPair kv : cfgDoc.as<JsonObject>()) {
     config[kv.key()] = kv.value();
   }
   sendOk(out, writer);
 }
 
-void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer) {
+void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt) {
   const char *id = requestId(doc);
   if (!requireAdmin(doc)) {
     sendError("set_config", "auth_failed", id, writer);
@@ -828,6 +853,36 @@ void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer) {
   if (patch.isNull()) {
     sendError("set_config", "invalid_config", id, writer);
     return;
+  }
+
+  if (isMqtt) {
+    for (auto kv : patch) {
+      const char *key = kv.key().c_str();
+      if (strcmp(key, "schema_version") != 0 &&
+          strcmp(key, "commissioned") != 0 &&
+          strcmp(key, "mode") != 0 &&
+          strcmp(key, "role") != 0 &&
+          strcmp(key, "role_tx") != 0 &&
+          strcmp(key, "local_address") != 0 &&
+          strcmp(key, "remote_address") != 0 &&
+          strcmp(key, "lora_frequency_hz") != 0 &&
+          strcmp(key, "lora_tx_power") != 0 &&
+          strcmp(key, "lora_spreading_factor") != 0 &&
+          strcmp(key, "lora_bandwidth_hz") != 0 &&
+          strcmp(key, "lora_coding_rate") != 0 &&
+          strcmp(key, "wifi_sta_ssid") != 0 &&
+          strcmp(key, "wifi_admin_enabled") != 0 &&
+          strcmp(key, "mqtt_client_enabled") != 0 &&
+          strcmp(key, "mqtt_control_enabled") != 0 &&
+          strcmp(key, "mqtt_host") != 0 &&
+          strcmp(key, "mqtt_port") != 0 &&
+          strcmp(key, "mqtt_topic_root") != 0 &&
+          strcmp(key, "sensor_temp_enabled") != 0 &&
+          strcmp(key, "sensor_tank_enabled") != 0) {
+        sendError("set_config", "security_write_restricted_over_mqtt", id, writer);
+        return;
+      }
+    }
   }
   String error;
   bool networkChanged = false;
@@ -1433,87 +1488,7 @@ void AdminExecutor::handleCancelLoraInventory(JsonDocument &doc, ResponseWriter 
   sendOk(out, writer);
 }
 
-void AdminExecutor::handleUdpLogControl(JsonDocument &doc, ResponseWriter writer) {
-  const char *id = requestId(doc);
-  if (!requireAdmin(doc)) {
-    sendError("udp_log_control", "auth_failed", id, writer);
-    return;
-  }
-  const bool enabled = parseBoolField(doc["enabled"], true);
-  uint32_t ttlS = doc["ttl_s"] | 300UL;
-  if (ttlS > 3600UL)
-    ttlS = 3600UL;
 
-  IPAddress host;
-  const uint16_t port = static_cast<uint16_t>(doc["port"] | 5514);
-  const char *hostStr = doc["host"] | "";
-  if (enabled && (port == 0 || !host.fromString(hostStr))) {
-    sendError("udp_log_control", "invalid_target", id, writer);
-    return;
-  }
-
-  if (enabled) {
-    lrslog::setUdpMirror(host, port, ttlS * 1000UL);
-  } else {
-    lrslog::disableUdpMirror();
-  }
-
-  JsonDocument out;
-  out["cmd"] = "udp_log_control";
-  if (id[0] != '\0')
-    out["id"] = id;
-  out["enabled"] = enabled;
-  out["host"] = enabled ? host.toString() : "";
-  out["port"] = enabled ? port : 0;
-  out["ttl_s"] = enabled ? ttlS : 0;
-  sendOk(out, writer);
-}
-
-void AdminExecutor::handleRemoteUdpLogControl(JsonDocument &doc, ResponseWriter writer) {
-  const char *id = requestId(doc);
-  if (!requireAdmin(doc)) {
-    sendError("remote_udp_log_control", "auth_failed", id, writer);
-    return;
-  }
-  if (sm_ == nullptr) {
-    sendError("remote_udp_log_control", "runtime_unavailable", id, writer);
-    return;
-  }
-  const int rawAddr = doc["addr"] | doc["address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
-    sendError("remote_udp_log_control", "invalid_address", id, writer);
-    return;
-  }
-  const bool enabled = parseBoolField(doc["enabled"], true);
-  uint32_t ttlS = doc["ttl_s"] | 300UL;
-  if (ttlS > 3600UL)
-    ttlS = 3600UL;
-
-  IPAddress host;
-  const uint16_t port = static_cast<uint16_t>(doc["port"] | 5514);
-  const char *hostStr = doc["host"] | "";
-  if (enabled && (port == 0 || !host.fromString(hostStr))) {
-    sendError("remote_udp_log_control", "invalid_target", id, writer);
-    return;
-  }
-
-  if (!sm_->mqttSetPeerUdpLogControl(static_cast<uint8_t>(rawAddr), enabled, host, port, ttlS)) {
-    sendError("remote_udp_log_control", "send_failed", id, writer);
-    return;
-  }
-
-  JsonDocument out;
-  out["cmd"] = "remote_udp_log_control";
-  if (id[0] != '\0')
-    out["id"] = id;
-  out["addr"] = rawAddr;
-  out["enabled"] = enabled;
-  out["host"] = enabled ? host.toString() : "";
-  out["port"] = enabled ? port : 0;
-  out["ttl_s"] = enabled ? ttlS : 0;
-  out["requires_remote_wifi"] = enabled;
-  sendOk(out, writer);
-}
 
 void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer) {
   const char *id = requestId(doc);
@@ -1996,7 +1971,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
   }
 
   if (strcmp(cmd, "set_config") == 0) {
-    handleSetConfig(doc, writer);
+    handleSetConfig(doc, writer, isMqtt);
     return;
   }
 
@@ -2045,15 +2020,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     return;
   }
 
-  if (strcmp(cmd, "udp_log_control") == 0) {
-    handleUdpLogControl(doc, writer);
-    return;
-  }
 
-  if (strcmp(cmd, "remote_udp_log_control") == 0) {
-    handleRemoteUdpLogControl(doc, writer);
-    return;
-  }
 
   if (strcmp(cmd, "remote_ota_pull") == 0) {
     handleRemoteOtaPull(doc, writer);

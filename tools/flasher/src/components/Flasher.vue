@@ -412,7 +412,6 @@ const isFirmwareServerStarting = ref(false);
 
 const remoteOtaBusyAddress = ref<number | null>(null);
 const otaQueue = ref<LoraInventoryDevice[]>([]);
-const remoteUdpBusyAddress = ref<number | null>(null);
 const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
 const firmwareServerRevalidatePending = ref(false);
 const serialLogs = ref<string[]>([]);
@@ -3075,110 +3074,7 @@ function startFleetOtaFollowup(device: LoraInventoryDevice) {
   }, 2500);
 }
 
-async function startFleetUdpLogs(device: LoraInventoryDevice) {
-  if (remoteUdpBusyAddress.value != null) return;
-  const { port, password } = fleetGatewayCommandTarget();
-  if (!port) {
-    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
-    return;
-  }
-  if (!password) {
-    notify('Enter the gateway admin password');
-    return;
-  }
-  if (!fleetLogsAvailable(device)) {
-    notify('UDP logs need confirmed WiFi connection and IP from fleet status');
-    return;
-  }
-  const targetLabel = fleetDeviceUdpLabel(device);
-  try {
-    remoteUdpBusyAddress.value = device.address;
-    if (!portGatewayReady(port)) await loadNetworkGateway();
-    const hosts = await invoke<string[]>('local_udp_log_hosts');
-    const host = hosts[0];
-    if (!host) throw new Error('No reachable Flasher LAN address found');
-    if (!isNetworkUdpMonitoring.value) {
-      await startNetworkUdpListener();
-    }
-    await sendEasyPairCommandOnPort(port, 'remote_udp_log_control', {
-      admin_password: password,
-      address: device.address,
-      enabled: true,
-      host,
-      port: 5514,
-      ttl_s: 300
-    }, 8000);
-    networkUdpTarget.value = targetLabel;
-    networkStatusMessage.value = `UDP logging enabled for ${targetLabel} to ${host}:5514.`;
-    notify(`UDP logs enabled for ${targetLabel}`);
-  } catch (e) {
-    const msg = serialFeatureError(`UDP logs ${targetLabel}`, e);
-    networkStatusMessage.value = msg;
-    pushNetworkLog(msg);
-    notify(msg);
-  } finally {
-    remoteUdpBusyAddress.value = null;
-  }
-}
 
-const isGatewayUdpLogsLoading = ref(false);
-const gatewayUdpLogsExpiry = ref(0);
-let gatewayUdpLogsInterval: number | null = null;
-
-async function enableGatewayUdpLogs() {
-  const { port, password } = fleetGatewayCommandTarget();
-  if (!port) {
-    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
-    return;
-  }
-  if (!password) {
-    notify('Enter the gateway admin password');
-    return;
-  }
-
-  isGatewayUdpLogsLoading.value = true;
-  try {
-    const hosts = await invoke<string[]>('local_udp_log_hosts');
-    const host = hosts[0];
-    if (!host) throw new Error('No reachable Flasher LAN address found');
-
-    if (!isNetworkUdpMonitoring.value) {
-      await startNetworkUdpListener();
-    }
-
-    await sendEasyPairCommandOnPort(port, 'udp_log_control', {
-      admin_password: password,
-      enabled: true,
-      host,
-      port: 5514,
-      ttl_s: 300
-    }, 8000);
-
-    networkUdpTarget.value = 'gateway';
-    networkStatusMessage.value = `UDP logging enabled for gateway to ${host}:5514 for 300s.`;
-    notify('Gateway UDP logging enabled for 300s');
-
-    gatewayUdpLogsExpiry.value = 300;
-    if (gatewayUdpLogsInterval) window.clearInterval(gatewayUdpLogsInterval);
-    gatewayUdpLogsInterval = window.setInterval(() => {
-      if (gatewayUdpLogsExpiry.value > 0) {
-        gatewayUdpLogsExpiry.value--;
-      } else {
-        if (gatewayUdpLogsInterval) {
-          window.clearInterval(gatewayUdpLogsInterval);
-          gatewayUdpLogsInterval = null;
-        }
-      }
-    }, 1000);
-  } catch (e) {
-    const msg = serialFeatureError('Gateway UDP logs', e);
-    networkStatusMessage.value = msg;
-    pushNetworkLog(msg);
-    notify(msg);
-  } finally {
-    isGatewayUdpLogsLoading.value = false;
-  }
-}
 
 async function flashLoraRemote(device: LoraInventoryDevice) {
   const { port, password } = fleetGatewayCommandTarget();
@@ -7316,13 +7212,7 @@ function toggleSelectAllBulkPorts() {
                         <code class="text-[10px] text-slate-500 mt-1">cmd: "start_lora_inventory"<br>cmd: "lora_inventory_status"</code>
                       </div>
 
-                      <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
-                        <div class="flex justify-between items-center">
-                          <span class="font-mono text-cyan-300 font-semibold">Remote UDP Diagnostic Logs</span>
-                          <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;remote_udp_log_control\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;addr\&quot;:1,\&quot;enabled\&quot;:true,\&quot;host\&quot;:\&quot;192.168.1.50\&quot;,\&quot;port\&quot;:5514}', 'remote_udp_log_control')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
-                        </div>
-                        Instructs a remote node over LoRa to redirect its diagnostic event logging to a specified local UDP server.
-                      </div>
+
 
                       <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
                         <div class="flex justify-between items-center">
@@ -7394,14 +7284,7 @@ function toggleSelectAllBulkPorts() {
                           <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (Enable WiFi chip) or <code class="text-slate-200">0</code> (Power off WiFi to conserve energy).</span>
                         </div>
 
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Peer Remote Diagnostics Control</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/udp_log_control</code>
-                          <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
-                            <code class="font-mono text-cyan-400 text-[10px]">{"enabled": true, "host": "...", "port": 5514}</code>
-                            <button @click="copyToClipboard('{\&quot;enabled\&quot;:true,\&quot;host\&quot;:\&quot;192.168.1.50\&quot;,\&quot;port\&quot;:5514,\&quot;ttl_s\&quot;:300}', 'Peer UDP config')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
-                          </div>
-                        </div>
+
                       </div>
                     </div>
                   </div>
@@ -7934,13 +7817,7 @@ function toggleSelectAllBulkPorts() {
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
               </button>
-              <button
-                @click="enableGatewayUdpLogs"
-                :disabled="isGatewayUdpLogsLoading || (fleetTransport === 'mqtt' ? !selectedMqttGatewayChipId : !gatewaySelectedPort)"
-                class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
-              >
-                {{ gatewayUdpLogsExpiry > 0 ? `Logs active (${gatewayUdpLogsExpiry}s)` : 'Enable Gateway Logs' }}
-              </button>
+
               <button
                 v-if="isGatewayUpgradeAvailable || isFlashing"
                 @click="flashFleetGateway"
@@ -8117,13 +7994,7 @@ function toggleSelectAllBulkPorts() {
                         >
                           ⚡ Flash
                         </button>
-                        <button
-                          @click="startFleetUdpLogs(device); activeDropdownAddress = null"
-                          :disabled="remoteUdpBusyAddress !== null || !fleetLogsAvailable(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
-                        >
-                          📋 Logs
-                        </button>
+
                         <button
                           @click="openSettingsModal(device)"
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"

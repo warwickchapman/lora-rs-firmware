@@ -229,44 +229,7 @@ bool parseBoolPayload(const uint8_t *payload, unsigned int length, bool &out) {
   return false;
 }
 
-bool parseUdpLogControlPayload(const uint8_t *payload, unsigned int length, bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS) {
-  if (payload == nullptr || length == 0 || length > 192) return false;
-  bool boolValue = false;
-  if (parseBoolPayload(payload, length, boolValue)) {
-    enabled = boolValue;
-    host = IPAddress();
-    port = 0;
-    ttlS = 0;
-    return true;
-  }
 
-  JsonDocument doc;
-  auto err = deserializeJson(doc, payload, length);
-  if (err) return false;
-
-  enabled = true;
-  if (doc["enabled"].is<bool>()) {
-    enabled = doc["enabled"].as<bool>();
-  } else if (doc["enabled"].is<const char *>()) {
-    const char *raw = doc["enabled"];
-    if (raw == nullptr || !parseBoolPayload(reinterpret_cast<const uint8_t *>(raw), strlen(raw), enabled)) return false;
-  } else {
-    enabled = true;
-  }
-
-  port = static_cast<uint16_t>(doc["port"] | 5514);
-  ttlS = doc["ttl_s"] | 300UL;
-  if (ttlS > 3600UL) ttlS = 3600UL;
-
-  const char *hostStr = doc["host"] | "";
-  if (enabled && (port == 0 || !host.fromString(hostStr))) return false;
-  if (!enabled) {
-    host = IPAddress();
-    port = 0;
-    ttlS = 0;
-  }
-  return true;
-}
 
 
 }
@@ -291,8 +254,8 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   instance_ = this;
   // Keep connection attempts short so MQTT outages do not stall control loop timing.
   mqtt_client_.setSocketTimeout(1);
-  if (!mqtt_client_.setBufferSize(2944)) {
-    LRS_LOGW(SYS, "failed to set buffer size to 2944 bytes");
+  if (!mqtt_client_.setBufferSize(1024)) {
+    LRS_LOGW(SYS, "failed to set buffer size to 1024 bytes");
   }
   mqtt_client_.setCallback(MqttBridge::staticCallback);
   resetPeerPublishCache();
@@ -432,14 +395,6 @@ void MqttBridge::rebuildTopics() {
   if (!settings_) return;
   snprintf(host_name_, sizeof(host_name_), "lrs-%s", chip_id_hex_.c_str());
   snprintf(topic_base_, sizeof(topic_base_), "%s/%s", settings_->mqtt_topic_root.c_str(), host_name_);
-  snprintf(relay_topic_, sizeof(relay_topic_), "%s/relay", topic_base_);
-  snprintf(control_topic_, sizeof(control_topic_), "%s/control", topic_base_);
-  snprintf(ota_status_topic_, sizeof(ota_status_topic_), "%s/ota_status", topic_base_);
-  snprintf(admin_command_topic_, sizeof(admin_command_topic_), "%s/admin_command", topic_base_);
-  snprintf(admin_response_topic_, sizeof(admin_response_topic_), "%s/admin_response", topic_base_);
-  snprintf(remote_prefix_, sizeof(remote_prefix_), "%s/peers/", topic_base_);
-  snprintf(discovery_topic_, sizeof(discovery_topic_), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
-  snprintf(availability_topic_, sizeof(availability_topic_), "%s/availability", topic_base_);
 
   mqtt_client_.setServer(settings_->mqtt_host.c_str(), runtime_.mqtt_port);
 }
@@ -459,7 +414,14 @@ bool MqttBridge::buildPeerTopic(char *out, size_t outLen, const char *addrSegmen
 void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length) {
   if (topic == nullptr) return;
 
-  if (strcmp(topic, relay_topic_) == 0) {
+  const size_t baseLen = strlen(topic_base_);
+  if (strncmp(topic, topic_base_, baseLen) != 0 || topic[baseLen] != '/') {
+    return;
+  }
+
+  const char *sub = topic + baseLen + 1;
+
+  if (strcmp(sub, "relay") == 0) {
     if (!runtime_.mqtt_control_enabled) {
       lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
       return;
@@ -473,7 +435,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     return;
   }
 
-  if (strcmp(topic, control_topic_) == 0) {
+  if (strcmp(sub, "control") == 0) {
     if (!runtime_.mqtt_control_enabled) {
       lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
       return;
@@ -513,9 +475,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     return;
   }
 
-
-
-  if (strcmp(topic, admin_command_topic_) == 0) {
+  if (strcmp(sub, "admin_command") == 0) {
     if (length == 0 || executor_ == nullptr) {
       return;
     }
@@ -536,7 +496,9 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       String respStr;
       serializeJson(respDoc, respStr);
       if (mqtt_client_.connected()) {
-        mqtt_client_.publish(admin_response_topic_, respStr.c_str(), false);
+        char admin_resp_topic[160];
+        snprintf(admin_resp_topic, sizeof(admin_resp_topic), "%s/admin_response", topic_base_);
+        mqtt_client_.publish(admin_resp_topic, respStr.c_str(), false);
       }
       return;
     }
@@ -548,24 +510,23 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     }
     executor_->execute(cmdPayload, [this](const String &response) {
       if (mqtt_client_.connected()) {
-        mqtt_client_.publish(admin_response_topic_, response.c_str(), false);
+        char admin_resp_topic[160];
+        snprintf(admin_resp_topic, sizeof(admin_resp_topic), "%s/admin_response", topic_base_);
+        mqtt_client_.publish(admin_resp_topic, response.c_str(), false);
       }
     }, true);
     return;
   }
 
-
-
   if (runtime_.role_tx && sm_ != nullptr) {
     if (!runtime_.mqtt_control_enabled) {
       return;
     }
-    const size_t remotePrefixLen = strlen(remote_prefix_);
-    if (strncmp(topic, remote_prefix_, remotePrefixLen) != 0) {
+    if (strncmp(sub, "peers/", 6) != 0) {
       return;
     }
 
-    const char *suffix = topic + remotePrefixLen;
+    const char *suffix = sub + 6;
     const char *slash = strchr(suffix, '/');
     if (slash == nullptr || slash == suffix) {
       return;
@@ -609,17 +570,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
-    if (strcmp(leaf, "udp_log_control") == 0) {
-      bool enabled = false;
-      IPAddress host;
-      uint16_t port = 0;
-      uint32_t ttlS = 0;
-      if (!parseUdpLogControlPayload(payload, length, enabled, host, port, ttlS)) return;
-      if (sm_->mqttSetPeerUdpLogControl(addr, enabled, host, port, ttlS)) {
-        lrslog::event(enabled ? "mqtt_remote_udp_log_control_enable" : "mqtt_remote_udp_log_control_disable", 0, 0, addr);
-      }
-      return;
-    }
+
 
     if (strcmp(leaf, "forget") == 0) {
       const bool forget = (length > 0 && payload[0] != '0');
@@ -627,7 +578,6 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
 
       // Extract the chip ID from the topic address segment if it's canonical
       uint32_t chipId = 0;
-      const char *suffix = topic + remotePrefixLen;
       const char *slash = strchr(suffix, '/');
       if (slash != nullptr) {
         const size_t addrLen = static_cast<size_t>(slash - suffix);
@@ -704,11 +654,14 @@ bool MqttBridge::connectIfNeeded() {
   snprintf(clientId, sizeof(clientId), "LRS-%s", chip_id_hex_.c_str());
   bool ok = false;
   if (!settings_) return false;
+  char availability_topic[160];
+  snprintf(availability_topic, sizeof(availability_topic), "%s/availability", topic_base_);
+
   if (settings_->mqtt_user.length() > 0) {
     ok = mqtt_client_.connect(clientId, settings_->mqtt_user.c_str(), settings_->mqtt_password.c_str(),
-                              availability_topic_, 0, true, "offline");
+                              availability_topic, 0, true, "offline");
   } else {
-    ok = mqtt_client_.connect(clientId, availability_topic_, 0, true, "offline");
+    ok = mqtt_client_.connect(clientId, availability_topic, 0, true, "offline");
   }
 
   if (!ok) {
@@ -722,14 +675,17 @@ bool MqttBridge::connectIfNeeded() {
   resetFibonacci();
 
   if (runtime_.mqtt_control_enabled) {
-    mqtt_client_.subscribe(relay_topic_);
-    mqtt_client_.subscribe(control_topic_);
-    mqtt_client_.subscribe(admin_command_topic_);
+    char topicBuf[160];
+    snprintf(topicBuf, sizeof(topicBuf), "%s/relay", topic_base_);
+    mqtt_client_.subscribe(topicBuf);
+    snprintf(topicBuf, sizeof(topicBuf), "%s/control", topic_base_);
+    mqtt_client_.subscribe(topicBuf);
+    snprintf(topicBuf, sizeof(topicBuf), "%s/admin_command", topic_base_);
+    mqtt_client_.subscribe(topicBuf);
     char topic[kMqttTopicBufBytes];
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "wifi")) mqtt_client_.subscribe(topic);
-    if (buildPeerTopic(topic, sizeof(topic), "+", "udp_log_control")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
   }
 
@@ -737,8 +693,10 @@ bool MqttBridge::connectIfNeeded() {
     lrslog::event("mqtt_connected", 0, 0, 0);
   }
   publishDiscovery();
-  mqtt_client_.publish(ota_status_topic_, "", true);
-  mqtt_client_.publish(availability_topic_, "online", true);
+  char ota_status_topic[160];
+  snprintf(ota_status_topic, sizeof(ota_status_topic), "%s/ota_status", topic_base_);
+  mqtt_client_.publish(ota_status_topic, "", true);
+  mqtt_client_.publish(availability_topic, "online", true);
   return true;
 }
 
@@ -771,7 +729,7 @@ void MqttBridge::publishStatus() {
     char topic[kMqttTopicBufBytes];
     const bool localInput = sm_->localInputState() != 0;
     if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
-    publishRetained(relay_topic_, sm_->relayState() ? "1" : "0");
+    if (buildLocalTopic(topic, sizeof(topic), "relay")) publishRetained(topic, sm_->relayState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "relay_feedback")) publishRetained(topic, sm_->relayFeedbackState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
 
@@ -1054,7 +1012,9 @@ void MqttBridge::publishDiscovery() {
   char payload[512];
   size_t n = serializeJson(doc, payload, sizeof(payload));
   if (n > 0) {
-    if (mqtt_client_.publish(discovery_topic_, payload, true)) {
+    char discovery_topic[192];
+    snprintf(discovery_topic, sizeof(discovery_topic), "%s/discovery/%s", settings_->mqtt_topic_root.c_str(), host_name_);
+    if (mqtt_client_.publish(discovery_topic, payload, true)) {
       last_discovery_publish_ms_ = millis();
     } else {
       lrslog::event("mqtt_discovery_publish_failed", 0, 0, 0);
@@ -1063,7 +1023,9 @@ void MqttBridge::publishDiscovery() {
 }
 
 void MqttBridge::publishOtaStatus(const String &status) {
-  if (mqtt_client_.connected() && ota_status_topic_[0] != '\0') {
-    mqtt_client_.publish(ota_status_topic_, status.c_str(), true);
+  if (mqtt_client_.connected()) {
+    char ota_status_topic[160];
+    snprintf(ota_status_topic, sizeof(ota_status_topic), "%s/ota_status", topic_base_);
+    mqtt_client_.publish(ota_status_topic, status.c_str(), true);
   }
 }

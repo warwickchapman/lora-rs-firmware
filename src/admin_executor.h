@@ -29,7 +29,7 @@ private:
   // Circular cache for MQTT Request IDs to prevent boot-session replays
   static constexpr size_t kMaxCachedRequestIds = 10;
   struct CachedRequest {
-    String id;
+    FixedSettingString<16> id;
     uint32_t received_ms;
   };
   CachedRequest cached_requests_[kMaxCachedRequestIds];
@@ -47,7 +47,7 @@ private:
   void buildProvisioningStatus(JsonDocument &doc);
   void handleStatus(JsonDocument &doc, ResponseWriter writer);
   void handleGetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
-  void handleSetConfig(JsonDocument &doc, ResponseWriter writer);
+  void handleSetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
   void handleFactoryReset(JsonDocument &doc, ResponseWriter writer);
   void handleConfigureGateway(JsonDocument &doc, ResponseWriter writer);
   void handleWifiScan(JsonDocument &doc, ResponseWriter writer);
@@ -57,8 +57,6 @@ private:
   void handleStartLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer);
   void handleCancelLoraInventory(JsonDocument &doc, ResponseWriter writer);
-  void handleUdpLogControl(JsonDocument &doc, ResponseWriter writer);
-  void handleRemoteUdpLogControl(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteReboot(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteSensorConfig(JsonDocument &doc, ResponseWriter writer);

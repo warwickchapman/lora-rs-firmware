@@ -87,12 +87,19 @@ USB serial admin protocol:
 - Flasher commands are line-delimited JSON prefixed with `LRS:` so responses can be separated from normal serial logs.
 - Replies use the same `LRS:` prefix and include `ok`, `cmd`, optional `id`, and command-specific fields.
 - Read-only commands: `hello`, `identity`, `status`, `provisioning_status`.
-- Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `reboot`, `udp_log_control`, `remote_udp_log_control`, `ota_pull`, `remote_ota_pull`, `start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`.
+- Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `reboot`, `ota_pull`, `remote_ota_pull`, `start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`.
 - `get_config` returns redacted secrets by default. `set_config` accepts a partial `config` object, validates safety bounds, saves atomically, and applies runtime changes through the normal config reload hook.
 - `factory_reset` supports `keep_shared_fleet_key` and `keep_wifi_credentials`, then reboots after acknowledging the command.
 - `ota_pull` and `remote_ota_pull` require a 64-character SHA256 for the firmware payload. The remote LoRa trigger sends that digest over the encrypted LoRa control channel before the target downloads `/firmware.bin`.
 - `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
 - Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
+
+## 7a. Heap and Memory Management Rules
+To prevent heap exhaustion and fragmentation on the ESP8266:
+1. **No Long-Lived Dynamic `String` Objects**: Long-lived runtime state (e.g. `NodeStateMachine`, `MqttBridge`, `SensorManager`) must not store dynamic C++ `String` fields. Instead, use the fixed-size buffer helper `FixedSettingString`.
+2. **Stack-Allocated Topic Buffers**: Do not use class-level or global `String` or static array buffers for MQTT topics. Construct topics dynamically on the stack using `snprintf` or local arrays.
+3. **1024-Byte MQTT Ceiling**: The PubSubClient network buffer is budgeted at **1024 bytes**. Inbound and outbound MQTT packets must fit entirely within this budget.
+4. **Compact Operational Configurations**: Over MQTT, `get_config` and `set_config` only support a subset of operational settings (excluding keys, secrets, and large tables) to maintain a small payload profile. Full config changes remain serial-only.
 
 ## 8. Packet Format
 Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.

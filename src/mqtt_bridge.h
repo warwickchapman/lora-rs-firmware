@@ -37,14 +37,6 @@ class MqttBridge {
   String chip_id_hex_;
   char host_name_[24]{};
   char topic_base_[128]{};
-  char relay_topic_[160]{};
-  char control_topic_[160]{};
-  char ota_status_topic_[160]{};
-  char admin_command_topic_[160]{};
-  char admin_response_topic_[160]{};
-  char remote_prefix_[160]{};
-  char discovery_topic_[192]{};
-  char availability_topic_[160]{};
 
   NodeStateMachine *sm_ = nullptr;
   AdminExecutor *executor_ = nullptr;

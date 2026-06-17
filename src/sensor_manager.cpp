@@ -49,8 +49,6 @@ void SensorManager::applyConfig(const Settings &cfg) {
   temp_.detected = false;
   temp_.valid = false;
   temp_.celsius = NAN;
-  temp_.address = "";
-  temp_.error = "";
   temp_.last_read_ms = 0;
   last_read_ms_ = 0;
   temp_conversion_pending_ = false;
@@ -146,7 +144,6 @@ void SensorManager::tickTemperature(uint32_t now) {
 
     if (c == DEVICE_DISCONNECTED_C || c <= kInvalidTemp) {
       temp_.valid = false;
-      temp_.error = "read_failed";
       lrslog::event("temp_read_failed", 0, 0, 0);
       LRS_LOGW(SENSOR, "event=temp_read_failed pin=%u", static_cast<unsigned>(temp_.pin));
       return;
@@ -154,7 +151,6 @@ void SensorManager::tickTemperature(uint32_t now) {
 
     temp_.valid = true;
     temp_.celsius = c;
-    temp_.error = "";
     lrslog::event("temp_read_ok", 0, 0, static_cast<uint8_t>(c));
     return;
   }
@@ -168,7 +164,6 @@ void SensorManager::tickTemperature(uint32_t now) {
   if (!req.result) {
     temp_.last_read_ms = now;
     temp_.valid = false;
-    temp_.error = "read_failed";
     lrslog::event("temp_read_failed", 0, 0, 0);
     LRS_LOGW(SENSOR, "event=temp_read_failed pin=%u", static_cast<unsigned>(temp_.pin));
     return;
@@ -238,7 +233,6 @@ void SensorManager::teardownBus() {
 void SensorManager::setupBus() {
   teardownBus();
   if (!temp_.enabled) {
-    temp_.error = "disabled";
     return;
   }
 
@@ -251,7 +245,6 @@ void SensorManager::setupBus() {
   uint8_t found[8];
   if (!ow_->search(found)) {
     temp_.detected = false;
-    temp_.error = "not_detected";
     ow_->reset_search();
     lrslog::event("temp_not_detected", 0, 0, temp_.pin);
     LRS_LOGW(SENSOR, "event=temp_not_detected pin=%u", static_cast<unsigned>(temp_.pin));
@@ -262,18 +255,12 @@ void SensorManager::setupBus() {
   memcpy(addr_, found, 8);
   has_addr_ = true;
   temp_.detected = true;
-  temp_.address = formatAddress();
-  temp_.error = "";
   ds_->setResolution(addr_, 12);
   temp_conversion_wait_ms_ = DallasTemperature::millisToWaitForConversion(12);
   lrslog::event("temp_detected", 0, 0, temp_.pin);
-  LRS_LOGI(SENSOR, "event=temp_detected pin=%u addr=%s", static_cast<unsigned>(temp_.pin), temp_.address.c_str());
-}
-
-String SensorManager::formatAddress() const {
-  char out[24]{};
-  snprintf(out, sizeof(out), "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
+  char addrStr[24]{};
+  snprintf(addrStr, sizeof(addrStr), "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
            addr_[0], addr_[1], addr_[2], addr_[3],
            addr_[4], addr_[5], addr_[6], addr_[7]);
-  return String(out);
+  LRS_LOGI(SENSOR, "event=temp_detected pin=%u addr=%s", static_cast<unsigned>(temp_.pin), addrStr);
 }

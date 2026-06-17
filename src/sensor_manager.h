@@ -11,8 +11,6 @@ struct TempSensorStatus {
   bool detected = false;
   bool valid = false;
   float celsius = NAN;
-  String address;
-  String error;
   uint8_t pin = 0;
   uint16_t interval_s = 10;
   uint32_t last_read_ms = 0;
@@ -73,5 +71,4 @@ class SensorManager {
   void tickTank(uint32_t now);
   void teardownBus();
   void setupBus();
-  String formatAddress() const;
 };

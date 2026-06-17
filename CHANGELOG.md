@@ -5,6 +5,15 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Optimized heap usage and reduced heap pressure to prevent fragmentation on ESP8266:
+  - Budgeted MQTT packet buffer size to a maximum of **1024 bytes** (down from 2944 bytes).
+  - Replaced long-lived dynamic `String` fields with `FixedSettingString` in `NodeStateMachine` and `AdminExecutor`.
+  - Replaced class-level dynamic topic buffers in `MqttBridge` with stack-allocated formatting.
+  - Replaced `settings_backup.h` / `SettingsBackup` capture-restore logic with direct struct copy assignments.
+  - Optimized Dallas temperature sensor address representation to format on-stack instead of storing on the heap.
+  - Implemented Compact Operational Config contract for `get_config` and `set_config` over MQTT (excluding keys/secrets).
+- Removed UDP Log Control (`UdpLogControl` message type, `udp_log_control` / `remote_udp_log_control` command surfaces) to clean up pre-1.0 code bloat.
+- Removed MQTT Secret Export support (`allow_mqtt_secret_export`) entirely for enhanced security.
 - Implemented Phase 2 Step 1 for Replacement Gateway Discovery & Explicit Peer Adoption:
   - Added volatile discovery candidate tracking capped at 12 entries (`Settings::kAddressListCap`) with explicit lifecycle states (`SeenAddressOnly`, `Identified`, `Readdressing`, `Adopted`, `Failed`, `ResetRequested`).
   - Introduced `MessageType::Readdress = 'D'` protocol message (payload: 4-byte `chip_id` LE, 1-byte address/reset, 1-byte op) with wrong-source/destination exclusions.
@@ -21,7 +30,7 @@ All notable changes to this pre-release project are documented here in current o
 - Upgraded the MaintenanceStatus payload version to 2, implementing paginated LoRa transmission for compact and flexible remote sensor telemetry.
 - Decoupled admin command execution from `SerialAdmin` to a transport-neutral `AdminExecutor`, allowing identical command capability over physical serial and MQTT connections.
 - Implemented secure remote request validation over MQTT featuring a boot-safe duplicate request cache (circular request ID cache of size 10) and ntp-aware timestamp TTL checks.
-- Enforced credential safety over MQTT by rejecting `"get_config"` secret exports unless the operator has explicitly provisioned `allow_mqtt_secret_export = true`.
+- Enforced credential safety over MQTT by completely excluding secrets from MQTT configuration outputs.
 - Wired `AdminExecutor` to `MqttBridge` to execute incoming commands on `<root>/lrs-<chip>/admin_command` and publish responses on `<root>/lrs-<chip>/admin_response`.
 - Raw ESP uptime (`uptime_ms`) is now exclusively populated from raw millisecond telemetry (`kMaintenancePageVersion`) and is no longer assigned from coarse debug minutes telemetry.
 - Gateway cached peer uptime is cleared immediately on standard non-uptime telemetry status packets (Heartbeats, PollResponses, ACKs, MqttStatus) to prevent stale uptime carry-forward.

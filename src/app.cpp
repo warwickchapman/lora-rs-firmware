@@ -247,20 +247,6 @@ void App::tick() {
     }
   }
   {
-    bool udpEnabled = false;
-    IPAddress udpHost;
-    uint16_t udpPort = 0;
-    uint32_t udpTtlS = 0;
-    uint8_t udpSrc = 0;
-    if (sm_.consumePendingUdpLogControl(udpEnabled, udpHost, udpPort, udpTtlS, udpSrc)) {
-      if (udpEnabled) {
-        lrslog::setUdpMirror(udpHost, udpPort, udpTtlS * 1000UL);
-      } else {
-        lrslog::disableUdpMirror();
-      }
-      lrslog::event(udpEnabled ? "udp_log_control_enable_apply" : "udp_log_control_disable_apply",
-                    0, udpSrc, static_cast<uint8_t>(udpPort & 0xFFU));
-    }
   }
   {
     IPAddress otaHost;
