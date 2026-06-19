@@ -3819,6 +3819,9 @@ function serialFeatureError(feature: string, err: unknown): string {
   if (text.includes('unknown_cmd')) {
     return `${feature} failed: unknown_cmd - Flash this gateway with the latest firmware and try again.`;
   }
+  if (text.includes('cooldown_active')) {
+    return `${feature} failed: Sending WiFi credentials to remotes is limited to once per 60 seconds. Please wait a moment and try again.`;
+  }
   if (text.includes(' failed: ')) return text;
   return `${feature} failed: ${text}`;
 }
@@ -4754,6 +4757,7 @@ async function waitForGatewayWifiConnection(ssid: string, attemptId: number, tim
 }
 
 async function connectGatewayWifi() {
+  if (isFleetWifiSending.value) return;
   const password = pairPassword();
   const ssid = pairWifiSsid.value.trim();
   if (!password || !ssid) {
@@ -4794,6 +4798,7 @@ async function connectGatewayWifi() {
 }
 
 async function sendWifiToRemotes() {
+  if (isWifiApplying.value) return;
   const ssid = pairWifiSsid.value;
   const password = pairAdminPassword.value;
   if (!ssid) {
@@ -6276,14 +6281,14 @@ function toggleSelectAllBulkPorts() {
             <div class="flex gap-3 mt-1">
               <button
                 @click="connectGatewayWifi"
-                :disabled="isWifiApplying || !gatewayReady || !pairWifiSsid"
+                :disabled="isWifiApplying || isFleetWifiSending || !gatewayReady || !pairWifiSsid"
                 class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60 flex-1"
               >
                 {{ isWifiApplying ? 'Saving Gateway...' : 'Save on Gateway' }}
               </button>
               <button
                 @click="sendWifiToRemotes"
-                :disabled="isFleetWifiSending || !gatewayReady || !pairWifiSsid"
+                :disabled="isFleetWifiSending || isWifiApplying || !gatewayReady || !pairWifiSsid"
                 class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60 flex-1"
               >
                 {{ isFleetWifiSending ? 'Sending...' : 'Send to Remotes' }}
