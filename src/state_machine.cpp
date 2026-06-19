@@ -2797,10 +2797,7 @@ void NodeStateMachine::tickPendingMaintenancePages() {
 
   if (maintenance_sensor_pending_) {
     if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
-      if (sendMaintenanceSensorStatus(maintenance_sensor_dst_)) {
-        maintenance_sensor_pending_ = false;
-        maintenance_sensor_dst_ = 0;
-      }
+      sendMaintenanceSensorStatus(maintenance_sensor_dst_);
     }
     return;
   }
@@ -3624,7 +3621,9 @@ void NodeStateMachine::tickReceive() {
   }
   if (msg.type == MessageType::MaintenanceRequest) {
     if (msg.dst == runtime_.local_address) {
-      sendMaintenanceStatus(msg.src);
+      if (!maintenance_version_pending_ && !maintenance_sensor_pending_ && !maintenance_debug_pending_) {
+        sendMaintenanceStatus(msg.src);
+      }
     }
     return;
   }
