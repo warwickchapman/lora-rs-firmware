@@ -66,7 +66,6 @@ constexpr const char *kAllowedFields[] = {
     "wifi_sta_password",
     "lan_hostname",
     "ap_always_on",
-    "wifi_phy_mode",
     "wifi_tx_power_dbm",
     "wifi_sleep_enabled",
     "wifi_static_ip_enabled",
@@ -362,7 +361,6 @@ bool ConfigStore::begin() {
   cfg_.wifi_sta_password = root["wifi_sta_password"] | "";
   cfg_.lan_hostname = root["lan_hostname"] | "";
   cfg_.ap_always_on = root["ap_always_on"] | true;
-  cfg_.wifi_phy_mode = root["wifi_phy_mode"] | "11b";
   cfg_.wifi_tx_power_dbm = root["wifi_tx_power_dbm"] | kDefaultWifiTxPowerDbm;
   cfg_.wifi_sleep_enabled = root["wifi_sleep_enabled"] | false;
   cfg_.wifi_static_ip_enabled = root["wifi_static_ip_enabled"] | false;
@@ -439,11 +437,6 @@ bool ConfigStore::begin() {
     ensureProvisionedDefaults();
     return save();
   }
-  cfg_.wifi_phy_mode.trim();
-  cfg_.wifi_phy_mode.toLowerCase();
-  if (cfg_.wifi_phy_mode != "11b" && cfg_.wifi_phy_mode != "11g" && cfg_.wifi_phy_mode != "11n") {
-    cfg_.wifi_phy_mode = "11b";
-  }
   if (cfg_.wifi_tx_power_dbm < 0.0f) cfg_.wifi_tx_power_dbm = 0.0f;
   if (cfg_.wifi_tx_power_dbm > kDefaultWifiTxPowerDbm) cfg_.wifi_tx_power_dbm = kDefaultWifiTxPowerDbm;
 #ifdef REGION_US
@@ -518,7 +511,6 @@ bool ConfigStore::save() {
   doc["wifi_sta_password"] = cfg_.wifi_sta_password;
   doc["lan_hostname"] = cfg_.lan_hostname;
   doc["ap_always_on"] = cfg_.ap_always_on;
-  doc["wifi_phy_mode"] = cfg_.wifi_phy_mode;
   doc["wifi_tx_power_dbm"] = cfg_.wifi_tx_power_dbm;
   doc["wifi_sleep_enabled"] = cfg_.wifi_sleep_enabled;
   doc["wifi_static_ip_enabled"] = cfg_.wifi_static_ip_enabled;
@@ -799,7 +791,6 @@ void ConfigStore::setDefaults() {
   cfg_.wifi_sta_password = "";
   cfg_.lan_hostname = defaultLanHostname();
   cfg_.ap_always_on = true;
-  cfg_.wifi_phy_mode = "11b";
   cfg_.wifi_tx_power_dbm = kDefaultWifiTxPowerDbm;
   cfg_.wifi_sleep_enabled = false;
   cfg_.wifi_static_ip_enabled = false;

@@ -158,7 +158,6 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
       cfg.lan_hostname.length() > 0 ? cfg.lan_hostname.c_str() : config.defaultLanHostname();
   doc["computed_lan_hostname"] = config.defaultLanHostname();
   doc["ap_always_on"] = cfg.ap_always_on;
-  doc["wifi_phy_mode"] = cfg.wifi_phy_mode;
   doc["wifi_tx_power_dbm"] = cfg.wifi_tx_power_dbm;
   doc["wifi_sleep_enabled"] = cfg.wifi_sleep_enabled;
   doc["wifi_static_ip_enabled"] = cfg.wifi_static_ip_enabled;
@@ -229,7 +228,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   FixedSettingString<65> prevStaPassword = cfg.wifi_sta_password;
   FixedSettingString<65> prevLanHost = cfg.lan_hostname;
   const bool prevApAlwaysOn = cfg.ap_always_on;
-  FixedSettingString<16> prevWifiPhyMode = cfg.wifi_phy_mode;
   const float prevWifiTxPowerDbm = cfg.wifi_tx_power_dbm;
   const bool prevWifiSleepEnabled = cfg.wifi_sleep_enabled;
   const bool prevWifiStaticIpEnabled = cfg.wifi_static_ip_enabled;
@@ -329,7 +327,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   }
   cfg.lan_hostname = doc["lan_hostname"] | cfg.lan_hostname.c_str();
   cfg.ap_always_on = parseBoolField(doc["ap_always_on"], cfg.ap_always_on);
-  cfg.wifi_phy_mode = doc["wifi_phy_mode"] | cfg.wifi_phy_mode.c_str();
   cfg.wifi_tx_power_dbm = doc["wifi_tx_power_dbm"] | cfg.wifi_tx_power_dbm;
   cfg.wifi_sleep_enabled =
       parseBoolField(doc["wifi_sleep_enabled"], cfg.wifi_sleep_enabled);
@@ -483,12 +480,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.rx_failsafe_timeout_ms = 5000UL;
   if (cfg.rx_failsafe_timeout_ms > 3600000UL)
     cfg.rx_failsafe_timeout_ms = 3600000UL;
-  cfg.wifi_phy_mode.trim();
-  cfg.wifi_phy_mode.toLowerCase();
-  if (cfg.wifi_phy_mode != "11b" && cfg.wifi_phy_mode != "11g" &&
-      cfg.wifi_phy_mode != "11n") {
-    return fail("wifi_phy_mode_invalid");
-  }
+
   const float maxWifiPower =
 #ifdef REGION_US
       19.37f;
@@ -538,7 +530,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
                    (cfg.wifi_sta_password != prevStaPassword) ||
                    (cfg.lan_hostname != prevLanHost) ||
                    (cfg.ap_always_on != prevApAlwaysOn) ||
-                   (cfg.wifi_phy_mode != prevWifiPhyMode) ||
                    (cfg.wifi_tx_power_dbm != prevWifiTxPowerDbm) ||
                    (cfg.wifi_sleep_enabled != prevWifiSleepEnabled) ||
                    (cfg.wifi_static_ip_enabled != prevWifiStaticIpEnabled) ||

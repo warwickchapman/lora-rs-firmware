@@ -271,7 +271,6 @@ interface SerialAdminConfig {
   wifi_sta_password: string;
   lan_hostname?: string;
   ap_always_on?: boolean;
-  wifi_phy_mode?: string;
   wifi_tx_power_dbm?: number;
   wifi_sleep_enabled?: boolean;
   wifi_static_ip_enabled?: boolean;
@@ -2116,7 +2115,6 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     wifi_sta_password: getCachedWifiPassword(stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || '')),
     lan_hostname: stringValue(cfg.lan_hostname, ''),
     ap_always_on: boolValue(cfg.ap_always_on, false),
-    wifi_phy_mode: stringValue(cfg.wifi_phy_mode, '11b'),
     wifi_tx_power_dbm: numberValue(cfg.wifi_tx_power_dbm, 20.5),
     wifi_sleep_enabled: boolValue(cfg.wifi_sleep_enabled, false),
     wifi_static_ip_enabled: boolValue(cfg.wifi_static_ip_enabled, false),
@@ -4007,7 +4005,6 @@ function serialConfigPatch(): Record<string, any> {
     wifi_sta_ssid: cfg.wifi_sta_ssid || '',
     lan_hostname: cfg.lan_hostname || '',
     ap_always_on: !!cfg.ap_always_on,
-    wifi_phy_mode: cfg.wifi_phy_mode || '11b',
     wifi_tx_power_dbm: Number(cfg.wifi_tx_power_dbm ?? 20.5),
     wifi_sleep_enabled: !!cfg.wifi_sleep_enabled,
     wifi_static_ip_enabled: !!cfg.wifi_static_ip_enabled,
@@ -6910,12 +6907,7 @@ function toggleSelectAllBulkPorts() {
                   <input v-model="serialAdminConfig.ap_always_on" type="checkbox" />
                   Always on while disconnected
                 </label>
-                <label class="self-center text-right font-semibold text-slate-300">PHY mode</label>
-                <select v-model="serialAdminConfig.wifi_phy_mode" class="glass-input h-9 appearance-none">
-                  <option value="11b">11b range</option>
-                  <option value="11g">11g</option>
-                  <option value="11n">11n</option>
-                </select>
+
                 <label class="self-center text-right font-semibold text-slate-300">TX power</label>
                 <input v-model.number="serialAdminConfig.wifi_tx_power_dbm" type="number" min="0" max="20.5" step="0.25" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">Channel</label>

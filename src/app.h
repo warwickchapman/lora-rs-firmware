@@ -76,8 +76,6 @@ class App {
   void applyWifiRuntimeSettings();
   void stopWifiForAdminDisable();
   bool shouldEnableSoftAp() const;
-  WiFiPhyMode_t configuredWifiPhyMode() const;
-  const char *configuredWifiPhyModeText() const;
   void startNtpClient();
   void tickTimeSync();
   void applyUpdatedConfig(bool restartNetwork, bool restartOtaAuth);

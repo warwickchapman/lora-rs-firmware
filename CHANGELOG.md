@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Removed `wifi_phy_mode` configuration setting and user-configurable PHY mode handling, defaulting entirely to the ESP8266 SDK's automatic mixed-mode (802.11n/b/g/n) negotiation for improved compatibility with modern enterprise and consumer APs.
 - Optimized heap usage and reduced heap pressure to prevent fragmentation on ESP8266:
   - Budgeted MQTT packet buffer size to a maximum of **1024 bytes** (down from 2944 bytes).
   - Replaced long-lived dynamic `String` fields with `FixedSettingString` in `NodeStateMachine` and `AdminExecutor`.
@@ -52,6 +53,7 @@ All notable changes to this pre-release project are documented here in current o
 
 
 ### Flasher UI Improvements
+- Removed the WiFi "PHY mode" dropdown selector from the network settings view.
 - Replaced static dashboard sensor cards with dynamic sensor rendering mapped from the generic `SensorRegistry`.
 - Added MQTT Gateway OTA upgrade support: when Fleet connection mode is MQTT, the "Upgrade gateway" button initiates a local firmware file server, dispatches the `ota_pull` admin command to the gateway over MQTT, and monitors MQTT discovery reports for successful version updates.
 - Fixed the "Load gateway" button disabling logic in Fleet mode to correctly evaluate selected MQTT gateways.

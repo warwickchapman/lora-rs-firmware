@@ -918,9 +918,9 @@ void App::startStaScan() {
   wifi_sta_retry_ms_ = millis();
   lrslog::event("sta_connect_start", 0, 0, 0);
   LRS_LOGI(WIFI,
-           "event=sta_scan_start ssid=%s host=%s phy=%s tx_power_dbm=%.2f sleep=%u channel_override=%u static_ip=%u",
+           "event=sta_scan_start ssid=%s host=%s phy=auto tx_power_dbm=%.2f sleep=%u channel_override=%u static_ip=%u",
            cfg.wifi_sta_ssid.c_str(), cached_sta_hostname_.c_str(),
-           configuredWifiPhyModeText(), static_cast<double>(cfg.wifi_tx_power_dbm),
+           static_cast<double>(cfg.wifi_tx_power_dbm),
            cfg.wifi_sleep_enabled ? 1U : 0U,
            static_cast<unsigned>(cfg.wifi_channel_override),
            cfg.wifi_static_ip_enabled ? 1U : 0U);
@@ -1043,7 +1043,6 @@ void App::applyWifiRuntimeSettings() {
   // Runtime radio knobs are re-applied before scans, connects, and AP changes
   // because the ESP8266 SDK may reset parts of this state across mode changes.
   WiFi.mode((ap_enabled_ || shouldEnableSoftAp()) ? WIFI_AP_STA : WIFI_STA);
-  WiFi.setPhyMode(configuredWifiPhyMode());
   WiFi.setOutputPower(cfg.wifi_tx_power_dbm);
   WiFi.setSleepMode(cfg.wifi_sleep_enabled ? WIFI_LIGHT_SLEEP : WIFI_NONE_SLEEP);
   wifi_set_sleep_type(cfg.wifi_sleep_enabled ? LIGHT_SLEEP_T : NONE_SLEEP_T);
@@ -1087,25 +1086,6 @@ bool App::shouldEnableSoftAp() const {
   return !sta_connected_;
 }
 
-WiFiPhyMode_t App::configuredWifiPhyMode() const {
-  String mode = config_.settings().wifi_phy_mode.c_str();
-  mode.trim();
-  mode.toLowerCase();
-  if (mode == "11g") return WIFI_PHY_MODE_11G;
-  if (mode == "11n") return WIFI_PHY_MODE_11N;
-  return WIFI_PHY_MODE_11B;
-}
-
-const char *App::configuredWifiPhyModeText() const {
-  switch (configuredWifiPhyMode()) {
-  case WIFI_PHY_MODE_11G:
-    return "11g";
-  case WIFI_PHY_MODE_11N:
-    return "11n";
-  default:
-    return "11b";
-  }
-}
 
 void App::startOta() {
   ota_enabled_ = false;

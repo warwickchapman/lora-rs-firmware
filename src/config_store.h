@@ -46,7 +46,6 @@ struct Settings {
   FixedSettingString<65> wifi_sta_password;
   FixedSettingString<65> lan_hostname;
   bool ap_always_on;
-  FixedSettingString<16> wifi_phy_mode;
   float wifi_tx_power_dbm;
   bool wifi_sleep_enabled;
   bool wifi_static_ip_enabled;

@@ -47,7 +47,7 @@ Recommended defaults:
 Use `Settings` in Flasher with a USB-connected device.
 
 - `General`: role/address and LoRa timing/fail-safe controls.
-- `Network`: WiFi SSID/password, hostname, PHY/TX power, static IP, fallback AP policy, and optional listen-only power save.
+- `Network`: WiFi SSID/password, hostname, TX power, static IP, fallback AP policy, and optional listen-only power save.
 - `MQTT`: broker, topic root, MQTT client/control, controller addresses.
 - `Sensors`: DS18B20 reporting and 4-20 mA tank level enablement.
 - `System`: save config, reboot, guarded factory reset.
