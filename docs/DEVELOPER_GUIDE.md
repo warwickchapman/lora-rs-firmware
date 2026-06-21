@@ -142,7 +142,7 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 | `type` | `tx`/`rx` | Device role. |
 | `addr` | `0xNN` | LoRa address (hex). |
 | `sensor/<kind>/<instance>/value` | string | Normalized value (float or int) for the given sensor. |
-| `sensor/<kind>/<instance>/state` | string | State for the given sensor (`ok`, `missing`, `fault`, etc.). |
+| `sensor/<kind>/<instance>/state` | string | State for the given sensor (`ok`, `missing`, `fault`, `waiting`, etc.). |
 | `last_updated` | int | `millis()` at publish time — use to detect stale data. |
 | `uptime_ms` | int | Gateway uptime in milliseconds. |
 | `heap_free` | int | Free heap bytes (diagnostic). |

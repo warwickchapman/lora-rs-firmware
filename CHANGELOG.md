@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Features
+- Added `SensorState::Waiting` (`"waiting"`) state to represent sensors that are detected but have not completed their first reading yet.
 - Removed `wifi_phy_mode` configuration setting and user-configurable PHY mode handling, defaulting entirely to the ESP8266 SDK's automatic mixed-mode (802.11n/b/g/n) negotiation for improved compatibility with modern enterprise and consumer APs.
 - Optimized heap usage and reduced heap pressure to prevent fragmentation on ESP8266:
   - Budgeted MQTT packet buffer size to a maximum of **1024 bytes** (down from 2944 bytes).
@@ -44,6 +45,7 @@ All notable changes to this pre-release project are documented here in current o
 - Added a BSS-allocated circular buffer (up to 16 entries) for gateway-side provisioning events. Expose these logs in the `provisioning_status` serial-admin endpoint with millisecond timestamps.
 
 ### Firmware Fixes
+- Fixed transient "Fault" state on startup for DS18B20 temperature sensors by scheduling the first conversion immediately and mapping initial state to `waiting` until the first reading completes.
 - Decoupled the transmitter and telemetry schedulers to prevent active paired group-command sync states from starving background task ticks. Added a transmission suppression guard to prevent background radio queries from colliding with the critical group ACK/poll response windows.
 - In paired mode, treat an empty known peer list as an empty fleet, preventing target resolution from falling back to default remote address `1` or other default targets. Standalone mode preserves legacy point-to-point fallback behavior.
 - Allow MessageType::Provisioning packets to bypass self-source validation (msg.src == runtime_.local_address), preventing gateway-side and remote-side packet drops when both devices share factory-default address 254.

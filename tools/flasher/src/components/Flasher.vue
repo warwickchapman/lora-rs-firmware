@@ -103,7 +103,7 @@ interface NetworkInterface {
 
 interface SensorReading {
   kind: 'input' | 'temperature' | 'tank_level';
-  state: 'disabled' | 'missing' | 'fault' | 'ok' | 'overrange';
+  state: 'disabled' | 'missing' | 'fault' | 'ok' | 'overrange' | 'waiting';
   instance: number;
   value?: number;
   unit?: string;

@@ -93,6 +93,9 @@ void SensorManager::tick() {
   } else if (!temp_.detected) {
     t_reading.state = SensorState::Missing;
     t_reading.value = 0;
+  } else if (temp_.last_read_ms == 0) {
+    t_reading.state = SensorState::Waiting;
+    t_reading.value = 0;
   } else if (!temp_.valid) {
     t_reading.state = SensorState::Fault;
     t_reading.value = 0;
@@ -155,7 +158,8 @@ void SensorManager::tickTemperature(uint32_t now) {
     return;
   }
 
-  if (now - last_read_ms_ < static_cast<uint32_t>(temp_.interval_s) * 1000UL) {
+  if (last_read_ms_ != 0 &&
+      now - last_read_ms_ < static_cast<uint32_t>(temp_.interval_s) * 1000UL) {
     return;
   }
   last_read_ms_ = now;

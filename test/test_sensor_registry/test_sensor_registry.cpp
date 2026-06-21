@@ -113,6 +113,44 @@ void test_sensor_registry_compression_decompression() {
   TEST_ASSERT_EQUAL_INT32(orig.value, decomp.value);
 }
 
+void test_sensor_state_to_string_waiting() {
+  TEST_ASSERT_EQUAL_STRING("waiting", sensorStateToString(SensorState::Waiting));
+}
+
+void test_sensor_registry_compression_decompression_waiting() {
+  SensorReading orig{0, SensorKind::TemperatureC, SensorState::Waiting, 1, 1};
+
+  // Simulate compression to wire format
+  int32_t val = orig.value;
+  SensorState st = orig.state;
+  if (val < -32768) val = -32768;
+  else if (val > 32767) { val = 32767; st = SensorState::Overrange; }
+  int16_t val16 = static_cast<int16_t>(val);
+
+  uint8_t wire[4];
+  wire[0] = (static_cast<uint8_t>(orig.kind) << 4) | (orig.instance & 0x0F);
+  wire[1] = (static_cast<uint8_t>(st) << 4) | (orig.scale & 0x0F);
+  wire[2] = static_cast<uint8_t>(val16 & 0xFFU);
+  wire[3] = static_cast<uint8_t>((val16 >> 8) & 0xFFU);
+
+  // Decompress from wire format
+  uint8_t kindVal = wire[0] >> 4;
+  uint8_t instVal = wire[0] & 0x0F;
+  SensorReading decomp{};
+  decomp.kind = static_cast<SensorKind>(kindVal);
+  decomp.instance = instVal;
+  decomp.state = static_cast<SensorState>(wire[1] >> 4);
+  decomp.scale = wire[1] & 0x0F;
+  int16_t valDec16 = static_cast<int16_t>(wire[2] | (static_cast<uint16_t>(wire[3]) << 8));
+  decomp.value = valDec16;
+
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(orig.kind), static_cast<uint8_t>(decomp.kind));
+  TEST_ASSERT_EQUAL_UINT8(orig.instance, decomp.instance);
+  TEST_ASSERT_EQUAL(SensorState::Waiting, decomp.state);
+  TEST_ASSERT_EQUAL_UINT8(orig.scale, decomp.scale);
+  TEST_ASSERT_EQUAL_INT32(orig.value, decomp.value);
+}
+
 void test_sensor_registry_multiple_instances() {
   SensorRegistry reg;
   reg.clear();
@@ -138,6 +176,8 @@ int main(int argc, char **argv) {
   RUN_TEST(test_sensor_registry_find);
   RUN_TEST(test_sensor_registry_clamp_int32_to_int16);
   RUN_TEST(test_sensor_registry_compression_decompression);
+  RUN_TEST(test_sensor_state_to_string_waiting);
+  RUN_TEST(test_sensor_registry_compression_decompression_waiting);
   RUN_TEST(test_sensor_registry_multiple_instances);
   return UNITY_END();
 }

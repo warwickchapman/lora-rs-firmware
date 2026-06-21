@@ -17,6 +17,7 @@ enum class SensorState : uint8_t {
   Fault = 2,
   Ok = 3,
   Overrange = 4,
+  Waiting = 5,
 };
 
 struct SensorReading {
@@ -54,6 +55,8 @@ inline const char* sensorStateToString(SensorState state) {
       return "ok";
     case SensorState::Overrange:
       return "overrange";
+    case SensorState::Waiting:
+      return "waiting";
     default:
       return "unknown";
   }
