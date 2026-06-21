@@ -142,8 +142,6 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
   doc["tx_mqtt_remote_default_poll_interval_ms"] =
       cfg.tx_mqtt_remote_default_poll_interval_ms;
-  doc["maintenance_debug_telemetry_enabled"] =
-      cfg.maintenance_debug_telemetry_enabled;
   doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   doc["input_control_paired_lora_enabled"] =
@@ -303,9 +301,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.tx_mqtt_remote_default_poll_interval_ms =
       doc["tx_mqtt_remote_default_poll_interval_ms"] |
       cfg.tx_mqtt_remote_default_poll_interval_ms;
-  cfg.maintenance_debug_telemetry_enabled = parseBoolField(
-      doc["maintenance_debug_telemetry_enabled"],
-      cfg.maintenance_debug_telemetry_enabled);
   cfg.rx_push_on_change_enabled =
       parseBoolField(doc["rx_push_on_change_enabled"],
                      cfg.rx_push_on_change_enabled);
@@ -765,7 +760,6 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
   if (sm_ != nullptr) {
     out["link_state"] = linkStateText(sm_->linkState());
     out["relay_state"] = sm_->relayState();
-    out["relay_feedback"] = sm_->relayFeedbackState();
     out["input_state"] = sm_->inputState();
     out["last_packet_rssi"] = sm_->lastPacketRssi();
     out["last_packet_ms"] = sm_->lastPacketMs();
@@ -1386,8 +1380,6 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
         row["heap_free"] = p.heap_free;
         row["heap_max_block"] = p.heap_max_block;
         row["heap_frag_pct"] = p.heap_frag_pct;
-        row["relay_feedback"] = p.relay_feedback;
-        row["input_feedback"] = p.input_feedback;
         row["debug_uptime_ms"] = p.debug_uptime_ms;
       }
       row["rssi"] = p.uplink_rssi;
@@ -1479,7 +1471,36 @@ void AdminExecutor::handleCancelLoraInventory(JsonDocument &doc, ResponseWriter 
   sendOk(out, writer);
 }
 
+void AdminExecutor::handlePollDiagnostics(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("poll_diagnostics", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("poll_diagnostics", "runtime_unavailable", id, writer);
+    return;
+  }
+  uint8_t address = doc["address"] | 0;
+  if (address < 1 || address > 254) {
+    sendError("poll_diagnostics", "invalid_address", id, writer);
+    return;
+  }
 
+  uint32_t sentCounter = 0;
+  if (!sm_->sendMaintenanceRequest(address, true, &sentCounter)) {
+    sendError("poll_diagnostics", "send_failed", id, writer);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "poll_diagnostics";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["address"] = address;
+  out["counter"] = sentCounter;
+  sendOk(out, writer);
+}
 
 void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer) {
   const char *id = requestId(doc);
@@ -2011,7 +2032,10 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     return;
   }
 
-
+  if (strcmp(cmd, "poll_diagnostics") == 0) {
+    handlePollDiagnostics(doc, writer);
+    return;
+  }
 
   if (strcmp(cmd, "remote_ota_pull") == 0) {
     handleRemoteOtaPull(doc, writer);

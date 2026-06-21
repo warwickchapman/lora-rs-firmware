@@ -620,10 +620,10 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
   const char *leaves[] = {
       "relay",           "input",              "ack_state",
       "addr_hex",        "addr_dec",
-      "uplink_rssi_dbm", "downlink_rssi_dbm",  "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
+      "uplink_rssi_dbm", "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "forget",           "poll_now",
-      "wifi",            "input_feedback",     "uptime_ms",        "heap_free",        "heap_max_block",
-      "heap_frag_pct",   "relay_feedback",
+      "wifi",            "uptime_ms",        "heap_free",        "heap_max_block",
+      "heap_frag_pct",
   };
 
   if (chipId != 0) {
@@ -730,7 +730,6 @@ void MqttBridge::publishStatus() {
     const bool localInput = sm_->localInputState() != 0;
     if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "relay")) publishRetained(topic, sm_->relayState() ? "1" : "0");
-    if (buildLocalTopic(topic, sizeof(topic), "relay_feedback")) publishRetained(topic, sm_->relayFeedbackState() ? "1" : "0");
     if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
 
     char addrHex[3];
@@ -847,8 +846,6 @@ void MqttBridge::publishStatus() {
             }
           }
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay_feedback")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, "");
         } else {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
           const uint8_t inputValue = node.input_state ? 1 : 0;
@@ -919,10 +916,6 @@ void MqttBridge::publishStatus() {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, numBuf);
           snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.heap_frag_pct));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, numBuf);
-          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.relay_feedback));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay_feedback")) publishRetainedTopic(topic, numBuf);
-          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.input_feedback));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input_feedback")) publishRetainedTopic(topic, numBuf);
         }
         if (!timedOut && node.uptime_ms > 0) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));

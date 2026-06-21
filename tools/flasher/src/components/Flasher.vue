@@ -127,10 +127,8 @@ interface LoraInventoryDevice {
   power_save_listen_only?: boolean;
   power_save_active?: boolean;
   relay_state?: number;
-  relay_feedback?: number;
   input_state?: number;
   input_state_known?: boolean;
-  input_feedback?: number;
   sensors?: SensorReading[];
   maintenance_debug_known?: boolean;
   heap_free?: number;
@@ -138,8 +136,6 @@ interface LoraInventoryDevice {
   heap_frag_pct?: number;
   debug_uptime_ms?: number;
   rssi?: number;
-  downlink_rssi_known?: boolean;
-  downlink_rssi?: number;
   uptime_ms?: number;
   age_ms?: number;
   poll_pending?: boolean;
@@ -235,7 +231,6 @@ interface SerialAdminStatus {
   };
   link_state?: string;
   relay_state?: number;
-  relay_feedback?: number;
   input_state?: number;
   peer_count?: number;
   sensors?: SensorReading[];
@@ -260,7 +255,6 @@ interface SerialAdminConfig {
   mqtt_remote_retry_timeout_ms?: number;
   tx_mqtt_remote_polling_enabled?: boolean;
   tx_mqtt_remote_default_poll_interval_ms?: number;
-  maintenance_debug_telemetry_enabled?: boolean;
   rx_push_on_change_enabled?: boolean;
   rx_push_min_interval_ms?: number;
   input_control_paired_lora_enabled?: boolean;
@@ -545,6 +539,10 @@ const monitorMqttDraftUser = ref('');
 const monitorMqttDraftPassword = ref('');
 const monitorMqttDraftTopicRoot = ref('lora');
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
+const selectedMonitorDeviceAddress = ref<number | null>(null);
+const hasDiagnosticsData = computed(() => {
+  return monitorFleetRows.value.some(device => device.heap_free !== undefined && device.heap_free !== null && device.heap_free !== 0);
+});
 const fleetTransport = ref<'serial' | 'mqtt'>('serial');
 const pairTransport = ref<'serial' | 'mqtt'>('serial');
 const pairGatewayLoaded = ref(false);
@@ -612,10 +610,8 @@ const fleetRowHistory = ref<Record<number, {
   heap_max_block?: number;
   heap_frag_pct?: number;
   relay_state?: number;
-  relay_feedback?: number;
   input_state?: number;
   input_state_known?: boolean;
-  input_feedback?: number;
   rssi?: number;
   lastTelemetryTimestamp?: number;
   knownRebootUntilMs?: number;
@@ -1142,11 +1138,11 @@ const monitorHealthSummary = computed(() => {
 });
 const monitorRelayKnown = computed(() => {
   const st = monitorGatewayStatus.value;
-  return st?.relay_feedback !== undefined || st?.relay_state !== undefined;
+  return st?.relay_state !== undefined;
 });
 const monitorRelayOn = computed(() => {
   const st = monitorGatewayStatus.value;
-  const relay = st?.relay_feedback ?? st?.relay_state;
+  const relay = st?.relay_state;
   return Number(relay) === 1;
 });
 const monitorRelayLabel = computed(() => {
@@ -2104,7 +2100,6 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     mqtt_remote_retry_timeout_ms: numberValue(cfg.mqtt_remote_retry_timeout_ms, 180000),
     tx_mqtt_remote_polling_enabled: boolValue(cfg.tx_mqtt_remote_polling_enabled, false),
     tx_mqtt_remote_default_poll_interval_ms: numberValue(cfg.tx_mqtt_remote_default_poll_interval_ms, 300000),
-    maintenance_debug_telemetry_enabled: boolValue(cfg.maintenance_debug_telemetry_enabled, false),
     rx_push_on_change_enabled: boolValue(cfg.rx_push_on_change_enabled, false),
     rx_push_min_interval_ms: numberValue(cfg.rx_push_min_interval_ms, 60000),
     input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, true),
@@ -2397,10 +2392,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
   const heapFragPct = row.heap_frag_pct || history.heap_frag_pct;
   
   const relayState = (row.relay_state !== undefined && row.relay_state !== null) ? row.relay_state : history.relay_state;
-  const relayFeedback = (row.relay_feedback !== undefined && row.relay_feedback !== null) ? row.relay_feedback : history.relay_feedback;
   const inputStateKnown = row.input_state_known === true;
   const inputState = inputStateKnown ? row.input_state : undefined;
-  const inputFeedback = (row.input_feedback !== undefined && row.input_feedback !== null) ? row.input_feedback : undefined;
   
   const rssi = (row.rssi !== undefined && row.rssi !== null && row.rssi !== 0 && row.rssi !== -127) ? row.rssi : history.rssi;
 
@@ -2427,10 +2420,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
     relay_state: relayState,
-    relay_feedback: relayFeedback,
     input_state: inputState,
     input_state_known: inputStateKnown,
-    input_feedback: inputFeedback,
     rssi,
     lastTelemetryTimestamp,
     rowState,
@@ -2462,10 +2453,8 @@ function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInven
     heap_max_block: heapMaxBlock,
     heap_frag_pct: heapFragPct,
     relay_state: relayState,
-    relay_feedback: relayFeedback,
     input_state: inputState,
     input_state_known: inputStateKnown,
-    input_feedback: inputFeedback,
     rssi: rssi ?? row.rssi,
     age_ms: ageMs,
     row_state: rowState,
@@ -2625,17 +2614,18 @@ function monitorFragLabel(row: LoraInventoryDevice): string {
 
 function monitorUptimeLabel(row: LoraInventoryDevice): string {
   const uptime = row.uptime_ms;
-  return uptime ? formatUptime(uptime) : 'waiting';
+  if (!uptime) return 'waiting';
+  return formatUptime(uptime + Number(row.age_ms || 0));
 }
 
 function remoteInputLabel(row: LoraInventoryDevice): string {
-  const value = row.input_feedback ?? (row.input_state_known ? row.input_state : undefined);
+  const value = row.input_state_known ? row.input_state : undefined;
   if (value === undefined || value === null) return 'waiting';
   return Number(value) === 1 ? 'Closed' : 'Open';
 }
 
 function remoteRelayLabel(row: LoraInventoryDevice): string {
-  const value = row.relay_feedback ?? row.relay_state;
+  const value = row.relay_state;
   if (value === undefined || value === null) return 'waiting';
   return Number(value) === 1 ? 'On' : 'Off';
 }
@@ -3379,6 +3369,30 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
   }
 }
 
+async function executeRemotePollDiagnostics(device: LoraInventoryDevice) {
+  activeDropdownAddress.value = null;
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  try {
+    notify(`Requesting one-shot diagnostics polling from remote ${device.address}...`);
+    await sendEasyPairCommandOnPort(port, 'poll_diagnostics', {
+      admin_password: password,
+      address: device.address
+    }, 8000);
+    notify(`Diagnostics polling request sent to remote ${device.address}`);
+  } catch (e) {
+    const msg = serialFeatureError(`Diagnostics polling request`, e);
+    notify(msg);
+  }
+}
+
 async function executeRemoteReboot(device: LoraInventoryDevice) {
   activeDropdownAddress.value = null;
   const { port, password } = fleetGatewayCommandTarget();
@@ -3998,7 +4012,6 @@ function serialConfigPatch(): Record<string, any> {
     mqtt_remote_retry_timeout_ms: Number(cfg.mqtt_remote_retry_timeout_ms || 180000),
     tx_mqtt_remote_polling_enabled: !!cfg.tx_mqtt_remote_polling_enabled,
     tx_mqtt_remote_default_poll_interval_ms: Number(cfg.tx_mqtt_remote_default_poll_interval_ms || 300000),
-    maintenance_debug_telemetry_enabled: !!cfg.maintenance_debug_telemetry_enabled,
     rx_push_on_change_enabled: !!cfg.rx_push_on_change_enabled,
     rx_push_min_interval_ms: Number(cfg.rx_push_min_interval_ms || 60000),
     input_control_paired_lora_enabled: !!cfg.input_control_paired_lora_enabled,
@@ -5673,13 +5686,7 @@ onMounted(async () => {
         dev.input_state = (val === '1' || val === 1) ? 1 : 0;
         dev.input_state_known = true;
       }
-      else if (f === 'relay_feedback') dev.relay_feedback = (val === '1' || val === 1) ? 1 : 0;
-      else if (f === 'input_feedback') dev.input_feedback = (val === '1' || val === 1) ? 1 : 0;
       else if (f === 'rssi' || f === 'uplink_rssi_dbm') dev.rssi = Number(val);
-      else if (f === 'downlink_rssi' || f === 'downlink_rssi_dbm') {
-        dev.downlink_rssi = Number(val);
-        dev.downlink_rssi_known = true;
-      }
       else if (f === 'fw_version') dev.fw_version = String(val);
       else if (f === 'chip_id') dev.chip_id = String(val);
       else if (f === 'uptime_ms') dev.uptime_ms = Number(val);
@@ -6858,11 +6865,6 @@ function toggleSelectAllBulkPorts() {
                 </select>
                 <label class="self-center text-right font-semibold text-slate-300">Failsafe sec</label>
                 <input :value="Math.round((serialAdminConfig.rx_failsafe_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.rx_failsafe_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Debug telemetry</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.maintenance_debug_telemetry_enabled" type="checkbox" />
-                  Enabled
-                </label>
                 <label class="self-center text-right font-semibold text-slate-300">Input control</label>
                 <label class="flex items-center gap-2 text-slate-300" title="When enabled, closing the gateway's input terminals will command paired remotes to close their relays">
                   <input v-model="serialAdminConfig.input_control_paired_lora_enabled" type="checkbox" />
@@ -7294,7 +7296,7 @@ function toggleSelectAllBulkPorts() {
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Local Gateway Status Topics:</div>
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/input</span>: Input state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay_feedback</span>: Live physical relay feedback sense state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay</span>: Command relay state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Normalized reading value</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Sensor status state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/ota_status</span>: Retained OTA status (<code class="text-cyan-400">downloading</code>, <code class="text-cyan-400">failed:&lt;code&gt;</code>, <code class="text-cyan-400">rebooting</code>)</li>
@@ -7303,7 +7305,7 @@ function toggleSelectAllBulkPorts() {
                       <div>
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Remote Peer Telemetry (Forwarded):</div>
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote unit relay feedback</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote unit commanded relay state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote unit dry contact state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
@@ -7534,7 +7536,12 @@ function toggleSelectAllBulkPorts() {
                     {{ s.kind === 'temperature' ? 'Temperature' : (s.kind === 'tank_level' ? 'Tank Level' : (s.kind === 'input' ? 'Input' : s.kind)) }} [{{ s.instance }}]
                   </div>
                   <div class="mt-2 text-lg font-bold text-slate-100">
-                    {{ s.state === 'ok' ? `${s.value} ${s.unit === 'c' ? '°C' : (s.unit || '')}` : (s.state === 'overrange' ? 'Overrange' : s.state) }}
+                    <template v-if="s.kind === 'input'">
+                      {{ Number(s.value) === 1 ? 'Closed' : 'Open' }}
+                    </template>
+                    <template v-else>
+                      {{ s.state === 'ok' ? `${s.value} ${s.unit === 'c' ? '°C' : (s.unit || '')}` : (s.state === 'overrange' ? 'Overrange' : s.state) }}
+                    </template>
                   </div>
                   <div class="mt-1 text-slate-400">local sensor</div>
                 </div>
@@ -7556,7 +7563,7 @@ function toggleSelectAllBulkPorts() {
               <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
                 <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</div>
                 <div class="mt-1 font-mono text-slate-200">
-                  {{ (monitorGatewayStatus?.relay_feedback ?? monitorGatewayStatus?.relay_state) !== undefined ? (Number(monitorGatewayStatus?.relay_feedback ?? monitorGatewayStatus?.relay_state) === 1 ? 'ON' : 'OFF') : '-' }}
+                  {{ monitorGatewayStatus?.relay_state !== undefined ? (Number(monitorGatewayStatus?.relay_state) === 1 ? 'ON' : 'OFF') : '-' }}
                 </div>
               </div>
               <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
@@ -7573,7 +7580,16 @@ function toggleSelectAllBulkPorts() {
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="text-sm font-bold text-slate-300">Gateway Peer Cache</h2>
-              <div class="mt-1 text-xs text-slate-500">Read-only serial view of the selected gateway's runtime state.</div>
+              <div class="mt-1 text-xs text-slate-500">Read-only serial view of the selected gateway's runtime state. Click a row to select it.</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                @click="const dev = monitorFleetRows.find(d => d.address === selectedMonitorDeviceAddress); if (dev) executeRemotePollDiagnostics(dev)"
+                :disabled="!selectedMonitorDeviceAddress"
+                class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
+              >
+                📊 Poll Diagnostics
+              </button>
             </div>
           </div>
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
@@ -7591,17 +7607,19 @@ function toggleSelectAllBulkPorts() {
                   <th class="px-2 py-1.5 text-left font-semibold">Tank</th>
                   <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
                   <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Heap</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Frag</th>
+                  <th v-if="hasDiagnosticsData" class="px-2 py-1.5 text-left font-semibold">Heap</th>
+                  <th v-if="hasDiagnosticsData" class="px-2 py-1.5 text-left font-semibold">Frag</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
                   <th class="px-2 py-1.5 text-left font-semibold">Poll</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="monitorFleetRows.length === 0">
-                  <td colspan="15" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
+                  <td :colspan="hasDiagnosticsData ? 15 : 13" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
                 </tr>
-                <tr v-for="device in monitorFleetRows" :key="device.address" class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
+                <tr v-for="device in monitorFleetRows" :key="device.address"
+                    @click="selectedMonitorDeviceAddress = device.address"
+                    :class="['border-b border-slate-900/80 hover:bg-white/5 transition-colors cursor-pointer', selectedMonitorDeviceAddress === device.address ? 'bg-cyan-500/10 border-cyan-500/30' : '']">
                   <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ lrsDeviceName(device.chip_id) }}</td>
                   <td class="px-2 py-1.5">
@@ -7617,11 +7635,22 @@ function toggleSelectAllBulkPorts() {
                     <div v-if="tankDetailLabel(device)" class="mt-0.5 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
                   </td>
                   <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">up {{ device.rssi ?? '-' }} / down {{ device.downlink_rssi_known ? device.downlink_rssi : '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorHeapLabel(device) }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ monitorFragLabel(device) }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi !== undefined && device.rssi !== null ? `${device.rssi} dBm` : '-' }}</td>
+                  <td v-if="hasDiagnosticsData" class="px-2 py-1.5 font-mono text-slate-300">{{ monitorHeapLabel(device) }}</td>
+                  <td v-if="hasDiagnosticsData" class="px-2 py-1.5 font-mono text-slate-300">{{ monitorFragLabel(device) }}</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ monitorUptimeLabel(device) }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.poll_pending ? 'Pending' : 'Idle' }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">
+                    <div class="flex items-center gap-2">
+                      <span>{{ device.poll_pending ? 'Pending' : 'Idle' }}</span>
+                      <button
+                        @click.stop="executeRemotePollDiagnostics(device)"
+                        class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold transition-colors whitespace-nowrap"
+                        title="Request one-shot diagnostics (Heap/Frag)"
+                      >
+                        Poll Diags
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>

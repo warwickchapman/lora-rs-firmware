@@ -139,7 +139,6 @@ Published retained every ~10 s under `<root>/lrs-<chipid>/`:
 |-------|------|-------------|
 | `input` | `0`/`1` | Dry contact / digital input state. |
 | `relay` | `0`/`1` | Local relay state. |
-| `relay_feedback` | `0`/`1` | Hardware GPIO readback of relay driver. |
 | `type` | `tx`/`rx` | Device role. |
 | `addr` | `0xNN` | LoRa address (hex). |
 | `sensor/<kind>/<instance>/value` | string | Normalized value (float or int) for the given sensor. |
@@ -158,7 +157,7 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 
 > **Stale data protection:** When `ack_state` is `timeout`, all operational topics
-> (`relay`, `input`, `wifi`, `relay_feedback`, `input_feedback`) are published as empty strings so automations do not act on
+> (`relay`, `input`, `wifi`) are published as empty strings so automations do not act on
 > stale values. Status/metadata/polling topics continue updating normally.
 
 **Operational** — use these for automations and integrations:
@@ -173,7 +172,6 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 | `wifi` | `0`/`1` | Remote WiFi enabled state (empty string if unknown). |
 | `uptime_ms` | int | Remote uptime in milliseconds (from version telemetry; cleared/published as empty when non-uptime status packet is received). |
 | `uplink_rssi_dbm` | int | RSSI of last received packet from this peer (dBm). |
-| `downlink_rssi_dbm` | int | RSSI reported by peer for gateway's signal (dBm, empty if unknown). |
 
 **Polling / timing** — gateway-managed peer polling state:
 
@@ -197,8 +195,6 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `relay_feedback` | `0`/`1` | Raw GPIO readback of remote relay driver pin (hidden from normal UI). |
-| `input_feedback` | `0`/`1` | Raw GPIO readback of remote input pin (hidden from normal UI). May differ from `input` due to telemetry page timing. |
 | `heap_free` | int | Remote free heap bytes. |
 | `heap_max_block` | int | Remote largest contiguous free block. |
 | `heap_frag_pct` | int | Remote heap fragmentation percentage. |

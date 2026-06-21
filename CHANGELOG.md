@@ -23,6 +23,11 @@ All notable changes to this pre-release project are documented here in current o
   - Exposed candidate lists and adoption status in the `lora_inventory_status` response.
   - Added native unit tests verifying candidate lifecycle, reason evaluation, conflict/out-of-range readdressing, and full-fleet safety reset guarding.
 - Gated incoming telemetry peer creation in paired gateway mode using a new target resolver helper `isConfiguredOperationalPeer`, preventing unconfigured same-key telemetry from populating the operational peer cache.
+- Completely removed `relay_feedback` and `input_feedback` telemetry fields and MQTT topics across the firmware, MQTT bridge, and Flasher application, relying purely on commanded `relay_state` and input sensor `input_state` for simplicity.
+- Removed `maintenance_debug_telemetry_enabled` configuration flag, replacing automatic debug telemetry sweeps with an explicit, one-shot "Poll Diagnostics" admin command and UI action to retrieve Heap and Frag metrics.
+- Simplified RSSI representation in the Monitor tab to show a single gateway-observed uplink RSSI metric (removing downlink RSSI).
+- Updated peer table uptime column to continuously extrapolate uptime based on age in the gateway's status cache.
+- Formatted local gateway input cards in the UI to display "Open" or "Closed" instead of raw states.
 
 - Rebuilt `lora_inventory_status` response to list only configured target addresses in `1..12` instead of dumping all `peer_count_` cache slots.
 - Compacted `lora_inventory_status` JSON output by omitting default/falsy boolean flags and empty strings/IPs.

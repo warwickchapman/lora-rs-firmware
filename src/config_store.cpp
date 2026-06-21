@@ -55,7 +55,6 @@ constexpr const char *kAllowedFields[] = {
     "mqtt_remote_retry_timeout_ms",
     "tx_mqtt_remote_polling_enabled",
     "tx_mqtt_remote_default_poll_interval_ms",
-    "maintenance_debug_telemetry_enabled",
     "rx_push_on_change_enabled",
     "rx_push_min_interval_ms",
     "input_control_paired_lora_enabled",
@@ -349,7 +348,6 @@ bool ConfigStore::begin() {
   cfg_.mqtt_remote_retry_timeout_ms = root["mqtt_remote_retry_timeout_ms"] | 300000;
   cfg_.tx_mqtt_remote_polling_enabled = root["tx_mqtt_remote_polling_enabled"] | false;
   cfg_.tx_mqtt_remote_default_poll_interval_ms = root["tx_mqtt_remote_default_poll_interval_ms"] | 60000;
-  cfg_.maintenance_debug_telemetry_enabled = root["maintenance_debug_telemetry_enabled"] | false;
   cfg_.rx_push_on_change_enabled = root["rx_push_on_change_enabled"] | false;
   cfg_.rx_push_min_interval_ms = root["rx_push_min_interval_ms"] | 60000;
   cfg_.input_control_paired_lora_enabled = root["input_control_paired_lora_enabled"] | false;
@@ -499,7 +497,6 @@ bool ConfigStore::save() {
   doc["mqtt_remote_retry_timeout_ms"] = cfg_.mqtt_remote_retry_timeout_ms;
   doc["tx_mqtt_remote_polling_enabled"] = cfg_.tx_mqtt_remote_polling_enabled;
   doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg_.tx_mqtt_remote_default_poll_interval_ms;
-  doc["maintenance_debug_telemetry_enabled"] = cfg_.maintenance_debug_telemetry_enabled;
   doc["rx_push_on_change_enabled"] = cfg_.rx_push_on_change_enabled;
   doc["rx_push_min_interval_ms"] = cfg_.rx_push_min_interval_ms;
   doc["input_control_paired_lora_enabled"] = cfg_.input_control_paired_lora_enabled;
@@ -779,7 +776,6 @@ void ConfigStore::setDefaults() {
   cfg_.mqtt_remote_retry_timeout_ms = 300000;
   cfg_.tx_mqtt_remote_polling_enabled = false;
   cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
-  cfg_.maintenance_debug_telemetry_enabled = false;
   cfg_.rx_push_on_change_enabled = false;
   cfg_.rx_push_min_interval_ms = 60000;
   cfg_.input_control_paired_lora_enabled = true;

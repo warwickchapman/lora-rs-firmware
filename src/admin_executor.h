@@ -57,6 +57,7 @@ private:
   void handleStartLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer);
   void handleCancelLoraInventory(JsonDocument &doc, ResponseWriter writer);
+  void handlePollDiagnostics(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteReboot(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteSensorConfig(JsonDocument &doc, ResponseWriter writer);

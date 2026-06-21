@@ -497,7 +497,6 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
   runtime_.tx_mqtt_remote_default_poll_interval_ms = cfg.tx_mqtt_remote_default_poll_interval_ms;
-  runtime_.maintenance_debug_telemetry_enabled = cfg.maintenance_debug_telemetry_enabled;
   runtime_.rx_push_on_change_enabled = cfg.rx_push_on_change_enabled;
   runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
@@ -698,8 +697,6 @@ bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const 
   out.heap_free = node.heap_free;
   out.heap_max_block = node.heap_max_block;
   out.heap_frag_pct = node.heap_frag_pct;
-  out.relay_feedback = node.relay_feedback;
-  out.input_feedback = node.input_feedback;
   out.debug_uptime_ms = node.debug_uptime_ms;
   out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
   out.power_save_listen_only = node.power_save_listen_only;
@@ -1004,8 +1001,6 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint
   node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
-  node->uptime_ms = 0;
-  node->debug_uptime_ms = 0;
   if (rssi != -127) {
     node->uplink_rssi = rssi;
   }
@@ -2595,11 +2590,12 @@ bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter
   return true;
 }
 
-bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sentCounter) {
+bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, bool requestDiagnostics, uint32_t *sentCounter) {
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
   uint8_t payload[12]{};
   payload[0] = 1;  // request version
+  payload[1] = requestDiagnostics ? 1 : 0;
   last_counter_++;
   if (!radio_->sendRaw(MessageType::MaintenanceRequest, last_counter_,
                        runtime_.local_address, dstAddress, payload)) {
@@ -2608,11 +2604,11 @@ bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, uint32_t *sent
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
   if (sentCounter != nullptr) *sentCounter = last_counter_;
-  lrslog::event("maint_request_tx", 0, last_counter_, dstAddress);
+  lrslog::event("maint_request_tx", requestDiagnostics ? 1 : 0, last_counter_, dstAddress);
   return true;
 }
 
-bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
+bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDiagnostics) {
   if (ota_pull_active_ || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 || settings_ == nullptr) return false;
@@ -2657,7 +2653,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress) {
   maintenance_sensor_pending_ = true;
   maintenance_sensor_dst_ = dstAddress;
   maintenance_sensor_page_index_ = 0;
-  if (runtime_.maintenance_debug_telemetry_enabled) {
+  if (requestDiagnostics) {
     maintenance_debug_pending_ = true;
     maintenance_debug_dst_ = dstAddress;
   }
@@ -2762,8 +2758,6 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
   payload[4] = static_cast<uint8_t>(heapMaxBlock & 0xFFU);
   payload[5] = static_cast<uint8_t>((heapMaxBlock >> 8) & 0xFFU);
   payload[6] = lrslog::heapFragPercent();
-  payload[7] = relayFeedbackState();
-  payload[8] = localInputState();
   uint32_t uptimeMinutes = millis() / 60000UL;
   if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
   payload[9] = static_cast<uint8_t>(uptimeMinutes & 0xFFU);
@@ -2803,11 +2797,6 @@ void NodeStateMachine::tickPendingMaintenancePages() {
   }
 
   if (!maintenance_debug_pending_) return;
-  if (!runtime_.maintenance_debug_telemetry_enabled) {
-    maintenance_debug_pending_ = false;
-    maintenance_debug_dst_ = 0;
-    return;
-  }
   if (millis() - last_maint_page_tx_ms_ >= kMaintenancePageGapMs) {
     if (sendMaintenanceDebugStatus(maintenance_debug_dst_)) {
       maintenance_debug_pending_ = false;
@@ -2830,9 +2819,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
   }
   PeerRuntime *node = findOrCreatePeer(msg.src);
   if (node == nullptr) return false;
-  if (node->uptime_ms > 0 && millis() - node->uptime_received_ms >= 5000) {
-    node->uptime_ms = 0;
-  }
   const uint8_t *p = msg.raw_payload;
   if (p[0] != kMaintenancePayloadVersion) {
     LRS_LOGW(LORA, "event=maint_status_unsupported_detail type=%c src=%u dst=%u version=%u page=%u rssi=%d counter=%lu",
@@ -2920,7 +2906,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
       if (dc.state == SensorState::Ok) {
         node->input_state = dc.value ? 1 : 0;
         node->input_state_known = true;
-        node->input_feedback = node->input_state;
       }
     }
   } else if (p[1] == kMaintenancePageDebug) {
@@ -2930,8 +2915,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->heap_max_block = static_cast<uint32_t>(p[4]) |
                            (static_cast<uint32_t>(p[5]) << 8);
     node->heap_frag_pct = p[6];
-    node->relay_feedback = p[7] ? 1 : 0;
-    node->input_feedback = p[8] ? 1 : 0;
     node->debug_uptime_ms = (static_cast<uint32_t>(p[9]) |
                              (static_cast<uint32_t>(p[10]) << 8)) * 60000UL;
   } else {
@@ -3068,7 +3051,7 @@ void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
   if (peer_maintenance_cursor_ >= targetCount) peer_maintenance_cursor_ = 0;
   const uint8_t dst = targets[peer_maintenance_cursor_++];
   uint32_t sentCounter = 0;
-  if (sendMaintenanceRequest(dst, &sentCounter)) {
+  if (sendMaintenanceRequest(dst, false, &sentCounter)) {
     lrslog::event("peer_maint_probe", 0, sentCounter, dst);
     next_peer_maintenance_ms_ = now + spacingMs;
   } else {
@@ -3095,7 +3078,7 @@ void NodeStateMachine::tickFleetScan(uint32_t now) {
   }
 
   uint32_t sentCounter = 0;
-  if (!sendMaintenanceRequest(fleet_scan_next_address_, &sentCounter)) {
+  if (!sendMaintenanceRequest(fleet_scan_next_address_, false, &sentCounter)) {
     fleet_scan_next_ms_ = now + 250U;
     return;
   }
@@ -3415,8 +3398,6 @@ void NodeStateMachine::tickReceive() {
                                        msg.type == MessageType::MqttStatus);
       if (statusCarriesState) {
         node->relay_state = msg.relay_state ? 1 : 0;
-        node->uptime_ms = 0;
-        node->debug_uptime_ms = 0;
         // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
         const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
         if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
@@ -3513,8 +3494,6 @@ void NodeStateMachine::tickReceive() {
         return;
       }
       node->relay_state = msg.relay_state ? 1 : 0;
-      node->uptime_ms = 0;
-      node->debug_uptime_ms = 0;
       // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
       const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
       if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
@@ -3622,7 +3601,8 @@ void NodeStateMachine::tickReceive() {
   if (msg.type == MessageType::MaintenanceRequest) {
     if (msg.dst == runtime_.local_address) {
       if (!maintenance_version_pending_ && !maintenance_sensor_pending_ && !maintenance_debug_pending_) {
-        sendMaintenanceStatus(msg.src);
+        const bool requestDiag = (msg.raw_payload[0] == 1 && (msg.raw_payload[1] & 0x01U) != 0U);
+        sendMaintenanceStatus(msg.src, requestDiag);
       }
     }
     return;
@@ -4795,7 +4775,7 @@ void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
       DiscoveryCandidate &c = discovery_candidates_[i];
       if (c.in_use && c.state == CandidateState::SeenAddressOnly) {
         uint32_t sentCounter = 0;
-        if (sendMaintenanceRequest(c.address, &sentCounter)) {
+        if (sendMaintenanceRequest(c.address, false, &sentCounter)) {
           last_candidate_probe_ms = now;
           lrslog::event("candidate_maint_probe", 0, sentCounter, c.address);
           break;
