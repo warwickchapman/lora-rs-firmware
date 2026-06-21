@@ -95,11 +95,12 @@ Otherwise packet is dropped and logged.
 - TX may send `PollRequest` to RX.
 - RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
 - TX may send `MaintenanceRequest` to RX.
+- TX sends `MaintenanceRequest` carrying the request version (set to `kMaintenancePayloadVersion`, i.e., `2`) in payload byte `b0` and diagnostics flag in `b1`.
 - RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `2`). 
   - Page `0` (Identity) carries identity and connectivity.
   - Page `3` (Version) carries the firmware build number and uptime.
   - Page `2` (Sensors) carries page-indexed generic sensor readings from the local `SensorRegistry` (up to 2 readings per 4-byte slot per page; packs `kind`, `instance`, `state` (0=Disabled, 1=Missing, 2=Fault, 3=Ok, 4=Overrange, 5=Waiting), `scale`, and clamped `int16` values).
-  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, relay feedback, and input feedback).
+  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, and uptime minutes).
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.

@@ -2594,7 +2594,7 @@ bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, bool requestDi
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
   uint8_t payload[12]{};
-  payload[0] = 1;  // request version
+  payload[0] = kMaintenancePayloadVersion;
   payload[1] = requestDiagnostics ? 1 : 0;
   last_counter_++;
   if (!radio_->sendRaw(MessageType::MaintenanceRequest, last_counter_,
@@ -2616,10 +2616,13 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDia
   uint8_t minor = 0;
   uint8_t patch = 0;
   parseFwVersionPacked(major, minor, patch);
-  const IPAddress ip = WiFi.localIP();
+  const bool wifiConnected = WiFi.isConnected();
+  const IPAddress ip = wifiConnected ? WiFi.localIP() : IPAddress(0, 0, 0, 0);
+  const bool hasValidIp = (ip != IPAddress(0, 0, 0, 0));
+
   uint8_t flags = 0;
   if (settings_->wifi_admin_enabled) flags |= 0x01;
-  if (WiFi.isConnected()) flags |= 0x02;
+  if (wifiConnected && hasValidIp) flags |= 0x02;
   if (settings_->mqtt_client_enabled) flags |= 0x04;
   if (mqtt_connected_) flags |= 0x08;
   if (runtime_.role_tx) flags |= 0x10;
@@ -2864,7 +2867,12 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->mqtt_connected = (flags & 0x08U) != 0U;
     node->power_save_listen_only = (flags & 0x20U) != 0U;
     node->power_save_active = (flags & 0x40U) != 0U;
-    memcpy(node->ip, p + 8, sizeof(node->ip));
+    const bool hasIp = (p[8] != 0 || p[9] != 0 || p[10] != 0 || p[11] != 0);
+    if (node->wifi_connected && hasIp) {
+      memcpy(node->ip, p + 8, sizeof(node->ip));
+    } else {
+      memset(node->ip, 0, sizeof(node->ip));
+    }
   } else if (p[1] == kMaintenancePageVersion) {
     node->fw_major = p[2];
     node->fw_minor = p[3];
@@ -3601,7 +3609,7 @@ void NodeStateMachine::tickReceive() {
   if (msg.type == MessageType::MaintenanceRequest) {
     if (msg.dst == runtime_.local_address) {
       if (!maintenance_version_pending_ && !maintenance_sensor_pending_ && !maintenance_debug_pending_) {
-        const bool requestDiag = (msg.raw_payload[0] == 1 && (msg.raw_payload[1] & 0x01U) != 0U);
+        const bool requestDiag = (msg.raw_payload[0] == kMaintenancePayloadVersion && (msg.raw_payload[1] & 0x01U) != 0U);
         sendMaintenanceStatus(msg.src, requestDiag);
       }
     }

@@ -45,6 +45,7 @@ All notable changes to this pre-release project are documented here in current o
 - Added a BSS-allocated circular buffer (up to 16 entries) for gateway-side provisioning events. Expose these logs in the `provisioning_status` serial-admin endpoint with millisecond timestamps.
 
 ### Firmware Fixes
+- Fixed stale remote IP addresses in the Fleet listing by zeroing out the IP payload structure on the remote when WiFi STA is disconnected, and clearing the cached remote IP in the gateway peer cache if the remote reports disconnected or sends a zero IP.
 - Fixed transient "Fault" state on startup for DS18B20 temperature sensors by scheduling the first conversion immediately and mapping initial state to `waiting` until the first reading completes.
 - Decoupled the transmitter and telemetry schedulers to prevent active paired group-command sync states from starving background task ticks. Added a transmission suppression guard to prevent background radio queries from colliding with the critical group ACK/poll response windows.
 - In paired mode, treat an empty known peer list as an empty fleet, preventing target resolution from falling back to default remote address `1` or other default targets. Standalone mode preserves legacy point-to-point fallback behavior.
