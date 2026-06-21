@@ -1920,6 +1920,13 @@ function fleetGatewayCommandTarget() {
   return { port, password, isMqtt };
 }
 
+function monitorGatewayCommandTarget() {
+  const isMqtt = monitorTransport.value === 'mqtt';
+  const port = isMqtt ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+  const password = adminPasswordForPort(port);
+  return { port, password, isMqtt };
+}
+
 function adminPasswordForPort(port: string): string {
   const state = serialDeviceState(port);
   return state?.adminPassword?.trim() ||
@@ -3371,9 +3378,9 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
 
 async function executeRemotePollDiagnostics(device: LoraInventoryDevice) {
   activeDropdownAddress.value = null;
-  const { port, password } = fleetGatewayCommandTarget();
+  const { port, password } = monitorGatewayCommandTarget();
   if (!port) {
-    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    notify(monitorTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
     return;
   }
   if (!password) {
@@ -3390,6 +3397,14 @@ async function executeRemotePollDiagnostics(device: LoraInventoryDevice) {
   } catch (e) {
     const msg = serialFeatureError(`Diagnostics polling request`, e);
     notify(msg);
+  }
+}
+
+async function executeSelectedMonitorPollDiagnostics() {
+  if (selectedMonitorDeviceAddress.value === null) return;
+  const dev = monitorFleetRows.value.find(d => d.address === selectedMonitorDeviceAddress.value);
+  if (dev) {
+    await executeRemotePollDiagnostics(dev);
   }
 }
 
@@ -7584,7 +7599,7 @@ function toggleSelectAllBulkPorts() {
             </div>
             <div class="flex items-center gap-2">
               <button
-                @click="const dev = monitorFleetRows.find(d => d.address === selectedMonitorDeviceAddress); if (dev) executeRemotePollDiagnostics(dev)"
+                @click="executeSelectedMonitorPollDiagnostics()"
                 :disabled="!selectedMonitorDeviceAddress"
                 class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
               >

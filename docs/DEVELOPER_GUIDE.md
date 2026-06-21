@@ -170,7 +170,7 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 | `sensor/<kind>/<instance>/value` | string | Remote sensor normalized value. |
 | `sensor/<kind>/<instance>/state` | string | Remote sensor state. |
 | `wifi` | `0`/`1` | Remote WiFi enabled state (empty string if unknown). |
-| `uptime_ms` | int | Remote uptime in milliseconds (from version telemetry; cleared/published as empty when non-uptime status packet is received). |
+| `uptime_ms` | int | Remote uptime in milliseconds (from version telemetry). |
 | `uplink_rssi_dbm` | int | RSSI of last received packet from this peer (dBm). |
 
 **Polling / timing** — gateway-managed peer polling state:

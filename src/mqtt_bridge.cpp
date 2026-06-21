@@ -890,12 +890,6 @@ void MqttBridge::publishStatus() {
 
         snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
-        if (node.downlink_rssi_valid) {
-          snprintf(numBuf, sizeof(numBuf), "%d", node.downlink_rssi);
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "downlink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "downlink_rssi_dbm")) publishRetainedTopic(topic, "");
-        }
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
         const uint32_t ageS = (node.last_seen_ms > 0) ? (millis() - node.last_seen_ms) / 1000U : 0;

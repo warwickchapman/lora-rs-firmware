@@ -1383,10 +1383,6 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
         row["debug_uptime_ms"] = p.debug_uptime_ms;
       }
       row["rssi"] = p.uplink_rssi;
-      if (p.downlink_rssi_valid) {
-        row["downlink_rssi_known"] = true;
-        row["downlink_rssi"] = p.downlink_rssi;
-      }
       if (p.last_seen_ms != 0) {
         row["last_seen_ms"] = p.last_seen_ms;
         row["age_ms"] = now - p.last_seen_ms;

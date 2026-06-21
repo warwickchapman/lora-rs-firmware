@@ -25,7 +25,7 @@ All notable changes to this pre-release project are documented here in current o
 - Gated incoming telemetry peer creation in paired gateway mode using a new target resolver helper `isConfiguredOperationalPeer`, preventing unconfigured same-key telemetry from populating the operational peer cache.
 - Completely removed `relay_feedback` and `input_feedback` telemetry fields and MQTT topics across the firmware, MQTT bridge, and Flasher application, relying purely on commanded `relay_state` and input sensor `input_state` for simplicity.
 - Removed `maintenance_debug_telemetry_enabled` configuration flag, replacing automatic debug telemetry sweeps with an explicit, one-shot "Poll Diagnostics" admin command and UI action to retrieve Heap and Frag metrics.
-- Simplified RSSI representation in the Monitor tab to show a single gateway-observed uplink RSSI metric (removing downlink RSSI).
+- Simplified RSSI representation, completely removing `downlink_rssi` from admin status and `downlink_rssi_dbm` MQTT topic, and showing only a single gateway-observed uplink RSSI metric in the Monitor tab.
 - Updated peer table uptime column to continuously extrapolate uptime based on age in the gateway's status cache.
 - Formatted local gateway input cards in the UI to display "Open" or "Closed" instead of raw states.
 
