@@ -927,9 +927,10 @@ const fleetGatewayFlashDisabled = computed(() => {
 const loraInventoryProgressLabel = computed(() => {
   const scan = loraInventoryScan.value;
   if (!scan) return 'Idle';
-  if (!scan.active) return `Complete, ${scan.sent || 0} probes sent`;
-  const next = scan.next_address || scan.start_address || 1;
-  return `Scanning ${next}-${scan.end_address || LRS_REMOTE_SCAN_CAP}, ${scan.sent || 0} probes sent`;
+  if (scan.active) {
+    return 'Scanning configured remotes and same-key candidates...';
+  }
+  return `Complete, ${scan.sent || 0} probes sent`;
 });
 const gatewayReady = computed(() => {
   const key = pairGatewayKey.value;
@@ -1091,7 +1092,54 @@ const fleetForceScanCooldownRemainingMs = computed(() =>
 const fleetForceScanLabel = computed(() => {
   if (isLoraInventoryScanning.value) return 'Stop scan';
   const remaining = Math.ceil(fleetForceScanCooldownRemainingMs.value / 1000);
-  return remaining > 0 ? `Force Scan ${remaining}s` : 'Force Scan';
+  return remaining > 0 ? `Scan ${remaining}s` : 'Scan';
+});
+const remotesAndCandidatesStatusLine = computed(() => {
+  const remotesCount = loraInventory.value.length;
+  const remotesLabel = `${remotesCount} remote${remotesCount === 1 ? '' : 's'} configured`;
+  
+  const total = loraCandidates.value.length;
+  if (total === 0) {
+    return `${remotesLabel} · 0 candidates`;
+  }
+  
+  if (total === 1) {
+    const c = loraCandidates.value[0];
+    if (c.state === 'seen_address_only') {
+      return `${remotesLabel} · 1 candidate identifying`;
+    }
+    if ((c.state === 'identified' || c.state === 'failed') && !!c.chip_id) {
+      return `${remotesLabel} · 1 candidate ready to adopt`;
+    }
+    if (c.state === 'readdressing') {
+      return `${remotesLabel} · 1 candidate adopting`;
+    }
+    if (c.state === 'reset_requested') {
+      return `${remotesLabel} · 1 candidate resetting`;
+    }
+    if (c.state === 'adopted') {
+      return `${remotesLabel} · 1 candidate adopted`;
+    }
+    return `${remotesLabel} · 1 candidate`;
+  }
+  
+  const identifying = loraCandidates.value.filter(c => c.state === 'seen_address_only').length;
+  const ready = loraCandidates.value.filter(c => (c.state === 'identified' || c.state === 'failed') && !!c.chip_id).length;
+  const adopting = loraCandidates.value.filter(c => c.state === 'readdressing').length;
+  const resetting = loraCandidates.value.filter(c => c.state === 'reset_requested').length;
+  const adopted = loraCandidates.value.filter(c => c.state === 'adopted').length;
+  
+  const parts: string[] = [];
+  if (identifying > 0) parts.push(`${identifying} identifying`);
+  if (ready > 0) parts.push(`${ready} ready`);
+  if (adopting > 0) parts.push(`${adopting} adopting`);
+  if (resetting > 0) parts.push(`${resetting} resetting`);
+  if (adopted > 0) parts.push(`${adopted} adopted`);
+  
+  if (parts.length === 0) {
+    return `${remotesLabel} · ${total} candidates`;
+  }
+  return `${remotesLabel} · ${total} candidates: ${parts.join(', ')}`;
 });
 const gatewayWifiReady = computed(() =>
   !!gatewaySelectedPort.value &&
@@ -2904,7 +2952,7 @@ async function startLoraInventoryScan() {
   }
   const remaining = fleetForceScanCooldownRemainingMs.value;
   if (remaining > 0) {
-    notify(`Force Scan available in ${Math.ceil(remaining / 1000)}s`);
+    notify(`Scan available in ${Math.ceil(remaining / 1000)}s`);
     return;
   }
   await beginLoraInventoryScan(port, true);
@@ -7752,7 +7800,7 @@ function toggleSelectAllBulkPorts() {
                 Fleet
               </h2>
               <p class="mt-1 text-xs text-slate-400 max-w-3xl">
-                {{ fleetGatewayStatusLabel }} · Gateway + {{ loraInventory.length }} remote{{ loraInventory.length === 1 ? '' : 's' }} · {{ loraInventoryProgressLabel }}
+                {{ fleetGatewayStatusLabel }} · {{ remotesAndCandidatesStatusLine }} · {{ loraInventoryProgressLabel }}
               </p>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-3">
@@ -7905,7 +7953,7 @@ function toggleSelectAllBulkPorts() {
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="text-lg font-bold text-slate-300">Remotes</h2>
-              <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Force Scan asks the gateway to refresh LoRa state.</div>
+              <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Scan asks the gateway to refresh LoRa state.</div>
             </div>
             <div class="flex items-center gap-3">
               <div class="text-xs text-slate-500">{{ loraInventory.length }} remote{{ loraInventory.length === 1 ? '' : 's' }} cached · {{ selectedLoraInventoryCount }} selected</div>
@@ -7933,7 +7981,7 @@ function toggleSelectAllBulkPorts() {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td :colspan="hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Force Scan to probe remotes.</td>
+                  <td :colspan="hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Scan to probe remotes.</td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
