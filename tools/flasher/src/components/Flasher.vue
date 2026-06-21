@@ -1095,6 +1095,41 @@ const fleetForceScanLabel = computed(() => {
   const remaining = Math.ceil(fleetForceScanCooldownRemainingMs.value / 1000);
   return remaining > 0 ? `Scan ${remaining}s` : 'Scan';
 });
+const CANDIDATE_RECENT_IDENTITY_MS = 90000;
+
+function candidateStateText(c: LoraAdoptionCandidate): string {
+  if (c.state === 'seen_address_only') return 'identifying';
+  if (c.state === 'identified') return 'ready to adopt';
+  if (c.state === 'readdressing') return 'adopting';
+  if (c.state === 'reset_requested') return 'reset requested';
+  if (c.state === 'failed') {
+    if (c.chip_id) {
+      return 'ready to retry adopt';
+    } else {
+      const ageMs = c.age_ms ?? 0;
+      return ageMs < CANDIDATE_RECENT_IDENTITY_MS ? 'retrying identity' : 'identity failed';
+    }
+  }
+  return c.state;
+}
+
+function candidateStateClass(c: LoraAdoptionCandidate): string {
+  if (c.state === 'adopted') return 'text-emerald-400';
+  if (c.state === 'readdressing') return 'text-sky-400 animate-pulse';
+  if (c.state === 'reset_requested') return 'text-amber-400 animate-pulse';
+  if (c.state === 'seen_address_only') return 'text-slate-400 animate-pulse';
+  if (c.state === 'identified') return 'text-slate-300';
+  if (c.state === 'failed') {
+    if (c.chip_id) {
+      return 'text-amber-400';
+    } else {
+      const ageMs = c.age_ms ?? 0;
+      return ageMs < CANDIDATE_RECENT_IDENTITY_MS ? 'text-slate-400 animate-pulse' : 'text-rose-400';
+    }
+  }
+  return 'text-slate-400';
+}
+
 const remotesAndCandidatesStatusLine = computed(() => {
   const remotesCount = loraInventory.value.length;
   const remotesLabel = `${remotesCount} remote${remotesCount === 1 ? '' : 's'} configured`;
@@ -1106,29 +1141,20 @@ const remotesAndCandidatesStatusLine = computed(() => {
   
   if (total === 1) {
     const c = loraCandidates.value[0];
-    if (c.state === 'seen_address_only') {
-      return `${remotesLabel} · 1 candidate identifying`;
-    }
-    if ((c.state === 'identified' || c.state === 'failed') && !!c.chip_id) {
-      return `${remotesLabel} · 1 candidate ready to adopt`;
-    }
-    if (c.state === 'readdressing') {
-      return `${remotesLabel} · 1 candidate adopting`;
-    }
-    if (c.state === 'reset_requested') {
-      return `${remotesLabel} · 1 candidate resetting`;
-    }
-    if (c.state === 'adopted') {
-      return `${remotesLabel} · 1 candidate adopted`;
-    }
-    return `${remotesLabel} · 1 candidate`;
+    return `${remotesLabel} · 1 candidate ${candidateStateText(c)}`;
   }
   
-  const identifying = loraCandidates.value.filter(c => c.state === 'seen_address_only').length;
+  const identifying = loraCandidates.value.filter(c =>
+    c.state === 'seen_address_only' ||
+    (c.state === 'failed' && !c.chip_id && (c.age_ms ?? 0) < CANDIDATE_RECENT_IDENTITY_MS)
+  ).length;
   const ready = loraCandidates.value.filter(c => (c.state === 'identified' || c.state === 'failed') && !!c.chip_id).length;
   const adopting = loraCandidates.value.filter(c => c.state === 'readdressing').length;
   const resetting = loraCandidates.value.filter(c => c.state === 'reset_requested').length;
   const adopted = loraCandidates.value.filter(c => c.state === 'adopted').length;
+  const failed = loraCandidates.value.filter(c =>
+    c.state === 'failed' && !c.chip_id && (c.age_ms ?? 0) >= CANDIDATE_RECENT_IDENTITY_MS
+  ).length;
   
   const parts: string[] = [];
   if (identifying > 0) parts.push(`${identifying} identifying`);
@@ -1136,6 +1162,7 @@ const remotesAndCandidatesStatusLine = computed(() => {
   if (adopting > 0) parts.push(`${adopting} adopting`);
   if (resetting > 0) parts.push(`${resetting} resetting`);
   if (adopted > 0) parts.push(`${adopted} adopted`);
+  if (failed > 0) parts.push(`${failed} failed`);
   
   if (parts.length === 0) {
     return `${remotesLabel} · ${total} candidates`;
@@ -8346,7 +8373,7 @@ function toggleSelectAllBulkPorts() {
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">
-                    {{ c.chip_id ? lrsDeviceName(c.chip_id) : 'Unknown (querying...)' }}
+                    {{ c.chip_id ? lrsDeviceName(c.chip_id) : 'querying...' }}
                   </td>
                   <td class="px-2 py-1.5 font-mono text-slate-300">{{ c.rssi }} dBm</td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ c.age_ms != null ? `${Math.round(c.age_ms / 1000)}s` : '-' }}</td>
@@ -8362,14 +8389,8 @@ function toggleSelectAllBulkPorts() {
                     </span>
                   </td>
                   <td class="px-2 py-1.5 font-mono">
-                    <span :class="['text-[10px] font-bold',
-                      c.state === 'adopted' ? 'text-emerald-400' :
-                      c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
-                      c.state === 'reset_requested' ? 'text-amber-400 animate-pulse' :
-                      c.state === 'failed' ? 'text-rose-400' :
-                      'text-slate-400'
-                    ]">
-                      {{ c.state }}
+                    <span :class="['text-[10px] font-bold', candidateStateClass(c)]">
+                      {{ candidateStateText(c) }}
                     </span>
                   </td>
                   <td class="px-2 py-1.5 flex items-center gap-2">
@@ -8380,11 +8401,19 @@ function toggleSelectAllBulkPorts() {
                     >
                       Adopt
                     </button>
-                    <span v-else-if="c.state === 'seen_address_only'" class="text-slate-500 text-[10px] animate-pulse">waiting for identity</span>
-                    <span v-else-if="c.state === 'readdressing'" class="text-sky-400 text-[10px] animate-pulse">adopting</span>
-                    <span v-else-if="c.state === 'reset_requested'" class="text-amber-400 text-[10px] animate-pulse">reset requested</span>
-                    <span v-else-if="c.state === 'failed' && !c.chip_id" class="text-rose-500 text-[10px]">failed</span>
-                    <span v-else class="text-slate-500 text-[10px]">-</span>
+                    <span
+                      v-else
+                      :class="[
+                        'text-[10px]',
+                        c.state === 'seen_address_only' || (c.state === 'failed' && (c.age_ms == null || c.age_ms < CANDIDATE_RECENT_IDENTITY_MS)) ? 'text-slate-500 animate-pulse' :
+                        c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
+                        c.state === 'reset_requested' ? 'text-amber-400 animate-pulse' :
+                        c.state === 'failed' ? 'text-rose-500' :
+                        'text-slate-500'
+                      ]"
+                    >
+                      {{ candidateStateText(c) }}
+                    </span>
                   </td>
                 </tr>
               </tbody>
