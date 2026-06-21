@@ -14,7 +14,7 @@ All notable changes to this pre-release project are documented here in current o
   - Replaced `settings_backup.h` / `SettingsBackup` capture-restore logic with direct struct copy assignments.
   - Optimized Dallas temperature sensor address representation to format on-stack instead of storing on the heap.
   - Implemented Compact Operational Config contract for `get_config` and `set_config` over MQTT (excluding keys/secrets).
-- Removed UDP Log Control (`UdpLogControl` message type, `udp_log_control` / `remote_udp_log_control` command surfaces) to clean up pre-1.0 code bloat.
+- Restored UDP log control (`UdpLogControl` message type, `udp_log_control` / `remote_udp_log_control` command surfaces) with tight heap limits: local gateway logging is MQTT-only and rejects serial commands with `mqtt_required`, while remote log control enforces firmware-side peer WiFi/IP eligibility.
 - Removed MQTT Secret Export support (`allow_mqtt_secret_export`) entirely for enhanced security.
 - Implemented Phase 2 Step 1 for Replacement Gateway Discovery & Explicit Peer Adoption:
   - Added volatile discovery candidate tracking capped at 12 entries (`Settings::kAddressListCap`) with explicit lifecycle states (`SeenAddressOnly`, `Identified`, `Readdressing`, `Adopted`, `Failed`, `ResetRequested`).

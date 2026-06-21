@@ -564,6 +564,7 @@ const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const settingsTab = ref<SettingsTab>('general');
 const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const networkUdpTarget = ref('');
+const activeRemoteUdpAddress = ref<number | null>(null);
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const loraCandidates = ref<LoraAdoptionCandidate[]>([]);
@@ -1869,15 +1870,172 @@ function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCod
   };
 }
 
+function getLocalHostIpForTarget(targetIp?: string): string | null {
+  if (!flasherInterfaces.value || flasherInterfaces.value.length === 0) {
+    return null;
+  }
+  if (targetIp) {
+    const targetParts = targetIp.split('.').map(Number);
+    for (const iface of flasherInterfaces.value) {
+      if (!iface.ip || !iface.netmask) continue;
+      const ipParts = iface.ip.split('.').map(Number);
+      const maskParts = iface.netmask.split('.').map(Number);
+      let match = true;
+      for (let i = 0; i < 4; i++) {
+        if ((targetParts[i] & maskParts[i]) !== (ipParts[i] & maskParts[i])) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        return iface.ip;
+      }
+    }
+  }
+  const nonLoopback = flasherInterfaces.value.find(i => i.ip && !i.ip.startsWith('127.'));
+  return nonLoopback ? nonLoopback.ip : null;
+}
+
+async function startNetworkUdpMonitor(): Promise<boolean> {
+  try {
+    const started = await invoke<string>('start_network_udp_monitor');
+    pushNetworkLog(started);
+    isNetworkUdpMonitoring.value = true;
+    networkUdpTarget.value = 'Local Listener';
+    networkUdpLogsExpanded.value = false;
+    nextTick(() => scrollNetworkUdpToBottom());
+    return true;
+  } catch (e) {
+    pushNetworkLog('UDP monitor start error: ' + e);
+    notify('UDP monitor start error: ' + e);
+    return false;
+  }
+}
+
+async function triggerGatewayUdpLogging() {
+  const hostIp = getLocalHostIpForTarget();
+  if (!hostIp) {
+    pushNetworkLog('Failed: No reachable Flasher LAN address available for UDP forwarding.');
+    notify('No reachable Flasher LAN address');
+    return;
+  }
+
+  if (!await startNetworkUdpMonitor()) {
+    return;
+  }
+  const port = fleetGatewayCommandTarget().port;
+  if (port) {
+    const isMqtt = isMqttGatewayKey(port);
+    if (isMqtt) {
+      const password = fleetGatewayCommandTarget().password;
+      if (!password) {
+        pushNetworkLog('Gateway password not loaded; skipping gateway-side UDP log enable command.');
+        return;
+      }
+      pushNetworkLog(`Requesting gateway UDP log forwarding to host IP: ${hostIp}...`);
+      try {
+        const res = await sendEasyPairCommandOnPort(port, 'udp_log_control', {
+          admin_password: password,
+          enabled: true,
+          host: hostIp,
+          port: 5514,
+          ttl_s: 300
+        }, 8000);
+        pushNetworkLog('Gateway UDP logging enabled successfully: ' + JSON.stringify(res));
+      } catch (e) {
+        pushNetworkLog('Failed to enable gateway-side UDP log control: ' + e);
+      }
+    } else {
+      pushNetworkLog('Gateway UDP logging is MQTT-only. Skipping gateway-side control command (connected via USB serial).');
+    }
+  }
+}
+
+async function triggerRemoteUdpLogging(device: LoraInventoryDevice) {
+  const { port, password } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+
+  const hostIp = getLocalHostIpForTarget(device.ip);
+  if (!hostIp) {
+    pushNetworkLog('Failed: No reachable Flasher LAN address available for UDP forwarding.');
+    notify('No reachable Flasher LAN address');
+    return;
+  }
+  
+  if (!isNetworkUdpMonitoring.value) {
+    if (!await startNetworkUdpMonitor()) {
+      return;
+    }
+  }
+  
+  notify(`Requesting remote ${device.address} to mirror UDP logs to ${hostIp}...`);
+  try {
+    const res = await sendEasyPairCommandOnPort(port, 'remote_udp_log_control', {
+      admin_password: password,
+      address: device.address,
+      enabled: true,
+      host: hostIp,
+      port: 5514,
+      ttl_s: 300
+    }, 8000);
+    notify(`Remote UDP logging triggered for address ${device.address}`);
+    pushNetworkLog(`Remote UDP logging enabled for Address ${device.address} sending to ${hostIp}: ` + JSON.stringify(res));
+    networkUdpTarget.value = `Addr ${device.address}`;
+    activeRemoteUdpAddress.value = device.address;
+  } catch (e) {
+    const msg = serialFeatureError(`Remote UDP log control`, e);
+    notify(msg);
+    pushNetworkLog(msg);
+  }
+}
+
 async function stopNetworkUdpMonitor() {
   try {
     const stopped = await invoke<string>('stop_network_udp_monitor');
     pushNetworkLog(stopped);
+    const port = fleetGatewayCommandTarget().port;
+    const password = fleetGatewayCommandTarget().password;
+    if (port && password) {
+      if (activeRemoteUdpAddress.value !== null) {
+        pushNetworkLog(`Requesting remote ${activeRemoteUdpAddress.value} to stop UDP log forwarding...`);
+        try {
+          await sendEasyPairCommandOnPort(port, 'remote_udp_log_control', {
+            admin_password: password,
+            address: activeRemoteUdpAddress.value,
+            enabled: false
+          }, 8000);
+          pushNetworkLog(`Remote ${activeRemoteUdpAddress.value} UDP logging disabled.`);
+        } catch (e) {
+          pushNetworkLog(`Failed to disable remote UDP logging on Address ${activeRemoteUdpAddress.value}: ` + e);
+        }
+      }
+
+      if (isMqttGatewayKey(port)) {
+        pushNetworkLog('Requesting gateway to stop UDP log forwarding...');
+        try {
+          await sendEasyPairCommandOnPort(port, 'udp_log_control', {
+            admin_password: password,
+            enabled: false
+          }, 8000);
+          pushNetworkLog('Gateway UDP logging disabled.');
+        } catch (e) {
+          pushNetworkLog('Failed to disable gateway-side UDP logging: ' + e);
+        }
+      }
+    }
   } catch (e) {
     pushNetworkLog('UDP monitor stop error: ' + e);
   } finally {
     isNetworkUdpMonitoring.value = false;
     networkUdpTarget.value = '';
+    activeRemoteUdpAddress.value = null;
     networkUdpLogsExpanded.value = false;
   }
 }
@@ -7821,6 +7979,12 @@ function toggleSelectAllBulkPorts() {
               >
                 {{ firmwareServerInfo ? 'Stop server' : (isFirmwareServerStarting ? 'Starting...' : 'Start server') }}
               </button>
+              <button
+                @click="isNetworkUdpMonitoring ? stopNetworkUdpMonitor() : triggerGatewayUdpLogging()"
+                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
+              >
+                <span>{{ isNetworkUdpMonitoring ? 'Stop UDP Listener' : 'Start UDP Listener' }}</span>
+              </button>
             </div>
           </div>
 
@@ -8094,6 +8258,14 @@ function toggleSelectAllBulkPorts() {
                           class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                         >
                           🔄 Reboot
+                        </button>
+                        <button
+                          @click="triggerRemoteUdpLogging(device); activeDropdownAddress = null"
+                          :disabled="!device.wifi_connected || !device.ip"
+                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none disabled:opacity-40"
+                          :title="(!device.wifi_connected || !device.ip) ? 'Remote device has no active WiFi or IP' : 'Trigger remote UDP logging'"
+                        >
+                          📋 View Logs
                         </button>
                         <button
                           @click="executeForgetRemote(device); activeDropdownAddress = null"

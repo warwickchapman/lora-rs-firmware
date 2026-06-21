@@ -33,6 +33,7 @@ Packed fields:
 - `Reboot` (`'B'`)
 - `SensorConfig` (`'K'`)
 - `FleetKeyControl` (`'Z'`)
+- `UdpLogControl` (`'U'`)
 
 ## Encrypted Payload Layout (12 bytes)
 - `b0`: `relay_state`
@@ -125,9 +126,9 @@ Otherwise packet is dropped and logged.
 - `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
 - `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.
 
-- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, and `FactoryReset` must be addressed to the target device's LoRa address.
+- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, and `FactoryReset` must be addressed to the target device's LoRa address.
 - Broadcast is reserved for controlled provisioning-style flows. Do not use broadcast for destructive or lockout-prone maintenance commands.
-- Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, or factory-reset commands.
+- Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, factory-reset, or UDP log control commands.
 
 ## MQTT-to-LoRa Semantics
 - MQTT `relay` topic sets only the local node relay state immediately.
@@ -210,5 +211,42 @@ To allow remote gateway control over LAN or cloud networks:
   ```
 - Credential protection:
   - Secrets are completely excluded from get_config responses sent over MQTT. Secret exports are only available over USB serial mode.
+
+## UDP Mirroring Controls
+
+- **udp_log_control** (Gateway UDP Mirroring)
+  - **Scope**: Local gateway only.
+  - **Transport**: MQTT-only. Rejects USB serial admin execution with `mqtt_required`.
+  - **Schema**:
+    ```json
+    {
+      "cmd": "udp_log_control",
+      "enabled": true,
+      "host": "192.168.1.100",
+      "port": 5514,
+      "ttl_s": 300
+    }
+    ```
+- **remote_udp_log_control** (Remote UDP Mirroring)
+  - **Scope**: Targets a specific remote node address via the LoRa bridge.
+  - **Transport**: May be sent over USB serial or MQTT gateway command bridge.
+  - **Eligibility**: Requires the remote node to have active/confirmed Wi-Fi connectivity and a valid IP address stored in the gateway's peer cache. Rejects with `peer_wifi_unavailable` if ineligible.
+  - **Schema**:
+    ```json
+    {
+      "cmd": "remote_udp_log_control",
+      "address": 42,
+      "enabled": true,
+      "host": "192.168.1.100",
+      "port": 5514,
+      "ttl_s": 300
+    }
+    ```
+- **UdpLogControl Frame Layout (`'U'`)**:
+  - `relay_state`: Op code (`1` = set)
+  - `input_state`: Enabled status (`0` = disable, `1` = enable)
+  - `flags` / `temp_code`: 16-bit destination port (little-endian)
+  - `sensor_mask` / `sensor_digital0` / `sensor_analog0`: 32-bit TTL duration in seconds (little-endian)
+  - `unix_time_s`: 32-bit destination IPv4 host address (each byte represents an octet)
 
 

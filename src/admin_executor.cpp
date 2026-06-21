@@ -1467,6 +1467,96 @@ void AdminExecutor::handleCancelLoraInventory(JsonDocument &doc, ResponseWriter 
   sendOk(out, writer);
 }
 
+void AdminExecutor::handleUdpLogControl(JsonDocument &doc, ResponseWriter writer, bool isMqtt) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("udp_log_control", "auth_failed", id, writer);
+    return;
+  }
+  if (!isMqtt) {
+    sendError("udp_log_control", "mqtt_required", id, writer);
+    return;
+  }
+  const bool enabled = parseBoolField(doc["enabled"], true);
+  uint32_t ttlS = doc["ttl_s"] | 300UL;
+  if (ttlS > 3600UL)
+    ttlS = 3600UL;
+
+  IPAddress host;
+  const uint16_t port = static_cast<uint16_t>(doc["port"] | 5514);
+  const char *hostStr = doc["host"] | "";
+  if (enabled && (port == 0 || !host.fromString(hostStr))) {
+    sendError("udp_log_control", "invalid_target", id, writer);
+    return;
+  }
+
+  if (enabled) {
+    lrslog::setUdpMirror(host, port, ttlS * 1000UL);
+  } else {
+    lrslog::disableUdpMirror();
+  }
+
+  JsonDocument out;
+  out["cmd"] = "udp_log_control";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["enabled"] = enabled;
+  out["host"] = enabled ? host.toString() : "";
+  out["port"] = enabled ? port : 0;
+  out["ttl_s"] = enabled ? ttlS : 0;
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleRemoteUdpLogControl(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_udp_log_control", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_udp_log_control", "runtime_unavailable", id, writer);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | 0;
+  if (rawAddr < 1 || rawAddr > 254) {
+    sendError("remote_udp_log_control", "invalid_address", id, writer);
+    return;
+  }
+  const uint8_t addr = static_cast<uint8_t>(rawAddr);
+  const bool enabled = parseBoolField(doc["enabled"], true);
+  if (enabled && !sm_->isPeerUdpLogsEligible(addr)) {
+    sendError("remote_udp_log_control", "peer_wifi_unavailable", id, writer);
+    return;
+  }
+  uint32_t ttlS = doc["ttl_s"] | 300UL;
+  if (ttlS > 3600UL)
+    ttlS = 3600UL;
+
+  IPAddress host;
+  const uint16_t port = static_cast<uint16_t>(doc["port"] | 5514);
+  const char *hostStr = doc["host"] | "";
+  if (enabled && (port == 0 || !host.fromString(hostStr))) {
+    sendError("remote_udp_log_control", "invalid_target", id, writer);
+    return;
+  }
+
+  if (!sm_->mqttSetPeerUdpLogControl(addr, enabled, host, port, ttlS)) {
+    sendError("remote_udp_log_control", "send_failed", id, writer);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "remote_udp_log_control";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["addr"] = rawAddr;
+  out["enabled"] = enabled;
+  out["host"] = enabled ? host.toString() : "";
+  out["port"] = enabled ? port : 0;
+  out["ttl_s"] = enabled ? ttlS : 0;
+  sendOk(out, writer);
+}
+
 void AdminExecutor::handlePollDiagnostics(JsonDocument &doc, ResponseWriter writer) {
   const char *id = requestId(doc);
   if (!requireAdmin(doc)) {
@@ -2030,6 +2120,16 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
 
   if (strcmp(cmd, "poll_diagnostics") == 0) {
     handlePollDiagnostics(doc, writer);
+    return;
+  }
+
+  if (strcmp(cmd, "udp_log_control") == 0) {
+    handleUdpLogControl(doc, writer, isMqtt);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_udp_log_control") == 0) {
+    handleRemoteUdpLogControl(doc, writer);
     return;
   }
 

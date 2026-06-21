@@ -412,3 +412,13 @@ Apple signing/notarization policy for flasher macOS artifacts:
   - Submit the signed artifact with `xcrun notarytool submit --wait` when notarization is enabled.
   - Staple with `xcrun stapler staple`.
   - Verify with `spctl -a -vv` and `codesign --verify --deep --strict --verbose=2`.
+
+## UDP Diagnostics Mirroring
+
+For real-time log monitoring over IP networks:
+1. **Gateway UDP logging** is enabled via the `udp_log_control` MQTT command. It is strictly disabled over USB serial commands (`mqtt_required`) to preserve heap and command bandwidth on serial links.
+2. **Remote UDP logging** is triggered via a targeted LoRa bridge command `remote_udp_log_control` sent to the gateway.
+3. The gateway checks if the remote node is eligible (confirmed WiFi connection and active IP address cached in its peer table). If ineligible, the request is rejected with `peer_wifi_unavailable`.
+4. If eligible, the gateway transmits a `UdpLogControl` `'U'` message type frame over the LoRa bridge to the target node.
+5. The target node parses the frame, configures its local `lrslog` module with the designated host IP, port, and TTL, and mirrors its structured logs as UDP packets to the target listener.
+6. The desktop Flasher UI provides an explicit "UDP Listener" panel and action buttons to trigger gateway/remote mirroring and display incoming logs dynamically.

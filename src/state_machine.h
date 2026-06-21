@@ -193,6 +193,7 @@ class NodeStateMachine {
   bool peerByIndex(size_t index, PeerStatusSnapshot &out) const;
   bool peerByAddress(uint8_t address, PeerStatusSnapshot &out) const;
   bool isConfiguredOperationalPeer(uint8_t address) const;
+  bool isPeerUdpLogsEligible(uint8_t address) const;
   void mqttSetLocalRelay(uint8_t relayState);
   bool mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState);
   bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
@@ -201,6 +202,7 @@ class NodeStateMachine {
   uint32_t resolveChipIdForAddress(uint8_t address) const;
   uint32_t activePeerChipIdForAddress(uint8_t address) const;
   bool mqttSetPeerWifi(uint8_t dstAddress, bool enabled);
+  bool mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS);
   bool sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,
                               const char *sha256Hex);
   bool isOtaPullTxActive() const { return ota_pull_tx_.active; }
@@ -213,6 +215,8 @@ class NodeStateMachine {
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
   bool sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter);
+  bool hasPendingUdpLogControl() const;
+  bool consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src);
   bool consumePendingOtaPull(IPAddress &host, uint16_t &port, String &sha256Hex,
                              uint8_t &src);
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
@@ -510,6 +514,12 @@ class NodeStateMachine {
   bool wifi_control_pending_enabled_ = true;
   uint8_t wifi_control_pending_src_ = 0;
   uint32_t wifi_control_pending_counter_ = 0;
+  bool udp_log_control_pending_ = false;
+  bool udp_log_control_pending_enabled_ = false;
+  IPAddress udp_log_control_pending_host_;
+  uint16_t udp_log_control_pending_port_ = 0;
+  uint32_t udp_log_control_pending_ttl_s_ = 0;
+  uint8_t udp_log_control_pending_src_ = 0;
   struct OtaPullRxTransfer {
     bool active = false;
     uint8_t src = 0;
@@ -679,6 +689,7 @@ class NodeStateMachine {
   void freePollStorage();
   bool handleWifiProvisionFrame(const ProtocolMessage &msg);
   bool handleWifiControlFrame(const ProtocolMessage &msg);
+  bool handleUdpLogControlFrame(const ProtocolMessage &msg);
   bool handleOtaPullControlFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleRebootFrame(const ProtocolMessage &msg);

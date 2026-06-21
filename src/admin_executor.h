@@ -64,6 +64,8 @@ private:
   void handleRemoteFleetKeyChange(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter writer);
   void handleOtaPull(JsonDocument &doc, ResponseWriter writer);
+  void handleUdpLogControl(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
+  void handleRemoteUdpLogControl(JsonDocument &doc, ResponseWriter writer);
   void handleSetGatewayTargets(JsonDocument &doc, ResponseWriter writer);
   void handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter writer);
   void handleAdoptCandidate(JsonDocument &doc, ResponseWriter writer);

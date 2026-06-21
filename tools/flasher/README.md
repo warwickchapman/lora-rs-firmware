@@ -42,9 +42,10 @@ Fleet mode is a LoRa/MQTT admin helper:
 - can trigger a discovered remote's OTA pull over LoRa from the inventory `Flash` action; the gateway sends the temporary firmware server host/port plus SHA256, and the remote downloads `/firmware.bin` over WiFi only after receiving the digest
 - supports OTA firmware upgrades of the gateway itself over MQTT when the Fleet tab is configured in Remote MQTT Broker mode, routing the `ota_pull` command via secure MQTT admin command topics and verifying reconnection
 - shows the MQTT `ota_pull` payload shape for online devices; payloads must include both `url` and `sha256`
-- listens for UDP logs on fixed port `5514`
+- listens for UDP logs on fixed port `5514` with a dedicated Start/Stop UDP Listener workflow
+- supports enabling UDP log mirroring on the gateway over MQTT, and targeted remote nodes over serial or MQTT gateway command bridge
 
-The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can also be commanded through MQTT admin. A USB-connected gateway can forward `ota_pull` over LoRa only to remotes that already have WiFi connectivity; remotes without WiFi cannot pull firmware.
+The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can also be commanded through MQTT admin. A USB-connected gateway can forward `ota_pull` and `remote_udp_log_control` over LoRa only to remotes that already have WiFi connectivity/IP eligibility; remotes without WiFi cannot pull firmware or stream UDP logs. Gateway-side UDP logging control is strictly MQTT-only.
 
 ## Provision foundation
 
