@@ -81,6 +81,13 @@ Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
 - Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes.
 - ESP8266 provisioning supports up to 12 remotes per gateway, matching `Settings::kAddressListCap` and `LRS_MAX_PEERS`.
+- Discovery candidates and peer adoption:
+  - Candidates are discovered volatilely (capped at 12 entries) using incoming same-key unconfigured telemetry.
+  - Gateway probes discovery candidates in the `SeenAddressOnly` state with a rate-limited global gap (500ms) and per-candidate query interval (1500ms).
+  - Unresponsive candidates are transitioned to `Failed` after 4 failed query attempts, preventing head-of-line blocking for other candidates.
+  - Active `SeenAddressOnly` candidates do not have their probe attempt count reset by incoming telemetry packets, avoiding infinite probe loops.
+  - Candidates in the `Failed` state are automatically revived and transitioned back to `SeenAddressOnly` if new telemetry is received.
+  - Peer adoption is completed via explicit readdressing or reset commands. Readdress request retries are sent by the gateway every 1000ms up to 5 retries (6 attempts total) to accommodate ESP8266 remote flash write/erase stalls (~300ms) and close-proximity RF noise.
 - `identify` flashes the local LED with the Identify pattern for physical unit lookup.
 
 USB serial admin protocol:

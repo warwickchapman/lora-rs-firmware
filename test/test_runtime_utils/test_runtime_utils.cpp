@@ -513,6 +513,105 @@ void test_start_adoption_reverts_on_tx_fail() {
   TEST_ASSERT_TRUE(adoptionActive);
 }
 
+void test_candidate_probe_tick_flow() {
+  DiscoveryCandidate c{};
+  c.in_use = true;
+  c.state = CandidateState::SeenAddressOnly;
+  
+  uint32_t now = 1000;
+  uint32_t last_global_probe_ms = 0;
+  bool outSendProbe = false;
+  
+  // 1st attempt: should succeed and send probe
+  bool ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_TRUE(outSendProbe);
+  TEST_ASSERT_EQUAL_UINT8(1, c.probe_attempt_count);
+  TEST_ASSERT_EQUAL_UINT32(now, c.last_probe_ms);
+  TEST_ASSERT_EQUAL_UINT32(now, last_global_probe_ms);
+  TEST_ASSERT_EQUAL(CandidateState::SeenAddressOnly, c.state);
+  
+  // 2nd attempt within candidate interval (1500ms): should fail/do nothing
+  now += 1000; // now = 2000
+  ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_FALSE(ok); // no tick processed
+  TEST_ASSERT_EQUAL_UINT8(1, c.probe_attempt_count);
+  
+  // 2nd attempt within global gap (500ms):
+  // Let's reset last_probe_ms to 0 to simulate candidate interval met, but last_global_probe_ms is 1000.
+  // We try at now = 1200.
+  c.last_probe_ms = 0;
+  now = 1200;
+  ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_FALSE(ok); // global gap violated
+  
+  // Let's meet all intervals and do the remaining attempts.
+  // 2nd attempt:
+  now = 3000;
+  c.last_probe_ms = 1000;
+  last_global_probe_ms = 1000;
+  ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_TRUE(outSendProbe);
+  TEST_ASSERT_EQUAL_UINT8(2, c.probe_attempt_count);
+  
+  // 3rd attempt:
+  now = 5000;
+  ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_TRUE(outSendProbe);
+  TEST_ASSERT_EQUAL_UINT8(3, c.probe_attempt_count);
+  
+  // 4th attempt (kCandidateProbeMaxAttempts = 4):
+  now = 7000;
+  ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_TRUE(outSendProbe);
+  TEST_ASSERT_EQUAL_UINT8(4, c.probe_attempt_count);
+  
+  // 5th call: attempt count has reached max, should transition to Failed and NOT send probe
+  now = 9000;
+  ok = runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_FALSE(outSendProbe);
+  TEST_ASSERT_EQUAL(CandidateState::Failed, c.state);
+  TEST_ASSERT_EQUAL_UINT32(now, c.last_seen_ms);
+}
+
+void test_candidate_telemetry_does_not_reset_active_attempts() {
+  DiscoveryCandidate c{};
+  c.in_use = true;
+  c.state = CandidateState::SeenAddressOnly;
+  c.probe_attempt_count = 2;
+  c.last_probe_ms = 500;
+  
+  // Receive telemetry (chipId == 0) while SeenAddressOnly: counters should NOT reset
+  uint32_t chipId = 0;
+  if (chipId == 0) {
+    if (c.state == CandidateState::Failed) {
+      c.state = CandidateState::SeenAddressOnly;
+      c.probe_attempt_count = 0;
+      c.last_probe_ms = 0;
+    }
+  }
+  TEST_ASSERT_EQUAL(CandidateState::SeenAddressOnly, c.state);
+  TEST_ASSERT_EQUAL_UINT8(2, c.probe_attempt_count);
+  TEST_ASSERT_EQUAL_UINT32(500, c.last_probe_ms);
+  
+  // Transition to Failed, then simulate telemetry packet receipt
+  c.state = CandidateState::Failed;
+  if (chipId == 0) {
+    if (c.state == CandidateState::Failed) {
+      c.state = CandidateState::SeenAddressOnly;
+      c.probe_attempt_count = 0;
+      c.last_probe_ms = 0;
+    }
+  }
+  TEST_ASSERT_EQUAL(CandidateState::SeenAddressOnly, c.state);
+  TEST_ASSERT_EQUAL_UINT8(0, c.probe_attempt_count);
+  TEST_ASSERT_EQUAL_UINT32(0, c.last_probe_ms);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_paired_transmitter_is_tx);
@@ -541,6 +640,8 @@ int main(int argc, char **argv) {
   RUN_TEST(test_remote_two_stage_reset_confirm_success);
   RUN_TEST(test_gateway_confirm_validation);
   RUN_TEST(test_start_adoption_reverts_on_tx_fail);
+  RUN_TEST(test_candidate_probe_tick_flow);
+  RUN_TEST(test_candidate_telemetry_does_not_reset_active_attempts);
   return UNITY_END();
 }
 

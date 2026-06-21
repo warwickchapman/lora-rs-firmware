@@ -4600,6 +4600,12 @@ void NodeStateMachine::recordDiscoveryCandidate(uint8_t address, uint32_t chipId
       lrslog::event("candidate_identified", 0, address, chipId);
     } else if (chipId != 0) {
       c.reason = evaluateCandidateReason(address, chipId);
+    } else {
+      if (c.state == CandidateState::Failed) {
+        c.state = CandidateState::SeenAddressOnly;
+        c.probe_attempt_count = 0;
+        c.last_probe_ms = 0;
+      }
     }
     return;
   }
@@ -4758,8 +4764,8 @@ bool NodeStateMachine::consumePendingReaddress(uint8_t &outNewAddress, uint8_t &
 
 void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
   if (adoption_active_) {
-    if (static_cast<int32_t>(now - adoption_sent_ms_) >= 500) {
-      if (adoption_retry_count_ < 3) {
+    if (static_cast<int32_t>(now - adoption_sent_ms_) >= static_cast<int32_t>(kAdoptionRetryIntervalMs)) {
+      if (adoption_retry_count_ < kAdoptionMaxRetries) {
         adoption_retry_count_++;
         adoption_sent_ms_ = now;
         sendPeerReaddress(adoption_dst_addr_, adoption_chip_id_, adoption_address_, 0);
@@ -4777,18 +4783,24 @@ void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
     }
   }
   
-  static uint32_t last_candidate_probe_ms = 0;
-  if (static_cast<int32_t>(now - last_candidate_probe_ms) >= 5000) {
-    for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
-      DiscoveryCandidate &c = discovery_candidates_[i];
-      if (c.in_use && c.state == CandidateState::SeenAddressOnly) {
+  static uint32_t last_global_probe_ms = 0;
+  for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
+    DiscoveryCandidate &c = discovery_candidates_[i];
+    bool outSendProbe = false;
+    if (runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe)) {
+      if (outSendProbe) {
         uint32_t sentCounter = 0;
         if (sendMaintenanceRequest(c.address, false, &sentCounter)) {
-          last_candidate_probe_ms = now;
           lrslog::event("candidate_maint_probe", 0, sentCounter, c.address);
-          break;
+        } else {
+          if (c.probe_attempt_count > 0) c.probe_attempt_count--;
+          c.last_probe_ms = 0;
+          last_global_probe_ms = 0;
         }
+      } else {
+        lrslog::event("candidate_probe_failed", 0, 0, c.address);
       }
+      break;
     }
   }
 }

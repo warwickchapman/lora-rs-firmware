@@ -166,6 +166,8 @@ class NodeStateMachine {
   friend class AdminExecutor;
   static constexpr uint32_t kIdentifyLedDurationMs = 6000;
   static constexpr uint32_t kMaintenancePageGapMs = 200;
+  static constexpr uint32_t kAdoptionRetryIntervalMs = 1000;
+  static constexpr uint8_t kAdoptionMaxRetries = 5;
 
   bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);

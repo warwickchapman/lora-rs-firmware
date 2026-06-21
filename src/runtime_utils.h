@@ -43,6 +43,8 @@ struct DiscoveryCandidate {
   CandidateReason reason = CandidateReason::Ok;
   CandidateState state = CandidateState::SeenAddressOnly;
   bool in_use = false;
+  uint8_t probe_attempt_count = 0;
+  uint32_t last_probe_ms = 0;
 };
 
 enum class RemoteReaddressState : uint8_t {
@@ -114,6 +116,17 @@ bool transitionAdoptionStart(
     bool &adoptionActive,
     bool isReset,
     bool txSuccess
+);
+
+constexpr uint32_t kCandidateProbeGlobalGapMs = 500;
+constexpr uint32_t kCandidateProbeIntervalMs = 1500;
+constexpr uint8_t kCandidateProbeMaxAttempts = 4;
+
+bool tickCandidateProbe(
+    DiscoveryCandidate &c,
+    uint32_t now,
+    uint32_t &last_global_probe_ms,
+    bool &outSendProbe
 );
 
 } // namespace runtime_utils

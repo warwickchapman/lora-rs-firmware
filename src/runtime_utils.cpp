@@ -247,5 +247,35 @@ bool transitionAdoptionStart(
   return true;
 }
 
+bool tickCandidateProbe(
+    DiscoveryCandidate &c,
+    uint32_t now,
+    uint32_t &last_global_probe_ms,
+    bool &outSendProbe
+) {
+  if (!c.in_use || c.state != CandidateState::SeenAddressOnly) {
+    return false;
+  }
+  if (last_global_probe_ms != 0 && static_cast<int32_t>(now - last_global_probe_ms) < static_cast<int32_t>(kCandidateProbeGlobalGapMs)) {
+    return false;
+  }
+  if (c.last_probe_ms != 0 && static_cast<int32_t>(now - c.last_probe_ms) < static_cast<int32_t>(kCandidateProbeIntervalMs)) {
+    return false;
+  }
+
+  if (c.probe_attempt_count < kCandidateProbeMaxAttempts) {
+    c.probe_attempt_count++;
+    c.last_probe_ms = now;
+    last_global_probe_ms = now;
+    outSendProbe = true;
+    return true;
+  } else {
+    c.state = CandidateState::Failed;
+    c.last_seen_ms = now;
+    outSendProbe = false;
+    return true;
+  }
+}
+
 } // namespace runtime_utils
 
