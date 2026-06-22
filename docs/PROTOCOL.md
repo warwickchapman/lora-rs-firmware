@@ -171,8 +171,9 @@ Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`O
 
 Any future change that changes packet size, encrypted payload layout, replay behavior, addressing rules, or Fleet Key derivation is a breaking protocol change and should use a major version boundary or explicit protocol-version signaling.
 
-## Remote MQTT Administration Protocol (Phase 1)
+## Remote MQTT Administration Protocol (Phase 1 & 2)
 To allow remote gateway control over LAN or cloud networks:
+- **Local Broker (Phase 2)**: Flasher can host a local `rumqttd` broker. It runs in unauthenticated mode on port `1883` (or user-defined port if busy) persistently until Flasher exits. Gateways can be configured manually to point at this broker's LAN IP.
 - Durable Transport Specifications:
   - **Packet Size Ceiling**: A fixed maximum packet size of **1024 bytes** is established. All inbound commands and outbound responses must remain under this ceiling to fit PubSubClient's allocated heap buffer on the ESP8266.
   - **Compact Operational Config**: MQTT `get_config` and `set_config` operations must adhere to a compact/partial config schema containing only operational parameters (e.g. Wi-Fi SSID, MQTT host/port, sensor enable flags). Secrets, large arrays, and roll-keys are restricted from MQTT read/write. Full configuration read/writes remain serial-only.

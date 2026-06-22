@@ -127,6 +127,7 @@ pub fn run() {
         .manage(crate::commands::network::UdpMonitorState::default())
         .manage(crate::commands::network::FirmwareServerState::default())
         .manage(crate::services::mqtt::MqttService::default())
+        .manage(crate::services::mqtt_broker::MqttBrokerService::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             maybe_offer_move_to_applications(&app.handle().clone());
@@ -158,6 +159,8 @@ pub fn run() {
             crate::commands::mqtt::disconnect_mqtt_broker,
             crate::commands::mqtt::publish_mqtt_command,
             crate::commands::mqtt::get_mqtt_state,
+            crate::commands::mqtt_broker::start_local_mqtt_broker,
+            crate::commands::mqtt_broker::get_local_mqtt_broker_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

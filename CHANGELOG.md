@@ -4,6 +4,14 @@ All notable changes to this pre-release project are documented here in current o
 
 ## [Unreleased]
 
+### Flasher Features
+- Unified MQTT, Local Broker, and USB Serial transports into a session-wide **Gateway Session Connection** banner.
+- Integrated an embedded `rumqttd = "0.20"` MQTT broker inside the Tauri backend.
+- Added support for starting the local broker once per Flasher session on a user-specified port (defaulting to `1883`), including validation to prevent port conflicts.
+- Refactored Monitor, Settings, and Fleet tabs to consume the shared Gateway Session Connection state.
+- Exposed copyable gateway MQTT settings strings and LAN IP listing for easier manual client setup.
+
+
 ### Firmware Features
 - Added `SensorState::Waiting` (`"waiting"`) state to represent sensors that are detected but have not completed their first reading yet.
 - Removed `wifi_phy_mode` configuration setting and user-configurable PHY mode handling, defaulting entirely to the ESP8266 SDK's automatic mixed-mode (802.11n/b/g/n) negotiation for improved compatibility with modern enterprise and consumer APs.

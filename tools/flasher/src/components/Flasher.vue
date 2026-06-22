@@ -524,7 +524,18 @@ const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
 const networkStatusMessage = ref('Select a USB gateway to read its fleet cache.');
 const monitorStatusMessage = ref('Select a USB gateway and refresh monitor data.');
-const monitorTransport = ref<'serial' | 'mqtt'>('serial');
+const monitorTransport = computed<'serial' | 'mqtt'>(() => {
+  return sessionConnectionType.value === 'serial' ? 'serial' : 'mqtt';
+});
+
+// Unified session gateway connection state variables
+const sessionConnectionType = ref<'serial' | 'mqtt' | 'local_broker'>('serial');
+const localBrokerPort = ref(1883);
+const localBrokerRunning = ref(false);
+const localBrokerLans = ref<string[]>([]);
+const localBrokerError = ref('');
+const showSessionConfigPanel = ref(false);
+
 const monitorMqttHost = ref('venus.local');
 const monitorMqttPort = ref(1883);
 const monitorMqttUser = ref('');
@@ -543,7 +554,9 @@ const selectedMonitorDeviceAddress = ref<number | null>(null);
 const hasDiagnosticsData = computed(() => {
   return monitorFleetRows.value.some(device => device.heap_free !== undefined && device.heap_free !== null && device.heap_free !== 0);
 });
-const fleetTransport = ref<'serial' | 'mqtt'>('serial');
+const fleetTransport = computed<'serial' | 'mqtt'>(() => {
+  return sessionConnectionType.value === 'serial' ? 'serial' : 'mqtt';
+});
 const pairTransport = ref<'serial' | 'mqtt'>('serial');
 const pairGatewayLoaded = ref(false);
 const mqttGateways = ref<Record<string, any>>({});
@@ -560,7 +573,9 @@ const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const monitorAutoRefresh = ref(true);
 const gatewaySnapshotPauseCount = ref(0);
-const settingsTransport = ref<'serial' | 'mqtt' | 'lora'>('serial');
+const settingsTransport = computed<'serial' | 'mqtt' | 'lora'>(() => {
+  return sessionConnectionType.value === 'serial' ? 'serial' : 'mqtt';
+});
 const settingsTab = ref<SettingsTab>('general');
 const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const networkUdpTarget = ref('');
@@ -3052,7 +3067,7 @@ function toggleMonitorLoop() {
   });
 }
 
-async function toggleMonitorMqttConnection() {
+async function toggleMonitorMqttConnection(preserveSessionConnectionType = false) {
   if (monitorMqttConnected.value) {
     try {
       await invoke('disconnect_mqtt_broker');
@@ -3067,7 +3082,9 @@ async function toggleMonitorMqttConnection() {
     monitorMqttUser.value = monitorMqttDraftUser.value;
     monitorMqttPassword.value = monitorMqttDraftPassword.value;
     monitorMqttTopicRoot.value = monitorMqttDraftTopicRoot.value.trim() || 'lora';
-    monitorTransport.value = 'mqtt';
+    if (!preserveSessionConnectionType) {
+      sessionConnectionType.value = 'mqtt';
+    }
     
     try {
       await invoke('connect_mqtt_broker', {
@@ -3086,6 +3103,42 @@ async function toggleMonitorMqttConnection() {
     }
   }
   showMonitorMqttSettings.value = false;
+}
+
+const isLocalBrokerStarting = ref(false);
+
+async function startLocalMqttBroker() {
+  if (localBrokerRunning.value) return;
+  isLocalBrokerStarting.value = true;
+  localBrokerError.value = '';
+  try {
+    const lans = await invoke<string[]>('start_local_mqtt_broker', {
+      port: localBrokerPort.value
+    });
+    localBrokerLans.value = lans;
+    localBrokerRunning.value = true;
+    notify(`Local broker started on port ${localBrokerPort.value}`);
+  } catch (e) {
+    localBrokerError.value = String(e);
+    notify(`Failed to start local broker: ${e}`);
+  } finally {
+    isLocalBrokerStarting.value = false;
+  }
+}
+
+async function applyLocalBrokerToMqttConfig() {
+  monitorMqttDraftHost.value = '127.0.0.1';
+  monitorMqttDraftPort.value = localBrokerPort.value;
+  monitorMqttDraftUser.value = '';
+  monitorMqttDraftPassword.value = '';
+  monitorMqttDraftTopicRoot.value = 'lora';
+  
+  if (monitorMqttConnected.value) {
+    await invoke('disconnect_mqtt_broker');
+    monitorMqttConnected.value = false;
+  }
+  
+  await toggleMonitorMqttConnection(true);
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
@@ -6000,6 +6053,15 @@ onMounted(async () => {
   }).catch((e) => {
     console.error('Failed to get MQTT state:', e);
   });
+
+  invoke<number | null>('get_local_mqtt_broker_status').then((activePort) => {
+    if (activePort) {
+      localBrokerPort.value = activePort;
+      localBrokerRunning.value = true;
+    }
+  }).catch((e) => {
+    console.error('Failed to get local broker status:', e);
+  });
 });
 
 watch(fleetGatewayFlashPhase, (newPhase) => {
@@ -6127,7 +6189,79 @@ function toggleSelectAllBulkPorts() {
 </script>
 
 <template>
-  <div class="relative h-full flex flex-col">
+  <div class="relative h-full flex flex-col gap-3">
+    <!-- Session Gateway Connection Settings Banner -->
+    <div class="glass-card p-3 shrink-0 flex flex-wrap items-center justify-between gap-3 text-xs border border-slate-800/80 bg-slate-900/40 text-left">
+      <div class="flex items-center gap-3">
+        <span class="font-bold text-slate-300">Gateway Session:</span>
+        <select v-model="sessionConnectionType" class="glass-input h-8 appearance-none min-w-[10rem] py-0 px-2 text-xs">
+          <option value="serial">USB Serial Gateway</option>
+          <option value="mqtt">Remote MQTT Broker</option>
+          <option value="local_broker">Local MQTT Broker</option>
+        </select>
+        
+        <span v-if="sessionConnectionType === 'local_broker'" :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', localBrokerRunning ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300']">
+          Broker: {{ localBrokerRunning ? `Running (port ${localBrokerPort})` : 'Not running' }}
+        </span>
+
+        <span :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+          Client: {{ monitorMqttConnected ? 'Connected' : 'Offline' }}
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button v-if="sessionConnectionType === 'local_broker' && !localBrokerRunning" @click="startLocalMqttBroker" :disabled="isLocalBrokerStarting" class="primary-btn h-8 px-3 text-[11px] font-bold">
+          {{ isLocalBrokerStarting ? 'Starting...' : 'Start Local Broker' }}
+        </button>
+        <button @click="showSessionConfigPanel = !showSessionConfigPanel" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-[11px] font-bold">
+          Configure Session Connection
+        </button>
+      </div>
+    </div>
+
+    <!-- Dropdown Session Configuration Panel -->
+    <div v-if="showSessionConfigPanel" class="glass-card p-3 shrink-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-left border border-slate-800">
+      <div v-if="sessionConnectionType === 'local_broker'" class="flex flex-col gap-1.5 text-xs">
+        <label class="font-semibold text-slate-400">Local Port</label>
+        <input v-model.number="localBrokerPort" :disabled="localBrokerRunning" type="number" class="glass-input h-9 px-2 text-xs" />
+        <span class="text-[9px] text-slate-500">
+          {{ localBrokerRunning ? 'Port locked while running until Flasher exits.' : 'Default port is 1883.' }}
+        </span>
+        <span v-if="localBrokerError" class="text-[10px] text-rose-300 mt-1">
+          {{ localBrokerError }}
+        </span>
+      </div>
+
+      <div v-if="sessionConnectionType === 'local_broker'" class="flex flex-col gap-1.5 text-xs lg:col-span-2">
+        <label class="font-semibold text-slate-400">LAN Host Details (For manual gateway config)</label>
+        <div class="glass-input h-9 flex items-center px-2 text-slate-300 overflow-x-auto whitespace-nowrap custom-scrollbar">
+          IP: {{ localBrokerLans.join(' / ') || '127.0.0.1' }}
+        </div>
+        <div class="flex gap-2 mt-1">
+          <button @click="applyLocalBrokerToMqttConfig" :disabled="!localBrokerRunning" class="primary-btn h-7 px-2 text-[10px] whitespace-nowrap">
+            Connect Client to Local Broker
+          </button>
+          <button @click="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')" class="glass-input h-7 px-2 text-[10px] whitespace-nowrap">
+            Copy Config Settings
+          </button>
+        </div>
+      </div>
+
+      <div v-if="sessionConnectionType === 'mqtt'" class="flex flex-col gap-1.5 text-xs lg:col-span-2">
+        <label class="font-semibold text-slate-400">Remote MQTT Broker Settings</label>
+        <div class="grid grid-cols-3 gap-2">
+          <input v-model="monitorMqttDraftHost" placeholder="Host" class="glass-input h-8 px-2 text-xs" />
+          <input v-model.number="monitorMqttDraftPort" placeholder="Port" type="number" class="glass-input h-8 px-2 text-xs" />
+          <input v-model="monitorMqttDraftTopicRoot" placeholder="Topic Root" class="glass-input h-8 px-2 text-xs" />
+        </div>
+        <div class="flex gap-2 mt-1">
+          <button @click="toggleMonitorMqttConnection()" class="primary-btn h-7 px-2 text-[10px]">
+            {{ monitorMqttConnected ? 'Disconnect Client' : 'Connect Client' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
       <div v-if="activeMode !== 'network' && activeMode !== 'monitor'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
@@ -6980,10 +7114,10 @@ function toggleSelectAllBulkPorts() {
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Transport</label>
-              <select v-model="settingsTransport" class="glass-input h-9 appearance-none">
-                <option value="serial">Serial</option>
-                <option value="mqtt">MQTT</option>
-                <option value="lora" disabled>LoRa gateway later</option>
+              <select v-model="sessionConnectionType" class="glass-input h-9 appearance-none">
+                <option value="serial">USB Serial Gateway</option>
+                <option value="mqtt">Remote MQTT Broker</option>
+                <option value="local_broker">Local MQTT Broker</option>
               </select>
             </div>
             <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs min-w-0">
@@ -7719,9 +7853,10 @@ function toggleSelectAllBulkPorts() {
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Transport</label>
-              <select v-model="monitorTransport" class="glass-input h-9 appearance-none">
-                <option value="serial">Serial</option>
-                <option value="mqtt">MQTT</option>
+              <select v-model="sessionConnectionType" class="glass-input h-9 appearance-none">
+                <option value="serial">USB Serial Gateway</option>
+                <option value="mqtt">Remote MQTT Broker</option>
+                <option value="local_broker">Local MQTT Broker</option>
               </select>
             </div>
             <div class="flex flex-col justify-end">
@@ -7954,7 +8089,7 @@ function toggleSelectAllBulkPorts() {
             <div class="flex gap-2">
               <button @click="closeMonitorMqttSettings" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
               <button
-                @click="toggleMonitorMqttConnection"
+                @click="toggleMonitorMqttConnection()"
                 :disabled="!monitorMqttDraftHost"
                 class="primary-btn h-8 px-3 text-xs font-bold disabled:opacity-50"
               >
@@ -8018,9 +8153,10 @@ function toggleSelectAllBulkPorts() {
           <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Connection Mode</label>
-              <select v-model="fleetTransport" class="glass-input h-10 appearance-none">
+              <select v-model="sessionConnectionType" class="glass-input h-10 appearance-none">
                 <option value="serial">USB Serial Gateway</option>
                 <option value="mqtt">Remote MQTT Broker</option>
+                <option value="local_broker">Local MQTT Broker</option>
               </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">

@@ -7,3 +7,5 @@ pub mod monitor;
 pub mod network;
 pub mod easy_pair;
 pub mod mqtt;
+pub mod mqtt_broker;
+

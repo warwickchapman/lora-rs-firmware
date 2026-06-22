@@ -77,10 +77,13 @@ Monitor is for gateway diagnostics over USB serial.
   temperature, and tank telemetry when reported.
 - It can start temporary UDP logs for WiFi-connected devices.
 
-## MQTT
-MQTT is optional and requires STA WiFi.
+## Gateway Session Connection & Local Broker
+Transport communication across Fleet, Monitor, and Settings is unified under the global **Gateway Session Connection** banner at the top of the interface:
+- **USB Serial Gateway**: Direct USB-connected gateway node.
+- **Remote MQTT Broker**: Uses an external cloud or network MQTT broker.
+- **Local MQTT Broker**: Starts an embedded `rumqttd` broker inside Flasher. Default port is `1883`. Once started, it runs persistently until Flasher exits. You can copy host settings and manually write them to your gateway device over USB.
 
-Configure it in Flasher `Settings > MQTT`:
+Configure MQTT parameters under settings:
 - Enable MQTT client.
 - Set broker host, port, topic root, and credentials as needed.
 - Enable MQTT control only when the broker and ACLs are trusted for control traffic.
