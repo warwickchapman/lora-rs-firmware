@@ -147,6 +147,7 @@ pub fn run() {
             crate::commands::status::get_system_status,
             crate::commands::status::get_app_version,
             crate::commands::device::get_device_info,
+            crate::commands::device::derive_device_info_from_chip_id,
             crate::commands::monitor::toggle_serial_monitor,
             crate::commands::network::start_firmware_file_server,
             crate::commands::network::stop_firmware_file_server,

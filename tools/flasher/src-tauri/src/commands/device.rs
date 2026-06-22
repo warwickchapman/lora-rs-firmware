@@ -21,6 +21,12 @@ pub struct DeviceInfo {
 }
 
 #[tauri::command]
+pub async fn derive_device_info_from_chip_id(chip_id: String) -> Result<DeviceInfo, String> {
+    let chip_id = normalize_chip_id(&chip_id)?;
+    Ok(derive_device_info(&chip_id, ""))
+}
+
+#[tauri::command]
 pub async fn get_device_info(
     app: AppHandle,
     coordinator: State<'_, SerialPortCoordinator>,
@@ -67,18 +73,33 @@ pub async fn get_device_info(
         }
     };
 
-    // 3. Derive Info
-    let (local_addr, remote_addr) = derive_addresses(&chip_id);
-    
-    Ok(DeviceInfo {
-        chip_id: chip_id.clone(),
-        mac,
-        serial: derive_serial(&chip_id),
-        password: derive_password(&chip_id),
+    Ok(derive_device_info(&chip_id, &mac))
+}
+
+fn derive_device_info(chip_id: &str, mac: &str) -> DeviceInfo {
+    let (local_addr, remote_addr) = derive_addresses(chip_id);
+    DeviceInfo {
+        chip_id: chip_id.to_string(),
+        mac: mac.to_string(),
+        serial: derive_serial(chip_id),
+        password: derive_password(chip_id),
         local_addr,
         remote_addr,
         ssid: format!("lrs-{}", chip_id),
-    })
+    }
+}
+
+fn normalize_chip_id(raw: &str) -> Result<String, String> {
+    let clean = raw.trim()
+        .trim_start_matches("lrs-")
+        .trim_start_matches("LRS-")
+        .trim_start_matches("0x")
+        .trim_start_matches("0X")
+        .to_lowercase();
+    if clean.len() < 6 || clean.len() > 8 || !clean.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("chip_id must be 6-8 hex characters, optionally prefixed with lrs-".to_string());
+    }
+    Ok(clean)
 }
 
 fn parse_chip_id(output: &str) -> Result<String, String> {

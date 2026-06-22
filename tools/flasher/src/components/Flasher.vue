@@ -534,6 +534,8 @@ const localBrokerPort = ref(1883);
 const localBrokerRunning = ref(false);
 const localBrokerLans = ref<string[]>([]);
 const localBrokerError = ref('');
+const localBrokerClientMessage = ref('');
+const isLocalBrokerClientConnecting = ref(false);
 const showSessionConfigPanel = ref(false);
 
 const monitorMqttHost = ref('venus.local');
@@ -576,7 +578,32 @@ watch(selectedMqttGatewayChipId, (newVal) => {
     selectedMqttManualChipId.value = newVal;
     manualMqttGatewayError.value = '';
   }
+  if (newVal) {
+    ensureMqttGatewayDefaultState(newVal);
+  }
 });
+
+async function ensureMqttGatewayDefaultState(rawChipId: string | undefined | null) {
+  const chipId = normalizeChipId(rawChipId);
+  if (!/^[0-9a-f]{6,8}$/.test(chipId)) return;
+
+  const state = serialDeviceState(chipId);
+  if (!state) return;
+
+  const gw = mqttGateways.value[chipId];
+  const derived = await invoke<DeviceInfo>('derive_device_info_from_chip_id', { chipId });
+  const password = state.adminPassword || state.deviceInfo?.password || derived.password;
+
+  state.adminSupported = true;
+  state.adminPassword = state.adminPassword || password;
+  state.deviceInfo = {
+    ...derived,
+    mac: gw?.mac || state.deviceInfo?.mac || derived.mac,
+    serial: state.deviceInfo?.serial || derived.serial,
+    password,
+    ssid: gw?.sta_ssid || state.deviceInfo?.ssid || derived.ssid
+  };
+}
 
 // Normalization and validation function for manual entry
 function handleManualMqttGatewayInput(val: string) {
@@ -597,6 +624,7 @@ function handleManualMqttGatewayInput(val: string) {
     selectedMqttGatewayChipId.value = clean;
     selectedPort.value = clean;
     selectedMqttManualChipId.value = clean;
+    ensureMqttGatewayDefaultState(clean);
     manualMqttGatewayError.value = '';
   } else {
     manualMqttGatewayError.value = 'Must be of format "lrs-<6-8 hex>" or "<6-8 hex>"';
@@ -2508,15 +2536,11 @@ async function loadNetworkGateway() {
       const gw = mqttGateways.value[chipId];
       const state = serialDeviceState(chipId);
       if (state) {
-        state.adminSupported = true;
+        await ensureMqttGatewayDefaultState(chipId);
         state.deviceInfo = {
-          chip_id: chipId,
-          mac: gw?.mac || '',
-          serial: '',
-          password: state.adminPassword || '',
-          local_addr: 254,
-          remote_addr: 0,
-          ssid: gw?.sta_ssid || ''
+          ...state.deviceInfo!,
+          mac: gw?.mac || state.deviceInfo?.mac || '',
+          ssid: gw?.sta_ssid || state.deviceInfo?.ssid || ''
         };
       }
       await refreshGatewaySnapshot(chipId, false, 'fleet');
@@ -3152,6 +3176,7 @@ async function startLocalMqttBroker() {
   if (localBrokerRunning.value) return;
   isLocalBrokerStarting.value = true;
   localBrokerError.value = '';
+  localBrokerClientMessage.value = '';
   try {
     const lans = await invoke<string[]>('start_local_mqtt_broker', {
       port: localBrokerPort.value
@@ -3168,18 +3193,34 @@ async function startLocalMqttBroker() {
 }
 
 async function applyLocalBrokerToMqttConfig() {
+  if (!localBrokerRunning.value) return;
+  isLocalBrokerClientConnecting.value = true;
+  localBrokerClientMessage.value = `Connecting Flasher client to 127.0.0.1:${localBrokerPort.value}...`;
   monitorMqttDraftHost.value = '127.0.0.1';
   monitorMqttDraftPort.value = localBrokerPort.value;
   monitorMqttDraftUser.value = '';
   monitorMqttDraftPassword.value = '';
   monitorMqttDraftTopicRoot.value = 'lora';
-  
-  if (monitorMqttConnected.value) {
-    await invoke('disconnect_mqtt_broker');
-    monitorMqttConnected.value = false;
+
+  try {
+    if (monitorMqttConnected.value) {
+      await invoke('disconnect_mqtt_broker');
+      monitorMqttConnected.value = false;
+    }
+
+    await toggleMonitorMqttConnection(true);
+    if (monitorMqttConnected.value) {
+      localBrokerClientMessage.value = `Flasher client connected to local broker on 127.0.0.1:${localBrokerPort.value}.`;
+      notify('Flasher client connected to local broker.');
+    } else {
+      localBrokerClientMessage.value = 'Flasher client did not connect to the local broker.';
+    }
+  } catch (e) {
+    localBrokerClientMessage.value = `Flasher client connection failed: ${e}`;
+    notify(`Local broker client connection failed: ${e}`);
+  } finally {
+    isLocalBrokerClientConnecting.value = false;
   }
-  
-  await toggleMonitorMqttConnection(true);
 }
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
@@ -4568,15 +4609,11 @@ async function loadEasyPairGateway(isAuto = false) {
       const gw = mqttGateways.value[chipId];
       const state = serialDeviceState(chipId);
       if (state) {
-        state.adminSupported = true;
+        await ensureMqttGatewayDefaultState(chipId);
         state.deviceInfo = {
-          chip_id: chipId,
-          mac: gw?.mac || '',
-          serial: '',
-          password: state.adminPassword || '',
-          local_addr: 254,
-          remote_addr: 0,
-          ssid: gw?.sta_ssid || ''
+          ...state.deviceInfo!,
+          mac: gw?.mac || state.deviceInfo?.mac || '',
+          ssid: gw?.sta_ssid || state.deviceInfo?.ssid || ''
         };
       }
       await refreshGatewayStatusForPair();
@@ -5973,6 +6010,7 @@ onMounted(async () => {
     const payload = event.payload;
     mqttGateways.value[payload.chip_id] = payload;
     lastMqttDiscoveryMs.value[payload.chip_id] = Date.now();
+    ensureMqttGatewayDefaultState(payload.chip_id);
     if (!selectedMqttGatewayChipId.value) {
       selectedMqttGatewayChipId.value = payload.chip_id;
     }
@@ -6279,13 +6317,19 @@ function toggleSelectAllBulkPorts() {
           IP: {{ localBrokerLans.join(' / ') || '127.0.0.1' }}
         </div>
         <div class="flex gap-2 mt-1">
-          <button @click="applyLocalBrokerToMqttConfig" :disabled="!localBrokerRunning" class="primary-btn h-7 px-2 text-[10px] whitespace-nowrap">
-            Connect Client to Local Broker
+          <button @click="applyLocalBrokerToMqttConfig" :disabled="!localBrokerRunning || isLocalBrokerClientConnecting" class="primary-btn h-7 px-2 text-[10px] whitespace-nowrap disabled:opacity-60">
+            {{ isLocalBrokerClientConnecting ? 'Connecting...' : (monitorMqttConnected && monitorMqttHost === '127.0.0.1' && monitorMqttPort === localBrokerPort ? 'Client Connected' : 'Connect Client to Local Broker') }}
           </button>
           <button @click="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')" class="glass-input h-7 px-2 text-[10px] whitespace-nowrap">
             Copy Config Settings
           </button>
         </div>
+        <span
+          v-if="localBrokerClientMessage"
+          :class="['text-[10px]', monitorMqttConnected && monitorMqttHost === '127.0.0.1' && monitorMqttPort === localBrokerPort ? 'text-emerald-300' : 'text-slate-400']"
+        >
+          {{ localBrokerClientMessage }}
+        </span>
       </div>
 
       <div v-if="sessionConnectionType === 'mqtt'" class="flex flex-col gap-1.5 text-xs lg:col-span-2">
