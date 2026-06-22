@@ -7279,7 +7279,7 @@ function toggleSelectAllBulkPorts() {
                   <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
                   <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
                 </div>
-                <label class="self-center text-right font-semibold text-slate-300">WiFi admin</label>
+                <label class="self-center text-right font-semibold text-slate-300">WiFi Enabled</label>
                 <label class="flex items-center gap-2 text-slate-300">
                   <input v-model="serialAdminConfig.wifi_admin_enabled" type="checkbox" />
                   Enabled
