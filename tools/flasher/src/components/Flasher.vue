@@ -6213,14 +6213,14 @@ function toggleSelectAllBulkPorts() {
         <button v-if="sessionConnectionType === 'local_broker' && !localBrokerRunning" @click="startLocalMqttBroker" :disabled="isLocalBrokerStarting" class="primary-btn h-8 px-3 text-[11px] font-bold">
           {{ isLocalBrokerStarting ? 'Starting...' : 'Start Local Broker' }}
         </button>
-        <button @click="showSessionConfigPanel = !showSessionConfigPanel" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-[11px] font-bold">
+        <button v-if="sessionConnectionType !== 'serial'" @click="showSessionConfigPanel = !showSessionConfigPanel" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-[11px] font-bold">
           Configure Session Connection
         </button>
       </div>
     </div>
 
     <!-- Dropdown Session Configuration Panel -->
-    <div v-if="showSessionConfigPanel" class="glass-card p-3 shrink-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-left border border-slate-800">
+    <div v-if="showSessionConfigPanel && sessionConnectionType !== 'serial'" class="glass-card p-3 shrink-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-left border border-slate-800">
       <div v-if="sessionConnectionType === 'local_broker'" class="flex flex-col gap-1.5 text-xs">
         <label class="font-semibold text-slate-400">Local Port</label>
         <input v-model.number="localBrokerPort" :disabled="localBrokerRunning" type="number" class="glass-input h-9 px-2 text-xs" />
