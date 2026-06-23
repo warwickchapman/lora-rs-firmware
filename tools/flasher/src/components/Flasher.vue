@@ -7,6 +7,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
+const sessionConnectionState = defineModel<'active' | 'partial' | 'offline'>('sessionConnectionState', { default: 'offline' });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type SerialJobPriority = 'user' | 'background';
@@ -553,6 +554,39 @@ const isSessionConnected = computed(() => {
   }
   return false;
 });
+
+const computedSessionConnectionState = computed<'active' | 'partial' | 'offline'>(() => {
+  if (sessionConnectionType.value === 'serial') {
+    if (portGatewayReady(gatewaySelectedPort.value)) {
+      return 'active';
+    }
+    if (gatewaySelectedPort.value) {
+      return 'partial';
+    }
+    return 'offline';
+  }
+  if (sessionConnectionType.value === 'mqtt') {
+    if (monitorMqttConnected.value) {
+      return 'active';
+    }
+    return 'partial';
+  }
+  if (sessionConnectionType.value === 'local_broker') {
+    const isClientConnected = monitorMqttConnected.value && monitorMqttHost.value === '127.0.0.1' && monitorMqttPort.value === localBrokerPort.value;
+    if (localBrokerRunning.value && isClientConnected) {
+      return 'active';
+    }
+    if (localBrokerRunning.value || isLocalBrokerStarting.value || isLocalBrokerClientConnecting.value) {
+      return 'partial';
+    }
+    return 'offline';
+  }
+  return 'offline';
+});
+
+watch(computedSessionConnectionState, (newVal) => {
+  sessionConnectionState.value = newVal;
+}, { immediate: true });
 
 const monitorMqttHost = ref('venus.local');
 const monitorMqttPort = ref(1883);
