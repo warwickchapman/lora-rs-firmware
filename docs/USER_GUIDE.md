@@ -81,7 +81,11 @@ Monitor is for gateway diagnostics over USB serial.
 Transport communication across Fleet, Monitor, and Settings is unified under the global **Gateway Session Connection** banner at the top of the interface:
 - **USB Serial Gateway**: Direct USB-connected gateway node.
 - **Remote MQTT Broker**: Uses an external cloud or network MQTT broker.
-- **Local MQTT Broker**: Starts an embedded `rumqttd` broker inside Flasher. Default port is `1883`. Once started, it runs persistently until Flasher exits. You can copy host settings and manually write them to your gateway device over USB.
+- **Local MQTT Broker**: Starts an embedded `rumqttd` broker inside Flasher. Default port is `1883`. Selecting this option automatically starts the local broker (if not already running) and connects Flasher's MQTT client to it. Once started, the broker runs persistently until Flasher exits. If the default port is busy, the Configure Session Connection panel will automatically open to display the error, allowing you to select an alternative port before retrying. You can copy the host settings and manually write them to your gateway device over USB.
+
+> [!TIP]
+> **MQTT Explorer Troubleshooting**:
+> If you are using MQTT Explorer to connect to the local `rumqttd` broker, do not subscribe to wildcard topic patterns containing `$SYS` (e.g., remove `$SYS/#` from the default subscription list). Instead, subscribe explicitly to the root topic, e.g., `lora/#`.
 
 Configure MQTT parameters under settings:
 - Enable MQTT client.

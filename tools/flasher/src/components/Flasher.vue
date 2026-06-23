@@ -3239,6 +3239,28 @@ async function applyLocalBrokerToMqttConfig() {
   }
 }
 
+async function startAndConnectLocalBroker() {
+  if (isLocalBrokerStarting.value || isLocalBrokerClientConnecting.value) return;
+
+  if (!localBrokerRunning.value) {
+    await startLocalMqttBroker();
+  }
+
+  if (!localBrokerRunning.value) {
+    showSessionConfigPanel.value = true;
+    return;
+  }
+
+  const alreadyConnected =
+    monitorMqttConnected.value &&
+    monitorMqttHost.value === '127.0.0.1' &&
+    monitorMqttPort.value === localBrokerPort.value;
+
+  if (!alreadyConnected) {
+    await applyLocalBrokerToMqttConfig();
+  }
+}
+
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
   const port = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
   const state = serialDeviceState(port);
@@ -5806,6 +5828,12 @@ watch(flashSelectedPort, port => saveTabPort('serial', port));
 watch(monitorSelectedPort, port => saveTabPort('monitor', port));
 watch(settingsSelectedPort, port => saveTabPort('settings', port));
 
+watch(sessionConnectionType, async (newVal) => {
+  if (newVal === 'local_broker') {
+    await startAndConnectLocalBroker();
+  }
+});
+
 const handleWindowClick = () => {
   activeDropdownAddress.value = null;
 };
@@ -6305,9 +6333,6 @@ function toggleSelectAllBulkPorts() {
       </div>
 
       <div class="flex items-center gap-2">
-        <button v-if="sessionConnectionType === 'local_broker' && !localBrokerRunning" @click="startLocalMqttBroker" :disabled="isLocalBrokerStarting" class="primary-btn h-8 px-3 text-[11px] font-bold">
-          {{ isLocalBrokerStarting ? 'Starting...' : 'Start Local Broker' }}
-        </button>
         <button v-if="sessionConnectionType !== 'serial'" @click="showSessionConfigPanel = !showSessionConfigPanel" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-[11px] font-bold">
           Configure Session Connection
         </button>
@@ -6332,17 +6357,22 @@ function toggleSelectAllBulkPorts() {
         <div class="glass-input h-9 flex items-center px-2 text-slate-300 overflow-x-auto whitespace-nowrap custom-scrollbar">
           IP: {{ localBrokerLans.join(' / ') || '127.0.0.1' }}
         </div>
-        <div class="flex gap-2 mt-1">
-          <button @click="applyLocalBrokerToMqttConfig" :disabled="!localBrokerRunning || isLocalBrokerClientConnecting" class="primary-btn h-7 px-2 text-[10px] whitespace-nowrap disabled:opacity-60">
-            {{ isLocalBrokerClientConnecting ? 'Connecting...' : (monitorMqttConnected && monitorMqttHost === '127.0.0.1' && monitorMqttPort === localBrokerPort ? 'Client Connected' : 'Connect Client to Local Broker') }}
-          </button>
-          <button @click="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')" class="glass-input h-7 px-2 text-[10px] whitespace-nowrap">
-            Copy Config Settings
-          </button>
+        <div class="flex flex-col gap-1 mt-1">
+          <div class="flex gap-2">
+            <button v-if="!localBrokerRunning" @click="startAndConnectLocalBroker" :disabled="isLocalBrokerStarting || isLocalBrokerClientConnecting" class="primary-btn h-7 px-2 text-[10px] whitespace-nowrap disabled:opacity-60">
+              {{ isLocalBrokerStarting ? 'Starting...' : 'Retry Start/Connect' }}
+            </button>
+            <button @click="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')" class="glass-input h-7 px-2 text-[10px] whitespace-nowrap">
+              Copy Gateway MQTT Settings
+            </button>
+          </div>
+          <span class="text-[9px] text-slate-400 mt-1">
+            Paste into the gateway Settings over USB, or use these values when configuring MQTT manually.
+          </span>
         </div>
         <span
           v-if="localBrokerClientMessage"
-          :class="['text-[10px]', monitorMqttConnected && monitorMqttHost === '127.0.0.1' && monitorMqttPort === localBrokerPort ? 'text-emerald-300' : 'text-slate-400']"
+          :class="['text-[10px] mt-1', monitorMqttConnected && monitorMqttHost === '127.0.0.1' && monitorMqttPort === localBrokerPort ? 'text-emerald-300' : 'text-slate-400']"
         >
           {{ localBrokerClientMessage }}
         </span>

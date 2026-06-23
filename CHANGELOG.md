@@ -5,6 +5,9 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Flasher Features
+- Improved local broker UX: selecting "Local MQTT Broker" now automatically starts the broker (if not already running) and connects Flasher's MQTT client.
+- Redesigned "Configure Session Connection" as a troubleshooting and details-only panel with a "Retry Start/Connect" option on failure.
+- Renamed and enhanced "Copy Gateway MQTT Settings" to copy gateway-compatible settings with clear usage instructions.
 - Unified MQTT, Local Broker, and USB Serial transports into a session-wide **Gateway Session Connection** banner.
 - Integrated an embedded `rumqttd = "0.20"` MQTT broker inside the Tauri backend.
 - Added support for starting the local broker once per Flasher session on a user-specified port (defaulting to `1883`), including validation to prevent port conflicts.
