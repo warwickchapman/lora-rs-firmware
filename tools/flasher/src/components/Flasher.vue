@@ -7,6 +7,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
+const sessionConnected = defineModel<boolean>('sessionConnected', { default: false });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type SerialJobPriority = 'user' | 'background';
@@ -537,6 +538,26 @@ const localBrokerError = ref('');
 const localBrokerClientMessage = ref('');
 const isLocalBrokerClientConnecting = ref(false);
 const showSessionConfigPanel = ref(false);
+
+const isSessionConnected = computed(() => {
+  if (sessionConnectionType.value === 'serial') {
+    return !!gatewaySelectedPort.value;
+  }
+  if (sessionConnectionType.value === 'mqtt') {
+    return monitorMqttConnected.value;
+  }
+  if (sessionConnectionType.value === 'local_broker') {
+    return localBrokerRunning.value &&
+           monitorMqttConnected.value &&
+           monitorMqttHost.value === '127.0.0.1' &&
+           monitorMqttPort.value === localBrokerPort.value;
+  }
+  return false;
+});
+
+watch(isSessionConnected, (newVal) => {
+  sessionConnected.value = newVal;
+}, { immediate: true });
 
 const monitorMqttHost = ref('venus.local');
 const monitorMqttPort = ref(1883);
@@ -6323,11 +6344,7 @@ function toggleSelectAllBulkPorts() {
           <option value="local_broker">Local MQTT Broker</option>
         </select>
         
-        <span v-if="sessionConnectionType === 'local_broker'" :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', localBrokerRunning ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300']">
-          Broker: {{ localBrokerRunning ? `Running (port ${localBrokerPort})` : 'Not running' }}
-        </span>
-
-        <span :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+        <span v-if="sessionConnectionType === 'mqtt'" :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
           Client: {{ monitorMqttConnected ? 'Connected' : 'Offline' }}
         </span>
       </div>
@@ -6692,32 +6709,30 @@ function toggleSelectAllBulkPorts() {
                   <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
                 </button>
               </div>
-              <div v-else class="flex flex-col gap-1">
-                <div v-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1.5">
-                  <input
-                    v-model="selectedMqttManualChipId"
-                    @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
-                    placeholder="Enter manual gateway chip ID (e.g. 0030eb55)"
-                    class="glass-input h-10 px-2 text-xs font-mono"
-                  />
-                  <span class="text-[9px] text-slate-400">
-                    No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
-                  </span>
-                  <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
-                    {{ manualMqttGatewayError }}
-                  </span>
-                </div>
-                <select v-else v-model="selectedPort" class="glass-input h-10 flex-1 appearance-none">
-                  <option value="" disabled>Select MQTT gateway</option>
-                  <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
-                    {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
-                  </option>
-                  <!-- Keep manual selection visible when it is not in discovery list -->
-                  <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
-                    Manual: lrs-{{ selectedMqttGatewayChipId }}
-                  </option>
-                </select>
+              <div v-else-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1">
+                <input
+                  v-model="selectedMqttManualChipId"
+                  @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
+                  placeholder="Enter manual gateway chip ID (e.g. 0030eb55)"
+                  class="glass-input h-10 px-2 text-xs font-mono"
+                />
+                <span class="text-[9px] text-slate-400">
+                  No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
+                </span>
+                <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
+                  {{ manualMqttGatewayError }}
+                </span>
               </div>
+              <select v-else v-model="selectedPort" class="glass-input h-10 appearance-none">
+                <option value="" disabled>Select MQTT gateway</option>
+                <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
+                  {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
+                </option>
+                <!-- Keep manual selection visible when it is not in discovery list -->
+                <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
+                  Manual: lrs-{{ selectedMqttGatewayChipId }}
+                </option>
+              </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Scan count</label>
@@ -8332,38 +8347,36 @@ function toggleSelectAllBulkPorts() {
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">{{ fleetTransport === 'serial' ? 'USB gateway' : 'MQTT gateway' }}</label>
-              <select v-if="fleetTransport === 'serial'" v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
+              <select v-if="fleetTransport === 'serial'" v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 appearance-none disabled:opacity-60">
                 <option value="" disabled>Select USB gateway</option>
                 <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
                   {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
                 </option>
               </select>
-              <div v-else class="flex flex-col gap-1 w-full">
-                <div v-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1.5 w-full">
-                  <input
-                    v-model="selectedMqttManualChipId"
-                    @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
-                    placeholder="Enter manual gateway chip ID"
-                    class="glass-input h-10 px-2 text-xs font-mono w-full"
-                  />
-                  <span class="text-[9px] text-slate-400">
-                    No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
-                  </span>
-                  <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
-                    {{ manualMqttGatewayError }}
-                  </span>
-                </div>
-                <select v-else v-model="selectedMqttGatewayChipId" class="glass-input h-10 flex-1 appearance-none w-full">
-                  <option value="" disabled>Select MQTT gateway</option>
-                  <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
-                    {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
-                  </option>
-                  <!-- Keep manual selection visible when it is not in discovery list -->
-                  <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
-                    Manual: lrs-{{ selectedMqttGatewayChipId }}
-                  </option>
-                </select>
+              <div v-else-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1 w-full">
+                <input
+                  v-model="selectedMqttManualChipId"
+                  @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
+                  placeholder="Enter manual gateway chip ID"
+                  class="glass-input h-10 px-2 text-xs font-mono w-full"
+                />
+                <span class="text-[9px] text-slate-400">
+                  No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
+                </span>
+                <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
+                  {{ manualMqttGatewayError }}
+                </span>
               </div>
+              <select v-else v-model="selectedMqttGatewayChipId" class="glass-input h-10 appearance-none w-full">
+                <option value="" disabled>Select MQTT gateway</option>
+                <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
+                  {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
+                </option>
+                <!-- Keep manual selection visible when it is not in discovery list -->
+                <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
+                  Manual: lrs-{{ selectedMqttGatewayChipId }}
+                </option>
+              </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
               <label class="font-medium text-slate-400">Gateway admin password</label>

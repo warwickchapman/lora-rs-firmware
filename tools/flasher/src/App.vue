@@ -11,6 +11,7 @@ interface SystemStatus {
 }
 
 const status = ref<SystemStatus>({ ready: false, message: 'Checking System...' });
+const sessionConnected = ref(false);
 const appVersion = ref('');
 const isFullscreen = ref(true);
 const isTogglingWindowMode = ref(false);
@@ -243,9 +244,9 @@ watch(activeMode, (mode) => {
       </div>
       <div class="flex gap-2">
         <div :class="['glass-card h-8 px-2 flex items-center gap-2 text-sm transition-all',
-                     status.ready ? 'bg-cyan-500/10 border-cyan-500/30' : 'bg-red-500/10 border-red-500/20']"
-             :title="status.message">
-          <span :class="['w-2 h-2 rounded-full', status.ready ? 'bg-emerald-500' : 'bg-red-500 animate-pulse']"></span>
+                     sessionConnected ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/20']"
+             :title="sessionConnected ? 'Gateway Connected' : 'Gateway Offline'">
+          <span :class="['w-2 h-2 rounded-full', sessionConnected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse']"></span>
         </div>
         <button
           @click="toggleWindowMode"
@@ -278,9 +279,9 @@ watch(activeMode, (mode) => {
         </button>
       </div>
     </header>
-
+ 
     <main class="w-full flex-1 min-h-0">
-      <Flasher v-model:active-mode="activeMode" />
+      <Flasher v-model:active-mode="activeMode" v-model:session-connected="sessionConnected" />
     </main>
   </div>
 </template>
