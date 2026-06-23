@@ -60,6 +60,14 @@ struct FixedSettingString {
   bool operator==(const String &s) const { return s.equals(value); }
   bool operator!=(const String &s) const { return !s.equals(value); }
 #endif
+  template <size_t M>
+  bool operator==(const FixedSettingString<M> &other) const {
+    return strcmp(value, other.value) == 0;
+  }
+  template <size_t M>
+  bool operator!=(const FixedSettingString<M> &other) const {
+    return strcmp(value, other.value) != 0;
+  }
 
   void trim() {
     char *start = value;

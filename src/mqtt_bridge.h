@@ -39,10 +39,10 @@ class MqttBridge {
   char topic_base_[128]{};
 
   // Cached MQTT settings to detect changes since we point to a mutable ConfigStore settings reference
-  String cached_mqtt_host_;
-  String cached_mqtt_user_;
-  String cached_mqtt_password_;
-  String cached_mqtt_topic_root_;
+  FixedSettingString<65> cached_mqtt_host_;
+  FixedSettingString<65> cached_mqtt_user_;
+  FixedSettingString<65> cached_mqtt_password_;
+  FixedSettingString<65> cached_mqtt_topic_root_;
 
   NodeStateMachine *sm_ = nullptr;
   AdminExecutor *executor_ = nullptr;
