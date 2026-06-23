@@ -7,7 +7,6 @@ import { open } from '@tauri-apps/plugin-dialog';
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
-const sessionConnected = defineModel<boolean>('sessionConnected', { default: false });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type SerialJobPriority = 'user' | 'background';
@@ -541,7 +540,7 @@ const showSessionConfigPanel = ref(false);
 
 const isSessionConnected = computed(() => {
   if (sessionConnectionType.value === 'serial') {
-    return !!gatewaySelectedPort.value;
+    return portGatewayReady(gatewaySelectedPort.value);
   }
   if (sessionConnectionType.value === 'mqtt') {
     return monitorMqttConnected.value;
@@ -554,10 +553,6 @@ const isSessionConnected = computed(() => {
   }
   return false;
 });
-
-watch(isSessionConnected, (newVal) => {
-  sessionConnected.value = newVal;
-}, { immediate: true });
 
 const monitorMqttHost = ref('venus.local');
 const monitorMqttPort = ref(1883);
@@ -6346,6 +6341,12 @@ function toggleSelectAllBulkPorts() {
         
         <span v-if="sessionConnectionType === 'mqtt'" :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
           Client: {{ monitorMqttConnected ? 'Connected' : 'Offline' }}
+        </span>
+
+        <span :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold transition-all',
+                       isSessionConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-800 bg-slate-950/20 text-slate-400']">
+          <span :class="['w-1.5 h-1.5 rounded-full mr-1.5', isSessionConnected ? 'bg-emerald-500' : 'bg-slate-500']"></span>
+          Session: {{ isSessionConnected ? 'Active' : 'Offline' }}
         </span>
       </div>
 

@@ -243,6 +243,11 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   sm_ = sm;
   executor_ = executor;
 
+  cached_mqtt_host_ = cfg.mqtt_host;
+  cached_mqtt_user_ = cfg.mqtt_user;
+  cached_mqtt_password_ = cfg.mqtt_password;
+  cached_mqtt_topic_root_ = cfg.mqtt_topic_root;
+
   rebuildTopics();
 
   if (executor_ != nullptr) {
@@ -270,26 +275,30 @@ void MqttBridge::clearPeerRetained(uint8_t addr, uint32_t chipId) {
 }
 
 void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
-  const bool settings_valid = (settings_ != nullptr);
-  const bool host_changed = !settings_valid || (settings_->mqtt_host != cfg.mqtt_host);
-  const bool port_changed = !settings_valid || (runtime_.mqtt_port != cfg.mqtt_port);
-  const bool user_changed = !settings_valid || (settings_->mqtt_user != cfg.mqtt_user);
-  const bool pass_changed = !settings_valid || (settings_->mqtt_password != cfg.mqtt_password);
-  const bool root_changed = !settings_valid || (settings_->mqtt_topic_root != cfg.mqtt_topic_root);
-  const bool client_enabled_changed = !settings_valid || (runtime_.mqtt_client_enabled != cfg.mqtt_client_enabled);
-  const bool control_enabled_changed = !settings_valid || (runtime_.mqtt_control_enabled != cfg.mqtt_control_enabled);
-  const bool polling_changed = !settings_valid || (runtime_.tx_mqtt_remote_polling_enabled != cfg.tx_mqtt_remote_polling_enabled);
+  const bool host_changed = (cached_mqtt_host_ != cfg.mqtt_host);
+  const bool port_changed = (runtime_.mqtt_port != cfg.mqtt_port);
+  const bool user_changed = (cached_mqtt_user_ != cfg.mqtt_user);
+  const bool pass_changed = (cached_mqtt_password_ != cfg.mqtt_password);
+  const bool root_changed = (cached_mqtt_topic_root_ != cfg.mqtt_topic_root);
+  const bool client_enabled_changed = (runtime_.mqtt_client_enabled != cfg.mqtt_client_enabled);
+  const bool control_enabled_changed = (runtime_.mqtt_control_enabled != cfg.mqtt_control_enabled);
+  const bool polling_changed = (runtime_.tx_mqtt_remote_polling_enabled != cfg.tx_mqtt_remote_polling_enabled);
 
-  const bool mqtt_credentials_changed = host_changed || port_changed || user_changed || pass_changed ||
-                                        root_changed || client_enabled_changed || control_enabled_changed ||
-                                        polling_changed;
+  const bool mqtt_connection_settings_changed = host_changed || port_changed || user_changed || pass_changed ||
+                                                root_changed || client_enabled_changed || control_enabled_changed ||
+                                                polling_changed;
 
   settings_ = &cfg;
   refreshRuntimeCfg(cfg);
   chip_id_hex_ = chipIdHex;
   rebuildTopics();
 
-  if (mqtt_credentials_changed) {
+  cached_mqtt_host_ = cfg.mqtt_host;
+  cached_mqtt_user_ = cfg.mqtt_user;
+  cached_mqtt_password_ = cfg.mqtt_password;
+  cached_mqtt_topic_root_ = cfg.mqtt_topic_root;
+
+  if (mqtt_connection_settings_changed) {
     if (mqtt_client_.connected()) {
       mqtt_client_.disconnect();
     }
