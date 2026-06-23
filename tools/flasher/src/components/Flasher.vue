@@ -2475,12 +2475,28 @@ async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payloa
   if (!monitorMqttConnected.value) {
     throw new Error('MQTT broker is not connected. Connect in the Monitor tab first.');
   }
+
+  const normalizedChipId = normalizeChipId(chipId);
+  const envelopePayload = { ...payload };
+
+  if (envelopePayload.admin_password == null && envelopePayload.password == null) {
+    // Older UI state may be keyed by either bare chip ID or lrs-<chip ID>.
+    let password = adminPasswordForPort(normalizedChipId);
+    if (!password) {
+      password = adminPasswordForPort(`lrs-${normalizedChipId}`);
+    }
+    if (!password) {
+      throw new Error('Enter the gateway admin password');
+    }
+    envelopePayload.admin_password = password;
+  }
+
   const reqId = `req-${Math.random().toString(36).substring(2, 11)}`;
-  const topic = `${monitorMqttTopicRoot.value}/lrs-${chipId}/admin_command`;
+  const topic = `${monitorMqttTopicRoot.value}/lrs-${normalizedChipId}/admin_command`;
   const requestPayload = {
     id: reqId,
     cmd,
-    ...payload,
+    ...envelopePayload,
     ts: Math.floor(Date.now() / 1000),
     ttl_ms: timeoutMs
   };
