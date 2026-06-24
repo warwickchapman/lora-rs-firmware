@@ -913,13 +913,24 @@ void MqttBridge::publishStatus() {
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_hex")) publishRetainedTopic(topic, addrHex);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_dec")) publishRetainedTopic(topic, addrDec);
 
-        snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
-        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
-        const uint32_t ageS = (node.last_seen_ms > 0) ? (millis() - node.last_seen_ms) / 1000U : 0;
-        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(ageS));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, numBuf);
+        if (node.uplink_rssi == -127 || node.last_seen_ms == 0) {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, "");
+        } else {
+          snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
+        }
+
+        if (node.last_seen_ms == 0) {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, "");
+        } else {
+          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
+          const uint32_t ageS = (millis() - node.last_seen_ms) / 1000U;
+          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(ageS));
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, numBuf);
+        }
+
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_cmd_counter")) publishRetainedTopic(topic, numBuf);
         snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
@@ -928,15 +939,20 @@ void MqttBridge::publishStatus() {
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
 
-        if (!timedOut && node.maintenance_debug_known) {
+        if (!timedOut && node.last_seen_ms > 0 && node.maintenance_debug_known) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_free));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, numBuf);
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_max_block));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, numBuf);
           snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.heap_frag_pct));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, numBuf);
+        } else {
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, "");
         }
-        if (!timedOut && node.uptime_ms > 0) {
+
+        if (!timedOut && node.last_seen_ms > 0 && node.uptime_ms > 0) {
           snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, numBuf);
         } else {
@@ -947,7 +963,7 @@ void MqttBridge::publishStatus() {
         snprintf(numBuf, sizeof(numBuf), "%08lx", static_cast<unsigned long>(node.chip_id));
         if (buildPeerTopic(topic, sizeof(topic), addrSeg, "chip_id")) publishRetainedTopic(topic, numBuf);
 
-        if (node.fw_major != 0 || node.fw_minor != 0 || node.fw_patch != 0) {
+        if (node.last_seen_ms > 0 && (node.fw_major != 0 || node.fw_minor != 0 || node.fw_patch != 0)) {
           if (node.fw_build > 0) {
             snprintf(numBuf, sizeof(numBuf), "%u.%u.%u~%u", node.fw_major, node.fw_minor, node.fw_patch, node.fw_build);
           } else {
@@ -958,7 +974,7 @@ void MqttBridge::publishStatus() {
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, "");
         }
 
-        if (node.wifi_connected && node.ip[0] != 0) {
+        if (node.last_seen_ms > 0 && node.wifi_connected && node.ip[0] != 0) {
           snprintf(numBuf, sizeof(numBuf), "%u.%u.%u.%u", node.ip[0], node.ip[1], node.ip[2], node.ip[3]);
           if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, numBuf);
         } else {

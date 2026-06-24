@@ -73,6 +73,7 @@ All notable changes to this pre-release project are documented here in current o
 - Fix repeat-session provisioning failure on commissioned gateways. Discovery now enters a quiet coordinator mode, cancelling active scans, pending maintenance pages, group commands, and transient peer command retries/polls while preserving persistent peer identity caches. Normal operations are symmetrically restored via a centralized exit helper.
 
 ### MQTT Improvements
+- Tightened peer telemetry publishing semantics: publish last_seen_ms, last_seen_age_s, uplink_rssi_dbm, heap metrics, uptime, firmware version, and IP as blank values instead of default/zero placeholders when a peer has no live status yet.
 - Updated MQTT schema to publish normalized `sensor/<kind>/<instance>/value` and `sensor/<kind>/<instance>/state` topics.
 - Gateway now publishes an empty string `""` to clear retained `peers/<addr>/uptime_ms` topics when peer uptime is cleared or absent.
 - Removed legacy MQTT topic-clearing and boot-time Sweeper logic from the gateway firmware (`mqtt_bridge.cpp`/`mqtt_bridge.h`) to prevent empty legacy directories (`peer/0x01`, `peers/01`, `peers/0x01`, `peers/1`) from appearing in MQTT Explorer. Canonical `peers/<NN_lrs-chipid>/...` cleanup is preserved for explicit forget/remove actions.
