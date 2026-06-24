@@ -4011,21 +4011,22 @@ async function executeForgetRemote(device: LoraInventoryDevice) {
   }
   const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
   const confirmed = await confirmOperatorAction(
-    `Forget remote device ${deviceName}?\n\nThis will permanently delete its address and name pairing from the gateway configuration.`,
-    { confirmText: 'Forget device', danger: true }
+    `Unpair remote device ${deviceName} from Gateway?\n\nThis will permanently delete its address and name pairing from the gateway configuration.\n\nThe remote itself is not reset. It remains on this fleet key and may appear as a same-key adoption candidate.`,
+    { confirmText: 'Unpair from Gateway', danger: true }
   );
   if (!confirmed) return;
 
-  notify(`Forgetting remote ${deviceName}...`);
+  notify(`Unpairing remote ${deviceName}...`);
   try {
     await sendEasyPairCommandOnPort(port, 'forget_gateway_target', {
       admin_password: password,
       address: device.address
     });
-    notify(`Successfully forgot remote ${deviceName}`);
+    notify(`Successfully unpaired remote ${deviceName}`);
+    loraInventory.value = loraInventory.value.filter(d => d.address !== device.address);
     refreshLoraInventoryStatus(false);
   } catch (e) {
-    const msg = serialFeatureError(`Forget remote`, e);
+    const msg = serialFeatureError(`Unpair remote`, e);
     notify(msg);
   }
 }
@@ -4722,8 +4723,13 @@ async function loadEasyPairGateway(isAuto = false) {
             pairFleetKeySource.value = 'gateway';
             pushPairLog(`Retrieved commissioned fleet key from gateway.`);
           } else if (isCommissioned && isDefaultKey === false && !retrievedKey) {
-            pairFleetKeySource.value = 'manual';
-            pushPairLog('Gateway is commissioned but fleet key is hidden. Please input the fleet key to proceed.');
+            if (pairFleetKey.value) {
+              pairFleetKeySource.value = 'manual';
+              pushPairLog('Gateway is commissioned; MQTT does not return secrets, using the existing fleet key in the Provision form.');
+            } else {
+              pairFleetKeySource.value = 'manual';
+              pushPairLog('Gateway is commissioned but fleet key is hidden. Please input the fleet key to proceed.');
+            }
           } else if (!isCommissioned || isDefaultKey === true) {
             generatePairFleetKey(true);
             pairFleetKeySource.value = 'factory_generated';
@@ -6149,9 +6155,8 @@ onMounted(async () => {
     if (fleetTransport.value === 'mqtt' && payload.gateway_id === selectedMqttGatewayChipId.value) {
       let dev = loraInventory.value.find(d => d.address === payload.address);
       if (!dev) {
-        dev = { address: payload.address, selected: false };
-        loraInventory.value.push(dev);
-        loraInventory.value.sort((a, b) => a.address - b.address);
+        // Skip adding new items if dev does not already exist in MQTT mode.
+        return;
       }
       const val = payload.value;
       const f = payload.field;
@@ -6730,7 +6735,7 @@ function toggleSelectAllBulkPorts() {
               <label class="font-medium text-slate-400">Connection Mode</label>
               <select v-model="pairTransport" class="glass-input h-10 appearance-none">
                 <option value="serial">USB Serial Gateway</option>
-                <option value="mqtt">Remote MQTT Broker</option>
+                <option value="mqtt">MQTT</option>
               </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
@@ -8675,7 +8680,7 @@ function toggleSelectAllBulkPorts() {
                           @click="executeForgetRemote(device); activeDropdownAddress = null"
                           class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
                         >
-                          🗑️ Forget Device
+                          🗑️ Unpair from Gateway
                         </button>
                         <div class="h-[1px] bg-slate-800/80 my-1"></div>
                         <button
@@ -8719,7 +8724,7 @@ function toggleSelectAllBulkPorts() {
         <div v-if="loraCandidates.length > 0" class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h2 class="text-lg font-bold text-slate-300">Discovered Candidates</h2>
+              <h2 class="text-lg font-bold text-slate-300">Same-Key Adoption Candidates</h2>
               <div class="mt-1 text-xs text-slate-500">Unconfigured same-key remotes heard by the gateway.</div>
             </div>
             <div class="text-xs text-slate-500">{{ loraCandidates.length }} candidate{{ loraCandidates.length === 1 ? '' : 's' }} discovered</div>
@@ -8842,14 +8847,14 @@ function toggleSelectAllBulkPorts() {
           </div>
           
           <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
-            💡 Select which parts of the remote configuration to preserve during reset. Clearing both options returns the node to uncommissioned factory-default state.
+            💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it stays in this fleet. Unchecking it performs a full factory reset and removes the node from this fleet.
           </div>
 
           <div class="flex flex-col gap-3 py-1">
             <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-2.5 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
               <input v-model="factoryResetTargetModal.keep_shared_fleet_key" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-0 focus:ring-offset-0" />
               <div>
-                <div class="font-semibold text-slate-200">Keep Fleet Key</div>
+                <div class="font-semibold text-slate-200">Reset but keep in fleet</div>
                 <div class="text-[10px] text-slate-500 mt-0.5">Preserves pairing encryption keys to stay in this gateway's secure fleet.</div>
               </div>
             </label>

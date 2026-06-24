@@ -5,6 +5,12 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Flasher Features
+- Renamed the Provision connection option from "Remote MQTT Broker" to "MQTT".
+- Renamed "Forget device" context menu button to "Unpair from Gateway", updated confirmation dialogs, and renamed "Discovered Candidates" header to "Same-Key Adoption Candidates".
+- Filtered incoming telemetry in MQTT mode to prevent stale or retained MQTT messages from automatically generating non-existent remote rows in the configured devices list.
+- Configured the frontend inventory list to immediately remove rows upon successful unpair command executions.
+- Updated the targeted factory reset modal to clarify options between full decommissioning vs keeping the device in the gateway's secure fleet (renamed "Keep Fleet Key" to "Reset but keep in fleet").
+- Suppressed the fleet key configuration warning if the fleet key is already populated in the form during MQTT gateway load.
 - Improved local broker UX: selecting "Local MQTT Broker" now automatically starts the broker (if not already running) and connects Flasher's MQTT client.
 - Redesigned "Configure Session Connection" as a troubleshooting and details-only panel with a "Retry Start/Connect" option on failure.
 - Renamed and enhanced "Copy Gateway MQTT Settings" to copy gateway-compatible settings with clear usage instructions.
@@ -19,6 +25,9 @@ All notable changes to this pre-release project are documented here in current o
 
 
 ### Firmware Features
+- Enhanced `clearPeerRetainedTopics()` to clear both canonical address+chip and legacy address-only topic namespaces on the MQTT broker on unpair.
+- Added missing properties to the retained topic cleanup list (`fw_version`, `ip`, `power_save_listen_only`, `power_save_active`, and `chip_id`).
+- Loop clear all instances (0 to 5) for all supported sensor domains (`input`, `temperature`, and `tank_level`) under `/sensor/<kind>/<instance>/value` and `/sensor/<kind>/<instance>/state`.
 - Transitioned provisioning coordinator discovery to maximum capacity ("Max remotes") listen semantics instead of treating target count as an exact requirement.
 - Implemented a bounded deterministic discovery timing model defined as `10s + 2s * max_remotes` (capped at 45s maximum), preventing hangs or timeouts when fewer devices are powered.
 - Renamed the API parameter `expected_remotes` (or `expected_count`) to `max_remotes` across the admin executor dispatcher, executor status payloads, and state machine internals.

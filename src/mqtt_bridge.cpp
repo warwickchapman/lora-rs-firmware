@@ -645,18 +645,47 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
   const char *leaves[] = {
       "relay",           "input",              "ack_state",
       "addr_hex",        "addr_dec",
-      "uplink_rssi_dbm", "last_seen_ms",     "last_seen_age_s", "last_cmd_counter",
+      "uplink_rssi_dbm", "last_seen_ms",       "last_seen_age_s", "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "forget",           "poll_now",
-      "wifi",            "uptime_ms",        "heap_free",        "heap_max_block",
-      "heap_frag_pct",
+      "wifi",            "uptime_ms",          "heap_free",        "heap_max_block",
+      "heap_frag_pct",   "fw_version",         "ip",               "power_save_listen_only",
+      "power_save_active", "chip_id"
   };
 
+  char canonicalSeg[24];
+  char legacySeg[24];
+  bool hasCanonical = false;
   if (chipId != 0) {
-    char canonicalSeg[24];
-    if (formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId)) {
-      char topic[kMqttTopicBufBytes];
-      for (const char *leaf : leaves) {
-        if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, leaf)) {
+    hasCanonical = formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId);
+  }
+  snprintf(legacySeg, sizeof(legacySeg), "%02u", static_cast<unsigned>(addr));
+
+  const char *segments[2];
+  int segCount = 0;
+  if (hasCanonical) {
+    segments[segCount++] = canonicalSeg;
+  }
+  segments[segCount++] = legacySeg;
+
+  for (int s = 0; s < segCount; ++s) {
+    const char *seg = segments[s];
+    char topic[kMqttTopicBufBytes];
+    for (const char *leaf : leaves) {
+      if (buildPeerTopic(topic, sizeof(topic), seg, leaf)) {
+        mqtt_client_.publish(topic, "", true);
+      }
+    }
+    const char *sensorKinds[] = {"input", "temperature", "tank_level"};
+    for (const char *kind : sensorKinds) {
+      for (int inst = 0; inst <= 5; ++inst) {
+        char valSuffix[48];
+        snprintf(valSuffix, sizeof(valSuffix), "sensor/%s/%d/value", kind, inst);
+        char stateSuffix[48];
+        snprintf(stateSuffix, sizeof(stateSuffix), "sensor/%s/%d/state", kind, inst);
+        if (buildPeerTopic(topic, sizeof(topic), seg, valSuffix)) {
+          mqtt_client_.publish(topic, "", true);
+        }
+        if (buildPeerTopic(topic, sizeof(topic), seg, stateSuffix)) {
           mqtt_client_.publish(topic, "", true);
         }
       }
