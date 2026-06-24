@@ -4,8 +4,10 @@ Synchronize flasher package versions from the repo VERSION file.
 
 Targets:
 - tools/flasher/package.json
+- tools/flasher/package-lock.json
 - tools/flasher/src-tauri/tauri.conf.json
 - tools/flasher/src-tauri/Cargo.toml
+- tools/flasher/src-tauri/Cargo.lock
 """
 
 from __future__ import annotations
@@ -71,6 +73,17 @@ def update_cargo_toml(path: Path, version: str) -> None:
     path.write_text(text_new, encoding="utf-8")
 
 
+def update_cargo_lock(path: Path, version: str) -> None:
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    pattern = r'(?m)^(\[\[package\]\]\s*\nname\s*=\s*"thanda-lora-flasher"\s*\nversion\s*=\s*")[^"]*(")'
+    new_text, count = re.subn(pattern, rf'\g<1>{version}\g<2>', text)
+    if count != 1:
+        raise RuntimeError(f"Failed to update thanda-lora-flasher package in {path}")
+    path.write_text(new_text, encoding="utf-8")
+
+
 def read_package_json_version(path: Path) -> str:
     data = json.loads(path.read_text(encoding="utf-8"))
     return str(data.get("version", "")).strip()
@@ -89,6 +102,15 @@ def read_cargo_toml_version(path: Path) -> str:
     return match.group(1).strip()
 
 
+def read_cargo_lock_version(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    pattern = r'(?m)^\[\[package\]\]\s*\nname\s*=\s*"thanda-lora-flasher"\s*\nversion\s*=\s*"(.*?)"'
+    match = re.search(pattern, text)
+    if not match:
+        raise RuntimeError(f"Failed to find thanda-lora-flasher package in {path}")
+    return match.group(1).strip()
+
+
 def read_package_lock_version(path: Path) -> str:
     data = json.loads(path.read_text(encoding="utf-8"))
     return str(data.get("version", "")).strip()
@@ -101,6 +123,10 @@ def check_versions(repo_root: Path, display_version: str, package_version: str) 
         ("tauri.conf.json", read_tauri_conf_version(flasher_root / "src-tauri" / "tauri.conf.json"), package_version),
         ("Cargo.toml", read_cargo_toml_version(flasher_root / "src-tauri" / "Cargo.toml"), package_version),
     ]
+
+    cargo_lock_path = flasher_root / "src-tauri" / "Cargo.lock"
+    if cargo_lock_path.exists():
+        checks.append(("Cargo.lock", read_cargo_lock_version(cargo_lock_path), package_version))
 
     lock_path = flasher_root / "package-lock.json"
     if lock_path.exists():
@@ -165,6 +191,7 @@ def main() -> int:
     update_package_lock(flasher_root / "package-lock.json", package_version)
     update_tauri_conf(flasher_root / "src-tauri" / "tauri.conf.json", package_version)
     update_cargo_toml(flasher_root / "src-tauri" / "Cargo.toml", package_version)
+    update_cargo_lock(flasher_root / "src-tauri" / "Cargo.lock", package_version)
 
     print(
         f"Synchronized flasher versions: release={release_version}, "
