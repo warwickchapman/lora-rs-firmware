@@ -80,9 +80,9 @@ constexpr uint8_t kProvHwRevA1 = 0xA1;
 constexpr uint8_t kProvRoleTxFlag = 0x01;
 constexpr uint32_t kProvVerifyTimeoutMs = 4000;
 constexpr uint32_t kProvLateVerifyProbeTimeoutMs = 1500;
-constexpr uint32_t kProvDiscoverReplyBaseMs = 2000;
-constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 2200;
-constexpr uint32_t kProvDiscoverReplyWindowMaxMs = 30000;
+constexpr uint32_t kProvDiscoverReplyBaseMs = 10000;
+constexpr uint32_t kProvDiscoverReplyPerDeviceMs = 2000;
+constexpr uint32_t kProvDiscoverTotalWindowMaxMs = 45000;
 constexpr uint8_t kProvDiscoverBroadcastBurstCount = 2;
 constexpr uint32_t kProvDiscoverBroadcastGapMs = 150;
 constexpr uint8_t kProvMaxRetriesPerNode = 3;
@@ -2007,7 +2007,7 @@ void NodeStateMachine::exitProvisioningCoordinatorMode(ProvisioningSessionState 
   }
 }
 
-bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
+bool NodeStateMachine::provisioningStartDiscovery(uint16_t maxRemotes) {
   if (!runtime_.role_tx || radio_ == nullptr) {
     LRS_LOGW(API,
              "event=provisioning_start_reject reason=%s role_tx=%u radio=%u",
@@ -2016,9 +2016,9 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
              (radio_ != nullptr) ? 1U : 0U);
     return false;
   }
-  if (estimatedCount == 0) estimatedCount = 1;
-  if (estimatedCount > static_cast<uint16_t>(kMaxProvisioningDevices)) {
-    estimatedCount = static_cast<uint16_t>(kMaxProvisioningDevices);
+  if (maxRemotes == 0) maxRemotes = 1;
+  if (maxRemotes > static_cast<uint16_t>(kMaxProvisioningDevices)) {
+    maxRemotes = static_cast<uint16_t>(kMaxProvisioningDevices);
   }
   if (isDefaultFleetKey()) {
     LRS_LOGW(API, "event=provisioning_start_reject reason=default_fleet_key");
@@ -2030,17 +2030,14 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   prov_.state = ProvisioningSessionState::Discovering;
   prov_.session_nonce = static_cast<uint16_t>((millis() ^ last_counter_ ^ runtime_.local_address ^ random(1, 65535)) & 0xFFFFU);
   if (prov_.session_nonce == 0) prov_.session_nonce = 1;
-  prov_.estimated_count = estimatedCount;
+  prov_.max_remotes = maxRemotes;
   prov_.started_ms = millis();
   prov_.pause_normal_tx = true;
   prov_.discover_broadcast_window_ms =
       (kProvDiscoverBroadcastBurstCount > 1) ? ((kProvDiscoverBroadcastBurstCount - 1U) * kProvDiscoverBroadcastGapMs) : 0U;
-  prov_.discover_reply_window_ms = kProvDiscoverReplyBaseMs + (static_cast<uint32_t>(estimatedCount) * kProvDiscoverReplyPerDeviceMs);
-  if (prov_.discover_reply_window_ms > kProvDiscoverReplyWindowMaxMs) {
-    prov_.discover_reply_window_ms = kProvDiscoverReplyWindowMaxMs;
-  }
+  prov_.discover_reply_window_ms = kProvDiscoverReplyBaseMs + (static_cast<uint32_t>(maxRemotes) * kProvDiscoverReplyPerDeviceMs);
   prov_.phase_deadline_ms = prov_.started_ms + prov_.discover_broadcast_window_ms + prov_.discover_reply_window_ms;
-  const uint32_t cap = prov_.started_ms + 120000UL;
+  const uint32_t cap = prov_.started_ms + kProvDiscoverTotalWindowMaxMs;
   if (prov_.phase_deadline_ms > cap) prov_.phase_deadline_ms = cap;
   if (prov_.phase_deadline_ms <= prov_.started_ms) prov_.phase_deadline_ms = prov_.started_ms + 1000UL;
   uint32_t totalWindowMs = prov_.phase_deadline_ms - prov_.started_ms;
@@ -2058,8 +2055,8 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   prov_.next_discover_broadcast_ms = prov_.started_ms;
   if (!ensureProvisioningStorage()) {
     LRS_LOGW(API,
-             "event=provisioning_start_reject reason=oom_provisioning_storage estimated=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
-             static_cast<unsigned>(estimatedCount),
+             "event=provisioning_start_reject reason=oom_provisioning_storage max_remotes=%u heap_free=%lu heap_frag=%u max_free_block=%lu",
+             static_cast<unsigned>(maxRemotes),
              static_cast<unsigned long>(lrslog::heapFree()),
              static_cast<unsigned>(lrslog::heapFragPercent()),
              static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
@@ -2078,9 +2075,9 @@ bool NodeStateMachine::provisioningStartDiscovery(uint16_t estimatedCount) {
   for (size_t i = 0; i < kMaxPeers; ++i) {
     provisioned_addrs_[i] = ProvisionedAddressEntry{};
   }
-  addProvLog("Discovery started: nonce=%u count=%u", prov_.session_nonce, estimatedCount);
+  addProvLog("Discovery started: nonce=%u max_remotes=%u", prov_.session_nonce, maxRemotes);
 
-  lrslog::event("prov_discover_start", 0, prov_.session_nonce, estimatedCount);
+  lrslog::event("prov_discover_start", 0, prov_.session_nonce, maxRemotes);
   return true;
 }
 
@@ -2118,9 +2115,9 @@ void NodeStateMachine::provisioningCancel() {
       prov_device_count_ > 0) {
     recomputeProvisioningConflictsAndAssignments();
     LRS_LOGI(API,
-             "event=prov_discover_ready reason=operator_stop found=%u estimated=%u elapsed_ms=%lu",
+             "event=prov_discover_ready reason=operator_stop found=%u max_remotes=%u elapsed_ms=%lu",
              static_cast<unsigned>(prov_device_count_),
-             static_cast<unsigned>(prov_.estimated_count),
+             static_cast<unsigned>(prov_.max_remotes),
              static_cast<unsigned long>(millis() - prov_.started_ms));
     exitProvisioningCoordinatorMode(ProvisioningSessionState::Ready);
     return;
@@ -2136,7 +2133,7 @@ bool NodeStateMachine::provisioningSession(ProvisioningSessionSnapshot &out) con
   out.active = prov_.active;
   out.state = prov_.state;
   out.session_nonce = prov_.session_nonce;
-  out.estimated_count = prov_.estimated_count;
+  out.max_remotes = prov_.max_remotes;
   out.started_ms = prov_.started_ms;
   out.phase_deadline_ms = prov_.phase_deadline_ms;
   out.paused_normal_tx = prov_.pause_normal_tx;
@@ -4179,9 +4176,9 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       const uint32_t remainingMs =
           (static_cast<int32_t>(prov_.phase_deadline_ms - now) > 0) ? (prov_.phase_deadline_ms - now) : 0U;
       LRS_LOGI(API,
-               "event=prov_discover_watchdog state=discovering found=%u estimated=%u broadcasts_left=%u deadline_in_ms=%lu heap_free=%lu max_free_block=%lu",
+               "event=prov_discover_watchdog state=discovering found=%u max_remotes=%u broadcasts_left=%u deadline_in_ms=%lu heap_free=%lu max_free_block=%lu",
                static_cast<unsigned>(prov_device_count_),
-               static_cast<unsigned>(prov_.estimated_count),
+               static_cast<unsigned>(prov_.max_remotes),
                static_cast<unsigned>(prov_.discover_broadcast_remaining),
                static_cast<unsigned long>(remainingMs),
                static_cast<unsigned long>(lrslog::heapFree()),
@@ -4199,24 +4196,24 @@ void NodeStateMachine::tickProvisioningCoordinator(uint32_t now) {
       }
       return;
     }
-    if (prov_.estimated_count > 0 && prov_device_count_ >= static_cast<size_t>(prov_.estimated_count)) {
+    if (prov_.max_remotes > 0 && prov_device_count_ >= static_cast<size_t>(prov_.max_remotes)) {
       recomputeProvisioningConflictsAndAssignments();
       LRS_LOGI(API,
-               "event=prov_discover_ready reason=target_reached found=%u estimated=%u elapsed_ms=%lu",
+               "event=prov_discover_ready reason=target_reached found=%u max_remotes=%u elapsed_ms=%lu",
                static_cast<unsigned>(prov_device_count_),
-               static_cast<unsigned>(prov_.estimated_count),
+               static_cast<unsigned>(prov_.max_remotes),
                static_cast<unsigned long>(now - prov_.started_ms));
       addProvLog("Discovery completed (found %u, target reached)", prov_device_count_);
-      lrslog::event("prov_discover_done_target_reached", 0, prov_device_count_, prov_.estimated_count);
+      lrslog::event("prov_discover_done_target_reached", 0, prov_device_count_, prov_.max_remotes);
       exitProvisioningCoordinatorMode(ProvisioningSessionState::Ready);
       return;
     }
     if (static_cast<int32_t>(now - prov_.phase_deadline_ms) >= 0) {
       recomputeProvisioningConflictsAndAssignments();
       LRS_LOGI(API,
-               "event=prov_discover_ready reason=deadline found=%u estimated=%u elapsed_ms=%lu",
+               "event=prov_discover_ready reason=deadline found=%u max_remotes=%u elapsed_ms=%lu",
                static_cast<unsigned>(prov_device_count_),
-               static_cast<unsigned>(prov_.estimated_count),
+               static_cast<unsigned>(prov_.max_remotes),
                static_cast<unsigned long>(now - prov_.started_ms));
       addProvLog("Discovery completed (found %u, deadline reached)", prov_device_count_);
       exitProvisioningCoordinatorMode(ProvisioningSessionState::Ready);

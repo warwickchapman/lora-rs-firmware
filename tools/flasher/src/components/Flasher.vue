@@ -86,7 +86,7 @@ interface EasyPairStatus {
   session?: {
     active: boolean;
     state: string;
-    estimated_count: number;
+    max_remotes: number;
     discovered_count: number;
     selected_count: number;
     verified_count: number;
@@ -4809,8 +4809,8 @@ async function loadEasyPairGateway(isAuto = false) {
 
 
 async function runEasyPair() {
-  const expected = Math.max(1, Math.min(12, Number(pairExpectedCount.value) || 12));
-  pairExpectedCount.value = expected;
+  const maxRemotes = Math.max(1, Math.min(12, Number(pairExpectedCount.value) || 12));
+  pairExpectedCount.value = maxRemotes;
   isPairBusy.value = true;
   provisionCacheRefreshedChips.clear();
   processedEasyPairLogLines.value.clear();
@@ -4831,16 +4831,16 @@ async function runEasyPair() {
     await sendPairCommand('configure_gateway', {
       admin_password: password,
       fleet_passphrase: fleetKey,
-      expected_remotes: expected
+      max_remotes: maxRemotes
     }, 10000);
     pairFleetKeySource.value = 'gateway';
-    pushPairLog(`Gateway prepared. Scanning for ${expected} remote device${expected === 1 ? '' : 's'}...`);
+    pushPairLog(`Gateway prepared. Scanning for up to ${maxRemotes} remote device${maxRemotes === 1 ? '' : 's'}...`);
     await sendPairCommand('start_discovery', {
       admin_password: password,
-      expected_remotes: expected
+      max_remotes: maxRemotes
     }, 10000);
     startEasyPairStatusPolling();
-    await waitForEasyPairState(['ready', 'error'], 130000);
+    await waitForEasyPairState(['ready', 'error'], 150000);
     if (pairStatus.value?.session?.state === 'error') throw new Error('Discovery ended with an error');
     const found = pairStatus.value?.session?.discovered_count || 0;
     if (found === 0) throw new Error('No remote devices found');
@@ -4929,13 +4929,13 @@ async function startEasyPairDiscovery() {
     await sendPairCommand('configure_gateway', {
       admin_password: password,
       fleet_passphrase: fleetKey,
-      expected_remotes: pairExpectedCount.value
+      max_remotes: pairExpectedCount.value
     }, 10000);
     pairFleetKeySource.value = 'gateway';
     pushPairLog(`Gateway prepared. Scanning for up to ${pairExpectedCount.value} powered remote devices...`);
     await sendPairCommand('start_discovery', {
       admin_password: password,
-      expected_remotes: pairExpectedCount.value
+      max_remotes: pairExpectedCount.value
     }, 10000);
     startEasyPairStatusPolling();
     await refreshEasyPairStatus(true);
@@ -6678,7 +6678,9 @@ function toggleSelectAllBulkPorts() {
               <h2 class="text-base font-bold text-cyan-300">
                 Provision
               </h2>
-              <p class="mt-1 text-xs text-slate-400">Selected USB device becomes the LoRa gateway.</p>
+              <p class="mt-1 text-xs text-slate-400">
+                {{ pairTransport === 'serial' ? 'Selected USB device becomes the LoRa gateway.' : 'Discovered MQTT gateway will commission remote devices.' }}
+              </p>
             </div>
             <div class="flex items-center gap-2">
               <button
@@ -6770,9 +6772,9 @@ function toggleSelectAllBulkPorts() {
               </select>
             </div>
             <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Scan count</label>
+              <label class="font-medium text-slate-400">Max remotes</label>
               <input v-model.number="pairExpectedCount" class="glass-input h-10" type="number" min="1" max="12" />
-              <div class="text-[10px] text-slate-500">Powered factory/unprovisioned remotes to listen for in this scan.</div>
+              <div class="text-[10px] text-slate-500">Maximum powered factory/unprovisioned remotes to listen for in this scan.</div>
             </div>
           </div>
 
@@ -6900,7 +6902,7 @@ function toggleSelectAllBulkPorts() {
             </div>
             <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
               <div class="text-slate-500">Found</div>
-              <div class="font-mono text-slate-300">{{ pairDiscoveredDeviceCount }} / {{ pairStatus.session.estimated_count }}</div>
+              <div class="font-mono text-slate-300">{{ pairDiscoveredDeviceCount }} / {{ pairStatus.session.max_remotes }}</div>
             </div>
             <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
               <div class="text-slate-500">Verified</div>
@@ -6913,7 +6915,7 @@ function toggleSelectAllBulkPorts() {
           </div>
 
           <div v-if="!pairStatus?.devices?.length" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
-            Power the remote devices, then scan from the selected USB gateway.
+            {{ pairTransport === 'serial' ? 'Power the remote devices, then scan from the selected USB gateway.' : 'Power the remote devices, then scan from the selected MQTT gateway.' }}
           </div>
 
           <div v-else class="flex-1 min-h-0 overflow-auto custom-scrollbar pr-1">

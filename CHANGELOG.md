@@ -12,10 +12,16 @@ All notable changes to this pre-release project are documented here in current o
 - Integrated an embedded `rumqttd = "0.20"` MQTT broker inside the Tauri backend.
 - Added support for starting the local broker once per Flasher session on a user-specified port (defaulting to `1883`), including validation to prevent port conflicts.
 - Refactored Monitor, Settings, and Fleet tabs to consume the shared Gateway Session Connection state.
+- Renamed "Scan count" parameter to "Max remotes" in EasyPair/provisioning UI and command inputs.
+- Adjusted empty list placeholder text and main Provision tab descriptions to adapt dynamically to serial vs MQTT transport mode.
+- Increased EasyPair UI state-machine wait safety timeout from 130s to 150s.
 - Exposed copyable gateway MQTT settings strings and LAN IP listing for easier manual client setup.
 
 
 ### Firmware Features
+- Transitioned provisioning coordinator discovery to maximum capacity ("Max remotes") listen semantics instead of treating target count as an exact requirement.
+- Implemented a bounded deterministic discovery timing model defined as `10s + 2s * max_remotes` (capped at 45s maximum), preventing hangs or timeouts when fewer devices are powered.
+- Renamed the API parameter `expected_remotes` (or `expected_count`) to `max_remotes` across the admin executor dispatcher, executor status payloads, and state machine internals.
 - Added `SensorState::Waiting` (`"waiting"`) state to represent sensors that are detected but have not completed their first reading yet.
 - Removed `wifi_phy_mode` configuration setting and user-configurable PHY mode handling, defaulting entirely to the ESP8266 SDK's automatic mixed-mode (802.11n/b/g/n) negotiation for improved compatibility with modern enterprise and consumer APs.
 - Optimized heap usage and reduced heap pressure to prevent fragmentation on ESP8266:

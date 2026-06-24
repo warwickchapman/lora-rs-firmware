@@ -23,7 +23,7 @@ const char *cmdName(const JsonDocument &doc) {
 
 const char *requestId(const JsonDocument &doc) { return doc["id"] | ""; }
 
-uint8_t clampExpectedRemotes(int raw) {
+uint8_t clampMaxRemotes(int raw) {
   if (raw < 1)
     return 1;
   if (raw > static_cast<int>(Settings::kAddressListCap))
@@ -667,7 +667,7 @@ void AdminExecutor::buildProvisioningStatus(JsonDocument &doc) {
   s["active"] = sess.active;
   s["state"] = provisioningSessionStateText(sess.state);
   s["session_nonce"] = sess.session_nonce;
-  s["estimated_count"] = sess.estimated_count;
+  s["max_remotes"] = sess.max_remotes;
   s["started_ms"] = sess.started_ms;
   s["phase_deadline_ms"] = sess.phase_deadline_ms;
   s["paused_normal_tx"] = sess.paused_normal_tx;
@@ -936,8 +936,8 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
     return;
   }
 
-  const uint8_t expected =
-      clampExpectedRemotes(doc["expected_remotes"] | doc["expected_count"] | 1);
+  const uint8_t maxRemotes =
+      clampMaxRemotes(doc["max_remotes"] | 1);
   auto &cfg = config_->settings();
   if (cfg.commissioned && cfg.role_tx &&
       !isDefaultDeploymentKey(cfg.fleet_passphrase.c_str()) &&
@@ -984,7 +984,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
   if (id[0] != '\0')
     out["id"] = id;
   out["local_address"] = cfg.local_address;
-  out["expected_remotes"] = expected;
+  out["max_remotes"] = maxRemotes;
   out["paired_target_count"] = cfg.paired_target_count;
   out["preserved_targets"] = preserveTargets;
   sendOk(out, writer);
@@ -2184,10 +2184,9 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
       sendError(cmd, "auth_failed", id, writer);
       return;
     }
-    const uint8_t expected =
-        clampExpectedRemotes(doc["expected_remotes"] | doc["expected_count"] |
-                             Settings::kAddressListCap);
-    if (sm_ == nullptr || !sm_->provisioningStartDiscovery(expected)) {
+    const uint8_t maxRemotes =
+        clampMaxRemotes(doc["max_remotes"] | Settings::kAddressListCap);
+    if (sm_ == nullptr || !sm_->provisioningStartDiscovery(maxRemotes)) {
       sendError(cmd, "start_failed", id, writer);
       return;
     }
@@ -2195,7 +2194,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     out["cmd"] = cmd;
     if (id[0] != '\0')
       out["id"] = id;
-    out["expected_remotes"] = expected;
+    out["max_remotes"] = maxRemotes;
     sendOk(out, writer);
     return;
   }

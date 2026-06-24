@@ -17,7 +17,7 @@ Firmware USB serial admin protocol:
 - Flasher can trigger authenticated `factory_reset` with `keep_shared_fleet_key` and `keep_wifi_credentials` options, and can use authenticated `reboot` for local recovery/admin flows.
 - The selected USB-connected device can be configured as the TX/gateway with `configure_gateway`.
 - The gateway can then run LoRa discovery/provisioning through `start_discovery`, `provisioning_status`, `provision_all`, and `cancel_provisioning`.
-- `expected_remotes` is scan capacity only. `configure_gateway` must not leave speculative runtime targets behind.
+- `max_remotes` is scan capacity only. `configure_gateway` must not leave speculative runtime targets behind.
 - After provisioning, Flasher should call `set_gateway_targets` with verified remote addresses to add to the gateway's paired/known target list. The command merges by default so follow-up batches cannot erase existing remotes; callers must pass `replace: true` only for an intentional full target-list replacement.
 - Flasher can scan WiFi from the selected USB gateway with `wifi_scan`, save the gateway STA credentials with `configure_wifi`, and send the same credentials to remotes over LoRa with `provision_fleet_wifi`.
 - Flasher can call `identify` to flash the selected USB device LED with the same 3 fast flashes, pause, 3 fast flashes pattern shown in the desktop UI.

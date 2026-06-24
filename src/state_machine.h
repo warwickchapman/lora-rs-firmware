@@ -131,7 +131,7 @@ struct ProvisioningSessionSnapshot {
   bool active = false;
   ProvisioningSessionState state = ProvisioningSessionState::Idle;
   uint16_t session_nonce = 0;
-  uint16_t estimated_count = 0;
+  uint16_t max_remotes = 0;
   uint32_t started_ms = 0;
   uint32_t phase_deadline_ms = 0;
   bool paused_normal_tx = false;
@@ -610,7 +610,7 @@ class NodeStateMachine {
     bool active = false;
     ProvisioningSessionState state = ProvisioningSessionState::Idle;
     uint16_t session_nonce = 0;
-    uint16_t estimated_count = 0;
+    uint16_t max_remotes = 0;
     uint32_t started_ms = 0;
     uint32_t phase_deadline_ms = 0;
     bool pause_normal_tx = false;
