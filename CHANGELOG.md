@@ -5,8 +5,14 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Flasher Features
+- Monotonically serializes MQTT admin commands per gateway session using a Promise chain to prevent out-of-order execution and replay rejections.
+- Implemented automatic MQTT session establishment handshake (`admin_challenge`) and automatic one-time retry handling when sessions are invalid or expired.
+- Stripped Unix time `ts` and `ttl_ms` parameters from MQTT command payloads.
 - Renamed the Provision connection option from "Remote MQTT Broker" to "MQTT".
-- Renamed "Forget device" context menu button to "Unpair from Gateway", updated confirmation dialogs, and renamed "Discovered Candidates" header to "Same-Key Adoption Candidates".
+- Renamed "Forget device" context menu button to "Remove from Gateway", updated confirmation dialogs, and renamed "Discovered Candidates" header to "Same-Key Adoption Candidates".
+- Added `addr` and `remote_addr` fields to the Tauri Rust `MqttGatewayPayload` struct to ensure MQTT discovery details are correctly matching and parsed in the UI.
+- Extracts `chip_id` from the canonical peer topic segment format (e.g. `02_lrs-0048d1bb`) in the Tauri MQTT backend and emits it to the frontend.
+- Matches telemetry updates to seeded inventory rows using both `address` and `chip_id` (normalizing identities), surfacing address collisions as UI conflict warnings and blocking mismatched data merges.
 - Filtered incoming telemetry in MQTT mode to prevent stale or retained MQTT messages from automatically generating non-existent remote rows in the configured devices list.
 - Configured the frontend inventory list to immediately remove rows upon successful unpair command executions.
 - Updated the targeted factory reset modal to clarify options between full decommissioning vs keeping the device in the gateway's secure fleet (renamed "Keep Fleet Key" to "Reset but keep in fleet").
@@ -25,6 +31,13 @@ All notable changes to this pre-release project are documented here in current o
 
 
 ### Firmware Features
+- Aligned raw ESP chip ID mapping to a canonical 24-bit identity across serial and MQTT bridges, publishing and subscribing to topics under the `00xxxxxx` namespace.
+- Pruned all telemetry metrics from the `lora_inventory_status` response payload when requested over MQTT to ensure command responses contain only the authoritative seed list (`address` + `chip_id`) and fit comfortably within the 1024-byte MQTT packet client buffer ceiling. In addition, capped same-key discovery candidates to at most 4 entries, pruned candidate timestamps (`last_seen_ms`, `age_ms`), and exposed `candidate_total` and `candidate_truncated` to avoid silent UI blind spots.
+- Cleaned up old stale raw-ID MQTT discovery topics by publishing retained null payloads on connection.
+- Replaced Unix time/NTP synchronization validation for MQTT admin commands with a lightweight challenge-response session mechanism.
+- Added `admin_challenge` command to issue 5-minute sessions (tracked via local `millis()`), resetting sequence count.
+- Enforced strict sequence monotonicity (`seq > last_seq`) per gateway session to provide replay protection without external clocks.
+- Retired the circular duplicate request ID cache for MQTT command deduplication.
 - Enhanced `clearPeerRetainedTopics()` to clear both canonical address+chip and legacy address-only topic namespaces on the MQTT broker on unpair.
 - Added missing properties to the retained topic cleanup list (`fw_version`, `ip`, `power_save_listen_only`, `power_save_active`, and `chip_id`).
 - Loop clear all instances (0 to 5) for all supported sensor domains (`input`, `temperature`, and `tank_level`) under `/sensor/<kind>/<instance>/value` and `/sensor/<kind>/<instance>/state`.

@@ -548,32 +548,25 @@ bool AdminExecutor::begin(ConfigStore *config, NodeStateMachine *sm,
   config_ = config;
   sm_ = sm;
   on_apply_ = onApply;
-  cache_head_ = 0;
-  for (size_t i = 0; i < kMaxCachedRequestIds; ++i) {
-    cached_requests_[i].id = "";
-    cached_requests_[i].received_ms = 0;
-  }
+  mqtt_session_ = MqttSession{};
   return true;
 }
 
-bool AdminExecutor::isDuplicateRequest(const String &id) {
-  if (id.length() == 0) return false;
-  uint32_t now = millis();
-  for (size_t i = 0; i < kMaxCachedRequestIds; ++i) {
-    if (cached_requests_[i].id.equals(id)) {
-      if (now - cached_requests_[i].received_ms < 15000) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
+void AdminExecutor::handleAdminChallenge(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = doc["id"] | "";
+  uint32_t session_id = random(1, 0x7FFFFFFF);
+  mqtt_session_.session_id = session_id;
+  mqtt_session_.created_ms = millis();
+  mqtt_session_.last_seq = 0;
+  mqtt_session_.active = true;
 
-void AdminExecutor::cacheRequest(const String &id) {
-  if (id.length() == 0) return;
-  cached_requests_[cache_head_].id = id;
-  cached_requests_[cache_head_].received_ms = millis();
-  cache_head_ = (cache_head_ + 1) % kMaxCachedRequestIds;
+  JsonDocument out;
+  out["cmd"] = "admin_challenge";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["session_id"] = session_id;
+  out["expires_in_ms"] = 300000;
+  sendOk(out, writer);
 }
 
 void AdminExecutor::execute(const String &jsonCommand, ResponseWriter writer, bool isMqtt) {
@@ -588,40 +581,42 @@ void AdminExecutor::execute(const String &jsonCommand, ResponseWriter writer, bo
   const char *id = requestId(doc);
 
   if (isMqtt) {
-    if (id == nullptr || id[0] == '\0' || cmd == nullptr || cmd[0] == '\0' ||
-        doc["ts"].isNull() || doc["ttl_ms"].isNull() ||
-        (doc["admin_password"].isNull() && doc["password"].isNull())) {
+    if (id == nullptr || id[0] == '\0' || cmd == nullptr || cmd[0] == '\0') {
       sendError(cmd ? cmd : "unknown", "invalid_envelope", id ? id : nullptr, writer);
       return;
     }
 
-    if (!requireAdmin(doc)) {
-      sendError(cmd, "auth_failed", id, writer);
-      return;
-    }
-
-    if (sm_ != nullptr && sm_->sharedUnixTimeValid()) {
-      uint32_t ts = doc["ts"].as<uint32_t>();
-      uint32_t ttl = doc["ttl_ms"].as<uint32_t>();
-      uint32_t nowUnix = sm_->sharedUnixTime();
-      if (ts > nowUnix && (ts - nowUnix) > 60) {
-        sendError(cmd, "request_future", id, writer);
+    if (strcmp(cmd, "admin_challenge") != 0) {
+      if (doc["session_id"].isNull()) {
+        sendError(cmd, "admin_session_required", id, writer);
         return;
       }
-      if (nowUnix > ts) {
-        const uint64_t ageMs = static_cast<uint64_t>(nowUnix - ts) * 1000ULL;
-        const uint64_t allowedMs = static_cast<uint64_t>(ttl) + 15000ULL;
-        if (ageMs > allowedMs) {
-          sendError(cmd, "request_expired", id, writer);
-          return;
-        }
-      }
-    }
 
-    if (isDuplicateRequest(id)) {
-      return;
+      const uint32_t req_session_id = doc["session_id"].as<uint32_t>();
+      if (!mqtt_session_.active || mqtt_session_.session_id != req_session_id) {
+        sendError(cmd, "admin_session_invalid", id, writer);
+        return;
+      }
+
+      if (millis() - mqtt_session_.created_ms >= 300000UL) {
+        mqtt_session_.active = false;
+        sendError(cmd, "admin_session_expired", id, writer);
+        return;
+      }
+
+      if (doc["seq"].isNull()) {
+        sendError(cmd, "admin_sequence_replay", id, writer);
+        return;
+      }
+
+      const uint32_t seq = doc["seq"].as<uint32_t>();
+      if (seq <= mqtt_session_.last_seq) {
+        sendError(cmd, "admin_sequence_replay", id, writer);
+        return;
+      }
+
+      mqtt_session_.last_seq = seq;
     }
-    cacheRequest(id);
   }
 
   handleCommand(doc, writer, isMqtt);
@@ -1217,7 +1212,7 @@ void AdminExecutor::handleStartLoraInventory(JsonDocument &doc, ResponseWriter w
   sendOk(out, writer);
 }
 
-void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer) {
+void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer, bool isMqtt) {
   const char *id = requestId(doc);
   if (sm_ == nullptr) {
     sendError("lora_inventory_status", "runtime_unavailable", id, writer);
@@ -1292,6 +1287,16 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
 
     JsonObject row = devices.add<JsonObject>();
     row["address"] = addr;
+
+    if (isMqtt) {
+      if (hasCached && p.chip_id != 0) {
+        char chipBuf[9];
+        snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
+        row["chip_id"] = chipBuf;
+      }
+      continue;
+    }
+
     row["role"] = "remote";
     row["mode"] = "paired";
 
@@ -1406,7 +1411,11 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
 
   JsonArray candidates = out["candidates"].to<JsonArray>();
   size_t cCount = sm_->candidateCount();
+  size_t addedCount = 0;
   for (size_t i = 0; i < cCount; ++i) {
+    if (isMqtt && addedCount >= 4) {
+      break;
+    }
     DiscoveryCandidate c{};
     if (sm_->candidateByIndex(i, c)) {
       JsonObject row = candidates.add<JsonObject>();
@@ -1417,14 +1426,20 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
         row["chip_id"] = chipBuf;
       }
       row["rssi"] = c.rssi;
-      row["last_seen_ms"] = c.last_seen_ms;
-      if (c.last_seen_ms != 0) {
-        row["age_ms"] = now - c.last_seen_ms;
+      if (!isMqtt) {
+        row["last_seen_ms"] = c.last_seen_ms;
+        if (c.last_seen_ms != 0) {
+          row["age_ms"] = now - c.last_seen_ms;
+        }
       }
       row["reason"] = candidateReasonToString(c.reason);
       row["state"] = candidateStateToString(c.state);
+      addedCount++;
     }
   }
+
+  out["candidate_total"] = cCount;
+  out["candidate_truncated"] = isMqtt && (cCount > 4);
 
   if (sm_->isAdoptionActive()) {
     JsonObject adoptObj = out["adoption"].to<JsonObject>();
@@ -2022,6 +2037,11 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     return;
   }
 
+  if (strcmp(cmd, "admin_challenge") == 0) {
+    handleAdminChallenge(doc, writer);
+    return;
+  }
+
   if (strcmp(cmd, "hello") == 0) {
     JsonDocument out;
     out["cmd"] = cmd;
@@ -2109,7 +2129,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
   }
 
   if (strcmp(cmd, "lora_inventory_status") == 0) {
-    handleLoraInventoryStatus(doc, writer);
+    handleLoraInventoryStatus(doc, writer, isMqtt);
     return;
   }
 

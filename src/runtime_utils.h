@@ -57,6 +57,17 @@ enum class RemoteReaddressState : uint8_t {
 
 namespace runtime_utils {
 
+constexpr uint32_t kUnitTestChipId = 0x0048CB85UL;
+
+inline uint32_t canonicalEspChipId() {
+#if defined(UNIT_TEST)
+  return kUnitTestChipId;
+#else
+  return ESP.getChipId() & 0x00FFFFFFUL;
+#endif
+}
+
+
 
 #if !defined(UNIT_TEST)
 bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleTx);

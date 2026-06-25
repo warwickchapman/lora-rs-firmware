@@ -25,6 +25,7 @@ pub enum MqttConnectionState {
 pub struct MqttTelemetryPayload {
     pub gateway_id: String,
     pub address: u8,
+    pub chip_id: Option<String>,
     pub field: String,
     pub value: serde_json::Value,
 }
@@ -39,6 +40,8 @@ pub struct MqttGatewayPayload {
     pub sta_ssid: String,
     pub uptime_ms: u64,
     pub fw_version: String,
+    pub addr: u8,
+    pub remote_addr: u8,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -225,10 +228,16 @@ impl MqttService {
         if parts.len() >= 5 && parts[0] == topic_root && parts[2] == "peers" {
             let gateway_id = parts[1].trim_start_matches("lrs-").to_string();
             
-            // Extract peer address segment
+            // Extract peer address segment and optional chip_id
             let addr_seg = parts[3];
+            let mut chip_id = None;
             let address = if let Some(underscore_idx) = addr_seg.find('_') {
-                addr_seg[..underscore_idx].parse::<u8>().unwrap_or(0)
+                let addr_part = &addr_seg[..underscore_idx];
+                let rest = &addr_seg[underscore_idx + 1..];
+                if rest.starts_with("lrs-") {
+                    chip_id = Some(rest["lrs-".len()..].to_string());
+                }
+                addr_part.parse::<u8>().unwrap_or(0)
             } else {
                 addr_seg.parse::<u8>().unwrap_or(0)
             };
@@ -246,6 +255,7 @@ impl MqttService {
             let _ = app.emit("mqtt-telemetry-update", MqttTelemetryPayload {
                 gateway_id,
                 address,
+                chip_id,
                 field,
                 value: json_value,
             });

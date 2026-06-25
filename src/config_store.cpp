@@ -725,7 +725,7 @@ bool ConfigStore::consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &kee
 const String &ConfigStore::chipIdHex() const {
   if (chip_id_hex_cache_.length() == 0) {
     char chip[9];
-    snprintf(chip, sizeof(chip), "%08x", ESP.getChipId());
+    snprintf(chip, sizeof(chip), "%08x", runtime_utils::canonicalEspChipId());
     chip_id_hex_cache_ = chip;
   }
   return chip_id_hex_cache_;

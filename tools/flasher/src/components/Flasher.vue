@@ -149,6 +149,7 @@ interface LoraInventoryDevice {
   pending_power_save_tx_ms?: number;
   wifi_pending_offline?: boolean;
   power_save_deferred?: boolean;
+  conflict_chip_id?: string;
 }
 
 interface LoraAdoptionCandidate {
@@ -180,7 +181,9 @@ interface LoraInventoryStatus {
   };
   devices?: LoraInventoryDevice[];
   candidates?: LoraAdoptionCandidate[];
-  adoption?: LoraAdoptionStatus;
+  candidate_total?: number;
+  candidate_truncated?: boolean;
+  adoption?: LoraAdoptionStatus | null;
 }
 
 interface WifiNetwork {
@@ -702,6 +705,8 @@ const activeRemoteUdpAddress = ref<number | null>(null);
 const loraInventory = ref<LoraInventoryDevice[]>([]);
 const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
 const loraCandidates = ref<LoraAdoptionCandidate[]>([]);
+const candidateTotal = ref(0);
+const candidateTruncated = ref(false);
 const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
 const activeGatewaySessionKey = ref('');
 const processedEasyPairLogLines = ref<Set<string>>(new Set());
@@ -2305,6 +2310,12 @@ function normalizeChipId(raw: string | undefined | null): string {
   return String(raw || '').trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '').toLowerCase();
 }
 
+function canonicalChipId(raw: string | undefined | null): string {
+  const norm = normalizeChipId(raw);
+  if (!norm) return '';
+  return norm.length < 8 ? norm.padStart(8, '0') : norm;
+}
+
 function isMqttGatewayKey(key: string): boolean {
   if (!key) return false;
   return key.startsWith('lrs-') || /^[0-9a-fA-F]{6,8}$/.test(key);
@@ -2521,34 +2532,34 @@ interface PendingMqttRequest {
 }
 const pendingMqttRequests = new Map<string, PendingMqttRequest>();
 
-async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
-  if (!monitorMqttConnected.value) {
-    throw new Error('MQTT broker is not connected. Connect in the Monitor tab first.');
-  }
+interface MqttGatewaySession {
+  sessionId: number | null;
+  nextSeq: number;
+  promiseChain: Promise<any>;
+}
+const mqttGatewaySessions = new Map<string, MqttGatewaySession>();
 
+function getOrCreateMqttSession(chipId: string): MqttGatewaySession {
+  let sess = mqttGatewaySessions.get(chipId);
+  if (!sess) {
+    sess = {
+      sessionId: null,
+      nextSeq: 1,
+      promiseChain: Promise.resolve()
+    };
+    mqttGatewaySessions.set(chipId, sess);
+  }
+  return sess;
+}
+
+async function executeMqttCommandRaw<T = any>(chipId: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
   const normalizedChipId = normalizeChipId(chipId);
-  const envelopePayload = { ...payload };
-
-  if (envelopePayload.admin_password == null && envelopePayload.password == null) {
-    // Older UI state may be keyed by either bare chip ID or lrs-<chip ID>.
-    let password = adminPasswordForPort(normalizedChipId);
-    if (!password) {
-      password = adminPasswordForPort(`lrs-${normalizedChipId}`);
-    }
-    if (!password) {
-      throw new Error('Enter the gateway admin password');
-    }
-    envelopePayload.admin_password = password;
-  }
-
   const reqId = `req-${Math.random().toString(36).substring(2, 11)}`;
   const topic = `${monitorMqttTopicRoot.value}/lrs-${normalizedChipId}/admin_command`;
   const requestPayload = {
     id: reqId,
     cmd,
-    ...envelopePayload,
-    ts: Math.floor(Date.now() / 1000),
-    ttl_ms: timeoutMs
+    ...payload
   };
 
   return new Promise<T>(async (resolve, reject) => {
@@ -2570,6 +2581,79 @@ async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payloa
       reject(e);
     }
   });
+}
+
+async function refreshMqttSession(chipId: string): Promise<void> {
+  const sess = getOrCreateMqttSession(chipId);
+  const res = await executeMqttCommandRaw<{ session_id: number; expires_in_ms: number }>(chipId, 'admin_challenge', {}, 5000);
+  if (res && res.session_id !== undefined) {
+    sess.sessionId = res.session_id;
+    sess.nextSeq = 1;
+  } else {
+    throw new Error('Failed to establish MQTT admin session');
+  }
+}
+
+async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
+  if (!monitorMqttConnected.value) {
+    throw new Error('MQTT broker is not connected. Connect in the Monitor tab first.');
+  }
+
+  const normalizedChipId = normalizeChipId(chipId);
+
+  if (cmd === 'admin_challenge') {
+    const sess = getOrCreateMqttSession(normalizedChipId);
+    const p = sess.promiseChain.then(async () => {
+      return await executeMqttCommandRaw<T>(normalizedChipId, cmd, payload, timeoutMs);
+    });
+    sess.promiseChain = p.catch(() => {});
+    return p;
+  }
+
+  const envelopePayload = { ...payload };
+  if (envelopePayload.admin_password == null && envelopePayload.password == null) {
+    let password = adminPasswordForPort(normalizedChipId);
+    if (!password) {
+      password = adminPasswordForPort(`lrs-${normalizedChipId}`);
+    }
+    if (!password) {
+      throw new Error('Enter the gateway admin password');
+    }
+    envelopePayload.admin_password = password;
+  }
+
+  const sess = getOrCreateMqttSession(normalizedChipId);
+  const p = sess.promiseChain.then(async () => {
+    if (sess.sessionId === null) {
+      await refreshMqttSession(normalizedChipId);
+    }
+
+    const cmdPayload = {
+      ...envelopePayload,
+      session_id: sess.sessionId,
+      seq: sess.nextSeq++
+    };
+
+    try {
+      return await executeMqttCommandRaw<T>(normalizedChipId, cmd, cmdPayload, timeoutMs);
+    } catch (err: any) {
+      const errMsg = err?.message || '';
+      if (errMsg.includes('admin_session_expired') || errMsg.includes('admin_session_invalid')) {
+        console.warn(`MQTT session for ${normalizedChipId} expired/invalid. Refreshing and retrying...`);
+        await refreshMqttSession(normalizedChipId);
+        const retryPayload = {
+          ...envelopePayload,
+          session_id: sess.sessionId,
+          seq: sess.nextSeq++
+        };
+        return await executeMqttCommandRaw<T>(normalizedChipId, cmd, retryPayload, timeoutMs);
+      }
+      throw err;
+    }
+  });
+
+  sess.promiseChain = p.catch(() => {});
+  return p;
 }
 
 async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
@@ -3128,6 +3212,8 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       loraInventoryScan.value = inventory.scan || null;
       mergeLoraInventoryRows(inventory.devices || []);
       loraCandidates.value = inventory.candidates || [];
+      candidateTotal.value = inventory.candidate_total || (inventory.candidates || []).length;
+      candidateTruncated.value = !!inventory.candidate_truncated;
       loraAdoptionStatus.value = inventory.adoption || null;
       isLoraInventoryScanning.value = !!inventory.scan?.active;
       networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
@@ -4011,22 +4097,22 @@ async function executeForgetRemote(device: LoraInventoryDevice) {
   }
   const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
   const confirmed = await confirmOperatorAction(
-    `Unpair remote device ${deviceName} from Gateway?\n\nThis will permanently delete its address and name pairing from the gateway configuration.\n\nThe remote itself is not reset. It remains on this fleet key and may appear as a same-key adoption candidate.`,
-    { confirmText: 'Unpair from Gateway', danger: true }
+    `Remove remote device ${deviceName} from Gateway?\n\nThis will permanently delete its address and name pairing from the gateway configuration.\n\nThe remote itself is not reset. It remains on this fleet key and may appear as a same-key adoption candidate.`,
+    { confirmText: 'Remove from Gateway', danger: true }
   );
   if (!confirmed) return;
 
-  notify(`Unpairing remote ${deviceName}...`);
+  notify(`Removing remote ${deviceName}...`);
   try {
     await sendEasyPairCommandOnPort(port, 'forget_gateway_target', {
       admin_password: password,
       address: device.address
     });
-    notify(`Successfully unpaired remote ${deviceName}`);
+    notify(`Successfully removed remote ${deviceName}`);
     loraInventory.value = loraInventory.value.filter(d => d.address !== device.address);
     refreshLoraInventoryStatus(false);
   } catch (e) {
-    const msg = serialFeatureError(`Unpair remote`, e);
+    const msg = serialFeatureError(`Remove remote`, e);
     notify(msg);
   }
 }
@@ -5154,7 +5240,8 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
   }
   state.adminSupported = true;
 
-  if (port && port === gatewaySelectedPort.value) {
+  const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  if (port && port === targetPort) {
     const sessionKey = `${out.chip_id || ''}:${out.commissioned === true}:${out.fleet_passphrase_default === true}:${out.role_tx === true}:${out.local_address || 0}`;
     if (activeGatewaySessionKey.value && activeGatewaySessionKey.value !== sessionKey) {
       clearFleetGatewayCache();
@@ -6158,6 +6245,24 @@ onMounted(async () => {
         // Skip adding new items if dev does not already exist in MQTT mode.
         return;
       }
+
+      if (payload.chip_id) {
+        const payloadCanonical = canonicalChipId(payload.chip_id);
+        if (dev.chip_id) {
+          const devCanonical = canonicalChipId(dev.chip_id);
+          if (payloadCanonical !== devCanonical) {
+            dev.conflict_chip_id = payload.chip_id;
+            return; // Block decoration of mismatched telemetry
+          } else {
+            // Clear conflict if it matches the current expected chip ID
+            dev.conflict_chip_id = undefined;
+          }
+        } else {
+          // Seed row had no chip ID, associate it now
+          dev.chip_id = payload.chip_id;
+        }
+      }
+
       const val = payload.value;
       const f = payload.field;
       if (f === 'relay') dev.relay_state = (val === '1' || val === 1) ? 1 : 0;
@@ -6167,7 +6272,18 @@ onMounted(async () => {
       }
       else if (f === 'rssi' || f === 'uplink_rssi_dbm') dev.rssi = Number(val);
       else if (f === 'fw_version') dev.fw_version = String(val);
-      else if (f === 'chip_id') dev.chip_id = String(val);
+      else if (f === 'chip_id') {
+        const canonicalVal = canonicalChipId(String(val));
+        if (dev.chip_id) {
+          const devCanonical = canonicalChipId(dev.chip_id);
+          if (canonicalVal !== devCanonical) {
+            dev.conflict_chip_id = String(val);
+            return;
+          }
+        } else {
+          dev.chip_id = String(val);
+        }
+      }
       else if (f === 'uptime_ms') dev.uptime_ms = Number(val);
       else if (f === 'role') dev.role = String(val);
       else if (f === 'mode') dev.mode = String(val);
@@ -8554,7 +8670,9 @@ function toggleSelectAllBulkPorts() {
               </thead>
               <tbody>
                 <tr v-if="loraInventory.length === 0">
-                  <td :colspan="hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">Select a USB gateway to read its peer cache, or Scan to probe remotes.</td>
+                  <td :colspan="hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">
+                    {{ fleetTransport === 'mqtt' ? 'Select an MQTT gateway to read its peer cache, or Scan to probe remotes.' : 'Select a USB gateway to read its peer cache, or Scan to probe remotes.' }}
+                  </td>
                 </tr>
                 <tr
                   v-for="device in loraInventory"
@@ -8567,7 +8685,16 @@ function toggleSelectAllBulkPorts() {
                       {{ device.address }}
                     </span>
                   </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.chip_id ? lrsDeviceName(device.chip_id) : '-' }}</td>
+                  <td class="px-2 py-1.5 font-mono text-slate-300">
+                    <div>{{ device.chip_id ? lrsDeviceName(device.chip_id) : '-' }}</div>
+                    <div
+                      v-if="device.conflict_chip_id"
+                      class="mt-1 text-[9px] font-bold text-rose-400 bg-rose-950/40 border border-rose-500/20 rounded px-1.5 py-0.5 inline-block select-none animate-pulse"
+                      :title="`Telemetry from chip lrs-${device.conflict_chip_id} rejected due to address collision`"
+                    >
+                      ⚠️ Address conflict
+                    </div>
+                  </td>
                   <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : '-' }}</td>
                   <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
                   <td class="px-2 py-1.5">
@@ -8680,7 +8807,7 @@ function toggleSelectAllBulkPorts() {
                           @click="executeForgetRemote(device); activeDropdownAddress = null"
                           class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
                         >
-                          🗑️ Unpair from Gateway
+                          🗑️ Remove from Gateway
                         </button>
                         <div class="h-[1px] bg-slate-800/80 my-1"></div>
                         <button
@@ -8727,7 +8854,10 @@ function toggleSelectAllBulkPorts() {
               <h2 class="text-lg font-bold text-slate-300">Same-Key Adoption Candidates</h2>
               <div class="mt-1 text-xs text-slate-500">Unconfigured same-key remotes heard by the gateway.</div>
             </div>
-            <div class="text-xs text-slate-500">{{ loraCandidates.length }} candidate{{ loraCandidates.length === 1 ? '' : 's' }} discovered</div>
+            <div class="text-xs text-slate-500">
+              <span v-if="candidateTruncated">Showing {{ loraCandidates.length }} of {{ candidateTotal }} candidates</span>
+              <span v-else>{{ loraCandidates.length }} candidate{{ loraCandidates.length === 1 ? '' : 's' }} discovered</span>
+            </div>
           </div>
           
           <div class="overflow-auto custom-scrollbar rounded-md border border-slate-800 max-h-64">

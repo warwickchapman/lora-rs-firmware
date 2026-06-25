@@ -9,6 +9,7 @@
 #include "logger.h"
 #include "ota_pull.h"
 #include "state_machine.h"
+#include "runtime_utils.h"
 
 namespace {
 constexpr uint32_t kPublishIntervalMs = 10000;
@@ -747,6 +748,13 @@ bool MqttBridge::connectIfNeeded() {
     lrslog::event("mqtt_connected", 0, 0, 0);
   }
   publishDiscovery();
+#if !defined(UNIT_TEST)
+  if (ESP.getChipId() != runtime_utils::canonicalEspChipId()) {
+    char old_topic[192];
+    snprintf(old_topic, sizeof(old_topic), "%s/discovery/lrs-%08x", settings_->mqtt_topic_root.c_str(), ESP.getChipId());
+    mqtt_client_.publish(old_topic, "", true);
+  }
+#endif
   char ota_status_topic[160];
   snprintf(ota_status_topic, sizeof(ota_status_topic), "%s/ota_status", topic_base_);
   mqtt_client_.publish(ota_status_topic, "", true);

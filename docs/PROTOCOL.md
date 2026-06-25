@@ -182,25 +182,41 @@ To allow remote gateway control over LAN or cloud networks:
   - Admin command topic: `<root>/lrs-<gateway_chip_id>/admin_command`
   - Admin response topic: `<root>/lrs-<gateway_chip_id>/admin_response`
   - OTA status topic: `<root>/lrs-<gateway_chip_id>/ota_status` (retained, publishes `"downloading"`, `"failed:<code>"`, `"rebooting"`)
-- JSON Schema for commands:
+- MQTT Admin Handshake (`admin_challenge`):
+  Before executing commands, the client sends an unauthenticated `admin_challenge` request to establish a session:
   ```json
   {
     "id": "req-123456",
+    "cmd": "admin_challenge"
+  }
+  ```
+  Response payload includes:
+  ```json
+  {
+    "ok": true,
+    "cmd": "admin_challenge",
+    "id": "req-123456",
+    "session_id": 4829104,
+    "expires_in_ms": 300000
+  }
+  ```
+
+- JSON Schema for standard commands (post-handshake):
+  ```json
+  {
+    "id": "req-123457",
     "cmd": "status",
-    "admin_password": "...",
-    "ts": 1717171717,
-    "ttl_ms": 5000
+    "session_id": 4829104,
+    "seq": 1,
+    "admin_password": "..."
   }
   ```
 - Command validation sequence on gateway:
-  1. **Strict Envelope Gate**: Verify presence of required fields (`id`, `cmd`, `admin_password`, `ts`, `ttl_ms`). Reject malformed envelopes with `"invalid_envelope"`.
-  2. **Authorization Gate**: Validates the `admin_password` against the gateway's configured password.
-  3. **Clock-Skew / Expiry Gate**: If NTP or shared time is active:
-     - **Future Skew**: If host timestamp `ts` is more than **60 seconds in the future** relative to the gateway's current Unix time, reject with `"request_future"`.
-     - **Stale Expiry**: If `(nowUnix - ts) * 1000 > (ttl_ms + 15000)` (incorporating a **15-second clock-skew grace window**), reject with `"request_expired"`.
-     - If NTP is not yet active, timing checks are bypassed to guarantee local boot rescue.
-  4. **Duplicate Cache Filter**: Checks the request ID against a circular deduplication cache of size 10 to protect against replay attacks. Malformed, unauthorized, stale, or future requests are rejected prior to this check to avoid duplicate cache poisoning.
-  5. **Command Dispatch**: Pass the validated request to the execution handoff.
+  1. **Strict Envelope Gate**: Verify presence of required fields (`id`, `cmd`). Reject malformed envelopes with `"invalid_envelope"`.
+  2. **Handshake Pass-Through**: If `cmd` is `"admin_challenge"`, bypass session validation and dispatch directly.
+  3. **Session Check**: Verify that `session_id` is provided (else `"admin_session_required"`), matches the active session (else `"admin_session_invalid"`), and that the session has not expired based on local `millis()` elapsed time (else `"admin_session_expired"`).
+  4. **Sequence Replay Gate**: Verify that `seq` is provided and is strictly greater than `last_seq`. If not, reject with `"admin_sequence_replay"`. Note: once a sequence validation succeeds, the gateway immediately updates `last_seq` to the new sequence number, meaning that sequence number is permanently consumed even if subsequent command dispatch fails password verification or business logic.
+  5. **Command Dispatch**: Proceed to execute the command. Password-gated commands will authenticate `admin_password` against the gateway configuration during execution.
 - JSON Response layout:
   ```json
   {
@@ -212,6 +228,9 @@ To allow remote gateway control over LAN or cloud networks:
   ```
 - Credential protection:
   - Secrets are completely excluded from get_config responses sent over MQTT. Secret exports are only available over USB serial mode.
+- MQTT packet buffer ceiling:
+  - The gateway firmware MQTT client enforces a strict `1024`-byte packet size ceiling to prevent heap fragmentation and memory exhaustion on the ESP8266.
+  - To respect this constraint, command responses that return lists (e.g. `lora_inventory_status`) automatically prune all peer telemetry attributes when executed over MQTT (`isMqtt == true`), returning only the authoritative seed list containing `address` and `chip_id` (when known). All other peer metrics (RSSI, firmware version, IP, sensors, relay status, uptime) are received as separate, retained MQTT telemetry topics to decorate the seeded UI rows. In addition, the same-key discovery candidates list is capped at at most 4 entries, heavy timestamps (`last_seen_ms`, `age_ms`) are omitted, and `candidate_total` and `candidate_truncated` are set in the response metadata to prevent packet overflow.
 
 ## UDP Mirroring Controls
 

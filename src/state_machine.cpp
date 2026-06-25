@@ -2529,7 +2529,7 @@ bool NodeStateMachine::sendProvisioningAnnounce(uint16_t sessionNonce) {
   uint8_t payload[12]{};
   payload[0] = kProvOpAnnounce;
   encodeU16LE(payload + 1, sessionNonce);
-  encodeU32LE(payload + 3, ESP.getChipId());
+  encodeU32LE(payload + 3, runtime_utils::canonicalEspChipId());
   payload[7] = runtime_.local_address;
   payload[8] = (runtime_.role_tx ? kProvRoleTxFlag : 0) | ((kProvHwModelLrs & 0x0F) << 4);
   payload[9] = static_cast<uint8_t>(fwDevBuild() & 0xFFU);
@@ -2554,7 +2554,7 @@ bool NodeStateMachine::sendProvisioningVerifyPacket(uint16_t sessionNonce, uint8
   uint8_t payload[12]{};
   payload[0] = kProvOpVerify;
   encodeU16LE(payload + 1, sessionNonce);
-  encodeU32LE(payload + 3, ESP.getChipId());
+  encodeU32LE(payload + 3, runtime_utils::canonicalEspChipId());
   payload[7] = assignedAddress;
   payload[8] = (runtime_.role_tx ? kProvRoleTxFlag : 0) | ((kProvHwModelLrs & 0x0F) << 4);
   payload[9] = static_cast<uint8_t>(fwDevBuild() & 0xFFU);
@@ -2707,7 +2707,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDia
   if (settings_->power_save_listen_only) flags |= 0x20;
   if (power_save_active_) flags |= 0x40;
   uint8_t payload[12]{};
-  const uint32_t chipId = ESP.getChipId() & 0xFFFFFFUL;
+  const uint32_t chipId = runtime_utils::canonicalEspChipId();
   payload[0] = kMaintenancePayloadVersion;
   payload[1] = kMaintenancePageIdentity;
   payload[2] = flags;
@@ -4523,7 +4523,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
   if (!(msg.dst == runtime_.local_address || msg.dst == kProvBroadcastAddress)) {
     return false;
   }
-  const uint32_t localChip = ESP.getChipId();
+  const uint32_t localChip = runtime_utils::canonicalEspChipId();
   const uint32_t targetChip = decodeU32LE(payload + 3);
 
   if (op == kProvOpDiscoverStart) {
@@ -4536,7 +4536,7 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     prov_rx_.session_nonce = sessionNonce;
     prov_rx_.discover_pending = true;
     prov_rx_.announce_remaining = kProvAnnounceRepeatCount;
-    const uint32_t chip = ESP.getChipId();
+    const uint32_t chip = runtime_utils::canonicalEspChipId();
     const uint32_t seed = fnv1a32(reinterpret_cast<const uint8_t *>(&chip), sizeof(chip));
     const uint32_t halfWindow = (replyWindowMs >= 2U) ? (replyWindowMs / 2U) : 1U;
     const uint32_t slotA = (halfWindow > 0U) ? (seed % halfWindow) : 0U;
@@ -4969,7 +4969,7 @@ bool NodeStateMachine::handleReaddressFrame(const ProtocolMessage &msg) {
     }
   } else {
     if (op == 0) { // Request
-      const uint32_t myChipId = ESP.getChipId() & 0xFFFFFFUL;
+      const uint32_t myChipId = runtime_utils::canonicalEspChipId();
       if (targetChipId == myChipId) {
         // Queue readdress change for app.cpp to consume
         readdress_pending_ = true;
@@ -4985,7 +4985,7 @@ bool NodeStateMachine::handleReaddressFrame(const ProtocolMessage &msg) {
 bool NodeStateMachine::sendReaddressConfirm(uint8_t gwAddr, uint8_t newAddress) {
   if (radio_ == nullptr || gwAddr == 0 || gwAddr == 255) return false;
   
-  uint32_t myChipId = ESP.getChipId() & 0xFFFFFFUL;
+  uint32_t myChipId = runtime_utils::canonicalEspChipId();
   uint8_t payload[12]{};
   payload[0] = static_cast<uint8_t>(myChipId & 0xFFU);
   payload[1] = static_cast<uint8_t>((myChipId >> 8) & 0xFFU);

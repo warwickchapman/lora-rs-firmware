@@ -26,17 +26,15 @@ private:
   NodeStateMachine *sm_ = nullptr;
   std::function<void(bool, bool)> on_apply_;
 
-  // Circular cache for MQTT Request IDs to prevent boot-session replays
-  static constexpr size_t kMaxCachedRequestIds = 10;
-  struct CachedRequest {
-    FixedSettingString<16> id;
-    uint32_t received_ms;
+  struct MqttSession {
+    uint32_t session_id = 0;
+    uint32_t created_ms = 0;
+    uint32_t last_seq = 0;
+    bool active = false;
   };
-  CachedRequest cached_requests_[kMaxCachedRequestIds];
-  size_t cache_head_ = 0;
+  MqttSession mqtt_session_;
 
-  bool isDuplicateRequest(const String &id);
-  void cacheRequest(const String &id);
+  void handleAdminChallenge(JsonDocument &doc, ResponseWriter writer);
   static void otaStatusCallback(const char *status, void *ctx);
 
   // Command handlers
@@ -55,7 +53,7 @@ private:
   void handleProvisionFleetWifi(JsonDocument &doc, ResponseWriter writer);
   void handleIdentify(JsonDocument &doc, ResponseWriter writer);
   void handleStartLoraInventory(JsonDocument &doc, ResponseWriter writer);
-  void handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer);
+  void handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer, bool isMqtt = false);
   void handleCancelLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handlePollDiagnostics(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer);
