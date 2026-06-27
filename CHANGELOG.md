@@ -4,6 +4,13 @@ All notable changes to this pre-release project are documented here in current o
 
 ## [Unreleased]
 
+### Firmware Changes
+- Replaced MQTT `relay` topic (was dual read/write) with explicit `set/relay` command topic for local relay control. The `relay` topic is now read-only status telemetry.
+- Added `peers/<NN_lrs-peer_chipid>/set/relay` command topic for remote peer relay control via LoRa, replacing the JSON `control` topic.
+- Removed legacy MQTT `control` topic (JSON `{addr, relay}` format). Use `set/relay` topics instead.
+- Added diagnostic logging for MQTT relay command failures (bad payload, no TX role, address parse errors).
+- Command topics (`set/relay`, `peers/.../set/relay`) must be published non-retained to prevent broker replay on reconnect.
+
 ### Flasher Features
 - Monotonically serializes MQTT admin commands per gateway session using a Promise chain to prevent out-of-order execution and replay rejections.
 - Implemented automatic MQTT session establishment handshake (`admin_challenge`) and automatic one-time retry handling when sessions are invalid or expired.

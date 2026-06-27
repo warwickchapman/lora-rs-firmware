@@ -7452,18 +7452,8 @@ function toggleSelectAllBulkPorts() {
                       <div class="flex flex-col gap-3 mt-1">
                         <div class="flex flex-col gap-1">
                           <span class="font-semibold text-slate-300">Toggle Local Relay</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/relay</code>
-                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF).</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Control Remote Device Relay</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/control</code>
-                          <span class="text-slate-400">Gateway accepts JSON payload to trigger OTA command to a remote:</span>
-                          <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
-                            <code class="font-mono text-cyan-400 text-[10px]">{"addr": 1, "relay": 1}</code>
-                            <button @click="copyToClipboard('{\&quot;addr\&quot;: 1, \&quot;relay\&quot;: 1}', 'MQTT control payload')" class="text-[10px] text-slate-500 hover:text-cyan-200">Copy JSON</button>
-                          </div>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/set/relay</code>
+                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF). Publish non-retained.</span>
                         </div>
                       </div>
                     </div>
@@ -7476,6 +7466,12 @@ function toggleSelectAllBulkPorts() {
                       
                       <div class="flex flex-col gap-3 mt-1">
                         <div class="flex flex-col gap-1">
+                          <span class="font-semibold text-slate-300">Control Remote Peer Relay</span>
+                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/set/relay</code>
+                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF). Publish non-retained.</span>
+                        </div>
+
+                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300">Peer Polling Interval (in seconds)</span>
                           <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/poll_interval_s</code>
                           <span class="text-slate-400">Payload: integer seconds (e.g. <code class="text-slate-200">300</code>). Set 0 to disable regular telemetry polling.</span>
@@ -7501,7 +7497,7 @@ function toggleSelectAllBulkPorts() {
                   <!-- Telemetry Publishing Details -->
                   <div class="glass-card p-3 flex flex-col gap-2">
                     <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Telemetry & Status Publishing Map</div>
-                    <span class="text-slate-400">The gateway automatically publishes status reports to these topics when updates are heard over LoRa or changed locally. Telemetry values are published as **retained** plain-text strings:</span>
+                    <span class="text-slate-400">The gateway automatically publishes status reports to these topics when updates are heard over LoRa or changed locally. Telemetry values are published as **retained** plain-text strings. These topics are **read-only** — publishing to them has no effect.</span>
                     <div class="grid gap-4 sm:grid-cols-2 mt-1">
                       <div>
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Local Gateway Status Topics:</div>
@@ -7516,7 +7512,7 @@ function toggleSelectAllBulkPorts() {
                       <div>
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Remote Peer Telemetry (Forwarded):</div>
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote device commanded relay state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote device relay state (read-only)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote device dry contact state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/uplink_rssi_dbm</span>: Reception signal level</li>

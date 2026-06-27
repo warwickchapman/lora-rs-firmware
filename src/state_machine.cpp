@@ -1063,7 +1063,10 @@ bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayStat
 }
 
 bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState) {
-  if (!runtime_.role_tx) return false;
+  if (!runtime_.role_tx) {
+    lrslog::event("mqtt_remote_relay_no_tx", 0, dstAddress, relayState ? 1 : 0);
+    return false;
+  }
   if (runtime_.input_control_paired_lora_enabled) {
     lrslog::event("mqtt_remote_relay_blocked", 0, dstAddress, relayState ? 1 : 0);
     return false;

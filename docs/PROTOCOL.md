@@ -131,27 +131,28 @@ Otherwise packet is dropped and logged.
 - Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, factory-reset, or UDP log control commands.
 
 ## MQTT-to-LoRa Semantics
-- MQTT `relay` topic sets only the local node relay state immediately.
-- MQTT `control` topic is handled only when node role is TX.
-- `control` payload: JSON with `addr` and `relay` (`0`/`1`).
-- `addr` as JSON number is decimal (example: `40`).
-- `addr` as JSON string is parsed as hex (example: `"0x28"` or `"28"`).
+- MQTT `relay` topic is **read-only status** — retained, published by the gateway. Do not publish to it.
+- MQTT `set/relay` topic accepts `1` or `0` payloads to set the local relay state immediately. Publish **non-retained**.
+- MQTT `control` topic has been removed.
 - TX publishes local `addr` topic value as `0xNN`.
 - TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer).
 - Peer status leaves include operational topics such as `relay`, `input`, `ack_state`, `sensor/<kind>/<instance>/value`, and `sensor/<kind>/<instance>/state`.
-- TX accepts peer control leaves:
+- TX accepts peer command leaves under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/`:
+  - `set/relay` — payload `1` or `0`, forwarded as LoRa `Mqtt` command
   - `poll_interval_s`
   - `poll_now`
   - `wifi` (`1`/`0`, `on`/`off`, `enable`/`disable`, or JSON `{ "enabled": true|false }`)
   - `forget` (payload `1` removes node from TX runtime and clears retained peer subtree topics)
 - TX rejects destination `0x00` and `0xFF`.
-- On accepted `control`, TX sends LoRa message type `Mqtt` to `addr`.
+- On accepted peer `set/relay`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
 - TX publishes confirmed peer Wi-Fi state under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/wifi` as retained `1`, `0`, or empty when unknown.
 - Paired TX input-control waits for slotted ACKs after the broadcast
   command, then polls missing remotes using `PollRequest` (visibility only, no late actuation) one at a time until the hard retry
   deadline (`tx_command_retry_timeout_ms`). `flags.bit2` (0x04) on `PollRequest` means `b8..b11` (unixTimeS) carries a paired group command correlation id; matching `PollResponse` echoes it and must not set `time_authoritative`.
+
+> **Non-retained commands:** Do not publish retained messages to `set/relay` or `peers/.../set/relay`. MQTT brokers may replay retained command payloads on reconnect. Commands must be published as non-retained.
 
 ## Timing Defaults
 - `heartbeat_ms`: 60000 (60 s)

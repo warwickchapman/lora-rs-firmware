@@ -455,7 +455,7 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
 
   const char *sub = topic + baseLen + 1;
 
-  if (strcmp(sub, "relay") == 0) {
+  if (strcmp(sub, "set/relay") == 0) {
     if (!runtime_.mqtt_control_enabled) {
       lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
       return;
@@ -463,51 +463,20 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     if (length == 0 || sm_ == nullptr) {
       return;
     }
-
+    if (length != 1 || (payload[0] != '0' && payload[0] != '1')) {
+      lrslog::event("mqtt_set_relay_bad_payload", 0, 0, 0);
+      return;
+    }
     bool targetRelay = payload[0] == '1';
     sm_->mqttSetLocalRelay(targetRelay ? 1 : 0);
     return;
   }
 
-  if (strcmp(sub, "control") == 0) {
-    if (!runtime_.mqtt_control_enabled) {
-      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
-      return;
-    }
-    if (!runtime_.role_tx || sm_ == nullptr) {
-      return;
-    }
-
-    JsonDocument doc;
-    auto err = deserializeJson(doc, payload, length);
-    if (err) {
-      {
-        lrslog::event("mqtt_control_json_err", 0, 0, 0);
-      }
-      return;
-    }
-
-    uint8_t addr = 0;
-    if (doc["addr"].is<const char *>()) {
-      const char *addrStr = doc["addr"];
-      if (addrStr == nullptr || !parsePeerAddressSegmentCstr(addrStr, strlen(addrStr), sm_, addr)) {
-        return;
-      }
-    } else if (doc["addr"].is<int>()) {
-      addr = static_cast<uint8_t>(doc["addr"].as<int>());
-    }
-
-    const bool relay = (doc["relay"] | 0) != 0;
-    if (addr == 0 || addr == 255) {
-      return;
-    }
-
-    sm_->mqttSendPeerRelay(addr, relay ? 1 : 0);
-    {
-      lrslog::event("mqtt_control_topic", 0, 0, relay ? 1 : 0);
-    }
+  if (strcmp(sub, "relay") == 0) {
     return;
   }
+
+
 
   if (strcmp(sub, "admin_command") == 0) {
     if (length == 0 || executor_ == nullptr) {
@@ -577,10 +546,22 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
     uint8_t addr = 0;
     const size_t addrLen = static_cast<size_t>(slash - suffix);
     if (!parsePeerAddressSegmentCstr(suffix, addrLen, sm_, addr)) {
+      lrslog::event("mqtt_peer_addr_parse_err", 0, 0, 0);
       return;
     }
 
     const char *leaf = slash + 1;
+    if (strcmp(leaf, "set/relay") == 0) {
+      if (length != 1 || (payload[0] != '0' && payload[0] != '1')) {
+        lrslog::event("mqtt_peer_set_relay_bad_payload", 0, addr, 0);
+        return;
+      }
+      bool targetRelay = payload[0] == '1';
+      const bool accepted = sm_->mqttSendPeerRelay(addr, targetRelay ? 1 : 0);
+      lrslog::event(accepted ? "mqtt_peer_set_relay" : "mqtt_peer_set_relay_fail", 0, addr, targetRelay ? 1 : 0);
+      return;
+    }
+
     if (strcmp(leaf, "poll_interval_s") == 0) {
       long sec = 0;
       if (!parseSignedPayloadLong(payload, length, sec)) return;
@@ -747,13 +728,12 @@ bool MqttBridge::connectIfNeeded() {
 
   if (runtime_.mqtt_control_enabled) {
     char topicBuf[160];
-    snprintf(topicBuf, sizeof(topicBuf), "%s/relay", topic_base_);
-    mqtt_client_.subscribe(topicBuf);
-    snprintf(topicBuf, sizeof(topicBuf), "%s/control", topic_base_);
+    snprintf(topicBuf, sizeof(topicBuf), "%s/set/relay", topic_base_);
     mqtt_client_.subscribe(topicBuf);
     snprintf(topicBuf, sizeof(topicBuf), "%s/admin_command", topic_base_);
     mqtt_client_.subscribe(topicBuf);
     char topic[kMqttTopicBufBytes];
+    if (buildPeerTopic(topic, sizeof(topic), "+", "set/relay")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "wifi")) mqtt_client_.subscribe(topic);
