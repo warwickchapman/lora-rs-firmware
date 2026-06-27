@@ -7417,7 +7417,7 @@ function toggleSelectAllBulkPorts() {
 
           <div class="min-h-0 flex-1 overflow-auto custom-scrollbar p-3">
             <div v-if="serialAdminIsFactoryDefault && settingsTab !== 'remote'" class="mb-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-100">
-              Factory default: this device is not commissioned yet. Use Provision before treating it as an operational transmitter or receiver.
+              Factory default: this device is not commissioned yet. Use Provision before treating it as an operational gateway or remote.
             </div>
 
             <div v-if="!hasActiveDeviceInfo && settingsTransport !== 'mqtt' && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
@@ -7454,8 +7454,8 @@ function toggleSelectAllBulkPorts() {
               <div v-if="serialAdminConfig" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
                 <label class="self-center text-right font-semibold text-slate-300">Role</label>
                 <select v-model="serialAdminConfig.role_tx" class="glass-input h-9 appearance-none">
-                  <option :value="true">Gateway / transmitter</option>
-                  <option :value="false">Remote / receiver</option>
+                  <option :value="true">Gateway</option>
+                  <option :value="false">Remote</option>
                 </select>
                 <label class="self-center text-right font-semibold text-slate-300">Local addr</label>
                 <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-9" />
@@ -7561,14 +7561,14 @@ function toggleSelectAllBulkPorts() {
 
             <div v-if="settingsTab === 'mqtt'" class="flex flex-col gap-3 text-xs">
               <template v-if="serialAdminConfig">
-                <!-- If it's a remote/receiver unit -->
+                <!-- If it's a remote unit -->
                 <div v-if="!serialAdminConfig.role_tx" class="flex flex-col gap-3">
                   <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
                     <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
                       <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></span>
                       🌐 Remote MQTT Routing Bridge Active
                     </div>
-                    This device is configured with the <span class="font-bold text-cyan-100">Remote / Receiver</span> role.
+                    This device is configured with the <span class="font-bold text-cyan-100">Remote</span> role.
                     <p class="mt-2 text-slate-300">
                       Remote units do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
                     </p>
@@ -7580,7 +7580,7 @@ function toggleSelectAllBulkPorts() {
                     </p>
                   </div>
 
-                  <!-- Configuration for Remote/Receiver units -->
+                  <!-- Configuration for Remote units -->
                   <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 mt-2 pt-3 border-t border-slate-800">
                     <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
                     <div class="flex flex-col gap-1">
@@ -7603,7 +7603,7 @@ function toggleSelectAllBulkPorts() {
                   </div>
                 </div>
 
-                <!-- If it's a gateway/transmitter unit -->
+                <!-- If it's a gateway unit -->
                 <div v-else class="flex flex-col gap-3">
                   <!-- Warning banner for input control override conflict -->
                   <div v-if="serialAdminConfig.input_control_paired_lora_enabled" class="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 select-text mb-2">
@@ -7952,7 +7952,7 @@ function toggleSelectAllBulkPorts() {
                       <div class="flex flex-col gap-3 mt-1 text-slate-400">
                         <div>
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::Heartbeat / PollResponse</span>
-                          <p class="mt-0.5">Emitted by remote receivers periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and receiver-side diagnostics.</p>
+                          <p class="mt-0.5">Emitted by remote nodes periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and remote-side diagnostics.</p>
                         </div>
                         <div class="border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::MaintenanceStatus</span>
@@ -7972,7 +7972,7 @@ function toggleSelectAllBulkPorts() {
                       <div class="flex flex-col gap-3 mt-1 text-slate-400">
                         <div>
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiProvision</span>
-                          <p class="mt-0.5">The gateway broadcasts chunked network credentials packets over the air. Receivers assemble the chunks in memory, verify the full string FNV-1a hash, and permanently commit the SSID & Password configuration store.</p>
+                          <p class="mt-0.5">The gateway broadcasts chunked network credentials packets over the air. Remote nodes assemble the chunks in memory, verify the full string FNV-1a hash, and permanently commit the SSID & Password configuration store.</p>
                         </div>
                         <div class="border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiControl</span>
@@ -8868,7 +8868,7 @@ function toggleSelectAllBulkPorts() {
         <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
           <div>
             <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Node {{ factoryResetTargetModal.device.address }}</h3>
-            <p class="mt-1 text-xs text-slate-500">Decommissions the receiver node over LoRa, formatting its state and triggering a reboot.</p>
+            <p class="mt-1 text-xs text-slate-500">Decommissions the remote node over LoRa, formatting its state and triggering a reboot.</p>
           </div>
           
           <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
