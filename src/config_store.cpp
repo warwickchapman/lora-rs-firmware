@@ -836,7 +836,7 @@ void ConfigStore::ensureProvisionedDefaults() {
   }
   cfg_.paired_target_count = 1;
   memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = runtime_utils::kFirstRemoteAddress;
+  cfg_.paired_target_addresses[0] = cfg_.role_tx ? runtime_utils::kFirstRemoteAddress : runtime_utils::kGatewayAddress;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
   cfg_.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;
