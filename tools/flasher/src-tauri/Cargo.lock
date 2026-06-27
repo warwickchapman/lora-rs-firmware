@@ -5235,7 +5235,7 @@ dependencies = [
 
 [[package]]
 name = "thanda-lora-flasher"
-version = "0.9.3-dev.107"
+version = "0.9.3-dev.111"
 dependencies = [
  "chrono",
  "get_if_addrs",

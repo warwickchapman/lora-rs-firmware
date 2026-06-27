@@ -1,5 +1,6 @@
 #include "mqtt_bridge.h"
 #include "admin_executor.h"
+#include "config_fields.h"
 
 #include <ArduinoJson.h>
 #include <ctype.h>
@@ -237,7 +238,9 @@ bool parseBoolPayload(const uint8_t *payload, unsigned int length, bool &out) {
 
 MqttBridge *MqttBridge::instance_ = nullptr;
 
-bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm, AdminExecutor *executor) {
+bool MqttBridge::begin(ConfigStore *config, const String &chipIdHex, NodeStateMachine *sm, AdminExecutor *executor) {
+  config_ = config;
+  const Settings &cfg = config->settings();
   settings_ = &cfg;
   refreshRuntimeCfg(cfg);
   chip_id_hex_ = chipIdHex;
@@ -309,6 +312,7 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
     status_publish_locals_done_ = false;
     status_publish_peer_index_ = 0;
   }
+  config_dirty_ = true;
 }
 
 void MqttBridge::tick(bool wifiConnected) {
@@ -334,6 +338,10 @@ void MqttBridge::tick(bool wifiConnected) {
   }
 
   mqtt_client_.loop();
+
+  if (config_dirty_ && mqtt_client_.connected()) {
+    publishLocalConfig();
+  }
 
   const uint32_t now = millis();
   if (!status_publish_in_progress_ && (now - last_publish_ms_) >= kPublishIntervalMs) {
@@ -767,6 +775,7 @@ bool MqttBridge::connectIfNeeded() {
   snprintf(ota_status_topic, sizeof(ota_status_topic), "%s/ota_status", topic_base_);
   mqtt_client_.publish(ota_status_topic, "", true);
   mqtt_client_.publish(availability_topic, "online", true);
+  config_dirty_ = true;
   return true;
 }
 
@@ -1115,3 +1124,79 @@ void MqttBridge::publishOtaStatus(const char *status) {
     mqtt_client_.publish(ota_status_topic, status, true);
   }
 }
+
+void MqttBridge::publishLocalConfig() {
+  if (!mqtt_client_.connected() || !config_ || !settings_) {
+    return;
+  }
+
+  const char *topic_root = settings_->mqtt_topic_root.c_str();
+  bool success = true;
+
+  char complete_topic[256];
+  snprintf(complete_topic, sizeof(complete_topic), "%s/lrs-%s/config/_complete", topic_root, chip_id_hex_.c_str());
+  if (!mqtt_client_.publish(complete_topic, "false", true)) {
+    success = false;
+  }
+  yield();
+
+  JsonDocument doc;
+  writeSettingsJson(doc, *config_, false);
+
+  char topic[256];
+  char payload[512];
+
+  for (size_t i = 0; i < kConfigFieldCount; ++i) {
+    const auto &field = kConfigFields[i];
+    if (field.classification == ConfigFieldClass::RetainedConfig) {
+      if (doc.containsKey(field.name)) {
+        snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), field.name);
+        size_t n = 0;
+        bool pub_ok = false;
+        if (doc[field.name].is<JsonArray>()) {
+          n = serializeJson(doc[field.name], payload, sizeof(payload));
+          pub_ok = mqtt_client_.publish(topic, payload, true);
+        } else if (doc[field.name].is<bool>()) {
+          bool val = doc[field.name].as<bool>();
+          pub_ok = mqtt_client_.publish(topic, val ? "true" : "false", true);
+        } else if (doc[field.name].is<const char*>()) {
+          pub_ok = mqtt_client_.publish(topic, doc[field.name].as<const char*>(), true);
+        } else {
+          n = serializeJson(doc[field.name], payload, sizeof(payload));
+          pub_ok = mqtt_client_.publish(topic, payload, true);
+        }
+        if (!pub_ok) {
+          success = false;
+        }
+        yield();
+      }
+    } else if (field.classification == ConfigFieldClass::SecretMetadata) {
+      char set_field_name[128];
+      snprintf(set_field_name, sizeof(set_field_name), "%s_set", field.name);
+      if (doc.containsKey(set_field_name)) {
+        snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), set_field_name);
+        bool is_set = doc[set_field_name].as<bool>();
+        if (!mqtt_client_.publish(topic, is_set ? "true" : "false", true)) {
+          success = false;
+        }
+        yield();
+      }
+      if (strcmp(field.name, "fleet_passphrase") == 0) {
+        snprintf(topic, sizeof(topic), "%s/lrs-%s/config/fleet_passphrase_default", topic_root, chip_id_hex_.c_str());
+        bool is_default = doc["fleet_passphrase_default"].as<bool>();
+        if (!mqtt_client_.publish(topic, is_default ? "true" : "false", true)) {
+          success = false;
+        }
+        yield();
+      }
+    }
+  }
+
+  if (success) {
+    if (mqtt_client_.publish(complete_topic, "true", true)) {
+      config_dirty_ = false;
+    }
+  }
+  yield();
+}
+

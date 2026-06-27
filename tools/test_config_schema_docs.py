@@ -5,7 +5,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_CPP = ROOT / "src" / "config_store.cpp"
-SERIAL_ADMIN_CPP = ROOT / "src" / "serial_admin.cpp"
+ADMIN_EXECUTOR_CPP = ROOT / "src" / "admin_executor.cpp"
+CONFIG_FIELDS_CPP = ROOT / "src" / "config_fields.cpp"
+
+# Explicit table of derived/metadata fields emitted by writeSettingsJson
+# but not persisted in kAllowedFields, with short reasons.
+DERIVED_METADATA_EXCEPTIONS = {
+    "wifi_sta_password_set": "Boolean flag indicating if wifi_sta_password is set",
+    "mqtt_password_set": "Boolean flag indicating if mqtt_password is set",
+    "fleet_passphrase_set": "Boolean flag indicating if fleet_passphrase is set",
+    "fleet_passphrase_default": "Boolean flag indicating if fleet_passphrase is still the default value",
+    "admin_password_set": "Boolean flag indicating if admin_password is set",
+    "computed_lan_hostname": "Status value returning either configured lan_hostname or default lrs-<chip_id>",
+    "role_tx": "Derived boolean flag indicating if the device's role is transmitter (derived from role)"
+}
+
 
 
 def allowed_fields():
@@ -28,13 +42,22 @@ def saved_fields():
 
 
 def serial_admin_config_fields():
-    text = SERIAL_ADMIN_CPP.read_text(encoding="utf-8")
+    text = ADMIN_EXECUTOR_CPP.read_text(encoding="utf-8")
     write_match = re.search(r"void writeSettingsJson\(.*?\{(?P<body>.*?)\n\}", text, re.S)
     if not write_match:
         raise AssertionError("writeSettingsJson body not found")
     body = write_match.group("body")
     fields = set(re.findall(r'doc\["([^"]+)"\]', body))
     fields.update(re.findall(r'writeAddressArray\(doc,\s*"([^"]+)"', body))
+    return fields
+
+
+def config_fields_classification():
+    text = CONFIG_FIELDS_CPP.read_text(encoding="utf-8")
+    fields = {}
+    matches = re.findall(r'\{\s*"([^"]+)"\s*,\s*ConfigFieldClass::(\w+)\s*\}', text)
+    for name, classification in matches:
+        fields[name] = classification
     return fields
 
 
@@ -45,8 +68,43 @@ class ConfigSchemaDocsTest(unittest.TestCase):
     def test_serial_admin_exposes_persistent_config_fields(self):
         admin_fields = serial_admin_config_fields()
         internal_fields = {"known_peer_chip_ids"}
-        missing = (allowed_fields() - internal_fields) - admin_fields
-        self.assertEqual(missing, set())
+        # Remove computed/metadata suffix fields from the writeSettingsJson list for allowed fields comparison
+        stripped_admin_fields = admin_fields - set(DERIVED_METADATA_EXCEPTIONS.keys())
+        missing = (allowed_fields() - internal_fields) - stripped_admin_fields
+        self.assertEqual(missing, set(), f"Persisted fields in kAllowedFields missing from writeSettingsJson: {missing}")
+
+    def test_all_allowed_fields_classified(self):
+        allowed = allowed_fields()
+        classifications = config_fields_classification()
+        missing = allowed - set(classifications.keys())
+        self.assertEqual(missing, set(), f"Fields in kAllowedFields missing classification: {missing}")
+        extra = set(classifications.keys()) - allowed
+        # Allow role_tx as a derived but public/writable field that is classified in kConfigFields
+        # but not persisted in kAllowedFields (since its value is derived on save).
+        extra = extra - {"role_tx"}
+        self.assertEqual(extra, set(), f"Classified fields not in kAllowedFields: {extra}")
+
+    def test_retained_config_fields_are_non_secret(self):
+        classifications = config_fields_classification()
+        secret_keywords = ["password", "passphrase", "secret"]
+        for name, classification in classifications.items():
+            if classification == "RetainedConfig":
+                for keyword in secret_keywords:
+                    self.assertNotIn(keyword, name, f"RetainedConfig field '{name}' contains secret keyword '{keyword}'!")
+            elif classification == "SecretMetadata":
+                has_secret_keyword = any(keyword in name for keyword in secret_keywords)
+                self.assertTrue(has_secret_keyword, f"SecretMetadata field '{name}' does not contain any secret keywords!")
+
+    def test_all_emitted_json_fields_are_classified_or_excepted(self):
+        emitted_fields = serial_admin_config_fields()
+        classifications = config_fields_classification()
+        for field in emitted_fields:
+            is_classified = (field in classifications)
+            is_excepted = (field in DERIVED_METADATA_EXCEPTIONS)
+            self.assertTrue(
+                is_classified or is_excepted,
+                f"Field '{field}' emitted by writeSettingsJson is neither classified in kConfigFields nor listed in DERIVED_METADATA_EXCEPTIONS!"
+            )
 
 
 if __name__ == "__main__":

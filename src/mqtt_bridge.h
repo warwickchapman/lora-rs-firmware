@@ -11,7 +11,7 @@ class AdminExecutor;
 
 class MqttBridge {
  public:
-  bool begin(const Settings &cfg, const String &chipIdHex, NodeStateMachine *sm, AdminExecutor *executor);
+  bool begin(ConfigStore *config, const String &chipIdHex, NodeStateMachine *sm, AdminExecutor *executor);
   void applyConfig(const Settings &cfg, const String &chipIdHex);
   void tick(bool wifiConnected);
   bool connected();
@@ -32,6 +32,7 @@ class MqttBridge {
     bool tx_mqtt_remote_polling_enabled = false;
   };
 
+  ConfigStore *config_ = nullptr;
   const Settings *settings_ = nullptr;
   RuntimeCfg runtime_{};
   String chip_id_hex_;
@@ -92,4 +93,7 @@ class MqttBridge {
   void publishStatus();
   void publishDiscovery();
   void publishOtaStatus(const char *status);
+  void publishLocalConfig();
+
+  bool config_dirty_ = false;
 };

@@ -74,3 +74,6 @@ private:
   void handleAdoptCandidate(JsonDocument &doc, ResponseWriter writer);
 };
 
+void writeSettingsJson(ArduinoJson::JsonDocument &doc, ConfigStore &config, bool includeSecrets);
+
+

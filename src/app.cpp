@@ -110,7 +110,7 @@ void App::begin() {
   admin_executor_.begin(&config_, &sm_, [](void *ctx, bool restartNetwork, bool restartOtaAuth) {
     static_cast<App *>(ctx)->applyUpdatedConfig(restartNetwork, restartOtaAuth);
   }, this);
-  mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_, &admin_executor_);
+  mqtt_.begin(&config_, config_.chipIdHex(), &sm_, &admin_executor_);
   serial_admin_.begin(&admin_executor_);
 
   if (power_save_state_ != PowerSaveRuntimeState::Sleeping) {

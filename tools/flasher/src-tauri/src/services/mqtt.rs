@@ -56,6 +56,13 @@ pub struct MqttOtaStatusPayload {
     pub status: String,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct MqttConfigUpdatePayload {
+    pub chip_id: String,
+    pub field: String,
+    pub value: String,
+}
+
 pub struct MqttService {
     client: Arc<Mutex<Option<AsyncClient>>>,
     state: Arc<Mutex<MqttConnectionState>>,
@@ -126,6 +133,7 @@ impl MqttService {
         let discovery_filter = format!("{}/discovery/+", topic_root);
         let response_filter = format!("{}/+/admin_response", topic_root);
         let status_filter = format!("{}/+/ota_status", topic_root);
+        let config_filter = format!("{}/+/config/#", topic_root);
 
         let sub_client = client.clone();
         tokio::spawn(async move {
@@ -134,6 +142,7 @@ impl MqttService {
             let _ = sub_client.subscribe(discovery_filter, QoS::AtMostOnce).await;
             let _ = sub_client.subscribe(response_filter, QoS::AtMostOnce).await;
             let _ = sub_client.subscribe(status_filter, QoS::AtMostOnce).await;
+            let _ = sub_client.subscribe(config_filter, QoS::AtMostOnce).await;
         });
 
         // Store client
@@ -224,6 +233,18 @@ impl MqttService {
             return;
         }
 
+        // Check config topic: <topic_root>/lrs-<chip_id>/config/<field_name>
+        if parts.len() >= 4 && parts[0] == topic_root && parts[2] == "config" {
+            let chip_id = parts[1].trim_start_matches("lrs-").to_string();
+            let field = parts[3..].join("/");
+            let _ = app.emit("mqtt-config-update", MqttConfigUpdatePayload {
+                chip_id,
+                field,
+                value: payload_str.clone(),
+            });
+            return;
+        }
+
         // 3. Check peer telemetry: <topic_root>/lrs-<chip_id>/peers/<addrSeg>/<leaf>
         if parts.len() >= 5 && parts[0] == topic_root && parts[2] == "peers" {
             let gateway_id = parts[1].trim_start_matches("lrs-").to_string();
@@ -246,7 +267,11 @@ impl MqttService {
                 return;
             }
 
-            let field = parts[4].to_string();
+            let field = if parts[4] == "sensor" && parts.len() > 5 {
+                parts[4..].join("/")
+            } else {
+                parts[4].to_string()
+            };
             
             // Try to parse payload as JSON (if it is a JSON number/bool/string/null)
             let json_value = serde_json::from_str::<serde_json::Value>(&payload_str)

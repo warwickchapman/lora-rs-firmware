@@ -5,6 +5,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
+import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -478,6 +479,7 @@ const isFetchingFirmware = ref(false);
 const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
 const mqttOtaStatus = ref<Record<string, { status: string; timestamp: number }>>({});
 let unlistenMqttOtaStatus: (() => void) | null = null;
+let unlistenMqttConfig: (() => void) | null = null;
 const showToast = ref(false);
 const toastMessage = ref('');
 const confirmDialog = ref<ConfirmDialogState | null>(null);
@@ -612,6 +614,23 @@ const lastMqttDiscoveryMs = ref<Record<string, number>>({});
 const selectedMqttGatewayChipId = ref('');
 const selectedMqttManualChipId = ref('');
 const manualMqttGatewayError = ref('');
+
+const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
+
+function isMqttSecretConfigured(secretKey: string): boolean {
+  if (settingsTransport.value !== 'mqtt' || !selectedPort.value) return false;
+  const canonical = canonicalChipId(selectedPort.value);
+  const bufState = mqttConfigBuffers.value[canonical];
+  return !!bufState?.secretsMetadata?.[secretKey];
+}
+
+function isMqttFleetPassphraseDefault(): boolean {
+  if (settingsTransport.value !== 'mqtt' || !selectedPort.value) return false;
+  const canonical = canonicalChipId(selectedPort.value);
+  const bufState = mqttConfigBuffers.value[canonical];
+  return !!bufState?.secretsMetadata?.['fleet_passphrase_default'];
+}
+
 
 // Computed helper to check if the selected chip is actually in the discovered map
 const isSelectedMqttGatewayDiscovered = computed(() => {
@@ -2462,7 +2481,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     rx_failsafe_mode: stringValue(cfg.rx_failsafe_mode, 'hold_last'),
     rx_failsafe_timeout_ms: numberValue(cfg.rx_failsafe_timeout_ms, 180000),
     wifi_sta_ssid: stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || ''),
-    wifi_sta_password: getCachedWifiPassword(stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || '')),
+    wifi_sta_password: settingsTransport.value === 'mqtt' ? '' : getCachedWifiPassword(stringValue(cfg.wifi_sta_ssid, wifi?.sta_ssid || '')),
     lan_hostname: stringValue(cfg.lan_hostname, ''),
     ap_always_on: boolValue(cfg.ap_always_on, false),
     wifi_tx_power_dbm: numberValue(cfg.wifi_tx_power_dbm, 20.5),
@@ -4370,7 +4389,28 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
   isSerialAdminLoading.value = true;
   pushSerialLog('Loading device configuration...');
   try {
-    if (settingsTransport.value !== 'mqtt' && state && !state.adminSupported) {
+    if (settingsTransport.value === 'mqtt') {
+      const bufState = mqttConfigBuffers.value[canonicalChipId(targetPort)];
+      if (bufState?.complete && state?.config) {
+        pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
+      } else {
+        pushSerialLog('Waiting for retained MQTT config topics to load...');
+        let elapsed = 0;
+        while (elapsed < 5000) {
+          await new Promise(r => setTimeout(r, 200));
+          elapsed += 200;
+          const curBuf = mqttConfigBuffers.value[canonicalChipId(targetPort)];
+          if (curBuf?.complete && state?.config) {
+            pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
+            return;
+          }
+        }
+        throw new Error('Timeout waiting for MQTT config topics');
+      }
+      return;
+    }
+
+    if (state && !state.adminSupported) {
       await probeSerialAdminSupport(targetPort);
     }
     const out = await sendEasyPairCommandOnPort<{ ok: boolean; cmd: string; config: SerialAdminConfig }>(targetPort, 'get_config', {
@@ -6210,6 +6250,25 @@ onMounted(async () => {
       else if (f === 'power_save_active') {
         dev.power_save_active = val === '1' || val === 1 || val === true;
       }
+      else if (f.startsWith('sensor/')) {
+        const sensorParts = f.split('/');
+        if (sensorParts.length >= 4) {
+          const kind = sensorParts[1];
+          const instance = Number(sensorParts[2]) || 0;
+          const prop = sensorParts[3];
+          if (!dev.sensors) dev.sensors = [];
+          let existing = dev.sensors.find(s => s.kind === kind && s.instance === instance);
+          if (!existing) {
+            existing = { kind: kind as any, state: 'waiting', instance };
+            dev.sensors.push(existing);
+          }
+          if (prop === 'value') {
+            existing.value = Number(val);
+          } else if (prop === 'state') {
+            existing.state = String(val) as any;
+          }
+        }
+      }
       dev.age_ms = 0;
 
       loraInventory.value = loraInventory.value.map(row => {
@@ -6232,6 +6291,17 @@ onMounted(async () => {
       timestamp: Date.now()
     };
   });
+
+  unlistenMqttConfig = await listen<any>('mqtt-config-update', (event) => {
+    const { chip_id, field, value } = event.payload;
+    handleConfigUpdate(chip_id, field, value, (completedChipId, configBuffer) => {
+      const state = serialDeviceState(completedChipId);
+      if (state) {
+        state.config = normalizeSerialAdminConfig(configBuffer as SerialAdminConfig, state.status);
+      }
+    });
+  });
+
 
   unlistenMqttAdminResponse = await listen<any>('mqtt-admin-response', (event) => {
     handleMqttAdminResponse(event.payload);
@@ -6319,6 +6389,7 @@ onUnmounted(() => {
   if (unlistenMqttGateway) unlistenMqttGateway();
   if (unlistenMqttAdminResponse) unlistenMqttAdminResponse();
   if (unlistenMqttOtaStatus) unlistenMqttOtaStatus();
+  if (unlistenMqttConfig) unlistenMqttConfig();
   if (isNetworkUdpMonitoring.value) {
     invoke('stop_network_udp_monitor').catch(() => {});
   }
@@ -7465,11 +7536,16 @@ function toggleSelectAllBulkPorts() {
                 <label class="self-center text-right font-semibold text-slate-300">Remote addr</label>
                 <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">Fleet key</label>
-                <div class="flex gap-2">
-                  <input v-model="serialAdminConfig.fleet_passphrase" :type="showSerialFleetKey ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Fleet key passphrase" />
-                  <button @click="showSerialFleetKey = !showSerialFleetKey" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
-                    {{ showSerialFleetKey ? 'Hide' : 'Show' }}
-                  </button>
+                <div class="flex flex-col gap-1">
+                  <div class="flex gap-2">
+                    <input v-model="serialAdminConfig.fleet_passphrase" :type="showSerialFleetKey ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Fleet key passphrase" />
+                    <button @click="showSerialFleetKey = !showSerialFleetKey" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
+                      {{ showSerialFleetKey ? 'Hide' : 'Show' }}
+                    </button>
+                  </div>
+                  <span v-if="isMqttSecretConfigured('fleet_passphrase')" class="text-[10px] font-medium" :class="isMqttFleetPassphraseDefault() ? 'text-amber-400' : 'text-cyan-400'">
+                    ✓ Currently configured on device {{ isMqttFleetPassphraseDefault() ? '(using default passphrase)' : '' }}
+                  </span>
                 </div>
                 <label class="self-center text-right font-semibold text-slate-300">Heartbeat sec</label>
                 <div class="flex items-center gap-2">
@@ -7517,9 +7593,14 @@ function toggleSelectAllBulkPorts() {
                   </datalist>
                 </div>
                 <label class="self-center text-right font-semibold text-slate-300">New WiFi password</label>
-                <div class="flex gap-2">
-                  <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
-                  <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialWifiPassword ? 'Hide' : 'Show' }}</button>
+                <div class="flex flex-col gap-1">
+                  <div class="flex gap-2">
+                    <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
+                    <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
+                      {{ showSerialWifiPassword ? 'Hide' : 'Show' }}
+                    </button>
+                  </div>
+                  <span v-if="isMqttSecretConfigured('wifi_sta_password')" class="text-[10px] text-cyan-400 font-medium">✓ Currently configured on device</span>
                 </div>
                 <label class="self-center text-right font-semibold text-slate-300">WiFi Enabled</label>
                 <label class="flex items-center gap-2 text-slate-300">
@@ -7641,9 +7722,14 @@ function toggleSelectAllBulkPorts() {
                     <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
                     <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
                     <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
-                    <div class="flex gap-2">
-                      <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
-                      <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70">{{ showSerialMqttPassword ? 'Hide' : 'Show' }}</button>
+                    <div class="flex flex-col gap-1">
+                      <div class="flex gap-2">
+                        <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
+                        <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
+                          {{ showSerialMqttPassword ? 'Hide' : 'Show' }}
+                        </button>
+                      </div>
+                      <span v-if="isMqttSecretConfigured('mqtt_password')" class="text-[10px] text-cyan-400 font-medium">✓ Currently configured on device</span>
                     </div>
                     <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
                     <div class="flex flex-col gap-1">
