@@ -10,9 +10,7 @@ bool NodeStateMachine::isTrustedReplaySource(uint8_t src, bool commissioningTraf
   if (src == 0 || src == 255) return false;
   if (src == runtime_.remote_address) return true;
   if (commissioningTraffic) return true;
-  for (size_t i = 0; i < peer_count_; ++i) {
-    if (peers_[i].in_use && peers_[i].address == src) return true;
-  }
+  if (peer_manager_.find(src) != nullptr) return true;
   return false;
 }
 

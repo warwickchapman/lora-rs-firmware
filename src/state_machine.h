@@ -43,13 +43,6 @@ enum class RxFailsafeMode : uint8_t {
   ForceOn,
 };
 
-enum class PeerAckState : uint8_t {
-  Unknown,
-  Pending,
-  Ok,
-  Timeout,
-};
-
 enum class PairedGroupPhase : uint8_t {
   Idle,
   AwaitInitialAcks,
@@ -57,44 +50,8 @@ enum class PairedGroupPhase : uint8_t {
   Complete,
 };
 
-struct PeerStatusSnapshot {
-  uint8_t address = 0;
-  uint8_t relay_state = 0;
-  uint8_t input_state = 0;
-  bool input_state_known = false;
-  SensorRegistry sensors;
-  int uplink_rssi = -127;
-  bool downlink_rssi_valid = false;
-  int downlink_rssi = -127;
-  uint32_t last_seen_ms = 0;
-  uint32_t last_cmd_counter = 0;
-  PeerAckState ack_state = PeerAckState::Unknown;
-  uint32_t poll_interval_ms = 0;
-  uint32_t last_poll_tx_ms = 0;
-  bool poll_pending = false;
-  bool wifi_state_known = false;
-  bool wifi_enabled = true;
-  bool wifi_connected_known = false;
-  bool wifi_connected = false;
-  uint8_t ip[4]{};
-  bool mqtt_state_known = false;
-  bool mqtt_enabled = false;
-  bool mqtt_connected = false;
-  uint32_t chip_id = 0;
-  uint8_t fw_major = 0;
-  uint8_t fw_minor = 0;
-  uint8_t fw_patch = 0;
-  uint16_t fw_build = 0;
-  uint32_t uptime_ms = 0;
-  bool maintenance_debug_known = false;
-  uint32_t heap_free = 0;
-  uint32_t heap_max_block = 0;
-  uint8_t heap_frag_pct = 0;
-  uint32_t debug_uptime_ms = 0;
-  uint32_t wifi_last_confirm_ms = 0;
-  bool power_save_listen_only = false;
-  bool power_save_active = false;
-};
+#include "peer_manager.h"
+
 
 struct FleetScanSnapshot {
   bool active = false;
@@ -390,70 +347,7 @@ class NodeStateMachine {
   uint8_t maintenance_version_dst_ = 0;
   uint32_t last_maint_page_tx_ms_ = 0;
 
-  struct PeerRuntime {
-    bool in_use = false;
-    uint8_t address = 0;
-    uint8_t relay_state = 0;
-    uint8_t input_state = 0;
-    bool input_state_known = false;
-    SensorRegistry sensors;
-    uint32_t sensors_updated_ms = 0;
-    int uplink_rssi = -127;
-    bool downlink_rssi_valid = false;
-    int downlink_rssi = -127;
-    uint32_t last_seen_ms = 0;
-    uint32_t last_cmd_counter = 0;
-    PeerAckState ack_state = PeerAckState::Unknown;
-    bool wifi_state_known = false;
-    bool wifi_enabled = true;
-    bool wifi_connected_known = false;
-    bool wifi_connected = false;
-    uint8_t ip[4]{};
-    bool mqtt_state_known = false;
-    bool mqtt_enabled = false;
-    bool mqtt_connected = false;
-    uint32_t chip_id = 0;
-    uint8_t fw_major = 0;
-    uint8_t fw_minor = 0;
-    uint8_t fw_patch = 0;
-    uint16_t fw_build = 0;
-    uint32_t uptime_ms = 0;
-    uint32_t uptime_received_ms = 0;
-    bool maintenance_debug_known = false;
-    uint32_t heap_free = 0;
-    uint32_t heap_max_block = 0;
-    uint8_t heap_frag_pct = 0;
-    uint32_t debug_uptime_ms = 0;
-    uint32_t wifi_last_confirm_ms = 0;
-    bool power_save_listen_only = false;
-    bool power_save_active = false;
-    bool wifi_pending = false;
-    bool wifi_pending_enabled = true;
-    uint32_t wifi_pending_counter = 0;
-    uint32_t wifi_pending_deadline_ms = 0;
-    bool pending = false;
-    uint8_t pending_relay = 0;
-    uint8_t retry_step = 0;
-    uint32_t next_retry_ms = 0;
-    uint32_t pending_counter = 0;
-    uint32_t pending_deadline_ms = 0;
-    uint32_t poll_interval_ms = 0;
-  };
-  static_assert(sizeof(PeerRuntime) <= 256, "PeerRuntime exceeds budget; review field additions");
-
-  struct PollRuntime {
-    uint32_t next_poll_ms = 0;
-    bool poll_pending = false;
-    uint8_t poll_retry_step = 0;
-    uint32_t poll_next_retry_ms = 0;
-    uint32_t poll_counter = 0;
-    uint32_t poll_deadline_ms = 0;
-    uint32_t last_poll_tx_ms = 0;
-  };
-  // Managed peer slots on ESP8266 (telemetry/poll/retry history). Remote commands
-  // may still be sent to uncached peers as transient fire-and-forget operations.
-  PeerRuntime peers_[kMaxPeers]{};
-  size_t peer_count_ = 0;
+  PeerManager peer_manager_;
   DiscoveryCandidate discovery_candidates_[Settings::kAddressListCap]{};
   bool adoption_active_ = false;
   uint32_t adoption_chip_id_ = 0;
@@ -468,10 +362,6 @@ class NodeStateMachine {
   bool readdress_pending_ = false;
   uint8_t readdress_pending_new_address_ = 0;
   uint8_t readdress_pending_gw_addr_ = 0;
-  PollRuntime *poll_states_ = nullptr;
-
-
-  size_t poll_state_capacity_ = 0;
 
   bool fleet_scan_active_ = false;
   uint8_t fleet_scan_start_address_ = 1;
@@ -686,13 +576,8 @@ class NodeStateMachine {
   bool handleMaintenanceStatus(const ProtocolMessage &msg);
   void tickPendingMaintenancePages();
   PeerRuntime *findOrCreatePeer(uint8_t address);
-  void removePeerAt(size_t index);
   void prePopulateGatewayPeerCache();
-  PollRuntime *pollStateForIndex(size_t index);
-  const PollRuntime *pollStateForIndex(size_t index) const;
-  bool ensurePollStorage();
-  void resetPollStorage();
-  void freePollStorage();
+
   bool handleWifiProvisionFrame(const ProtocolMessage &msg);
   bool handleWifiControlFrame(const ProtocolMessage &msg);
   bool handleUdpLogControlFrame(const ProtocolMessage &msg);

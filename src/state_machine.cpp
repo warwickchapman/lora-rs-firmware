@@ -321,11 +321,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   maintenance_version_dst_ = 0;
   last_maint_page_tx_ms_ = 0;
   last_wifi_prov_tx_ms_ = 0;
-  peer_count_ = 0;
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    peers_[i] = PeerRuntime{};
-  }
-  resetPollStorage();
+  peer_manager_.begin(runtime_.local_address);
   fleet_scan_active_ = false;
   fleet_scan_start_address_ = 1;
   fleet_scan_end_address_ = 32;
@@ -439,11 +435,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   maintenance_sensor_dst_ = 0;
   maintenance_version_pending_ = false;
   maintenance_version_dst_ = 0;
-  peer_count_ = 0;
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    peers_[i] = PeerRuntime{};
-  }
-  resetPollStorage();
+  peer_manager_.applyConfig(runtime_.local_address);
   fleet_scan_active_ = false;
   fleet_scan_next_ms_ = 0;
   fleet_scan_started_ms_ = 0;
@@ -511,7 +503,7 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   if (runtime_.rx_failsafe_timeout_ms < kMinRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMinRxFailsafeTimeoutMs;
   if (runtime_.rx_failsafe_timeout_ms > kMaxRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMaxRxFailsafeTimeoutMs;
   if (!runtime_.tx_mqtt_remote_polling_enabled) {
-    freePollStorage();
+    peer_manager_.freePollStorage();
   }
 }
 
@@ -548,43 +540,7 @@ void NodeStateMachine::freeProvisioningStorage() {
   prov_device_count_ = 0;
 }
 
-NodeStateMachine::PollRuntime *NodeStateMachine::pollStateForIndex(size_t index) {
-  if (poll_states_ == nullptr || index >= poll_state_capacity_) return nullptr;
-  return &poll_states_[index];
-}
 
-const NodeStateMachine::PollRuntime *NodeStateMachine::pollStateForIndex(size_t index) const {
-  if (poll_states_ == nullptr || index >= poll_state_capacity_) return nullptr;
-  return &poll_states_[index];
-}
-
-bool NodeStateMachine::ensurePollStorage() {
-  if (poll_states_ != nullptr && poll_state_capacity_ >= kMaxPeers) return true;
-  freePollStorage();
-  poll_states_ = new (std::nothrow) PollRuntime[kMaxPeers];
-  if (poll_states_ == nullptr) {
-    poll_state_capacity_ = 0;
-    lrslog::event("poll_storage_oom", 0, static_cast<uint32_t>(kMaxPeers & 0xFFFFU),
-                  static_cast<uint8_t>(sizeof(PollRuntime) & 0xFFU));
-    return false;
-  }
-  poll_state_capacity_ = kMaxPeers;
-  resetPollStorage();
-  return true;
-}
-
-void NodeStateMachine::resetPollStorage() {
-  if (poll_states_ == nullptr) return;
-  for (size_t i = 0; i < poll_state_capacity_; ++i) poll_states_[i] = PollRuntime{};
-}
-
-void NodeStateMachine::freePollStorage() {
-  if (poll_states_ != nullptr) {
-    delete[] poll_states_;
-    poll_states_ = nullptr;
-  }
-  poll_state_capacity_ = 0;
-}
 
 void NodeStateMachine::tick(bool powerSaveActive) {
   power_save_active_ = powerSaveActive;
@@ -664,56 +620,17 @@ bool NodeStateMachine::sharedUnixTimeValid() const { return shared_time_valid_; 
 uint32_t NodeStateMachine::sharedUnixTime() const { return currentUnixTimeS(millis()); }
 RxControlSource NodeStateMachine::lastRxControlSource() const { return last_rx_control_source_; }
 
-size_t NodeStateMachine::peerCount() const { return peer_count_; }
+size_t NodeStateMachine::peerCount() const { return peer_manager_.count(); }
 
 bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const {
-  if (index >= peer_count_) return false;
-  const PeerRuntime &node = peers_[index];
-  if (!node.in_use) return false;
-  out.address = node.address;
-  out.relay_state = node.relay_state;
-  out.input_state = node.input_state;
-  out.input_state_known = node.input_state_known;
-  out.sensors = node.sensors;
-  out.uplink_rssi = node.uplink_rssi;
-  out.downlink_rssi_valid = node.downlink_rssi_valid;
-  out.downlink_rssi = node.downlink_rssi;
-  out.last_seen_ms = node.last_seen_ms;
-  out.last_cmd_counter = node.last_cmd_counter;
-  out.ack_state = node.ack_state;
-  out.wifi_state_known = node.wifi_state_known;
-  out.wifi_enabled = node.wifi_enabled;
-  out.wifi_connected_known = node.wifi_connected_known;
-  out.wifi_connected = node.wifi_connected;
-  memcpy(out.ip, node.ip, sizeof(out.ip));
-  out.mqtt_state_known = node.mqtt_state_known;
-  out.mqtt_enabled = node.mqtt_enabled;
-  out.mqtt_connected = node.mqtt_connected;
-  out.chip_id = node.chip_id;
-  out.fw_major = node.fw_major;
-  out.fw_minor = node.fw_minor;
-  out.fw_patch = node.fw_patch;
-  out.fw_build = node.fw_build;
-  out.uptime_ms = node.uptime_ms;
-  out.maintenance_debug_known = node.maintenance_debug_known;
-  out.heap_free = node.heap_free;
-  out.heap_max_block = node.heap_max_block;
-  out.heap_frag_pct = node.heap_frag_pct;
-  out.debug_uptime_ms = node.debug_uptime_ms;
-  out.wifi_last_confirm_ms = node.wifi_last_confirm_ms;
-  out.power_save_listen_only = node.power_save_listen_only;
-  out.power_save_active = node.power_save_active;
-  out.poll_interval_ms = node.poll_interval_ms;
-  const PollRuntime *poll = pollStateForIndex(index);
-  out.last_poll_tx_ms = poll ? poll->last_poll_tx_ms : 0U;
-  out.poll_pending = poll ? poll->poll_pending : false;
-  return true;
+  return peer_manager_.buildStatusSnapshot(index, out);
 }
 
 bool NodeStateMachine::peerByAddress(uint8_t address, PeerStatusSnapshot &out) const {
-  for (size_t i = 0; i < peer_count_; ++i) {
-    if (peers_[i].in_use && peers_[i].address == address) {
-      return peerByIndex(i, out);
+  for (size_t i = 0; i < peer_manager_.count(); ++i) {
+    const PeerRuntime* item = peer_manager_.findByIndex(i);
+    if (item && item->address == address) {
+      return peer_manager_.buildStatusSnapshot(i, out);
     }
   }
   return false;
@@ -749,15 +666,14 @@ bool NodeStateMachine::isPeerUdpLogsEligible(uint8_t address) const {
   if (address == 0 || address == 255) return false;
   const uint32_t now = millis();
   constexpr uint32_t kFreshnessWindowMs = 300000UL; // 5 minutes
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    if (peers_[i].in_use && peers_[i].address == address) {
-      if (peers_[i].wifi_connected_known && peers_[i].wifi_connected &&
-          (peers_[i].ip[0] != 0 || peers_[i].ip[1] != 0 || peers_[i].ip[2] != 0 || peers_[i].ip[3] != 0)) {
-        const bool seenFresh = (now - peers_[i].last_seen_ms) <= kFreshnessWindowMs;
-        const bool confirmFresh = (now - peers_[i].wifi_last_confirm_ms) <= kFreshnessWindowMs;
-        if (seenFresh || confirmFresh) {
-          return true;
-        }
+  const PeerRuntime* p = peer_manager_.find(address);
+  if (p != nullptr) {
+    if (p->wifi_connected_known && p->wifi_connected &&
+        (p->ip[0] != 0 || p->ip[1] != 0 || p->ip[2] != 0 || p->ip[3] != 0)) {
+      const bool seenFresh = (now - p->last_seen_ms) <= kFreshnessWindowMs;
+      const bool confirmFresh = (now - p->wifi_last_confirm_ms) <= kFreshnessWindowMs;
+      if (seenFresh || confirmFresh) {
+        return true;
       }
     }
   }
@@ -1221,8 +1137,8 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
     if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
     if (interval > kMaxRemotePollIntervalMs) interval = kMaxRemotePollIntervalMs;
     node->poll_interval_ms = interval;
-    if (ensurePollStorage()) {
-      PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+    if (peer_manager_.ensurePollStorage()) {
+      PollRuntime *poll = peer_manager_.pollStateForPeer(node);
       if (poll != nullptr) {
         poll->next_poll_ms = now + interval;
       }
@@ -1249,10 +1165,10 @@ bool NodeStateMachine::mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t po
   if (pollIntervalMs > 0 && pollIntervalMs < kMinRemotePollIntervalMs) pollIntervalMs = kMinRemotePollIntervalMs;
   if (pollIntervalMs > kMaxRemotePollIntervalMs) pollIntervalMs = kMaxRemotePollIntervalMs;
   if (pollIntervalMs > 0) {
-    if (!ensurePollStorage()) return false;
+    if (!peer_manager_.ensurePollStorage()) return false;
   }
   node->poll_interval_ms = pollIntervalMs;
-  PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+  PollRuntime *poll = peer_manager_.pollStateForPeer(node);
   if (pollIntervalMs == 0) {
     if (poll != nullptr) {
       *poll = PollRuntime{};
@@ -1269,8 +1185,8 @@ bool NodeStateMachine::mqttPollPeerNow(uint8_t dstAddress) {
 
   PeerRuntime *node = findOrCreatePeer(dstAddress);
   if (node == nullptr) return false;
-  if (!ensurePollStorage()) return false;
-  PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+  if (!peer_manager_.ensurePollStorage()) return false;
+  PollRuntime *poll = peer_manager_.pollStateForPeer(node);
   if (poll == nullptr) return false;
 
   uint32_t sentCounter = 0;
@@ -1512,40 +1428,14 @@ bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, ch
   return true;
 }
 
-void NodeStateMachine::removePeerAt(size_t idx) {
-  if (idx >= peer_count_) return;
-  for (size_t i = idx; i + 1 < peer_count_; ++i) {
-    peers_[i] = peers_[i + 1];
-    if (poll_states_ != nullptr && i + 1 < poll_state_capacity_) {
-      poll_states_[i] = poll_states_[i + 1];
-    }
-  }
-  if (peer_count_ > 0) {
-    peer_count_--;
-    peers_[peer_count_] = PeerRuntime{};
-    if (poll_states_ != nullptr && peer_count_ < poll_state_capacity_) {
-      poll_states_[peer_count_] = PollRuntime{};
-    }
-  }
-}
-
 bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
   if (!runtime_.role_tx) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
-
-  size_t idx = kMaxPeers;
-  for (size_t i = 0; i < peer_count_; ++i) {
-    if (peers_[i].in_use && peers_[i].address == dstAddress) {
-      idx = i;
-      break;
-    }
-  }
-  if (idx >= peer_count_) return false;
-  removePeerAt(idx);
-  {
+  bool success = peer_manager_.forget(dstAddress);
+  if (success) {
     lrslog::event("mqtt_remote_forget", 0, 0, dstAddress);
   }
-  return true;
+  return success;
 }
 
 uint32_t NodeStateMachine::resolveChipIdForAddress(uint8_t address) const {
@@ -1559,12 +1449,8 @@ uint32_t NodeStateMachine::resolveChipIdForAddress(uint8_t address) const {
 }
 
 uint32_t NodeStateMachine::activePeerChipIdForAddress(uint8_t address) const {
-  for (size_t i = 0; i < peer_count_; ++i) {
-    if (peers_[i].in_use && peers_[i].address == address) {
-      return peers_[i].chip_id;
-    }
-  }
-  return 0;
+  const PeerRuntime* p = peer_manager_.find(address);
+  return p ? p->chip_id : 0;
 }
 
 bool NodeStateMachine::fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs) {
@@ -1929,18 +1815,18 @@ void NodeStateMachine::enterProvisioningQuietMode() {
   uint32_t groups = (tx_group_phase_ != PairedGroupPhase::Idle) ? 1 : 0;
   
   uint32_t peerCmds = 0;
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    if (peers_[i].in_use && peers_[i].pending) {
+  for (size_t i = 0; i < peer_manager_.count(); ++i) {
+    const PeerRuntime* p = peer_manager_.findByIndex(i);
+    if (p && p->pending) {
       peerCmds++;
     }
   }
   
   uint32_t polls = 0;
-  if (poll_states_ != nullptr) {
-    for (size_t i = 0; i < poll_state_capacity_; ++i) {
-      if (poll_states_[i].poll_pending) {
-        polls++;
-      }
+  for (size_t i = 0; i < peer_manager_.count(); ++i) {
+    const PollRuntime* poll = peer_manager_.pollStateForIndex(i);
+    if (poll && poll->poll_pending) {
+      polls++;
     }
   }
 
@@ -1965,25 +1851,7 @@ void NodeStateMachine::enterProvisioningQuietMode() {
   rx_push_pending_ = false;
 
   // 5. Clear pending peer command and poll states (preserving identity/cache)
-  for (size_t i = 0; i < kMaxPeers; ++i) {
-    if (peers_[i].in_use) {
-      peers_[i].pending = false;
-      peers_[i].retry_step = 0;
-      peers_[i].next_retry_ms = 0;
-      peers_[i].pending_counter = 0;
-      peers_[i].pending_deadline_ms = 0;
-      peers_[i].wifi_pending = false;
-    }
-  }
-  if (poll_states_ != nullptr) {
-    for (size_t i = 0; i < poll_state_capacity_; ++i) {
-      poll_states_[i].poll_pending = false;
-      poll_states_[i].poll_retry_step = 0;
-      poll_states_[i].poll_next_retry_ms = 0;
-      poll_states_[i].poll_counter = 0;
-      poll_states_[i].poll_deadline_ms = 0;
-    }
-  }
+  peer_manager_.clearAllPending();
 
   addProvLog("Provisioning quiet mode entered");
   if (scans || maint || groups || peerCmds || polls) {
@@ -2414,12 +2282,12 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
       used[addr] = true;
     }
   }
-  for (size_t i = 0; i < peer_count_; ++i) {
-    const PeerRuntime &peer = peers_[i];
-    if (!peer.in_use) continue;
-    if (peer.address >= kProvAddressMin && peer.address <= kProvAddressMax) {
-      if (addressBelongsToCurrentProvisioningDevice(peer.address)) continue;
-      used[peer.address] = true;
+  for (size_t i = 0; i < peer_manager_.count(); ++i) {
+    const PeerRuntime *peer = peer_manager_.findByIndex(i);
+    if (!peer || !peer->in_use) continue;
+    if (peer->address >= kProvAddressMin && peer->address <= kProvAddressMax) {
+      if (addressBelongsToCurrentProvisioningDevice(peer->address)) continue;
+      used[peer->address] = true;
     }
   }
   for (size_t i = 0; i < kMaxPeers; ++i) {
@@ -2594,37 +2462,30 @@ bool NodeStateMachine::confirmProvisioningByFleetResponse(const ProtocolMessage 
   return false;
 }
 
-NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t address) {
+PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t address) {
   if (address == 0 || address == 255 || address == runtime_.local_address) {
     return nullptr;
   }
-  for (size_t i = 0; i < peer_count_; ++i) {
-    if (peers_[i].in_use && peers_[i].address == address) {
-      return &peers_[i];
-    }
+  PeerRuntime *node = peer_manager_.find(address);
+  if (node != nullptr) {
+    return node;
   }
-  if (peer_count_ >= kMaxPeers) {
-    return nullptr;
-  }
-  PeerRuntime &node = peers_[peer_count_++];
-  node = PeerRuntime{};
-  node.in_use = true;
-  node.address = address;
 
+  uint32_t chip_id = 0;
   // Resolve chip ID from recently provisioned address cache if available
   for (size_t i = 0; i < kMaxPeers; ++i) {
     const ProvisionedAddressEntry &e = provisioned_addrs_[i];
     if (e.in_use && e.assigned_address == address && e.chip_id != 0) {
-      node.chip_id = e.chip_id;
+      chip_id = e.chip_id;
       break;
     }
   }
 
   // Also check if there's a chip ID persisted in Settings!
-  if (node.chip_id == 0 && settings_ != nullptr) {
+  if (chip_id == 0 && settings_ != nullptr) {
     for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
       if (settings_->known_peer_addresses[i] == address) {
-        node.chip_id = settings_->known_peer_chip_ids[i];
+        chip_id = settings_->known_peer_chip_ids[i];
         break;
       }
     }
@@ -2633,19 +2494,8 @@ NodeStateMachine::PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t addres
   uint32_t interval = runtime_.tx_mqtt_remote_default_poll_interval_ms;
   if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
   if (interval > kMaxRemotePollIntervalMs) interval = kMaxRemotePollIntervalMs;
-  if (!runtime_.tx_mqtt_remote_polling_enabled) {
-    interval = 0;
-  }
-  node.poll_interval_ms = interval;
-  if (interval > 0) {
-    if (ensurePollStorage()) {
-      PollRuntime *poll = pollStateForIndex(static_cast<size_t>(&node - peers_));
-      if (poll != nullptr) {
-        poll->next_poll_ms = millis() + interval;
-      }
-    }
-  }
-  return &node;
+
+  return peer_manager_.findOrCreate(address, chip_id, interval, runtime_.tx_mqtt_remote_polling_enabled, millis());
 }
 
 bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter) {
@@ -2913,13 +2763,14 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
                                     (static_cast<uint32_t>(p[4]) << 8) |
                                     (static_cast<uint32_t>(p[5]) << 16);
     if (reportedChipId != 0) {
-      for (size_t i = 0; i < peer_count_; ++i) {
-        if (!peers_[i].in_use || peers_[i].address == msg.src ||
-            peers_[i].chip_id != reportedChipId) {
+      for (size_t i = 0; i < peer_manager_.count(); ++i) {
+        PeerRuntime *item = peer_manager_.findByIndex(i);
+        if (!item || !item->in_use || item->address == msg.src ||
+            item->chip_id != reportedChipId) {
           continue;
         }
-        lrslog::event("peer_identity_moved", msg.rssi, peers_[i].address, msg.src);
-        removePeerAt(i);
+        lrslog::event("peer_identity_moved", msg.rssi, item->address, msg.src);
+        peer_manager_.forget(item->address);
         node = findOrCreatePeer(msg.src);
         if (node == nullptr) return false;
         break;
@@ -3016,20 +2867,20 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
 
 void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
   if (!runtime_.role_tx) return;
-  for (size_t i = 0; i < peer_count_; ++i) {
-    PeerRuntime &node = peers_[i];
-    if (!node.in_use || !node.pending) continue;
+  for (size_t i = 0; i < peer_manager_.count(); ++i) {
+    PeerRuntime *node = peer_manager_.findByIndex(i);
+    if (!node || !node->pending) continue;
 
-    if (static_cast<int32_t>(now - node.pending_deadline_ms) >= 0) {
-      node.pending = false;
-      node.ack_state = PeerAckState::Timeout;
+    if (static_cast<int32_t>(now - node->pending_deadline_ms) >= 0) {
+      node->pending = false;
+      node->ack_state = PeerAckState::Timeout;
       {
-        lrslog::event("mqtt_remote_ack_timeout", 0, node.pending_counter, node.pending_relay);
+        lrslog::event("mqtt_remote_ack_timeout", 0, node->pending_counter, node->pending_relay);
       }
       continue;
     }
 
-    if (static_cast<int32_t>(now - node.next_retry_ms) < 0) {
+    if (static_cast<int32_t>(now - node->next_retry_ms) < 0) {
       continue;
     }
     if (isGroupActive()) {
@@ -3040,19 +2891,19 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
     }
 
     uint32_t sentCounter = 0;
-    if (sendPeerMqttCommand(node.address, node.pending_relay, &sentCounter)) {
-      const uint8_t idx = node.retry_step < (sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0]))
-                              ? node.retry_step
+    if (sendPeerMqttCommand(node->address, node->pending_relay, &sentCounter)) {
+      const uint8_t idx = node->retry_step < (sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0]))
+                              ? node->retry_step
                               : (sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0])) - 1;
-      node.next_retry_ms = now + kMqttRetryScheduleMs[idx];
-      if (node.retry_step < ((sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0])) - 1)) {
-        node.retry_step++;
+      node->next_retry_ms = now + kMqttRetryScheduleMs[idx];
+      if (node->retry_step < ((sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0])) - 1)) {
+        node->retry_step++;
       }
-      node.pending_counter = sentCounter;
-      node.last_cmd_counter = sentCounter;
-      node.ack_state = PeerAckState::Pending;
+      node->pending_counter = sentCounter;
+      node->last_cmd_counter = sentCounter;
+      node->ack_state = PeerAckState::Pending;
     } else {
-      lrslog::event("mqtt_remote_retry_send_fail", 0, node.pending_counter, node.pending_relay);
+      lrslog::event("mqtt_remote_retry_send_fail", 0, node->pending_counter, node->pending_relay);
     }
   }
 }
@@ -3060,27 +2911,26 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
 void NodeStateMachine::tickPeerPolling(uint32_t now) {
   if (!runtime_.role_tx) return;
   if (!runtime_.tx_mqtt_remote_polling_enabled) return;
-  if (poll_states_ == nullptr) {
-    if (!ensurePollStorage()) return;
-  }
-  const uint32_t pollResponseDeadlineMs = (runtime_.ack_timeout_ms >= 2000U) ? runtime_.ack_timeout_ms : 2000U;
-  for (size_t i = 0; i < peer_count_; ++i) {
-    PeerRuntime &node = peers_[i];
-    PollRuntime &poll = poll_states_[i];
-    if (!node.in_use || node.poll_interval_ms == 0) continue;
+  if (!peer_manager_.ensurePollStorage()) return;
 
-    if (poll.poll_pending && static_cast<int32_t>(now - poll.poll_deadline_ms) >= 0) {
-      poll.poll_pending = false;
-      lrslog::event("tx_poll_timeout", 0, poll.poll_counter, 0);
-      poll.next_poll_ms = now + node.poll_interval_ms;
+  const uint32_t pollResponseDeadlineMs = (runtime_.ack_timeout_ms >= 2000U) ? runtime_.ack_timeout_ms : 2000U;
+  for (size_t i = 0; i < peer_manager_.count(); ++i) {
+    PeerRuntime *node = peer_manager_.findByIndex(i);
+    PollRuntime *poll = peer_manager_.pollStateForIndex(i);
+    if (!node || !poll || node->poll_interval_ms == 0) continue;
+
+    if (poll->poll_pending && static_cast<int32_t>(now - poll->poll_deadline_ms) >= 0) {
+      poll->poll_pending = false;
+      lrslog::event("tx_poll_timeout", 0, poll->poll_counter, 0);
+      poll->next_poll_ms = now + node->poll_interval_ms;
     }
 
     // Keep exactly one in-flight poll per node to avoid overlap ambiguity.
-    if (poll.poll_pending) {
+    if (poll->poll_pending) {
       continue;
     }
 
-    if (static_cast<int32_t>(now - poll.next_poll_ms) < 0) {
+    if (static_cast<int32_t>(now - poll->next_poll_ms) < 0) {
       continue;
     }
     if (isGroupActive()) {
@@ -3091,15 +2941,15 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
     }
 
     uint32_t sentCounter = 0;
-    if (sendPollRequest(node.address, &sentCounter)) {
-      poll.poll_pending = true;
-      poll.poll_counter = sentCounter;
-      poll.poll_deadline_ms = now + pollResponseDeadlineMs;
-      poll.last_poll_tx_ms = now;
-      poll.next_poll_ms = now + node.poll_interval_ms;
+    if (sendPollRequest(node->address, &sentCounter)) {
+      poll->poll_pending = true;
+      poll->poll_counter = sentCounter;
+      poll->poll_deadline_ms = now + pollResponseDeadlineMs;
+      poll->last_poll_tx_ms = now;
+      poll->next_poll_ms = now + node->poll_interval_ms;
     } else {
       // Retry soon if radio send fails.
-      poll.next_poll_ms = now + 1000U;
+      poll->next_poll_ms = now + 1000U;
     }
   }
 }
@@ -3627,7 +3477,7 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
       } else {
         // Clear pending on any valid response from this node; retries can overlap counters.
-        PollRuntime *poll = pollStateForIndex(static_cast<size_t>(node - peers_));
+        PollRuntime *poll = peer_manager_.pollStateForPeer(node);
         if (poll != nullptr) {
           poll->poll_pending = false;
           poll->next_poll_ms = millis() + node->poll_interval_ms;
