@@ -18,7 +18,6 @@ extern const uint32_t kMinTxPollDefaultIntervalMs;
 extern const uint32_t kMaxTxPollDefaultIntervalMs;
 extern const uint32_t kMinRxPushIntervalMs;
 extern const uint32_t kMaxRxPushIntervalMs;
-extern const char *const kDefaultDeploymentKey;
 extern const size_t kMinDeploymentKeyLen;
 extern const long kMinFrequencyHz;
 extern const long kMaxFrequencyHz;
@@ -32,8 +31,6 @@ uint8_t parseAddressField(const JsonVariantConst &value, uint8_t fallback);
 uint8_t parseAddressText(const String &text, uint8_t fallback);
 bool parseBoolField(const JsonVariantConst &value, bool fallback);
 bool softApActiveNow();
-bool isDefaultDeploymentKey(const String &v);
-bool isDefaultDeploymentKey(const char *v);
 const char *linkStateText(LinkState st);
 
 }  // namespace admin_config_utils

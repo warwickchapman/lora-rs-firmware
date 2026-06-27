@@ -140,5 +140,11 @@ bool tickCandidateProbe(
     bool &outSendProbe
 );
 
+extern const char *const kDefaultDeploymentKey;
+bool isDefaultDeploymentKey(const char *v);
+#if !defined(UNIT_TEST)
+bool isDefaultDeploymentKey(const String &v);
+#endif
+
 } // namespace runtime_utils
 

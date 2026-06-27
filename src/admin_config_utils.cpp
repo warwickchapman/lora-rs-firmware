@@ -16,7 +16,6 @@ const uint32_t kMinTxPollDefaultIntervalMs = 60 * 1000;
 const uint32_t kMaxTxPollDefaultIntervalMs = 3600 * 1000;
 const uint32_t kMinRxPushIntervalMs = 60 * 1000;
 const uint32_t kMaxRxPushIntervalMs = 3600 * 1000;
-const char *const kDefaultDeploymentKey = "lora-default-passphrase";
 const size_t kMinDeploymentKeyLen = 16;
 
 #ifdef REGION_US
@@ -118,20 +117,6 @@ bool parseBoolField(const JsonVariantConst &value, bool fallback) {
 bool softApActiveNow() {
   const IPAddress apIp = WiFi.softAPIP();
   return apIp[0] != 0;
-}
-
-bool isDefaultDeploymentKey(const String &v) {
-  String k = v;
-  k.trim();
-  return k == kDefaultDeploymentKey;
-}
-
-bool isDefaultDeploymentKey(const char *v) {
-  if (v == nullptr) return false;
-  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
-  size_t len = strlen(v);
-  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
-  return strlen(kDefaultDeploymentKey) == len && strncmp(v, kDefaultDeploymentKey, len) == 0;
 }
 
 const char *linkStateText(LinkState st) {

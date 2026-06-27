@@ -38,7 +38,8 @@ void SerialAdmin::handleLine(const String &line) {
     Serial.println(F("LRS:{\"ok\":false,\"cmd\":\"unknown\",\"error\":\"executor_unavailable\"}"));
     return;
   }
-  executor_->execute(line.substring(4), [](const String &response) {
+  String cmd = line.substring(4);
+  executor_->execute(cmd.c_str(), cmd.length(), [](const String &response) {
     Serial.print(F("LRS:"));
     Serial.println(response);
   }, false);

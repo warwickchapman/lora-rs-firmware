@@ -87,7 +87,9 @@ class MqttBridge {
   void clearPeerPublishCache(uint8_t addr);
   void clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId = 0);
   bool connectIfNeeded();
+  void publishLocalStatus();
+  bool publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYield);
   void publishStatus();
   void publishDiscovery();
-  void publishOtaStatus(const String &status);
+  void publishOtaStatus(const char *status);
 };

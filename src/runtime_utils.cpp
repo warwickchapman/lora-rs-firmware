@@ -277,5 +277,21 @@ bool tickCandidateProbe(
   }
 }
 
+const char *const kDefaultDeploymentKey = "lora-default-passphrase";
+
+bool isDefaultDeploymentKey(const char *v) {
+  if (v == nullptr) return false;
+  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
+  size_t len = strlen(v);
+  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
+  return strlen(kDefaultDeploymentKey) == len && strncmp(v, kDefaultDeploymentKey, len) == 0;
+}
+
+#if !defined(UNIT_TEST)
+bool isDefaultDeploymentKey(const String &v) {
+  return isDefaultDeploymentKey(v.c_str());
+}
+#endif
+
 } // namespace runtime_utils
 

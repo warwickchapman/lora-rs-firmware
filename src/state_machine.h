@@ -217,7 +217,7 @@ class NodeStateMachine {
   bool sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter);
   bool hasPendingUdpLogControl() const;
   bool consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src);
-  bool consumePendingOtaPull(IPAddress &host, uint16_t &port, String &sha256Hex,
+  bool consumePendingOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize,
                              uint8_t &src);
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
@@ -244,7 +244,7 @@ class NodeStateMachine {
 
   bool sendFleetWifiProvision(const String &ssid, const String &password, uint8_t targetAddress = 255);
   bool hasPendingWifiProvision() const;
-  bool consumePendingWifiProvision(String &ssid, String &password, uint8_t &src);
+  bool consumePendingWifiProvision(char *ssidDest, size_t ssidSize, char *passwordDest, size_t passwordSize, uint8_t &src);
   uint32_t fleetWifiProvisionCooldownRemainingMs() const;
   bool sendPeerReboot(uint8_t dstAddress);
   bool hasPendingReboot() const { return reboot_pending_; }
@@ -256,7 +256,7 @@ class NodeStateMachine {
   bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
   bool sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey);
   bool hasPendingFleetKeyChange() const;
-  bool consumePendingFleetKeyChange(String &newKey, uint8_t &src);
+  bool consumePendingFleetKeyChange(char *keyDest, size_t keySize, uint8_t &src);
   bool provisioningStartDiscovery(uint16_t estimatedCount);
   bool provisioningStartProvisionAll();
   void provisioningCancel();
@@ -267,9 +267,13 @@ class NodeStateMachine {
   bool provisioningLogByIndex(size_t index, uint32_t &timestampMs, char outMsg[56]) const;
   bool hasPendingFleetProvisionApply() const;
   bool consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx, uint8_t &controllerAddress,
-                                         String &fleetKey);
+                                         char *fleetKeyDest, size_t keySize);
   bool sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress);
   void triggerIdentify(uint32_t durationMs = kIdentifyLedDurationMs);
+
+  static size_t peerRuntimeSize();
+  static size_t pollRuntimeSize();
+  static size_t replaySourceStateSize();
 
  private:
   static constexpr size_t kMaxPeers = LRS_MAX_PEERS;
@@ -435,6 +439,8 @@ class NodeStateMachine {
     uint32_t pending_deadline_ms = 0;
     uint32_t poll_interval_ms = 0;
   };
+  static_assert(sizeof(PeerRuntime) <= 256, "PeerRuntime exceeds budget; review field additions");
+
   struct PollRuntime {
     uint32_t next_poll_ms = 0;
     bool poll_pending = false;

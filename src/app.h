@@ -88,6 +88,18 @@ class App {
   uint32_t sta_reconnect_fib_prev_s_ = 0;
   uint32_t sta_reconnect_fib_curr_s_ = 1;
   
+  void handlePendingWifiControl();
+  void handlePendingUdpLogControl();
+  bool handlePendingOtaPull();
+  void handlePendingWifiProvision();
+  bool handlePendingFactoryReset();
+  bool handlePendingReboot();
+  bool handlePendingReaddress();
+  void handlePendingPeerSync();
+  void handlePendingSensorConfig();
+  void handlePendingFleetProvision();
+  bool handlePendingFleetKeyChange();
+
   PowerSaveRuntimeState power_save_state_ = PowerSaveRuntimeState::FullPower;
 
   void enterPowerSave(const char *reason);

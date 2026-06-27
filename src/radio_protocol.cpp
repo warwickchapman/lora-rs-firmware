@@ -7,6 +7,7 @@
 #include <SHA256.h>
 
 #include "logger.h"
+#include "runtime_utils.h"
 
 namespace {
 constexpr uint8_t kNss = 15;
@@ -14,7 +15,6 @@ constexpr uint8_t kRst = 16;
 constexpr uint8_t kDio0 = 0;
 constexpr size_t kPayloadSize = 12;
 constexpr size_t kMacSize = 8;
-constexpr const char *kDefaultDeploymentKey = "lora-default-passphrase";
 
 struct __attribute__((packed)) Packet {
   uint8_t dst;
@@ -45,14 +45,6 @@ void computeMac(const uint8_t macKey[32], const Packet &p, uint8_t out[32]) {
   hash.update(macKey, 32);
   hash.update(reinterpret_cast<const uint8_t *>(&p), sizeof(Packet) - kMacSize);
   hash.finalize(out, 32);
-}
-
-bool isDefaultDeploymentKey(const char *v) {
-  if (v == nullptr) return false;
-  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
-  size_t len = strlen(v);
-  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
-  return strlen(kDefaultDeploymentKey) == len && strncmp(v, kDefaultDeploymentKey, len) == 0;
 }
 }
 
@@ -268,8 +260,8 @@ void RadioProtocol::deriveKeys() {
   uint8_t digest[32];
   const char *fleet = settings_->fleet_passphrase.c_str();
   const size_t fleetLen = settings_->fleet_passphrase.length();
-  const char *factory = kDefaultDeploymentKey;
-  const size_t factoryLen = strlen(kDefaultDeploymentKey);
+  const char *factory = runtime_utils::kDefaultDeploymentKey;
+  const size_t factoryLen = strlen(runtime_utils::kDefaultDeploymentKey);
   const uint8_t sep = ':';
 
   hash.reset();
@@ -311,7 +303,7 @@ void RadioProtocol::refreshRuntimeCfg(const Settings &cfg) {
 
 void RadioProtocol::refreshRadioRuntimeState() {
   default_key_configured_ =
-      settings_ && isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
+      settings_ && runtime_utils::isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
   lora_enabled_ = true;
   LoRa.idle();
   LoRa.receive();

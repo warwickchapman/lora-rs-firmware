@@ -19,7 +19,6 @@ constexpr size_t kConfigMaxBytes = 8192;
 constexpr size_t kPostOtaActionMaxBytes = 256;
 constexpr uint16_t kConfigSchemaVersion = 3;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
-constexpr char kDefaultDeploymentKey[] = "lora-default-passphrase";
 constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
 constexpr char kRoleNone[] = "none";
@@ -448,6 +447,8 @@ bool ConfigStore::begin() {
     cfg_.wifi_ap_fallback_policy = "fallback_on_disconnect";
   }
 
+  char maskedKey[32];
+  lrslog::maskSecret(maskedKey, sizeof(maskedKey), cfg_.fleet_passphrase.c_str());
   LRS_LOGI(FS,
            "event=config_loaded path=%s schema_version=%u commissioned=%u role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
@@ -457,7 +458,7 @@ bool ConfigStore::begin() {
            static_cast<unsigned>(cfg_.local_address),
            static_cast<unsigned>(cfg_.remote_address),
            cfg_.wifi_sta_ssid.c_str(),
-           lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str());
+           maskedKey);
   if (needs_save) {
     LRS_LOGI(FS, "event=config_healed action=saving_clean_config");
     save();
@@ -577,6 +578,8 @@ bool ConfigStore::save() {
     return false;
   }
 
+  char maskedKey[32];
+  lrslog::maskSecret(maskedKey, sizeof(maskedKey), cfg_.fleet_passphrase.c_str());
   LRS_LOGI(FS,
            "event=config_saved path=%s bytes=%lu role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
@@ -585,7 +588,7 @@ bool ConfigStore::save() {
            static_cast<unsigned>(cfg_.local_address),
            static_cast<unsigned>(cfg_.remote_address),
            cfg_.wifi_sta_ssid.c_str(),
-           lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str());
+           maskedKey);
   return ok;
 }
 
@@ -600,18 +603,20 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
 
   if (keepSharedFleetKey && preservedFleetKey.length() > 0) {
     cfg_.fleet_passphrase = preservedFleetKey;
-    cfg_.fleet_setup_prompt_dismissed = preservedFleetPromptDismissed || (cfg_.fleet_passphrase != kDefaultDeploymentKey);
+    cfg_.fleet_setup_prompt_dismissed = preservedFleetPromptDismissed || (cfg_.fleet_passphrase != runtime_utils::kDefaultDeploymentKey);
   }
   if (keepWifiCredentials) {
     cfg_.wifi_sta_ssid = preservedWifiSsid;
     cfg_.wifi_sta_password = preservedWifiPassword;
   }
 
+  char maskedKey[32];
+  lrslog::maskSecret(maskedKey, sizeof(maskedKey), cfg_.fleet_passphrase.c_str());
   LRS_LOGW(SYS,
            "event=factory_reset_apply keep_fleet_key=%u keep_wifi=%u fleet_key=%s wifi_ssid=%s",
            keepSharedFleetKey ? 1U : 0U,
            keepWifiCredentials ? 1U : 0U,
-           lrslog::maskSecret(String(cfg_.fleet_passphrase.c_str())).c_str(),
+           maskedKey,
            cfg_.wifi_sta_ssid.c_str());
   return save();
 }

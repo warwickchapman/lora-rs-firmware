@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include <IPAddress.h>
 
-#include <functional>
 
 namespace lrslog {
 
@@ -25,13 +24,13 @@ enum class Category : uint8_t {
   FS,
 };
 
-using UnixTimeProvider = std::function<bool(uint32_t &)>;
+using UnixTimeProviderFn = bool (*)(void *context, uint32_t &unixTimeS);
 
 void setLevel(Level level);
 Level level();
 bool enabled(Level level);
 
-void setUnixTimeProvider(UnixTimeProvider provider);
+void setUnixTimeProvider(UnixTimeProviderFn provider, void *context);
 
 void logf(Level level, Category cat, const char *fmt, ...);
 void logAtf(Level level, Category cat, uint32_t ms, uint32_t unixTimeS, const char *fmt, ...);
@@ -47,8 +46,7 @@ uint32_t heapFree();
 uint8_t heapFragPercent();
 uint32_t heapMaxFreeBlock();
 
-String maskSecret(const String &value, size_t keepPrefix = 2, size_t keepSuffix = 2);
-String redact(const String &value);
+void maskSecret(char *dest, size_t destSize, const char *src, size_t keepPrefix = 2, size_t keepSuffix = 2);
 
 }  // namespace lrslog
 

@@ -252,9 +252,9 @@ bool MqttBridge::begin(const Settings &cfg, const String &chipIdHex, NodeStateMa
   rebuildTopics();
 
   if (executor_ != nullptr) {
-    executor_->setOtaStatusPublisher([this](const String &status) {
-      publishOtaStatus(status);
-    });
+    executor_->setOtaStatusPublisher([](void *context, const char *status) {
+      static_cast<MqttBridge *>(context)->publishOtaStatus(status);
+    }, this);
   }
 
   instance_ = this;
@@ -530,24 +530,22 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       }
       return;
     }
-    String cmdPayload;
-    if (cmdPayload.reserve(length + 1)) {
-      for (unsigned int i = 0; i < length; ++i) {
-        cmdPayload += static_cast<char>(payload[i]);
-      }
+    if (length >= 1024) {
+      LRS_LOGW(API, "mqtt_command_rejected reason=oversized_payload length=%u", length);
+      return;
     }
-    String cmdNameStr = "unknown";
+    char cmdNameStr[32] = "unknown";
     JsonDocument tempDoc;
-    if (deserializeJson(tempDoc, cmdPayload) == DeserializationError::Ok) {
+    if (deserializeJson(tempDoc, payload, length) == DeserializationError::Ok) {
       const char *cmdVal = tempDoc["cmd"] | "unknown";
-      cmdNameStr = cmdVal;
+      strlcpy(cmdNameStr, cmdVal, sizeof(cmdNameStr));
     }
-    executor_->execute(cmdPayload, [this, cmdNameStr](const String &response) {
+    executor_->execute(reinterpret_cast<const char *>(payload), length, [this, cmdNameStr](const String &response) {
       if (mqtt_client_.connected()) {
         char admin_resp_topic[160];
         snprintf(admin_resp_topic, sizeof(admin_resp_topic), "%s/admin_response", topic_base_);
         if (!mqtt_client_.publish(admin_resp_topic, response.c_str(), false)) {
-          LRS_LOGW(API, "admin_response_publish_failed cmd=%s size=%u", cmdNameStr.c_str(), (unsigned)response.length());
+          LRS_LOGW(API, "admin_response_publish_failed cmd=%s size=%u", cmdNameStr, (unsigned)response.length());
         }
       }
     }, true);
@@ -772,14 +770,7 @@ bool MqttBridge::connectIfNeeded() {
   return true;
 }
 
-void MqttBridge::publishStatus() {
-  if (!mqtt_client_.connected() || sm_ == nullptr) {
-    status_publish_in_progress_ = false;
-    status_publish_locals_done_ = false;
-    status_publish_peer_index_ = 0;
-    return;
-  }
-
+void MqttBridge::publishLocalStatus() {
   uint8_t publishOpsSinceYield = 0;
   auto maybeYield = [&]() {
     ++publishOpsSinceYield;
@@ -792,28 +783,136 @@ void MqttBridge::publishStatus() {
     mqtt_client_.publish(topic, payload, true);
     maybeYield();
   };
+
+  char topic[kMqttTopicBufBytes];
+  const bool localInput = sm_->localInputState() != 0;
+  if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
+  if (buildLocalTopic(topic, sizeof(topic), "relay")) publishRetained(topic, sm_->relayState() ? "1" : "0");
+  if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
+
+  char addrHex[3];
+  snprintf(addrHex, sizeof(addrHex), "%02X", runtime_.local_address);
+  char addrHexPrefixed[5];
+  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
+  if (buildLocalTopic(topic, sizeof(topic), "addr")) publishRetained(topic, addrHexPrefixed);
+
+  const SensorRegistry &localReg = sm_->localSensors();
+  for (uint8_t i = 0; i < localReg.count(); ++i) {
+    SensorReading r{};
+    if (localReg.byIndex(i, r)) {
+      char valBuf[32];
+      char topicSuffix[64];
+      snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
+      if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+        if (r.scale == 0) {
+          snprintf(valBuf, sizeof(valBuf), "%d", static_cast<int>(r.value));
+        } else {
+          float divisor = 1.0f;
+          for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+          dtostrf(static_cast<float>(r.value) / divisor, 0, r.scale, valBuf);
+        }
+        if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, valBuf);
+      } else {
+        if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, "");
+      }
+      snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
+      if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, sensorStateToString(r.state));
+    }
+  }
+
+  char updatedMs[16];
+  snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));
+  if (buildLocalTopic(topic, sizeof(topic), "last_updated")) publishRetained(topic, updatedMs);
+
+  char numBuf[24];
+  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(lrslog::heapFree()));
+  if (buildLocalTopic(topic, sizeof(topic), "heap_free")) publishRetained(topic, numBuf);
+  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  if (buildLocalTopic(topic, sizeof(topic), "heap_max_block")) publishRetained(topic, numBuf);
+  snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(lrslog::heapFragPercent()));
+  if (buildLocalTopic(topic, sizeof(topic), "heap_frag_pct")) publishRetained(topic, numBuf);
+  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(millis()));
+  if (buildLocalTopic(topic, sizeof(topic), "uptime_ms")) publishRetained(topic, numBuf);
+}
+
+bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYield) {
+  PeerStatusSnapshot node{};
+  if (!sm_->peerByIndex(peerIndex, node)) {
+    return false;
+  }
+  if (node.chip_id == 0) {
+    return false;
+  }
+  const uint8_t addr = node.address;
+  PeerPublishCacheEntry *peerCache = upsertPeerPublishCache(addr);
+  if (peerCache == nullptr) {
+    return false;
+  }
+  if (!runtime_.tx_mqtt_remote_polling_enabled) {
+    const bool changed =
+        !peerCache->published_once || peerCache->last_seen_ms != node.last_seen_ms || peerCache->last_cmd_counter != node.last_cmd_counter;
+    if (!changed) {
+      return false;
+    }
+  }
+
+  auto maybeYield = [&]() {
+    ++publishOpsSinceYield;
+    if (publishOpsSinceYield >= kStatusPublishYieldEveryOps) {
+      publishOpsSinceYield = 0;
+      yield();
+    }
+  };
   auto publishRetainedTopic = [&](const char *topic, const char *payload) {
     mqtt_client_.publish(topic, payload, true);
     maybeYield();
   };
 
-  if (!status_publish_locals_done_) {
-    char topic[kMqttTopicBufBytes];
-    const bool localInput = sm_->localInputState() != 0;
-    if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
-    if (buildLocalTopic(topic, sizeof(topic), "relay")) publishRetained(topic, sm_->relayState() ? "1" : "0");
-    if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
+  char addrHex[3];
+  snprintf(addrHex, sizeof(addrHex), "%02X", node.address);
+  char addrHexPrefixed[5];
+  snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
+  char addrDec[4];
+  snprintf(addrDec, sizeof(addrDec), "%02u", static_cast<unsigned>(node.address));
+  char addrSeg[24];
+  if (!formatCanonicalPeerAddrSegment(addrSeg, sizeof(addrSeg), node.address, node.chip_id)) {
+    return false;
+  }
 
-    char addrHex[3];
-    snprintf(addrHex, sizeof(addrHex), "%02X", runtime_.local_address);
-    char addrHexPrefixed[5];
-    snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
-    if (buildLocalTopic(topic, sizeof(topic), "addr")) publishRetained(topic, addrHexPrefixed);
+  char topic[kMqttTopicBufBytes];
+  char numBuf[24];
 
-    const SensorRegistry &localReg = sm_->localSensors();
-    for (uint8_t i = 0; i < localReg.count(); ++i) {
+  const bool timedOut = (node.ack_state == PeerAckState::Timeout);
+
+  if (timedOut) {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, "");
+    if (!peerCache->input_published || peerCache->input_value != 0xFF) {
+      if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, "");
+      peerCache->input_published = true;
+      peerCache->input_value = 0xFF;
+    }
+    for (uint8_t j = 0; j < node.sensors.count(); ++j) {
       SensorReading r{};
-      if (localReg.byIndex(i, r)) {
+      if (node.sensors.byIndex(j, r)) {
+        char topicSuffix[64];
+        snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
+        snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
+      }
+    }
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
+  } else {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
+    const uint8_t inputValue = node.input_state ? 1 : 0;
+    if (!peerCache->input_published || peerCache->input_value != inputValue) {
+      if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
+      peerCache->input_published = true;
+      peerCache->input_value = inputValue;
+    }
+    for (uint8_t j = 0; j < node.sensors.count(); ++j) {
+      SensorReading r{};
+      if (node.sensors.byIndex(j, r)) {
         char valBuf[32];
         char topicSuffix[64];
         snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
@@ -825,29 +924,116 @@ void MqttBridge::publishStatus() {
             for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
             dtostrf(static_cast<float>(r.value) / divisor, 0, r.scale, valBuf);
           }
-          if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, valBuf);
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, valBuf);
         } else {
-          if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, "");
+          if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
         }
         snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
-        if (buildLocalTopic(topic, sizeof(topic), topicSuffix)) publishRetained(topic, sensorStateToString(r.state));
+        if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, sensorStateToString(r.state));
       }
     }
+    if (node.wifi_state_known) {
+      if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, node.wifi_enabled ? "1" : "0");
+    } else {
+      if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
+    }
+  }
 
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ack_state")) publishRetainedTopic(topic, peerAckStateText(node.ack_state));
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_hex")) publishRetainedTopic(topic, addrHex);
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_dec")) publishRetainedTopic(topic, addrDec);
 
-    char updatedMs[16];
-    snprintf(updatedMs, sizeof(updatedMs), "%lu", static_cast<unsigned long>(millis()));
-    if (buildLocalTopic(topic, sizeof(topic), "last_updated")) publishRetained(topic, updatedMs);
+  if (node.uplink_rssi == -127 || node.last_seen_ms == 0) {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, "");
+  } else {
+    snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
+  }
 
-    char numBuf[24];
-    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(lrslog::heapFree()));
-    if (buildLocalTopic(topic, sizeof(topic), "heap_free")) publishRetained(topic, numBuf);
-    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
-    if (buildLocalTopic(topic, sizeof(topic), "heap_max_block")) publishRetained(topic, numBuf);
-    snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(lrslog::heapFragPercent()));
-    if (buildLocalTopic(topic, sizeof(topic), "heap_frag_pct")) publishRetained(topic, numBuf);
-    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(millis()));
-    if (buildLocalTopic(topic, sizeof(topic), "uptime_ms")) publishRetained(topic, numBuf);
+  if (node.last_seen_ms == 0) {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, "");
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, "");
+  } else {
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
+    const uint32_t ageS = (millis() - node.last_seen_ms) / 1000U;
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(ageS));
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, numBuf);
+  }
+
+  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_cmd_counter")) publishRetainedTopic(topic, numBuf);
+  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_interval_s")) publishRetainedTopic(topic, numBuf);
+  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
+
+  if (!timedOut && node.last_seen_ms > 0 && node.maintenance_debug_known) {
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_free));
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, numBuf);
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_max_block));
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, numBuf);
+    snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.heap_frag_pct));
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, numBuf);
+  } else {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, "");
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, "");
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, "");
+  }
+
+  if (!timedOut && node.last_seen_ms > 0 && node.uptime_ms > 0) {
+    snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, numBuf);
+  } else {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, "");
+  }
+
+  snprintf(numBuf, sizeof(numBuf), "%08lx", static_cast<unsigned long>(node.chip_id));
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "chip_id")) publishRetainedTopic(topic, numBuf);
+
+  if (node.last_seen_ms > 0 && (node.fw_major != 0 || node.fw_minor != 0 || node.fw_patch != 0)) {
+    if (node.fw_build > 0) {
+      snprintf(numBuf, sizeof(numBuf), "%u.%u.%u~%u", node.fw_major, node.fw_minor, node.fw_patch, node.fw_build);
+    } else {
+      snprintf(numBuf, sizeof(numBuf), "%u.%u.%u", node.fw_major, node.fw_minor, node.fw_patch);
+    }
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, numBuf);
+  } else {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, "");
+  }
+
+  if (node.last_seen_ms > 0 && node.wifi_connected && node.ip[0] != 0) {
+    snprintf(numBuf, sizeof(numBuf), "%u.%u.%u.%u", node.ip[0], node.ip[1], node.ip[2], node.ip[3]);
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, numBuf);
+  } else {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, "");
+  }
+
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "power_save_listen_only")) {
+    publishRetainedTopic(topic, node.power_save_listen_only ? "1" : "0");
+  }
+  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "power_save_active")) {
+    publishRetainedTopic(topic, node.power_save_active ? "1" : "0");
+  }
+
+  peerCache->chip_id = node.chip_id;
+  peerCache->last_seen_ms = node.last_seen_ms;
+  peerCache->last_cmd_counter = node.last_cmd_counter;
+  peerCache->published_once = true;
+  return true;
+}
+
+void MqttBridge::publishStatus() {
+  if (!mqtt_client_.connected() || sm_ == nullptr) {
+    status_publish_in_progress_ = false;
+    status_publish_locals_done_ = false;
+    status_publish_peer_index_ = 0;
+    return;
+  }
+
+  if (!status_publish_locals_done_) {
+    publishLocalStatus();
     status_publish_locals_done_ = true;
     if (runtime_.role_tx) {
       return;
@@ -861,190 +1047,16 @@ void MqttBridge::publishStatus() {
     }
 
     uint8_t peerSnapshotsPublished = 0;
-    for (; status_publish_peer_index_ < nodeCount; ++status_publish_peer_index_) {
-      PeerStatusSnapshot node{};
-      if (!sm_->peerByIndex(status_publish_peer_index_, node)) {
-        continue;
-      }
-      if (node.chip_id == 0) {
-        continue;
-      }
-      const uint8_t addr = node.address;
-      PeerPublishCacheEntry *peerCache = upsertPeerPublishCache(addr);
-      if (peerCache == nullptr) {
-        continue;
-      }
-      if (!runtime_.tx_mqtt_remote_polling_enabled) {
-        const bool changed =
-            !peerCache->published_once || peerCache->last_seen_ms != node.last_seen_ms || peerCache->last_cmd_counter != node.last_cmd_counter;
-        if (!changed) {
-          continue;
+    uint8_t publishOpsSinceYield = 0;
+    for (; status_publish_peer_index_ < nodeCount; ) {
+      if (publishPeerStatus(status_publish_peer_index_, publishOpsSinceYield)) {
+        ++peerSnapshotsPublished;
+        ++status_publish_peer_index_;
+        if (peerSnapshotsPublished >= kStatusPeerSnapshotsPerTick) {
+          return;
         }
-      }
-
-      char addrHex[3];
-      snprintf(addrHex, sizeof(addrHex), "%02X", node.address);
-      char addrHexPrefixed[5];
-      snprintf(addrHexPrefixed, sizeof(addrHexPrefixed), "0x%s", addrHex);
-      char addrDec[4];
-      snprintf(addrDec, sizeof(addrDec), "%02u", static_cast<unsigned>(node.address));
-      char addrSeg[24];
-      if (!formatCanonicalPeerAddrSegment(addrSeg, sizeof(addrSeg), node.address, node.chip_id)) {
-        continue;
-      }
-
-      auto publishRemote = [&](const char *addrSeg) {
-        char topic[kMqttTopicBufBytes];
-        char numBuf[24];
-
-        const bool timedOut = (node.ack_state == PeerAckState::Timeout);
-
-        // --- Operational topics: blank when timed out ---
-        if (timedOut) {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, "");
-          if (!peerCache->input_published || peerCache->input_value != 0xFF) {
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, "");
-            peerCache->input_published = true;
-            peerCache->input_value = 0xFF; // sentinel: stale
-          }
-          for (uint8_t j = 0; j < node.sensors.count(); ++j) {
-            SensorReading r{};
-            if (node.sensors.byIndex(j, r)) {
-              char topicSuffix[64];
-              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
-              if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
-              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
-              if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
-            }
-          }
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
-          const uint8_t inputValue = node.input_state ? 1 : 0;
-          if (!peerCache->input_published || peerCache->input_value != inputValue) {
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
-            peerCache->input_published = true;
-            peerCache->input_value = inputValue;
-          }
-          for (uint8_t j = 0; j < node.sensors.count(); ++j) {
-            SensorReading r{};
-            if (node.sensors.byIndex(j, r)) {
-              char valBuf[32];
-              char topicSuffix[64];
-              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/value", sensorKindToString(r.kind), r.instance);
-              if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
-                if (r.scale == 0) {
-                  snprintf(valBuf, sizeof(valBuf), "%d", static_cast<int>(r.value));
-                } else {
-                  float divisor = 1.0f;
-                  for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
-                  dtostrf(static_cast<float>(r.value) / divisor, 0, r.scale, valBuf);
-                }
-                if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, valBuf);
-              } else {
-                if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, "");
-              }
-              snprintf(topicSuffix, sizeof(topicSuffix), "sensor/%s/%u/state", sensorKindToString(r.kind), r.instance);
-              if (buildPeerTopic(topic, sizeof(topic), addrSeg, topicSuffix)) publishRetainedTopic(topic, sensorStateToString(r.state));
-            }
-          }
-          if (node.wifi_state_known) {
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, node.wifi_enabled ? "1" : "0");
-          } else {
-            if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
-          }
-        }
-
-        // --- Always published: status/metadata/diagnostic ---
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ack_state")) publishRetainedTopic(topic, peerAckStateText(node.ack_state));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_hex")) publishRetainedTopic(topic, addrHex);
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "addr_dec")) publishRetainedTopic(topic, addrDec);
-
-        if (node.uplink_rssi == -127 || node.last_seen_ms == 0) {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, "");
-        } else {
-          snprintf(numBuf, sizeof(numBuf), "%d", node.uplink_rssi);
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uplink_rssi_dbm")) publishRetainedTopic(topic, numBuf);
-        }
-
-        if (node.last_seen_ms == 0) {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, "");
-        } else {
-          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_seen_ms));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_ms")) publishRetainedTopic(topic, numBuf);
-          const uint32_t ageS = (millis() - node.last_seen_ms) / 1000U;
-          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(ageS));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_seen_age_s")) publishRetainedTopic(topic, numBuf);
-        }
-
-        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_cmd_counter")) publishRetainedTopic(topic, numBuf);
-        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_interval_s")) publishRetainedTopic(topic, numBuf);
-        snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
-
-        if (!timedOut && node.last_seen_ms > 0 && node.maintenance_debug_known) {
-          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_free));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, numBuf);
-          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.heap_max_block));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, numBuf);
-          snprintf(numBuf, sizeof(numBuf), "%u", static_cast<unsigned>(node.heap_frag_pct));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_free")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_max_block")) publishRetainedTopic(topic, "");
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "heap_frag_pct")) publishRetainedTopic(topic, "");
-        }
-
-        if (!timedOut && node.last_seen_ms > 0 && node.uptime_ms > 0) {
-          snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.uptime_ms));
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "uptime_ms")) publishRetainedTopic(topic, "");
-        }
-
-        // --- Additional Peer Telemetry Leaves ---
-        snprintf(numBuf, sizeof(numBuf), "%08lx", static_cast<unsigned long>(node.chip_id));
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "chip_id")) publishRetainedTopic(topic, numBuf);
-
-        if (node.last_seen_ms > 0 && (node.fw_major != 0 || node.fw_minor != 0 || node.fw_patch != 0)) {
-          if (node.fw_build > 0) {
-            snprintf(numBuf, sizeof(numBuf), "%u.%u.%u~%u", node.fw_major, node.fw_minor, node.fw_patch, node.fw_build);
-          } else {
-            snprintf(numBuf, sizeof(numBuf), "%u.%u.%u", node.fw_major, node.fw_minor, node.fw_patch);
-          }
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "fw_version")) publishRetainedTopic(topic, "");
-        }
-
-        if (node.last_seen_ms > 0 && node.wifi_connected && node.ip[0] != 0) {
-          snprintf(numBuf, sizeof(numBuf), "%u.%u.%u.%u", node.ip[0], node.ip[1], node.ip[2], node.ip[3]);
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, numBuf);
-        } else {
-          if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ip")) publishRetainedTopic(topic, "");
-        }
-
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "power_save_listen_only")) {
-          publishRetainedTopic(topic, node.power_save_listen_only ? "1" : "0");
-        }
-        if (buildPeerTopic(topic, sizeof(topic), addrSeg, "power_save_active")) {
-          publishRetainedTopic(topic, node.power_save_active ? "1" : "0");
-        }
-      };
-
-      publishRemote(addrSeg);
-      peerCache->chip_id = node.chip_id;
-      peerCache->last_seen_ms = node.last_seen_ms;
-      peerCache->last_cmd_counter = node.last_cmd_counter;
-      peerCache->published_once = true;
-      ++peerSnapshotsPublished;
-      ++status_publish_peer_index_;
-      if (peerSnapshotsPublished >= kStatusPeerSnapshotsPerTick) {
-        return;
+      } else {
+        ++status_publish_peer_index_;
       }
     }
     status_publish_peer_index_ = 0;
@@ -1056,7 +1068,6 @@ void MqttBridge::publishStatus() {
   if ((now - last_discovery_publish_ms_) >= kDiscoveryPublishIntervalMs) {
     publishDiscovery();
   }
-
 }
 
 void MqttBridge::publishDiscovery() {
@@ -1097,10 +1108,10 @@ void MqttBridge::publishDiscovery() {
   }
 }
 
-void MqttBridge::publishOtaStatus(const String &status) {
+void MqttBridge::publishOtaStatus(const char *status) {
   if (mqtt_client_.connected()) {
     char ota_status_topic[160];
     snprintf(ota_status_topic, sizeof(ota_status_topic), "%s/ota_status", topic_base_);
-    mqtt_client_.publish(ota_status_topic, status.c_str(), true);
+    mqtt_client_.publish(ota_status_topic, status, true);
   }
 }

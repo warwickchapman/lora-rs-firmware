@@ -2,6 +2,11 @@
 #include <cstring>
 
 #include "runtime_utils.h"
+#include "state_machine.h"
+
+size_t NodeStateMachine::peerRuntimeSize() { return sizeof(NodeStateMachine::PeerRuntime); }
+size_t NodeStateMachine::pollRuntimeSize() { return sizeof(NodeStateMachine::PollRuntime); }
+size_t NodeStateMachine::replaySourceStateSize() { return sizeof(NodeStateMachine::ReplaySourceState); }
 
 void test_paired_transmitter_is_tx() {
   bool roleTx = false;
@@ -612,6 +617,19 @@ void test_candidate_telemetry_does_not_reset_active_attempts() {
   TEST_ASSERT_EQUAL_UINT32(0, c.last_probe_ms);
 }
 
+void test_struct_sizes() {
+  size_t peerSize = NodeStateMachine::peerRuntimeSize();
+  size_t pollSize = NodeStateMachine::pollRuntimeSize();
+  size_t replaySize = NodeStateMachine::replaySourceStateSize();
+
+  printf("AUDIT_METRIC: sizeof(PeerRuntime) = %zu\n", peerSize);
+  printf("AUDIT_METRIC: sizeof(PollRuntime) = %zu\n", pollSize);
+  printf("AUDIT_METRIC: sizeof(DiscoveryCandidate) = %zu\n", sizeof(DiscoveryCandidate));
+  printf("AUDIT_METRIC: sizeof(ReplaySourceState) = %zu\n", replaySize);
+
+  TEST_ASSERT_TRUE(peerSize <= 256);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_paired_transmitter_is_tx);
@@ -642,6 +660,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_start_adoption_reverts_on_tx_fail);
   RUN_TEST(test_candidate_probe_tick_flow);
   RUN_TEST(test_candidate_telemetry_does_not_reset_active_attempts);
+  RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }
 

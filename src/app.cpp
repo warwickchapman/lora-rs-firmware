@@ -100,18 +100,16 @@ void App::begin() {
   sensors_.begin(config_.settings());
 
   sm_.begin(config_.settings(), &radio_);
-  // Logs can be timestamped from LoRa-shared time even before this device has
-  // its own NTP fix.
-  auto unixProvider = [this](uint32_t &unixTimeS) {
-    if (!sm_.sharedUnixTimeValid())
+  lrslog::setUnixTimeProvider([](void *ctx, uint32_t &unixTimeS) -> bool {
+    auto *self = static_cast<App *>(ctx);
+    if (!self->sm_.sharedUnixTimeValid())
       return false;
-    unixTimeS = sm_.sharedUnixTime();
+    unixTimeS = self->sm_.sharedUnixTime();
     return (unixTimeS != 0);
-  };
-  lrslog::setUnixTimeProvider(unixProvider);
-  admin_executor_.begin(&config_, &sm_, [this](bool restartNetwork, bool restartOtaAuth) {
-    applyUpdatedConfig(restartNetwork, restartOtaAuth);
-  });
+  }, this);
+  admin_executor_.begin(&config_, &sm_, [](void *ctx, bool restartNetwork, bool restartOtaAuth) {
+    static_cast<App *>(ctx)->applyUpdatedConfig(restartNetwork, restartOtaAuth);
+  }, this);
   mqtt_.begin(config_.settings(), config_.chipIdHex(), &sm_, &admin_executor_);
   serial_admin_.begin(&admin_executor_);
 
@@ -221,280 +219,17 @@ void App::tick() {
   phaseStartMs = millis();
   sm_.tick(power_save_state_ == PowerSaveRuntimeState::Sleeping);
   phaseSlowWarn("sm_tick", phaseStartMs);
-  {
-    // Remote LoRa admin commands are applied in App so persistent config,
-    // network restarts, and acknowledgement status stay in one place.
-    if (sm_.hasPendingWifiControl()) {
-      bool wifiEnabled = true;
-      uint8_t ctrlSrc = 0;
-      uint32_t ctrlCounter = 0;
-      if (sm_.consumePendingWifiControl(wifiEnabled, ctrlSrc, ctrlCounter)) {
-        if (wifiEnabled) {
-          exitPowerSave("remote_wifi_control");
-        }
-        auto &cfg = config_.settings();
-        const bool changed = (cfg.wifi_admin_enabled != wifiEnabled);
-        cfg.wifi_admin_enabled = wifiEnabled;
-        if (config_.save()) {
-          const bool statusSent = sm_.sendWifiControlStatus(ctrlSrc, wifiEnabled, ctrlCounter);
-          lrslog::event(wifiEnabled ? "wifi_control_enable_apply" : "wifi_control_disable_apply",
-                        statusSent ? 1 : 0, ctrlSrc, changed ? 1 : 0);
-          applyUpdatedConfig(true, false);
-        } else {
-          lrslog::event("wifi_control_save_fail", 0, ctrlSrc, 0);
-        }
-      }
-    }
-  }
-  {
-    bool udpEnabled = false;
-    IPAddress udpHost;
-    uint16_t udpPort = 0;
-    uint32_t udpTtlS = 0;
-    uint8_t udpSrc = 0;
-    if (sm_.consumePendingUdpLogControl(udpEnabled, udpHost, udpPort, udpTtlS, udpSrc)) {
-      if (udpEnabled) {
-        lrslog::setUdpMirror(udpHost, udpPort, udpTtlS * 1000UL);
-      } else {
-        lrslog::disableUdpMirror();
-      }
-      lrslog::event(udpEnabled ? "udp_log_control_enable_apply" : "udp_log_control_disable_apply",
-                    0, udpSrc, static_cast<uint8_t>(udpPort & 0xFFU));
-    }
-  }
-  {
-    IPAddress otaHost;
-    uint16_t otaPort = 0;
-    String otaSha256;
-    uint8_t otaSrc = 0;
-    if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSha256, otaSrc)) {
-      String url = String("http://") + otaHost.toString() + ":" + String(otaPort) + kRemoteOtaPullPath;
-      String error;
-      LRS_LOGW(SYS, "event=ota_pull_control_apply src=%u url=%s", otaSrc, url.c_str());
-      if (otaPullFromUrl(url.c_str(), otaSha256.c_str(), error)) {
-        lrslog::event("ota_pull_control_reboot", 0, otaSrc, 0);
-        ESP.restart();
-      } else {
-        LRS_LOGW(SYS, "event=ota_pull_control_failed src=%u error=%s", otaSrc, error.c_str());
-        sm_.clearOtaPullActive();
-      }
-    }
-  }
-  {
-    // Provisioning over LoRa intentionally reuses the normal WiFi restart path;
-    // the sender needs the device to retry immediately even if credentials are
-    // unchanged.
-    if (sm_.hasPendingWifiProvision()) {
-      String provSsid;
-      String provPassword;
-      uint8_t provSrc = 0;
-      if (sm_.consumePendingWifiProvision(provSsid, provPassword, provSrc)) {
-        exitPowerSave("remote_wifi_provision");
-        auto &cfg = config_.settings();
-        const bool changed = (cfg.wifi_sta_ssid != provSsid) ||
-                             (cfg.wifi_sta_password != provPassword) ||
-                             !cfg.wifi_admin_enabled;
-        cfg.wifi_sta_ssid = provSsid;
-        cfg.wifi_sta_password = provPassword;
-        cfg.wifi_admin_enabled = true;
-        if (config_.save()) {
-          lrslog::event("wifi_prov_applied", 0, provSrc,
-                        static_cast<uint8_t>(provSsid.length() & 0xFFU));
-          if (!changed) {
-            LRS_LOGI(WIFI,
-                     "event=wifi_prov_reapply reason=unchanged_credentials "
-                     "action=restart_network");
-          }
-          if (cfg.power_save_listen_only) {
-            LRS_LOGI(WIFI, "event=wifi_prov_quiet_save reason=powersave_active action=none");
-          } else {
-            // LoRa-driven WiFi provisioning must always restart networking so a
-            // previously disabled/failed WiFi stack can recover without reboot.
-            applyUpdatedConfig(true, false);
-          }
-        } else {
-          lrslog::event("wifi_prov_save_fail", 0, provSrc, 0);
-        }
-      }
-    }
-  }
-  {
-    bool keepFleetKey = true;
-    bool keepWifi = false;
-    uint8_t resetSrc = 0;
-    if (sm_.consumePendingFactoryReset(keepFleetKey, keepWifi, resetSrc)) {
-      lrslog::event(keepFleetKey ? "factory_reset_exec_keep"
-                                 : "factory_reset_exec_full",
-                    0, resetSrc, 0);
-      if (config_.factoryReset(keepFleetKey, keepWifi)) {
-        delay(100);
-        ESP.restart();
-        return;
-      }
-      lrslog::event("factory_reset_exec_save_fail", 0, resetSrc, 0);
-    }
-  }
-  {
-    if (sm_.consumePendingReboot()) {
-      lrslog::event("reboot_exec", 0, 0, 0);
-      delay(100);
-      ESP.restart();
-      return;
-    }
-  }
-  {
-    uint8_t newAddress = 0;
-    uint8_t gwAddr = 0;
-    if (sm_.consumePendingReaddress(newAddress, gwAddr)) {
-      if (newAddress == 0) {
-        lrslog::event("readdress_exec_reset", 0, 0, 0);
-        if (config_.factoryReset(false, true)) {
-          if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
-            lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
-            LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
-          }
-          delay(100);
-          ESP.restart();
-          return;
-        } else {
-          lrslog::event("readdress_save_fail", 0, newAddress, 0);
-        }
-      } else {
-        auto &cfg = config_.settings();
-        cfg.local_address = newAddress;
-        lrslog::event("readdress_exec", 0, newAddress, 0);
-        if (config_.save()) {
-          if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
-            lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
-            LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
-          }
-          applyUpdatedConfig(false, false);
-        } else {
-          lrslog::event("readdress_save_fail", 0, newAddress, 0);
-        }
-      }
-    }
-  }
-  {
-    uint32_t syncChipId = 0;
-    uint8_t syncAddress = 0;
-    if (sm_.consumePendingPeerSync(syncChipId, syncAddress)) {
-      if (admin_executor_.addPeerToConfig(syncChipId, syncAddress)) {
-        lrslog::event("peer_sync_success", 0, syncAddress, syncChipId);
-      } else {
-        lrslog::event("peer_sync_fail", 0, syncAddress, syncChipId);
-      }
-    }
-  }
-
-  {
-    bool sensorTempEnabled = false;
-    bool sensorTankEnabled = false;
-    bool sensorPowerSaveEnabled = false;
-    bool sensorPowerSaveBootGrace = true;
-    if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled, sensorPowerSaveEnabled, sensorPowerSaveBootGrace)) {
-      auto &cfg = config_.settings();
-      const bool changed = (cfg.sensor_temp_enabled != sensorTempEnabled) ||
-                           (cfg.sensor_tank_enabled != sensorTankEnabled) ||
-                           (cfg.power_save_listen_only != sensorPowerSaveEnabled);
-      
-      if (changed) {
-        cfg.sensor_temp_enabled = sensorTempEnabled;
-        cfg.sensor_tank_enabled = sensorTankEnabled;
-        cfg.power_save_listen_only = sensorPowerSaveEnabled;
-        if (config_.save()) {
-          if (sensorPowerSaveEnabled) {
-            enterPowerSave("remote_command");
-          } else {
-            exitPowerSave("remote_command");
-          }
-          bool restartNetwork = !sensorPowerSaveEnabled;
-          applyUpdatedConfig(restartNetwork, false);
-          lrslog::event("sensor_config_exec_success", 0, 0, 0);
-        } else {
-          lrslog::event("sensor_config_exec_failed", 0, 0, 0);
-        }
-      } else {
-        if (sensorPowerSaveEnabled) {
-          enterPowerSave("remote_command");
-        } else {
-          exitPowerSave("remote_command");
-        }
-        bool restartNetwork = !sensorPowerSaveEnabled;
-        applyUpdatedConfig(restartNetwork, false);
-        lrslog::event("sensor_config_exec_no_change", 0, 0, 0);
-      }
-    }
-  }
-  {
-    // Fleet provisioning rewrites role/address/key together so receivers never
-    // keep stale controller ACLs after a successful apply.
-    if (sm_.hasPendingFleetProvisionApply()) {
-      uint16_t provSession = 0;
-      uint8_t provAddr = 0;
-      bool provRoleTx = false;
-      uint8_t provControllerAddr = 0;
-      String provFleetKey;
-      if (sm_.consumePendingFleetProvisionApply(provSession, provAddr,
-                                                provRoleTx, provControllerAddr, provFleetKey)) {
-        auto &cfg = config_.settings();
-        const bool changed = (cfg.local_address != provAddr) ||
-                             (cfg.role_tx != provRoleTx) ||
-                             (cfg.fleet_passphrase != provFleetKey);
-        cfg.local_address = provAddr;
-        cfg.role_tx = provRoleTx;
-        cfg.mode = "paired";
-        cfg.role = provRoleTx ? "transmitter" : "receiver";
-        if (provRoleTx) {
-          cfg.input_control_paired_lora_enabled = true;
-          cfg.paired_target_count = 0;
-          memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
-        } else {
-          cfg.input_control_paired_lora_enabled = false;
-          if (provControllerAddr < 1 || provControllerAddr > 254) {
-            provControllerAddr = cfg.remote_address;
-          }
-          cfg.allowed_controller_count = 1;
-          memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
-          cfg.allowed_controller_addresses[0] = provControllerAddr;
-          cfg.remote_address = provControllerAddr;
-        }
-        cfg.fleet_passphrase = provFleetKey;
-        cfg.fleet_setup_prompt_dismissed = !provFleetKey.isEmpty();
-        if (config_.save()) {
-          lrslog::event("fleet_prov_applied", 0, provSession, provAddr);
-          if (changed) {
-            applyUpdatedConfig(false, false);
-          }
-          sm_.sendProvisioningVerify(provSession, provAddr);
-        } else {
-          lrslog::event("fleet_prov_save_fail", 0, provSession, provAddr);
-        }
-      }
-    }
-  }
-  {
-    String newFleetKey;
-    uint8_t keySrc = 0;
-    if (sm_.consumePendingFleetKeyChange(newFleetKey, keySrc)) {
-      auto &cfg = config_.settings();
-      const bool changed = (cfg.fleet_passphrase != newFleetKey);
-      if (changed) {
-        cfg.fleet_passphrase = newFleetKey;
-        cfg.fleet_setup_prompt_dismissed = true;
-        if (config_.save()) {
-          lrslog::event("fleet_key_remote_exec_success", 0, keySrc, 0);
-          delay(200);
-          ESP.restart();
-          return;
-        } else {
-          lrslog::event("fleet_key_remote_exec_failed", 0, keySrc, 0);
-        }
-      } else {
-        lrslog::event("fleet_key_remote_exec_no_change", 0, keySrc, 0);
-      }
-    }
-  }
+  handlePendingWifiControl();
+  handlePendingUdpLogControl();
+  if (handlePendingOtaPull()) return;
+  handlePendingWifiProvision();
+  if (handlePendingFactoryReset()) return;
+  if (handlePendingReboot()) return;
+  if (handlePendingReaddress()) return;
+  handlePendingPeerSync();
+  handlePendingSensorConfig();
+  handlePendingFleetProvision();
+  if (handlePendingFleetKeyChange()) return;
   const bool startupDeferNonEssential =
       !WiFi.isConnected() && (millis() < kStartupNonEssentialDeferralMs);
   if (startupDeferNonEssential) {
@@ -796,6 +531,290 @@ void App::startNtpClient() {
   LRS_LOGI(
       NTP,
       "event=ntp_start servers=pool.ntp.org,time.nist.gov,time.google.com");
+}
+
+void App::handlePendingWifiControl() {
+  if (sm_.hasPendingWifiControl()) {
+    bool wifiEnabled = true;
+    uint8_t ctrlSrc = 0;
+    uint32_t ctrlCounter = 0;
+    if (sm_.consumePendingWifiControl(wifiEnabled, ctrlSrc, ctrlCounter)) {
+      if (wifiEnabled) {
+        exitPowerSave("remote_wifi_control");
+      }
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.wifi_admin_enabled != wifiEnabled);
+      cfg.wifi_admin_enabled = wifiEnabled;
+      if (config_.save()) {
+        const bool statusSent = sm_.sendWifiControlStatus(ctrlSrc, wifiEnabled, ctrlCounter);
+        lrslog::event(wifiEnabled ? "wifi_control_enable_apply" : "wifi_control_disable_apply",
+                      statusSent ? 1 : 0, ctrlSrc, changed ? 1 : 0);
+        applyUpdatedConfig(true, false);
+      } else {
+        lrslog::event("wifi_control_save_fail", 0, ctrlSrc, 0);
+      }
+    }
+  }
+}
+
+void App::handlePendingUdpLogControl() {
+  bool udpEnabled = false;
+  IPAddress udpHost;
+  uint16_t udpPort = 0;
+  uint32_t udpTtlS = 0;
+  uint8_t udpSrc = 0;
+  if (sm_.consumePendingUdpLogControl(udpEnabled, udpHost, udpPort, udpTtlS, udpSrc)) {
+    if (udpEnabled) {
+      lrslog::setUdpMirror(udpHost, udpPort, udpTtlS * 1000UL);
+    } else {
+      lrslog::disableUdpMirror();
+    }
+    lrslog::event(udpEnabled ? "udp_log_control_enable_apply" : "udp_log_control_disable_apply",
+                  0, udpSrc, static_cast<uint8_t>(udpPort & 0xFFU));
+  }
+}
+
+bool App::handlePendingOtaPull() {
+  IPAddress otaHost;
+  uint16_t otaPort = 0;
+  char otaSha256[65];
+  uint8_t otaSrc = 0;
+  if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSha256, sizeof(otaSha256), otaSrc)) {
+    char url[256];
+    snprintf(url, sizeof(url), "http://%u.%u.%u.%u:%u%s",
+             otaHost[0], otaHost[1], otaHost[2], otaHost[3],
+             otaPort, kRemoteOtaPullPath);
+    String error;
+    LRS_LOGW(SYS, "event=ota_pull_control_apply src=%u url=%s", otaSrc, url);
+    if (otaPullFromUrl(url, otaSha256, error)) {
+      lrslog::event("ota_pull_control_reboot", 0, otaSrc, 0);
+      ESP.restart();
+      return true;
+    } else {
+      LRS_LOGW(SYS, "event=ota_pull_control_failed src=%u error=%s", otaSrc, error.c_str());
+      sm_.clearOtaPullActive();
+    }
+  }
+  return false;
+}
+
+void App::handlePendingWifiProvision() {
+  if (sm_.hasPendingWifiProvision()) {
+    char provSsid[33];
+    char provPassword[65];
+    uint8_t provSrc = 0;
+    if (sm_.consumePendingWifiProvision(provSsid, sizeof(provSsid), provPassword, sizeof(provPassword), provSrc)) {
+      exitPowerSave("remote_wifi_provision");
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.wifi_sta_ssid != provSsid) ||
+                           (cfg.wifi_sta_password != provPassword) ||
+                           !cfg.wifi_admin_enabled;
+      cfg.wifi_sta_ssid = provSsid;
+      cfg.wifi_sta_password = provPassword;
+      cfg.wifi_admin_enabled = true;
+      if (config_.save()) {
+        lrslog::event("wifi_prov_applied", 0, provSrc,
+                      static_cast<uint8_t>(strlen(provSsid) & 0xFFU));
+        if (!changed) {
+          LRS_LOGI(WIFI,
+                   "event=wifi_prov_reapply reason=unchanged_credentials "
+                   "action=restart_network");
+        }
+        if (cfg.power_save_listen_only) {
+          LRS_LOGI(WIFI, "event=wifi_prov_quiet_save reason=powersave_active action=none");
+        } else {
+          applyUpdatedConfig(true, false);
+        }
+      } else {
+        lrslog::event("wifi_prov_save_fail", 0, provSrc, 0);
+      }
+    }
+  }
+}
+
+bool App::handlePendingFactoryReset() {
+  bool keepFleetKey = true;
+  bool keepWifi = false;
+  uint8_t resetSrc = 0;
+  if (sm_.consumePendingFactoryReset(keepFleetKey, keepWifi, resetSrc)) {
+    lrslog::event(keepFleetKey ? "factory_reset_exec_keep"
+                               : "factory_reset_exec_full",
+                  0, resetSrc, 0);
+    if (config_.factoryReset(keepFleetKey, keepWifi)) {
+      delay(100);
+      ESP.restart();
+      return true;
+    }
+    lrslog::event("factory_reset_exec_save_fail", 0, resetSrc, 0);
+  }
+  return false;
+}
+
+bool App::handlePendingReboot() {
+  if (sm_.consumePendingReboot()) {
+    lrslog::event("reboot_exec", 0, 0, 0);
+    delay(100);
+    ESP.restart();
+    return true;
+  }
+  return false;
+}
+
+bool App::handlePendingReaddress() {
+  uint8_t newAddress = 0;
+  uint8_t gwAddr = 0;
+  if (sm_.consumePendingReaddress(newAddress, gwAddr)) {
+    if (newAddress == 0) {
+      lrslog::event("readdress_exec_reset", 0, 0, 0);
+      if (config_.factoryReset(false, true)) {
+        if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
+          lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
+          LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
+        }
+        delay(100);
+        ESP.restart();
+        return true;
+      } else {
+        lrslog::event("readdress_save_fail", 0, newAddress, 0);
+      }
+    } else {
+      auto &cfg = config_.settings();
+      cfg.local_address = newAddress;
+      lrslog::event("readdress_exec", 0, newAddress, 0);
+      if (config_.save()) {
+        if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
+          lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
+          LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
+        }
+        applyUpdatedConfig(false, false);
+      } else {
+        lrslog::event("readdress_save_fail", 0, newAddress, 0);
+      }
+    }
+  }
+  return false;
+}
+
+void App::handlePendingPeerSync() {
+  uint32_t syncChipId = 0;
+  uint8_t syncAddress = 0;
+  if (sm_.consumePendingPeerSync(syncChipId, syncAddress)) {
+    if (admin_executor_.addPeerToConfig(syncChipId, syncAddress)) {
+      lrslog::event("peer_sync_success", 0, syncAddress, syncChipId);
+    } else {
+      lrslog::event("peer_sync_fail", 0, syncAddress, syncChipId);
+    }
+  }
+}
+
+void App::handlePendingSensorConfig() {
+  bool sensorTempEnabled = false;
+  bool sensorTankEnabled = false;
+  bool sensorPowerSaveEnabled = false;
+  bool sensorPowerSaveBootGrace = true;
+  if (sm_.consumePendingSensorConfig(sensorTempEnabled, sensorTankEnabled, sensorPowerSaveEnabled, sensorPowerSaveBootGrace)) {
+    auto &cfg = config_.settings();
+    const bool changed = (cfg.sensor_temp_enabled != sensorTempEnabled) ||
+                         (cfg.sensor_tank_enabled != sensorTankEnabled) ||
+                         (cfg.power_save_listen_only != sensorPowerSaveEnabled);
+    
+    if (changed) {
+      cfg.sensor_temp_enabled = sensorTempEnabled;
+      cfg.sensor_tank_enabled = sensorTankEnabled;
+      cfg.power_save_listen_only = sensorPowerSaveEnabled;
+      if (config_.save()) {
+        if (sensorPowerSaveEnabled) {
+          enterPowerSave("remote_command");
+        } else {
+          exitPowerSave("remote_command");
+        }
+        bool restartNetwork = !sensorPowerSaveEnabled;
+        applyUpdatedConfig(restartNetwork, false);
+        lrslog::event("sensor_config_exec_success", 0, 0, 0);
+      } else {
+        lrslog::event("sensor_config_exec_failed", 0, 0, 0);
+      }
+    } else {
+      if (sensorPowerSaveEnabled) {
+        enterPowerSave("remote_command");
+      } else {
+        exitPowerSave("remote_command");
+      }
+      bool restartNetwork = !sensorPowerSaveEnabled;
+      applyUpdatedConfig(restartNetwork, false);
+      lrslog::event("sensor_config_exec_no_change", 0, 0, 0);
+    }
+  }
+}
+
+void App::handlePendingFleetProvision() {
+  if (sm_.hasPendingFleetProvisionApply()) {
+    uint16_t provSession = 0;
+    uint8_t provAddr = 0;
+    bool provRoleTx = false;
+    uint8_t provControllerAddr = 0;
+    char provFleetKey[65];
+    if (sm_.consumePendingFleetProvisionApply(provSession, provAddr,
+                                              provRoleTx, provControllerAddr, provFleetKey, sizeof(provFleetKey))) {
+      auto &cfg = config_.settings();
+      const bool changed = (cfg.local_address != provAddr) ||
+                           (cfg.role_tx != provRoleTx) ||
+                           (cfg.fleet_passphrase != provFleetKey);
+      cfg.local_address = provAddr;
+      cfg.role_tx = provRoleTx;
+      cfg.mode = "paired";
+      cfg.role = provRoleTx ? "transmitter" : "receiver";
+      if (provRoleTx) {
+        cfg.input_control_paired_lora_enabled = true;
+        cfg.paired_target_count = 0;
+        memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
+      } else {
+        cfg.input_control_paired_lora_enabled = false;
+        if (provControllerAddr < 1 || provControllerAddr > 254) {
+          provControllerAddr = cfg.remote_address;
+        }
+        cfg.allowed_controller_count = 1;
+        memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
+        cfg.allowed_controller_addresses[0] = provControllerAddr;
+        cfg.remote_address = provControllerAddr;
+      }
+      cfg.fleet_passphrase = provFleetKey;
+      cfg.fleet_setup_prompt_dismissed = (provFleetKey[0] != '\0');
+      if (config_.save()) {
+        lrslog::event("fleet_prov_applied", 0, provSession, provAddr);
+        if (changed) {
+          applyUpdatedConfig(false, false);
+        }
+        sm_.sendProvisioningVerify(provSession, provAddr);
+      } else {
+        lrslog::event("fleet_prov_save_fail", 0, provSession, provAddr);
+      }
+    }
+  }
+}
+
+bool App::handlePendingFleetKeyChange() {
+  char newFleetKey[65];
+  uint8_t keySrc = 0;
+  if (sm_.consumePendingFleetKeyChange(newFleetKey, sizeof(newFleetKey), keySrc)) {
+    auto &cfg = config_.settings();
+    const bool changed = (cfg.fleet_passphrase != newFleetKey);
+    if (changed) {
+      cfg.fleet_passphrase = newFleetKey;
+      cfg.fleet_setup_prompt_dismissed = true;
+      if (config_.save()) {
+        lrslog::event("fleet_key_remote_exec_success", 0, keySrc, 0);
+        delay(200);
+        ESP.restart();
+        return true;
+      } else {
+        lrslog::event("fleet_key_remote_exec_failed", 0, keySrc, 0);
+      }
+    } else {
+      lrslog::event("fleet_key_remote_exec_no_change", 0, keySrc, 0);
+    }
+  }
+  return false;
 }
 
 void App::tickTimeSync() {

@@ -185,7 +185,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["sensor_tank_interval_s"] = cfg.sensor_tank_interval_s;
   doc["fleet_passphrase"] = includeSecrets ? cfg.fleet_passphrase : "";
   doc["fleet_passphrase_set"] = cfg.fleet_passphrase.length() > 0;
-  doc["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
+  doc["fleet_passphrase_default"] = runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
   doc["admin_password"] = includeSecrets ? cfg.admin_password : "";
   doc["admin_password_set"] = cfg.admin_password.length() > 0;
@@ -428,10 +428,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     return fail("fleet_passphrase_too_short");
   }
   if (hasFleetPassphraseField && !allowDefaultDeploymentKey &&
-      isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
+      runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     return fail("fleet_passphrase_default_blocked");
   }
-  if (hasFleetPassphraseField && !isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
+  if (hasFleetPassphraseField && !runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     cfg.fleet_setup_prompt_dismissed = true;
   }
 
@@ -544,10 +544,11 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
 } // namespace
 
 bool AdminExecutor::begin(ConfigStore *config, NodeStateMachine *sm,
-                          std::function<void(bool, bool)> onApply) {
+                          ConfigApplyCallback onApply, void *context) {
   config_ = config;
   sm_ = sm;
   on_apply_ = onApply;
+  on_apply_ctx_ = context;
   mqtt_session_ = MqttSession{};
   return true;
 }
@@ -569,9 +570,9 @@ void AdminExecutor::handleAdminChallenge(JsonDocument &doc, ResponseWriter write
   sendOk(out, writer);
 }
 
-void AdminExecutor::execute(const String &jsonCommand, ResponseWriter writer, bool isMqtt) {
+void AdminExecutor::execute(const char *jsonCommand, size_t length, ResponseWriter writer, bool isMqtt) {
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, jsonCommand);
+  const DeserializationError err = deserializeJson(doc, jsonCommand, length);
   if (err) {
     sendError("unknown", "invalid_json", nullptr, writer);
     return;
@@ -759,7 +760,7 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
   out["local_address"] = cfg.local_address;
   out["remote_address"] = cfg.remote_address;
   out["commissioned"] = cfg.commissioned;
-  out["fleet_passphrase_default"] = isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
+  out["fleet_passphrase_default"] = runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
 
   JsonObject wifi = out["wifi"].to<JsonObject>();
   wifi["admin_enabled"] = cfg.wifi_admin_enabled;
@@ -906,7 +907,7 @@ void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer, bo
 
   if (on_apply_) {
     delay(50); // Allow TX buffers to flush response
-    on_apply_(networkChanged, otaAuthChanged);
+    on_apply_(on_apply_ctx_, networkChanged, otaAuthChanged);
   }
 }
 
@@ -950,7 +951,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
 
   const char *fleetKey = doc["fleet_passphrase"] | doc["fleet_key"] | "";
   if (strlen(fleetKey) < kMinDeploymentKeyLen ||
-      isDefaultDeploymentKey(fleetKey)) {
+      runtime_utils::isDefaultDeploymentKey(fleetKey)) {
     sendError("configure_gateway", "invalid_fleet_key", requestId(doc), writer);
     return;
   }
@@ -959,7 +960,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
       clampMaxRemotes(doc["max_remotes"] | 1);
   auto &cfg = config_->settings();
   if (cfg.commissioned && cfg.role_tx &&
-      !isDefaultDeploymentKey(cfg.fleet_passphrase.c_str()) &&
+      !runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str()) &&
       !cfg.fleet_passphrase.equals(fleetKey)) {
     sendError("configure_gateway", "fleet_key_mismatch", requestId(doc), writer);
     return;
@@ -995,7 +996,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
     return;
   }
   if (on_apply_)
-    on_apply_(false, false);
+    on_apply_(on_apply_ctx_, false, false);
 
   JsonDocument out;
   out["cmd"] = "configure_gateway";
@@ -1069,7 +1070,7 @@ void AdminExecutor::handleConfigureWifi(JsonDocument &doc, ResponseWriter writer
     return;
   }
   if (on_apply_)
-    on_apply_(true, false);
+    on_apply_(on_apply_ctx_, true, false);
 
   JsonDocument out;
   out["cmd"] = "configure_wifi";
@@ -1112,7 +1113,7 @@ void AdminExecutor::handleProvisionFleetWifi(JsonDocument &doc, ResponseWriter w
     sendError("provision_fleet_wifi", "credentials_too_long", requestId(doc), writer);
     return;
   }
-  if (isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
+  if (runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     sendError("provision_fleet_wifi", "fleet_key_default", requestId(doc), writer);
     return;
   }
@@ -1155,11 +1156,13 @@ void AdminExecutor::handleProvisionFleetWifi(JsonDocument &doc, ResponseWriter w
   out["target_address"] = targetAddress;
   out["packets"] = static_cast<uint32_t>(chunks + 2U);
   sendOk(out, writer);
+  char maskedPass[32];
+  lrslog::maskSecret(maskedPass, sizeof(maskedPass), pass);
   LRS_LOGI(API,
            "event=serial_fleet_wifi_provision_tx target=%u ssid=%s "
            "password=%s packets=%lu",
            static_cast<unsigned>(targetAddress), ssid,
-           lrslog::maskSecret(String(pass)).c_str(),
+           maskedPass,
            static_cast<unsigned long>(chunks + 2U));
 }
 
@@ -1208,7 +1211,7 @@ void AdminExecutor::handleStartLoraInventory(JsonDocument &doc, ResponseWriter w
     sendError("start_lora_inventory", "not_commissioned", id, writer);
     return;
   }
-  if (isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
+  if (runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str())) {
     sendError("start_lora_inventory", "factory_fleet_key", id, writer);
     return;
   }
@@ -1686,7 +1689,7 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
 void AdminExecutor::otaStatusCallback(const char *status, void *ctx) {
   auto *self = static_cast<AdminExecutor *>(ctx);
   if (self && self->ota_status_publisher_) {
-    self->ota_status_publisher_(status);
+    self->ota_status_publisher_(self->ota_status_publisher_ctx_, status);
   }
 }
 
@@ -1701,14 +1704,16 @@ void AdminExecutor::handleOtaPull(JsonDocument &doc, ResponseWriter writer) {
   String error;
   if (!otaPullFromUrl(url, sha256, error, AdminExecutor::otaStatusCallback, this)) {
     if (ota_status_publisher_) {
-      ota_status_publisher_("failed:" + error);
+      char errBuf[128];
+      snprintf(errBuf, sizeof(errBuf), "failed:%s", error.c_str());
+      ota_status_publisher_(ota_status_publisher_ctx_, errBuf);
     }
     sendError("ota_pull", error.c_str(), id, writer);
     return;
   }
 
   if (ota_status_publisher_) {
-    ota_status_publisher_("rebooting");
+    ota_status_publisher_(ota_status_publisher_ctx_, "rebooting");
   }
 
   if (config_ != nullptr) {
@@ -1824,7 +1829,7 @@ void AdminExecutor::handleRemoteFleetKeyChange(JsonDocument &doc, ResponseWriter
     sendError("remote_fleet_key_change", "fleet_passphrase_too_long", id, writer);
     return;
   }
-  if (isDefaultDeploymentKey(newKey)) {
+  if (runtime_utils::isDefaultDeploymentKey(newKey)) {
     sendError("remote_fleet_key_change", "fleet_passphrase_default_blocked", id, writer);
     return;
   }
@@ -1970,7 +1975,7 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
     return;
   }
   if (on_apply_)
-    on_apply_(false, false);
+    on_apply_(on_apply_ctx_, false, false);
   JsonDocument out;
   out["cmd"] = cmd;
   if (id[0] != '\0')
@@ -2041,7 +2046,7 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
       return;
     }
     if (on_apply_)
-      on_apply_(false, false);
+      on_apply_(on_apply_ctx_, false, false);
   }
 
   JsonDocument out;
@@ -2407,7 +2412,7 @@ bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
   
   if (config_->save()) {
     if (on_apply_) {
-      on_apply_(false, false);
+      on_apply_(on_apply_ctx_, false, false);
     }
     return true;
   }

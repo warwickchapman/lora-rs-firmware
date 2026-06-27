@@ -117,14 +117,6 @@ inline void startupTxSendTimingTrace(const char *phase, uint32_t startMs) {
            static_cast<unsigned long>(endMs - startMs));
 }
 
-bool isDefaultDeploymentKey(const char *v) {
-  if (v == nullptr) return false;
-  while (*v == ' ' || *v == '\t' || *v == '\r' || *v == '\n') ++v;
-  size_t len = strlen(v);
-  while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' || v[len - 1] == '\r' || v[len - 1] == '\n')) --len;
-  return strlen("lora-default-passphrase") == len && strncmp(v, "lora-default-passphrase", len) == 0;
-}
-
 bool csvContainsAddress(const String &raw, uint8_t src) {
   const char *cursor = raw.c_str();
   while (*cursor != '\0') {
@@ -230,13 +222,11 @@ bool sha256HexToBytes(const char *hex, uint8_t out[32]) {
   return true;
 }
 
-String sha256BytesToHex(const uint8_t digest[32]) {
-  char out[65];
+void sha256BytesToHex(const uint8_t digest[32], char out[65]) {
   for (size_t i = 0; i < 32; ++i) {
     snprintf(out + (i * 2), 3, "%02x", digest[i]);
   }
   out[64] = '\0';
-  return String(out);
 }
 
 void fillProvisionPayloadBytes(const ProtocolMessage &msg, uint8_t out[7]) {
@@ -1505,12 +1495,14 @@ bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &hos
 
 
 
-bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, String &sha256Hex,
+bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize,
                                              uint8_t &src) {
   if (!ota_pull_pending_) return false;
   host = ota_pull_pending_host_;
   port = ota_pull_pending_port_;
-  sha256Hex = ota_pull_pending_sha256_.c_str();
+  if (sha256HexDest && destSize > 0) {
+    strlcpy(sha256HexDest, ota_pull_pending_sha256_.c_str(), destSize);
+  }
   src = ota_pull_pending_src_;
   ota_pull_pending_ = false;
   ota_pull_pending_host_ = IPAddress();
@@ -1686,10 +1678,14 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
   return true;
 }
 
-bool NodeStateMachine::consumePendingWifiProvision(String &ssid, String &password, uint8_t &src) {
+bool NodeStateMachine::consumePendingWifiProvision(char *ssidDest, size_t ssidSize, char *passwordDest, size_t passwordSize, uint8_t &src) {
   if (!wifi_prov_pending_) return false;
-  ssid = wifi_prov_pending_ssid_.c_str();
-  password = wifi_prov_pending_password_.c_str();
+  if (ssidDest && ssidSize > 0) {
+    strlcpy(ssidDest, wifi_prov_pending_ssid_.c_str(), ssidSize);
+  }
+  if (passwordDest && passwordSize > 0) {
+    strlcpy(passwordDest, wifi_prov_pending_password_.c_str(), passwordSize);
+  }
   src = wifi_prov_pending_src_;
   wifi_prov_pending_ = false;
   wifi_prov_pending_ssid_ = "";
@@ -1776,9 +1772,11 @@ bool NodeStateMachine::sendPeerFleetKeyChange(uint8_t targetAddress, const Strin
 
 bool NodeStateMachine::hasPendingFleetKeyChange() const { return fleet_key_pending_; }
 
-bool NodeStateMachine::consumePendingFleetKeyChange(String &newKey, uint8_t &src) {
+bool NodeStateMachine::consumePendingFleetKeyChange(char *keyDest, size_t keySize, uint8_t &src) {
   if (!fleet_key_pending_) return false;
-  newKey = fleet_key_pending_key_.c_str();
+  if (keyDest && keySize > 0) {
+    strlcpy(keyDest, fleet_key_pending_key_.c_str(), keySize);
+  }
   src = fleet_key_pending_src_;
   fleet_key_pending_ = false;
   fleet_key_pending_key_ = "";
@@ -1909,7 +1907,7 @@ bool NodeStateMachine::isAuthorizedPairedSource(uint8_t src) const {
 
 bool NodeStateMachine::isDefaultFleetKey() const {
   return settings_ != nullptr &&
-         isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
+         runtime_utils::isDefaultDeploymentKey(settings_->fleet_passphrase.c_str());
 }
 
 static const char *localProvisioningSessionStateText(ProvisioningSessionState s) {
@@ -2211,13 +2209,15 @@ void NodeStateMachine::addProvLog(const char *fmt, ...) {
 }
 
 bool NodeStateMachine::consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx,
-                                                         uint8_t &controllerAddress, String &fleetKey) {
+                                                         uint8_t &controllerAddress, char *fleetKeyDest, size_t keySize) {
   if (!fleet_prov_apply_pending_) return false;
   sessionNonce = fleet_prov_apply_session_nonce_;
   newAddress = fleet_prov_apply_address_;
   roleTx = fleet_prov_apply_role_tx_;
   controllerAddress = fleet_prov_apply_controller_address_;
-  fleetKey = fleet_prov_apply_key_.c_str();
+  if (fleetKeyDest && keySize > 0) {
+    strlcpy(fleetKeyDest, fleet_prov_apply_key_.c_str(), keySize);
+  }
   fleet_prov_apply_pending_ = false;
   fleet_prov_apply_session_nonce_ = 0;
   fleet_prov_apply_address_ = 0;
@@ -4068,7 +4068,9 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
 
     ota_pull_pending_host_ = ota_pull_rx_.host;
     ota_pull_pending_port_ = ota_pull_rx_.port;
-    ota_pull_pending_sha256_ = sha256BytesToHex(ota_pull_rx_.sha256);
+    char sha256Hex[65];
+    sha256BytesToHex(ota_pull_rx_.sha256, sha256Hex);
+    ota_pull_pending_sha256_ = sha256Hex;
     ota_pull_pending_src_ = ota_pull_rx_.src;
     ota_pull_pending_ = true;
     ota_pull_rx_ = OtaPullRxTransfer{};
@@ -5006,5 +5008,6 @@ bool NodeStateMachine::sendReaddressConfirm(uint8_t gwAddr, uint8_t newAddress) 
   return ok;
 }
 
-
-
+size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
+size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
+size_t NodeStateMachine::replaySourceStateSize() { return sizeof(ReplaySourceState); }

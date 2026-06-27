@@ -13,7 +13,8 @@ namespace {
 #endif
 
 Level g_level = static_cast<Level>(LRS_LOG_LEVEL_DEFAULT);
-UnixTimeProvider g_unix_provider;
+UnixTimeProviderFn g_unix_provider = nullptr;
+void *g_unix_provider_ctx = nullptr;
 WiFiUDP g_udp;
 bool g_udp_enabled = false;
 IPAddress g_udp_host;
@@ -176,7 +177,10 @@ Level level() { return g_level; }
 
 bool enabled(Level level) { return static_cast<uint8_t>(level) <= static_cast<uint8_t>(g_level); }
 
-void setUnixTimeProvider(UnixTimeProvider provider) { g_unix_provider = provider; }
+void setUnixTimeProvider(UnixTimeProviderFn provider, void *context) {
+  g_unix_provider = provider;
+  g_unix_provider_ctx = context;
+}
 
 void setUdpMirror(const IPAddress &host, uint16_t port, uint32_t ttlMs) {
   g_udp_host = host;
@@ -213,7 +217,7 @@ void logf(Level level, Category cat, const char *fmt, ...) {
   uint32_t unixTimeS = 0;
   if (g_unix_provider) {
     uint32_t candidate = 0;
-    if (g_unix_provider(candidate)) {
+    if (g_unix_provider(g_unix_provider_ctx, candidate)) {
       unixTimeS = candidate;
     }
   }
@@ -236,7 +240,7 @@ void event(const char *eventName, int rssi, uint32_t counter, uint8_t state) {
   uint32_t unixTimeS = 0;
   if (g_unix_provider) {
     uint32_t candidate = 0;
-    if (g_unix_provider(candidate)) unixTimeS = candidate;
+    if (g_unix_provider(g_unix_provider_ctx, candidate)) unixTimeS = candidate;
   }
 
   if (eventName != nullptr && strcmp(eventName, "tx_prov") == 0) {
@@ -284,17 +288,31 @@ uint8_t heapFragPercent() { return static_cast<uint8_t>(ESP.getHeapFragmentation
 
 uint32_t heapMaxFreeBlock() { return ESP.getMaxFreeBlockSize(); }
 
-String redact(const String &value) { return value.length() ? String("<redacted>") : String(""); }
 
-String maskSecret(const String &value, size_t keepPrefix, size_t keepSuffix) {
-  if (value.length() == 0) return "";
-  if (value.length() <= (keepPrefix + keepSuffix + 1U)) return "<redacted>";
-  String out;
-  out.reserve(value.length());
-  out += value.substring(0, keepPrefix);
-  out += "***";
-  out += value.substring(value.length() - keepSuffix);
-  return out;
+void maskSecret(char *dest, size_t destSize, const char *src, size_t keepPrefix, size_t keepSuffix) {
+  if (destSize == 0) return;
+  if (src == nullptr || strlen(src) == 0) {
+    dest[0] = '\0';
+    return;
+  }
+  size_t len = strlen(src);
+  if (len <= (keepPrefix + keepSuffix + 1U)) {
+    strlcpy(dest, "<redacted>", destSize);
+    return;
+  }
+  size_t pos = 0;
+  for (size_t i = 0; i < keepPrefix && pos < destSize - 1; ++i) {
+    dest[pos++] = src[i];
+  }
+  const char *stars = "***";
+  for (size_t i = 0; i < 3 && pos < destSize - 1; ++i) {
+    dest[pos++] = stars[i];
+  }
+  size_t suffixStart = len - keepSuffix;
+  for (size_t i = 0; i < keepSuffix && pos < destSize - 1; ++i) {
+    dest[pos++] = src[suffixStart + i];
+  }
+  dest[pos] = '\0';
 }
 
 }  // namespace lrslog

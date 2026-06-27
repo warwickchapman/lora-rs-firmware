@@ -9,22 +9,27 @@
 
 class AdminExecutor {
 public:
+  using ConfigApplyCallback = void (*)(void *context, bool restartNetwork, bool restartOtaAuth);
   using ResponseWriter = std::function<void(const String& response)>;
-
-  using OtaStatusPublisher = std::function<void(const String& status)>;
-  void setOtaStatusPublisher(OtaStatusPublisher publisher) { ota_status_publisher_ = publisher; }
+  using OtaStatusPublisherFn = void (*)(void *context, const char *status);
+  void setOtaStatusPublisher(OtaStatusPublisherFn publisher, void *context) {
+    ota_status_publisher_ = publisher;
+    ota_status_publisher_ctx_ = context;
+  }
 
   bool begin(ConfigStore *config, NodeStateMachine *sm,
-             std::function<void(bool, bool)> onApply);
-  void execute(const String &jsonCommand, ResponseWriter writer, bool isMqtt = false);
+             ConfigApplyCallback onApply, void *context);
+  void execute(const char *jsonCommand, size_t length, ResponseWriter writer, bool isMqtt = false);
   bool addPeerToConfig(uint32_t chipId, uint8_t address);
 
 private:
-  OtaStatusPublisher ota_status_publisher_ = nullptr;
+  OtaStatusPublisherFn ota_status_publisher_ = nullptr;
+  void *ota_status_publisher_ctx_ = nullptr;
 
   ConfigStore *config_ = nullptr;
   NodeStateMachine *sm_ = nullptr;
-  std::function<void(bool, bool)> on_apply_;
+  ConfigApplyCallback on_apply_ = nullptr;
+  void *on_apply_ctx_ = nullptr;
 
   struct MqttSession {
     uint32_t session_id = 0;
