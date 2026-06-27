@@ -6,6 +6,15 @@
 - Maintain documentation and human-readable changelog entries when behavior changes.
 - Do not discard uncommitted work. Inspect `git status --short` before editing.
 
+## Plan Review Discipline
+
+When reviewing an implementation plan against a defined boundary or constraint:
+
+- Do not approve from a checklist. Test each item against the boundary rule.
+- For every injected dependency, method, or option: state whether it is in-scope model/state or out-of-scope orchestration. Flag violations explicitly.
+- Before approving, argue the rejection case. List what should be removed and why.
+- Treat "not a blocker" as a decision that requires justification, not a default.
+
 ## Dev Build Versioning
 
 - The repo-root `VERSION` file is the operator-visible firmware and Flasher version source of truth.
