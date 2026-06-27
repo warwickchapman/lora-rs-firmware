@@ -2303,6 +2303,17 @@ function normalizeChipId(raw: string | undefined | null): string {
   return String(raw || '').trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '').toLowerCase();
 }
 
+function normalizeRole(role: string | null | undefined): string {
+  const r = String(role || '').trim().toLowerCase();
+  if (r === 'tx' || r === 'transmitter' || r === 'gateway') {
+    return 'gateway';
+  }
+  if (r === 'rx' || r === 'receiver' || r === 'remote') {
+    return 'remote';
+  }
+  return r;
+}
+
 function canonicalChipId(raw: string | undefined | null): string {
   const norm = normalizeChipId(raw);
   if (!norm) return '';
@@ -5129,6 +5140,9 @@ function clearGatewayWifiReady() {
 function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.value) {
   const state = serialDeviceState(port);
   if (!state) return;
+  if (out && out.role) {
+    out.role = normalizeRole(out.role);
+  }
   state.status = out;
   if (port === selectedPort.value) {
     serialUptimeMs.value = Number(out.uptime_ms || 0);
@@ -6110,8 +6124,8 @@ onMounted(async () => {
         heap_frag_pct: state.status?.heap_frag_pct || 0,
         heap_max_block: state.status?.heap_max_block || 0,
         mode: state.status?.mode || '',
-        role: payload.role === 'tx' ? 'gateway' : (payload.role || ''),
-        role_tx: payload.role === 'tx',
+        role: normalizeRole(payload.role),
+        role_tx: normalizeRole(payload.role) === 'gateway',
         local_address: payload.addr || state.status?.local_address || 254,
         remote_address: payload.remote_addr || state.status?.remote_address || 0,
         commissioned: true,
@@ -6180,7 +6194,7 @@ onMounted(async () => {
         }
       }
       else if (f === 'uptime_ms') dev.uptime_ms = Number(val);
-      else if (f === 'role') dev.role = String(val);
+      else if (f === 'role') dev.role = normalizeRole(String(val));
       else if (f === 'mode') dev.mode = String(val);
       else if (f === 'ip') {
         dev.ip = String(val);
