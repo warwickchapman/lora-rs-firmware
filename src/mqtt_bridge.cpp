@@ -524,7 +524,9 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       if (mqtt_client_.connected()) {
         char admin_resp_topic[160];
         snprintf(admin_resp_topic, sizeof(admin_resp_topic), "%s/admin_response", topic_base_);
-        mqtt_client_.publish(admin_resp_topic, respStr.c_str(), false);
+        if (!mqtt_client_.publish(admin_resp_topic, respStr.c_str(), false)) {
+          LRS_LOGW(API, "admin_response_publish_failed cmd=%s size=%u", cmd, (unsigned)respStr.length());
+        }
       }
       return;
     }
@@ -534,11 +536,19 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
         cmdPayload += static_cast<char>(payload[i]);
       }
     }
-    executor_->execute(cmdPayload, [this](const String &response) {
+    String cmdNameStr = "unknown";
+    JsonDocument tempDoc;
+    if (deserializeJson(tempDoc, cmdPayload) == DeserializationError::Ok) {
+      const char *cmdVal = tempDoc["cmd"] | "unknown";
+      cmdNameStr = cmdVal;
+    }
+    executor_->execute(cmdPayload, [this, cmdNameStr](const String &response) {
       if (mqtt_client_.connected()) {
         char admin_resp_topic[160];
         snprintf(admin_resp_topic, sizeof(admin_resp_topic), "%s/admin_response", topic_base_);
-        mqtt_client_.publish(admin_resp_topic, response.c_str(), false);
+        if (!mqtt_client_.publish(admin_resp_topic, response.c_str(), false)) {
+          LRS_LOGW(API, "admin_response_publish_failed cmd=%s size=%u", cmdNameStr.c_str(), (unsigned)response.length());
+        }
       }
     }, true);
     return;

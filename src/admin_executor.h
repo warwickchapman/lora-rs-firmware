@@ -42,7 +42,7 @@ private:
   bool requireAdmin(const JsonDocument &doc);
   void sendError(const char *cmd, const char *error, const char *id, ResponseWriter writer);
   void sendOk(JsonDocument &doc, ResponseWriter writer);
-  void buildProvisioningStatus(JsonDocument &doc);
+  void buildProvisioningStatus(JsonDocument &doc, bool isMqtt = false);
   void handleStatus(JsonDocument &doc, ResponseWriter writer);
   void handleGetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
   void handleSetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt);

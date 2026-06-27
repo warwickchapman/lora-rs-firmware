@@ -649,7 +649,7 @@ void AdminExecutor::sendOk(JsonDocument &doc, ResponseWriter writer) {
   writer(output);
 }
 
-void AdminExecutor::buildProvisioningStatus(JsonDocument &doc) {
+void AdminExecutor::buildProvisioningStatus(JsonDocument &doc, bool isMqtt) {
   if (sm_ == nullptr) {
     doc["ok"] = false;
     doc["error"] = "state_machine_unavailable";
@@ -659,29 +659,42 @@ void AdminExecutor::buildProvisioningStatus(JsonDocument &doc) {
   ProvisioningSessionSnapshot sess{};
   sm_->provisioningSession(sess);
   JsonObject s = doc["session"].to<JsonObject>();
-  s["active"] = sess.active;
-  s["state"] = provisioningSessionStateText(sess.state);
-  s["session_nonce"] = sess.session_nonce;
-  s["max_remotes"] = sess.max_remotes;
-  s["started_ms"] = sess.started_ms;
-  s["phase_deadline_ms"] = sess.phase_deadline_ms;
-  s["paused_normal_tx"] = sess.paused_normal_tx;
-  s["discovered_count"] = sess.discovered_count;
-  s["selected_count"] = sess.selected_count;
-  s["conflict_count"] = sess.conflict_count;
-  s["verified_count"] = sess.verified_count;
-  s["failed_count"] = sess.failed_count;
-  s["now_ms"] = millis();
 
-  JsonArray debugEvents = s["debug_events"].to<JsonArray>();
-  const size_t logCount = sm_->provisioningLogCount();
-  for (size_t i = 0; i < logCount; ++i) {
-    uint32_t ts = 0;
-    char logMsg[56]{};
-    if (sm_->provisioningLogByIndex(i, ts, logMsg)) {
-      char buf[72];
-      snprintf(buf, sizeof(buf), "[%lu] %s", static_cast<unsigned long>(ts), logMsg);
-      debugEvents.add(buf);
+  if (isMqtt) {
+    s["active"] = sess.active;
+    s["state"] = provisioningSessionStateText(sess.state);
+    s["max"] = sess.max_remotes;
+    s["found"] = sess.discovered_count;
+    s["verified"] = sess.verified_count;
+    s["failed"] = sess.failed_count;
+    s["deadline"] = sess.phase_deadline_ms;
+    s["now"] = millis();
+    doc["log_truncated"] = true;
+  } else {
+    s["active"] = sess.active;
+    s["state"] = provisioningSessionStateText(sess.state);
+    s["session_nonce"] = sess.session_nonce;
+    s["max_remotes"] = sess.max_remotes;
+    s["started_ms"] = sess.started_ms;
+    s["phase_deadline_ms"] = sess.phase_deadline_ms;
+    s["paused_normal_tx"] = sess.paused_normal_tx;
+    s["discovered_count"] = sess.discovered_count;
+    s["selected_count"] = sess.selected_count;
+    s["conflict_count"] = sess.conflict_count;
+    s["verified_count"] = sess.verified_count;
+    s["failed_count"] = sess.failed_count;
+    s["now_ms"] = millis();
+
+    JsonArray debugEvents = s["debug_events"].to<JsonArray>();
+    const size_t logCount = sm_->provisioningLogCount();
+    for (size_t i = 0; i < logCount; ++i) {
+      uint32_t ts = 0;
+      char logMsg[56]{};
+      if (sm_->provisioningLogByIndex(i, ts, logMsg)) {
+        char buf[72];
+        snprintf(buf, sizeof(buf), "[%lu] %s", static_cast<unsigned long>(ts), logMsg);
+        debugEvents.add(buf);
+      }
     }
   }
 
@@ -691,23 +704,34 @@ void AdminExecutor::buildProvisioningStatus(JsonDocument &doc) {
     ProvisioningDeviceSnapshot d{};
     if (!sm_->provisioningDeviceByIndex(i, d))
       continue;
-    JsonObject o = devices.add<JsonObject>();
-    char chipHex[11];
-    snprintf(chipHex, sizeof(chipHex), "0x%08lx",
-             static_cast<unsigned long>(d.chip_id));
-    o["chip_id_hex"] = chipHex;
-    o["current_address"] = d.current_address;
-    o["assigned_address"] = d.assigned_address;
-    o["role_tx"] = d.role_tx;
-    o["fw_major"] = d.fw_major;
-    o["fw_minor"] = d.fw_minor;
-    o["fw_patch"] = d.fw_patch;
-    if (d.fw_build > 0)
-      o["fw_build"] = d.fw_build;
-    o["rssi"] = d.rssi;
-    o["selected"] = d.selected;
-    o["address_conflict"] = d.address_conflict;
-    o["state"] = provisioningDeviceStateText(d.state);
+
+    if (isMqtt) {
+      JsonArray o = devices.add<JsonArray>();
+      char chipHex[9];
+      snprintf(chipHex, sizeof(chipHex), "%08lx", static_cast<unsigned long>(d.chip_id));
+      o.add(chipHex);
+      o.add(d.assigned_address);
+      o.add(d.rssi);
+      o.add(provisioningDeviceStateText(d.state));
+    } else {
+      JsonObject o = devices.add<JsonObject>();
+      char chipHex[11];
+      snprintf(chipHex, sizeof(chipHex), "0x%08lx",
+               static_cast<unsigned long>(d.chip_id));
+      o["chip_id_hex"] = chipHex;
+      o["current_address"] = d.current_address;
+      o["assigned_address"] = d.assigned_address;
+      o["role_tx"] = d.role_tx;
+      o["fw_major"] = d.fw_major;
+      o["fw_minor"] = d.fw_minor;
+      o["fw_patch"] = d.fw_patch;
+      if (d.fw_build > 0)
+        o["fw_build"] = d.fw_build;
+      o["rssi"] = d.rssi;
+      o["selected"] = d.selected;
+      o["address_conflict"] = d.address_conflict;
+      o["state"] = provisioningDeviceStateText(d.state);
+    }
   }
 }
 
@@ -2241,7 +2265,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     out["cmd"] = cmd;
     if (id[0] != '\0')
       out["id"] = id;
-    buildProvisioningStatus(out);
+    buildProvisioningStatus(out, isMqtt);
     if (out["ok"].isNull())
       sendOk(out, writer);
     else {

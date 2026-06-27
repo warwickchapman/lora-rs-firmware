@@ -4948,10 +4948,50 @@ async function runEasyPair() {
     isPairBusy.value = false;
   }
 }
+let lastMqttPairErrorTimeMs = 0;
 
 async function refreshEasyPairStatus(log = false) {
   try {
-    pairStatus.value = await sendPairCommand<EasyPairStatus>('provisioning_status', {}, 5000);
+    const rawStatus = await sendPairCommand<any>('provisioning_status', {}, 5000);
+    if (!rawStatus) return;
+
+    // 1. Normalize session keys
+    if (rawStatus.session) {
+      const s = rawStatus.session;
+      if (s.max !== undefined) s.max_remotes = s.max;
+      if (s.found !== undefined) s.discovered_count = s.found;
+      if (s.verified !== undefined) s.verified_count = s.verified;
+      if (s.failed !== undefined) s.failed_count = s.failed;
+      if (s.deadline !== undefined) s.phase_deadline_ms = s.deadline;
+      if (s.selected_count === undefined) s.selected_count = s.discovered_count || 0;
+      if (s.conflict_count === undefined) s.conflict_count = 0;
+    }
+
+    // 2. Normalize device rows
+    if (Array.isArray(rawStatus.devices)) {
+      rawStatus.devices = rawStatus.devices.map((device: any) => {
+        if (Array.isArray(device)) {
+          return {
+            chip_id_hex: '0x' + device[0],
+            assigned_address: device[1],
+            rssi: device[2],
+            state: device[3],
+            current_address: 0,
+            fw_major: 0,
+            fw_minor: 0,
+            fw_patch: 0,
+            fw_build: 0,
+            role_tx: false,
+            selected: true,
+            address_conflict: false
+          };
+        }
+        return device;
+      });
+    }
+
+    pairStatus.value = rawStatus;
+
     if (pairStatus.value?.session?.debug_events) {
       for (const line of pairStatus.value.session.debug_events) {
         if (!processedEasyPairLogLines.value.has(line)) {
@@ -4960,7 +5000,7 @@ async function refreshEasyPairStatus(log = false) {
         }
       }
     }
-    if (log && pairStatus.value.session) {
+    if (log && pairStatus.value && pairStatus.value.session) {
       const s = pairStatus.value.session;
       const visibleCount = pairStatus.value.devices?.length ?? s.discovered_count;
       if (s.state === 'discovering') {
@@ -4973,7 +5013,15 @@ async function refreshEasyPairStatus(log = false) {
       await refreshProvisionedSerialDeviceCaches();
     }
   } catch (e) {
-    if (log) pushPairLog('Status refresh failed: ' + e);
+    if (log) {
+      pushPairLog('Status refresh failed: ' + e);
+    } else if (pairTransport.value === 'mqtt') {
+      const now = Date.now();
+      if (now - lastMqttPairErrorTimeMs >= 12000) {
+        lastMqttPairErrorTimeMs = now;
+        pushPairLog('Status refresh failed (MQTT): ' + e);
+      }
+    }
   }
 }
 

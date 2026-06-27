@@ -33,6 +33,9 @@ All notable changes to this pre-release project are documented here in current o
 ### Firmware Features
 - Aligned raw ESP chip ID mapping to a canonical 24-bit identity across serial and MQTT bridges, publishing and subscribing to topics under the `00xxxxxx` namespace.
 - Pruned all telemetry metrics from the `lora_inventory_status` response payload when requested over MQTT to ensure command responses contain only the authoritative seed list (`address` + `chip_id`) and fit comfortably within the 1024-byte MQTT packet client buffer ceiling. In addition, capped same-key discovery candidates to at most 4 entries, pruned candidate timestamps (`last_seen_ms`, `age_ms`), and exposed `candidate_total` and `candidate_truncated` to avoid silent UI blind spots.
+- Optimized the `provisioning_status` response payload over MQTT using a highly compact array-based schema for devices (`[["chip_id", address, rssi, "state"], ...]`) and removing verbose debug logs to ensure 12-device status reports stay safely below the 1024-byte packet limit.
+- Added validation for MQTT command response publishes, logging failures as warnings featuring the command name and payload size.
+- Configured Flasher to normalize compact array-based MQTT and verbose object-based Serial payloads, and rate-limited MQTT polling error output to at most once per 12 seconds.
 - Cleaned up old stale raw-ID MQTT discovery topics by publishing retained null payloads on connection.
 - Replaced Unix time/NTP synchronization validation for MQTT admin commands with a lightweight challenge-response session mechanism.
 - Added `admin_challenge` command to issue 5-minute sessions (tracked via local `millis()`), resetting sequence count.
