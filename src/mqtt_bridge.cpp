@@ -788,7 +788,7 @@ void MqttBridge::publishLocalStatus() {
   const bool localInput = sm_->localInputState() != 0;
   if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
   if (buildLocalTopic(topic, sizeof(topic), "relay")) publishRetained(topic, sm_->relayState() ? "1" : "0");
-  if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "tx" : "rx");
+  if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "gateway" : "remote");
 
   char addrHex[3];
   snprintf(addrHex, sizeof(addrHex), "%02X", runtime_.local_address);
@@ -1079,7 +1079,7 @@ void MqttBridge::publishDiscovery() {
   if (!settings_) return;
   doc["serial"] = settings_->factory_serial;
   doc["chip_id"] = chip_id_hex_;
-  doc["role"] = runtime_.role_tx ? "tx" : "rx";
+  doc["role"] = runtime_.role_tx ? "gateway" : "remote";
   doc["addr"] = runtime_.local_address;
   doc["remote_addr"] = runtime_.remote_address;
   doc["mac"] = WiFi.macAddress();

@@ -2553,7 +2553,7 @@ async function loadNetworkGateway() {
       }
       await refreshGatewaySnapshot(chipId, false, 'fleet');
       networkStatusMessage.value = `Gateway loaded over MQTT; firmware ${gw?.fw_version || 'unknown'}.`;
-      startFleetCachePolling();
+      startLoraInventoryPolling();
     } catch (e) {
       networkStatusMessage.value = `MQTT Gateway load error: ${e}`;
       notify(networkStatusMessage.value);
@@ -5819,9 +5819,12 @@ watch(selectedPort, (port) => {
   }
 });
 
-watch(selectedMqttGatewayChipId, () => {
+watch(selectedMqttGatewayChipId, (newVal) => {
   clearFleetGatewayCache();
   activeGatewaySessionKey.value = '';
+  if (newVal && activeMode.value === 'network') {
+    loadNetworkGateway();
+  }
 });
 
 watch(fleetTransport, () => {
@@ -7561,7 +7564,7 @@ function toggleSelectAllBulkPorts() {
 
             <div v-if="settingsTab === 'mqtt'" class="flex flex-col gap-3 text-xs">
               <template v-if="serialAdminConfig">
-                <!-- If it's a remote unit -->
+                <!-- If it's a remote device -->
                 <div v-if="!serialAdminConfig.role_tx" class="flex flex-col gap-3">
                   <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
                     <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
@@ -7570,17 +7573,17 @@ function toggleSelectAllBulkPorts() {
                     </div>
                     This device is configured with the <span class="font-bold text-cyan-100">Remote</span> role.
                     <p class="mt-2 text-slate-300">
-                      Remote units do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
+                      Remote devices do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
                     </p>
                     <p class="mt-2 text-slate-300">
-                      The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote unit.
+                      The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote device.
                     </p>
                     <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
                       💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
                     </p>
                   </div>
 
-                  <!-- Configuration for Remote units -->
+                  <!-- Configuration for Remote devices -->
                   <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 mt-2 pt-3 border-t border-slate-800">
                     <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
                     <div class="flex flex-col gap-1">
@@ -7603,7 +7606,7 @@ function toggleSelectAllBulkPorts() {
                   </div>
                 </div>
 
-                <!-- If it's a gateway unit -->
+                <!-- If it's a gateway device -->
                 <div v-else class="flex flex-col gap-3">
                   <!-- Warning banner for input control override conflict -->
                   <div v-if="serialAdminConfig.input_control_paired_lora_enabled" class="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 select-text mb-2">
@@ -7646,7 +7649,7 @@ function toggleSelectAllBulkPorts() {
                     <div class="flex flex-col gap-1">
                       <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
                       <div class="text-[10px] text-slate-500 leading-normal">
-                        Allowed controller addresses (comma-separated). Remote units will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
+                        Allowed controller addresses (comma-separated). Remote devices will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
                       </div>
                     </div>
                   </div>
@@ -7827,7 +7830,7 @@ function toggleSelectAllBulkPorts() {
                           <span class="font-mono text-cyan-300 font-semibold">LoRa Inventory Scan</span>
                           <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;start_lora_inventory\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;start_addr\&quot;:1,\&quot;end_addr\&quot;:12}', 'start_lora_inventory')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
                         </div>
-                        Commands gateway to query remote nodes via LoRa:
+                        Commands gateway to query remote devices via LoRa:
                         <code class="text-[10px] text-slate-500 mt-1">cmd: "start_lora_inventory"<br>cmd: "lora_inventory_status"</code>
                       </div>
 
@@ -7838,7 +7841,7 @@ function toggleSelectAllBulkPorts() {
                           <span class="font-mono text-cyan-300 font-semibold">Remote OTA Firmware Pull</span>
                           <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;remote_ota_pull\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;addr\&quot;:1,\&quot;url\&quot;:\&quot;http://192.168.1.100/fw.bin\&quot;,\&quot;sha256\&quot;:\&quot;YOUR_SHA256_HEX\&quot;}', 'remote_ota_pull')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
                         </div>
-                        Signals a remote unit over LoRa carrying an HTTP URL and SHA256 checksum to trigger it to download a firmware update over WiFi.
+                        Signals a remote device over LoRa carrying an HTTP URL and SHA256 checksum to trigger it to download a firmware update over WiFi.
                       </div>
                     </div>
                   </div>
@@ -7867,7 +7870,7 @@ function toggleSelectAllBulkPorts() {
                         </div>
 
                         <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Control Remote Node Relay</span>
+                          <span class="font-semibold text-slate-300">Control Remote Device Relay</span>
                           <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/control</code>
                           <span class="text-slate-400">Gateway accepts JSON payload to trigger OTA command to a remote:</span>
                           <div class="flex items-center justify-between bg-slate-950/60 p-1.5 rounded mt-1">
@@ -7926,8 +7929,8 @@ function toggleSelectAllBulkPorts() {
                       <div>
                         <div class="font-bold text-slate-300 text-[11px] mb-1">Remote Peer Telemetry (Forwarded):</div>
                         <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote unit commanded relay state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote unit dry contact state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote device commanded relay state</li>
+                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote device dry contact state</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
                           <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Peer sensor value</li>
