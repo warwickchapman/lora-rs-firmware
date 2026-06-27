@@ -332,36 +332,12 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   fleet_scan_last_tx_ms_ = 0;
   fleet_scan_sent_ = 0;
   wifi_prov_rx_ = WifiProvisionRxTransfer{};
-  wifi_prov_pending_ = false;
-  wifi_prov_pending_ssid_ = "";
-  wifi_prov_pending_password_ = "";
-  wifi_prov_pending_src_ = 0;
-  udp_log_control_pending_ = false;
-  udp_log_control_pending_enabled_ = false;
-  udp_log_control_pending_host_ = IPAddress();
-  udp_log_control_pending_port_ = 0;
-  udp_log_control_pending_ttl_s_ = 0;
-  udp_log_control_pending_src_ = 0;
-
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
-  ota_pull_pending_ = false;
-  ota_pull_pending_host_ = IPAddress();
-  ota_pull_pending_port_ = 0;
-  ota_pull_pending_sha256_ = "";
-  ota_pull_pending_src_ = 0;
   ota_silence_until_ms_ = 0;
   ota_pull_active_ = false;
   ota_pull_start_ms_ = 0;
-  factory_reset_pending_ = false;
-  factory_reset_keep_fleet_pending_ = true;
-  factory_reset_pending_src_ = 0;
-  fleet_prov_apply_pending_ = false;
-  fleet_prov_apply_session_nonce_ = 0;
-  fleet_prov_apply_address_ = 0;
-  fleet_prov_apply_role_tx_ = false;
-  fleet_prov_apply_controller_address_ = 0;
-  fleet_prov_apply_key_ = "";
+  pending_commands_.resetAll();
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
   tick_watchdog_last_log_ms_ = millis();
@@ -442,33 +418,9 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   fleet_scan_last_tx_ms_ = 0;
   fleet_scan_sent_ = 0;
   wifi_prov_rx_ = WifiProvisionRxTransfer{};
-  wifi_prov_pending_ = false;
-  wifi_prov_pending_ssid_ = "";
-  wifi_prov_pending_password_ = "";
-  wifi_prov_pending_src_ = 0;
-  udp_log_control_pending_ = false;
-  udp_log_control_pending_enabled_ = false;
-  udp_log_control_pending_host_ = IPAddress();
-  udp_log_control_pending_port_ = 0;
-  udp_log_control_pending_ttl_s_ = 0;
-  udp_log_control_pending_src_ = 0;
-
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
-  ota_pull_pending_ = false;
-  ota_pull_pending_host_ = IPAddress();
-  ota_pull_pending_port_ = 0;
-  ota_pull_pending_sha256_ = "";
-  ota_pull_pending_src_ = 0;
-  factory_reset_pending_ = false;
-  factory_reset_keep_fleet_pending_ = true;
-  factory_reset_pending_src_ = 0;
-  fleet_prov_apply_pending_ = false;
-  fleet_prov_apply_session_nonce_ = 0;
-  fleet_prov_apply_address_ = 0;
-  fleet_prov_apply_role_tx_ = false;
-  fleet_prov_apply_controller_address_ = 0;
-  fleet_prov_apply_key_ = "";
+  pending_commands_.resetOnConfigApply();
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
   tick_watchdog_last_log_ms_ = millis();
@@ -545,7 +497,7 @@ void NodeStateMachine::freeProvisioningStorage() {
 void NodeStateMachine::tick(bool powerSaveActive) {
   power_save_active_ = powerSaveActive;
   const uint32_t now = millis();
-  if (ota_pull_active_ && !ota_pull_pending_ && (now - ota_pull_start_ms_ > 60000UL)) {
+  if (ota_pull_active_ && !pending_commands_.hasPendingOtaPull() && (now - ota_pull_start_ms_ > 60000UL)) {
     ota_pull_active_ = false;
     ota_pull_rx_ = OtaPullRxTransfer{};
     lrslog::event("ota_pull_control_timeout", 0, 0, 0);
@@ -1363,17 +1315,10 @@ void NodeStateMachine::tickPendingOtaPullControl(uint32_t now) {
   }
 }
 
-bool NodeStateMachine::hasPendingWifiControl() const { return wifi_control_pending_; }
+bool NodeStateMachine::hasPendingWifiControl() const { return pending_commands_.hasPendingWifiControl(); }
 
 bool NodeStateMachine::consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter) {
-  if (!wifi_control_pending_) return false;
-  enabled = wifi_control_pending_enabled_;
-  src = wifi_control_pending_src_;
-  commandCounter = wifi_control_pending_counter_;
-  wifi_control_pending_ = false;
-  wifi_control_pending_src_ = 0;
-  wifi_control_pending_counter_ = 0;
-  return true;
+  return pending_commands_.consumeWifiControl(enabled, src, commandCounter);
 }
 
 bool NodeStateMachine::sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter) {
@@ -1391,41 +1336,15 @@ bool NodeStateMachine::sendWifiControlStatus(uint8_t dstAddress, bool enabled, u
   return true;
 }
 
-bool NodeStateMachine::hasPendingUdpLogControl() const { return udp_log_control_pending_; }
+bool NodeStateMachine::hasPendingUdpLogControl() const { return pending_commands_.hasPendingUdpLogControl(); }
 
 bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src) {
-  if (!udp_log_control_pending_) return false;
-  enabled = udp_log_control_pending_enabled_;
-  host = udp_log_control_pending_host_;
-  port = udp_log_control_pending_port_;
-  ttlS = udp_log_control_pending_ttl_s_;
-  src = udp_log_control_pending_src_;
-  udp_log_control_pending_ = false;
-  udp_log_control_pending_enabled_ = false;
-  udp_log_control_pending_host_ = IPAddress();
-  udp_log_control_pending_port_ = 0;
-  udp_log_control_pending_ttl_s_ = 0;
-  udp_log_control_pending_src_ = 0;
-  return true;
+  return pending_commands_.consumeUdpLogControl(enabled, host, port, ttlS, src);
 }
-
-
 
 bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize,
                                              uint8_t &src) {
-  if (!ota_pull_pending_) return false;
-  host = ota_pull_pending_host_;
-  port = ota_pull_pending_port_;
-  if (sha256HexDest && destSize > 0) {
-    strlcpy(sha256HexDest, ota_pull_pending_sha256_.c_str(), destSize);
-  }
-  src = ota_pull_pending_src_;
-  ota_pull_pending_ = false;
-  ota_pull_pending_host_ = IPAddress();
-  ota_pull_pending_port_ = 0;
-  ota_pull_pending_sha256_ = "";
-  ota_pull_pending_src_ = 0;
-  return true;
+  return pending_commands_.consumeOtaPull(host, port, sha256HexDest, destSize, src);
 }
 
 bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
@@ -1565,22 +1484,10 @@ bool NodeStateMachine::sendFleetWifiProvision(const String &ssid, const String &
 }
 
 bool NodeStateMachine::consumePendingWifiProvision(char *ssidDest, size_t ssidSize, char *passwordDest, size_t passwordSize, uint8_t &src) {
-  if (!wifi_prov_pending_) return false;
-  if (ssidDest && ssidSize > 0) {
-    strlcpy(ssidDest, wifi_prov_pending_ssid_.c_str(), ssidSize);
-  }
-  if (passwordDest && passwordSize > 0) {
-    strlcpy(passwordDest, wifi_prov_pending_password_.c_str(), passwordSize);
-  }
-  src = wifi_prov_pending_src_;
-  wifi_prov_pending_ = false;
-  wifi_prov_pending_ssid_ = "";
-  wifi_prov_pending_password_ = "";
-  wifi_prov_pending_src_ = 0;
-  return true;
+  return pending_commands_.consumeWifiProvision(ssidDest, ssidSize, passwordDest, passwordSize, src);
 }
 
-bool NodeStateMachine::hasPendingWifiProvision() const { return wifi_prov_pending_; }
+bool NodeStateMachine::hasPendingWifiProvision() const { return pending_commands_.hasPendingWifiProvision(); }
 
 uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
   if (last_wifi_prov_tx_ms_ == 0) return 0;
@@ -1656,18 +1563,10 @@ bool NodeStateMachine::sendPeerFleetKeyChange(uint8_t targetAddress, const Strin
   return true;
 }
 
-bool NodeStateMachine::hasPendingFleetKeyChange() const { return fleet_key_pending_; }
+bool NodeStateMachine::hasPendingFleetKeyChange() const { return pending_commands_.hasPendingFleetKeyChange(); }
 
 bool NodeStateMachine::consumePendingFleetKeyChange(char *keyDest, size_t keySize, uint8_t &src) {
-  if (!fleet_key_pending_) return false;
-  if (keyDest && keySize > 0) {
-    strlcpy(keyDest, fleet_key_pending_key_.c_str(), keySize);
-  }
-  src = fleet_key_pending_src_;
-  fleet_key_pending_ = false;
-  fleet_key_pending_key_ = "";
-  fleet_key_pending_src_ = 0;
-  return true;
+  return pending_commands_.consumeFleetKeyChange(keyDest, keySize, src);
 }
 
 bool NodeStateMachine::sendPeerReboot(uint8_t dstAddress) {
@@ -1693,9 +1592,7 @@ bool NodeStateMachine::sendPeerReboot(uint8_t dstAddress) {
 }
 
 bool NodeStateMachine::consumePendingReboot() {
-  if (!reboot_pending_) return false;
-  reboot_pending_ = false;
-  return true;
+  return pending_commands_.consumeReboot();
 }
 
 bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled, bool powerSaveBootGrace) {
@@ -1722,13 +1619,7 @@ bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled
 }
 
 bool NodeStateMachine::consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled, bool &powerSaveBootGrace) {
-  if (!sensor_config_pending_) return false;
-  tempEnabled = sensor_config_temp_enabled_;
-  tankEnabled = sensor_config_tank_enabled_;
-  powerSaveEnabled = sensor_config_power_save_enabled_;
-  powerSaveBootGrace = sensor_config_power_save_boot_grace_;
-  sensor_config_pending_ = false;
-  return true;
+  return pending_commands_.consumeSensorConfig(tempEnabled, tankEnabled, powerSaveEnabled, powerSaveBootGrace);
 }
 
 bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials) {
@@ -1762,15 +1653,7 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
 }
 
 bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src) {
-  if (!factory_reset_pending_) return false;
-  keepSharedFleetKey = factory_reset_keep_fleet_pending_;
-  keepWifiCredentials = factory_reset_keep_wifi_pending_;
-  src = factory_reset_pending_src_;
-  factory_reset_pending_ = false;
-  factory_reset_keep_fleet_pending_ = true;
-  factory_reset_keep_wifi_pending_ = false;
-  factory_reset_pending_src_ = 0;
-  return true;
+  return pending_commands_.consumeFactoryReset(keepSharedFleetKey, keepWifiCredentials, src);
 }
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
@@ -2078,24 +1961,10 @@ void NodeStateMachine::addProvLog(const char *fmt, ...) {
 
 bool NodeStateMachine::consumePendingFleetProvisionApply(uint16_t &sessionNonce, uint8_t &newAddress, bool &roleTx,
                                                          uint8_t &controllerAddress, char *fleetKeyDest, size_t keySize) {
-  if (!fleet_prov_apply_pending_) return false;
-  sessionNonce = fleet_prov_apply_session_nonce_;
-  newAddress = fleet_prov_apply_address_;
-  roleTx = fleet_prov_apply_role_tx_;
-  controllerAddress = fleet_prov_apply_controller_address_;
-  if (fleetKeyDest && keySize > 0) {
-    strlcpy(fleetKeyDest, fleet_prov_apply_key_.c_str(), keySize);
-  }
-  fleet_prov_apply_pending_ = false;
-  fleet_prov_apply_session_nonce_ = 0;
-  fleet_prov_apply_address_ = 0;
-  fleet_prov_apply_role_tx_ = false;
-  fleet_prov_apply_controller_address_ = 0;
-  fleet_prov_apply_key_ = "";
-  return true;
+  return pending_commands_.consumeFleetProvApply(sessionNonce, newAddress, roleTx, controllerAddress, fleetKeyDest, keySize);
 }
 
-bool NodeStateMachine::hasPendingFleetProvisionApply() const { return fleet_prov_apply_pending_; }
+bool NodeStateMachine::hasPendingFleetProvisionApply() const { return pending_commands_.hasPendingFleetProvApply(); }
 
 bool NodeStateMachine::sendProvisioningVerify(uint16_t sessionNonce, uint8_t assignedAddress) {
   return sendProvisioningVerifyPacket(sessionNonce, assignedAddress);
@@ -3669,13 +3538,10 @@ bool NodeStateMachine::handleWifiProvisionFrame(const ProtocolMessage &msg) {
     char passBuf[65]{};
     memcpy(ssidBuf, wifi_prov_rx_.data, wifi_prov_rx_.ssid_len);
     memcpy(passBuf, wifi_prov_rx_.data + wifi_prov_rx_.ssid_len, wifi_prov_rx_.pass_len);
-    wifi_prov_pending_ssid_ = String(ssidBuf);
-    wifi_prov_pending_password_ = String(passBuf);
-    wifi_prov_pending_src_ = wifi_prov_rx_.src;
-    wifi_prov_pending_ = (wifi_prov_pending_ssid_.length() > 0);
+    pending_commands_.requestWifiProvision(ssidBuf, passBuf, wifi_prov_rx_.src);
     lrslog::event("wifi_prov_rx_ready", msg.rssi, msg.counter, wifi_prov_rx_.total_chunks);
     wifi_prov_rx_ = WifiProvisionRxTransfer{};
-    return wifi_prov_pending_;
+    return pending_commands_.hasPendingWifiProvision();
   }
 
   lrslog::event("wifi_prov_rx_unknown", msg.rssi, msg.counter, op);
@@ -3752,12 +3618,10 @@ bool NodeStateMachine::handleFleetKeyControlFrame(const ProtocolMessage &msg) {
     }
     char keyBuf[65]{};
     memcpy(keyBuf, fleet_key_rx_.data, fleet_key_rx_.key_len);
-    fleet_key_pending_key_ = String(keyBuf);
-    fleet_key_pending_src_ = fleet_key_rx_.src;
-    fleet_key_pending_ = (fleet_key_pending_key_.length() > 0);
+    pending_commands_.requestFleetKeyChange(keyBuf, fleet_key_rx_.src);
     lrslog::event("fleet_key_rx_ready", msg.rssi, msg.counter, fleet_key_rx_.total_chunks);
     fleet_key_rx_ = FleetKeyControlRxTransfer{};
-    return fleet_key_pending_;
+    return pending_commands_.hasPendingFleetKeyChange();
   }
 
   lrslog::event("fleet_key_rx_unknown", msg.rssi, msg.counter, op);
@@ -3797,10 +3661,7 @@ bool NodeStateMachine::handleWifiControlFrame(const ProtocolMessage &msg) {
     lrslog::event("wifi_control_rx_bad_op", msg.rssi, msg.counter, op);
     return false;
   }
-  wifi_control_pending_enabled_ = enabled;
-  wifi_control_pending_src_ = msg.src;
-  wifi_control_pending_counter_ = msg.counter;
-  wifi_control_pending_ = true;
+  pending_commands_.requestWifiControl(enabled, msg.counter, msg.src);
   lrslog::event(enabled ? "wifi_control_enable_rx" : "wifi_control_disable_rx",
                 msg.rssi, msg.counter, msg.src);
   return true;
@@ -3834,12 +3695,7 @@ bool NodeStateMachine::handleUdpLogControlFrame(const ProtocolMessage &msg) {
     return false;
   }
 
-  udp_log_control_pending_enabled_ = enabled;
-  udp_log_control_pending_host_ = host;
-  udp_log_control_pending_port_ = port;
-  udp_log_control_pending_ttl_s_ = ttlS;
-  udp_log_control_pending_src_ = msg.src;
-  udp_log_control_pending_ = true;
+  pending_commands_.requestUdpLogControl(enabled, host, port, ttlS, msg.src);
   lrslog::event(enabled ? "udp_log_control_enable_rx" : "udp_log_control_disable_rx",
                 msg.rssi, msg.counter, msg.src);
   return true;
@@ -3916,13 +3772,9 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
       return false;
     }
 
-    ota_pull_pending_host_ = ota_pull_rx_.host;
-    ota_pull_pending_port_ = ota_pull_rx_.port;
     char sha256Hex[65];
     sha256BytesToHex(ota_pull_rx_.sha256, sha256Hex);
-    ota_pull_pending_sha256_ = sha256Hex;
-    ota_pull_pending_src_ = ota_pull_rx_.src;
-    ota_pull_pending_ = true;
+    pending_commands_.requestOtaPull(ota_pull_rx_.host, ota_pull_rx_.port, sha256Hex, ota_pull_rx_.src);
     ota_pull_rx_ = OtaPullRxTransfer{};
     lrslog::event("ota_pull_control_rx", msg.rssi, msg.counter, msg.src);
     return true;
@@ -3960,12 +3812,11 @@ bool NodeStateMachine::handleFactoryResetFrame(const ProtocolMessage &msg) {
     lrslog::event("factory_reset_rx_bad", msg.rssi, msg.counter, 0);
     return false;
   }
-  factory_reset_keep_fleet_pending_ = (msg.flags & kFactoryResetKeepFleetFlag) != 0U;
-  factory_reset_keep_wifi_pending_ = (msg.flags & kFactoryResetKeepWifiFlag) != 0U;
-  factory_reset_pending_src_ = msg.src;
-  factory_reset_pending_ = true;
+  const bool keepFleet = (msg.flags & kFactoryResetKeepFleetFlag) != 0U;
+  const bool keepWifi = (msg.flags & kFactoryResetKeepWifiFlag) != 0U;
+  pending_commands_.requestFactoryReset(keepFleet, keepWifi, msg.src);
   {
-    lrslog::event(factory_reset_keep_fleet_pending_ ? "factory_reset_rx_keep" : "factory_reset_rx_full",
+    lrslog::event(keepFleet ? "factory_reset_rx_keep" : "factory_reset_rx_full",
                msg.rssi, msg.counter, msg.src);
   }
   return true;
@@ -3976,7 +3827,7 @@ bool NodeStateMachine::handleRebootFrame(const ProtocolMessage &msg) {
     lrslog::event("reboot_rx_bad", msg.rssi, msg.counter, 0);
     return false;
   }
-  reboot_pending_ = true;
+  pending_commands_.requestReboot();
   lrslog::event("reboot_rx", msg.rssi, msg.counter, msg.src);
   return true;
 }
@@ -3986,11 +3837,11 @@ bool NodeStateMachine::handleSensorConfigFrame(const ProtocolMessage &msg) {
     lrslog::event("sensor_config_rx_bad", msg.rssi, msg.counter, 0);
     return false;
   }
-  sensor_config_temp_enabled_ = (msg.flags & 0x01) != 0;
-  sensor_config_power_save_enabled_ = (msg.flags & 0x02) != 0;
-  sensor_config_power_save_boot_grace_ = (msg.flags & 0x04) == 0;
-  sensor_config_tank_enabled_ = (msg.temp_code == 1);
-  sensor_config_pending_ = true;
+  const bool tempEnabled = (msg.flags & 0x01) != 0;
+  const bool powerSaveEnabled = (msg.flags & 0x02) != 0;
+  const bool powerSaveBootGrace = (msg.flags & 0x04) == 0;
+  const bool tankEnabled = (msg.temp_code == 1);
+  pending_commands_.requestSensorConfig(tempEnabled, tankEnabled, powerSaveEnabled, powerSaveBootGrace);
   lrslog::event("sensor_config_rx", msg.rssi, msg.counter, msg.src);
   return true;
 }
@@ -4475,21 +4326,20 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
     if (prov_rx_.key_session_nonce != sessionNonce) return false;
     const uint8_t newAddr = payload[7];
     if (newAddr != prov_rx_.staged_address) return false;
-    String newKey;
-    newKey.reserve(prov_rx_.key_len);
-    for (uint8_t i = 0; i < prov_rx_.key_len; ++i) newKey += prov_rx_.key_data[i];
-    fleet_prov_apply_session_nonce_ = sessionNonce;
-    fleet_prov_apply_address_ = newAddr;
-    fleet_prov_apply_role_tx_ = (payload[8] & kProvRoleTxFlag) != 0U;
-    fleet_prov_apply_controller_address_ = msg.src;
-    fleet_prov_apply_key_ = newKey;
-    fleet_prov_apply_pending_ = (fleet_prov_apply_key_.length() > 0);
+    char keyBuf[65]{};
+    size_t keyLenToCopy = prov_rx_.key_len < 64 ? prov_rx_.key_len : 64;
+    memcpy(keyBuf, prov_rx_.key_data, keyLenToCopy);
+    keyBuf[keyLenToCopy] = '\0';
+
+    const bool roleTx = (payload[8] & kProvRoleTxFlag) != 0U;
+    pending_commands_.requestFleetProvApply(sessionNonce, newAddr, roleTx, msg.src, keyBuf);
+
     prov_rx_.key_transfer_active = false;
     prov_rx_.discover_pending = false;
     prov_rx_.announce_remaining = 0;
     prov_rx_.announce_second_at_ms = 0;
     lrslog::event("prov_apply_rx", msg.rssi, sessionNonce, newAddr);
-    return fleet_prov_apply_pending_;
+    return pending_commands_.hasPendingFleetProvApply();
   }
 
   return false;
@@ -4718,23 +4568,15 @@ bool NodeStateMachine::sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, ui
 }
 
 bool NodeStateMachine::consumePendingPeerSync(uint32_t &chipId, uint8_t &address) {
-  if (!peer_sync_pending_) return false;
-  chipId = peer_sync_chip_id_;
-  address = peer_sync_address_;
-  peer_sync_pending_ = false;
-  return true;
+  return pending_commands_.consumePeerSync(chipId, address);
 }
 
 bool NodeStateMachine::hasPendingReaddress() const {
-  return readdress_pending_;
+  return pending_commands_.hasPendingReaddress();
 }
 
 bool NodeStateMachine::consumePendingReaddress(uint8_t &outNewAddress, uint8_t &outGwAddr) {
-  if (!readdress_pending_) return false;
-  outNewAddress = readdress_pending_new_address_;
-  outGwAddr = readdress_pending_gw_addr_;
-  readdress_pending_ = false;
-  return true;
+  return pending_commands_.consumeReaddress(outNewAddress, outGwAddr);
 }
 
 
@@ -4809,9 +4651,7 @@ bool NodeStateMachine::handleReaddressFrame(const ProtocolMessage &msg) {
         
         if (newAddress != 0) {
           // Queue sync to config
-          peer_sync_pending_ = true;
-          peer_sync_chip_id_ = targetChipId;
-          peer_sync_address_ = newAddress;
+          pending_commands_.requestPeerSync(targetChipId, newAddress);
         } else {
           // Reset successful, remove candidate from list so it doesn't linger
           removeDiscoveryCandidate(targetChipId);
@@ -4824,9 +4664,7 @@ bool NodeStateMachine::handleReaddressFrame(const ProtocolMessage &msg) {
       const uint32_t myChipId = runtime_utils::canonicalEspChipId();
       if (targetChipId == myChipId) {
         // Queue readdress change for app.cpp to consume
-        readdress_pending_ = true;
-        readdress_pending_new_address_ = newAddress;
-        readdress_pending_gw_addr_ = msg.src;
+        pending_commands_.requestReaddress(newAddress, msg.src);
         return true;
       }
     }

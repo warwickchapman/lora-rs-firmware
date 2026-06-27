@@ -9,6 +9,7 @@
 #include "sensor_status.h"
 #include "sensor_registry.h"
 #include "runtime_utils.h"
+#include "pending_command_manager.h"
 
 
 #ifndef LRS_PROVISIONING_MAX_DEVICES
@@ -204,10 +205,10 @@ class NodeStateMachine {
   bool consumePendingWifiProvision(char *ssidDest, size_t ssidSize, char *passwordDest, size_t passwordSize, uint8_t &src);
   uint32_t fleetWifiProvisionCooldownRemainingMs() const;
   bool sendPeerReboot(uint8_t dstAddress);
-  bool hasPendingReboot() const { return reboot_pending_; }
+  bool hasPendingReboot() const { return pending_commands_.hasPendingReboot(); }
   bool consumePendingReboot();
   bool sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled, bool powerSaveBootGrace);
-  bool hasPendingSensorConfig() const { return sensor_config_pending_; }
+  bool hasPendingSensorConfig() const { return pending_commands_.hasPendingSensorConfig(); }
   bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled, bool &powerSaveBootGrace);
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials);
   bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
@@ -356,12 +357,7 @@ class NodeStateMachine {
   uint32_t adoption_sent_ms_ = 0;
   uint8_t adoption_retry_count_ = 0;
   bool adoption_is_reset_ = false;
-  bool peer_sync_pending_ = false;
-  uint32_t peer_sync_chip_id_ = 0;
-  uint8_t peer_sync_address_ = 0;
-  bool readdress_pending_ = false;
-  uint8_t readdress_pending_new_address_ = 0;
-  uint8_t readdress_pending_gw_addr_ = 0;
+
 
   bool fleet_scan_active_ = false;
   uint8_t fleet_scan_start_address_ = 1;
@@ -387,10 +383,7 @@ class NodeStateMachine {
     uint8_t data[96]{};
   };
   WifiProvisionRxTransfer wifi_prov_rx_{};
-  bool wifi_prov_pending_ = false;
-  FixedSettingString<33> wifi_prov_pending_ssid_;
-  FixedSettingString<65> wifi_prov_pending_password_;
-  uint8_t wifi_prov_pending_src_ = 0;
+
 
   struct FleetKeyControlRxTransfer {
     bool active = false;
@@ -403,19 +396,7 @@ class NodeStateMachine {
     uint8_t data[64]{};
   };
   FleetKeyControlRxTransfer fleet_key_rx_{};
-  bool fleet_key_pending_ = false;
-  FixedSettingString<65> fleet_key_pending_key_;
-  uint8_t fleet_key_pending_src_ = 0;
-  bool wifi_control_pending_ = false;
-  bool wifi_control_pending_enabled_ = true;
-  uint8_t wifi_control_pending_src_ = 0;
-  uint32_t wifi_control_pending_counter_ = 0;
-  bool udp_log_control_pending_ = false;
-  bool udp_log_control_pending_enabled_ = false;
-  IPAddress udp_log_control_pending_host_;
-  uint16_t udp_log_control_pending_port_ = 0;
-  uint32_t udp_log_control_pending_ttl_s_ = 0;
-  uint8_t udp_log_control_pending_src_ = 0;
+
   struct OtaPullRxTransfer {
     bool active = false;
     uint8_t src = 0;
@@ -437,30 +418,11 @@ class NodeStateMachine {
   };
   OtaPullTxTransfer ota_pull_tx_{};
   OtaPullRxTransfer ota_pull_rx_{};
-  bool ota_pull_pending_ = false;
-  IPAddress ota_pull_pending_host_;
-  uint16_t ota_pull_pending_port_ = 0;
-  FixedSettingString<65> ota_pull_pending_sha256_;
-  uint8_t ota_pull_pending_src_ = 0;
+
   uint32_t ota_silence_until_ms_ = 0;
   bool ota_pull_active_ = false;
   uint32_t ota_pull_start_ms_ = 0;
-  bool factory_reset_pending_ = false;
-  bool factory_reset_keep_fleet_pending_ = true;
-  bool factory_reset_keep_wifi_pending_ = false;
-  uint8_t factory_reset_pending_src_ = 0;
-  bool reboot_pending_ = false;
-  bool sensor_config_pending_ = false;
-  bool sensor_config_temp_enabled_ = false;
-  bool sensor_config_tank_enabled_ = false;
-  bool sensor_config_power_save_enabled_ = false;
-  bool sensor_config_power_save_boot_grace_ = true;
-  bool fleet_prov_apply_pending_ = false;
-  uint16_t fleet_prov_apply_session_nonce_ = 0;
-  uint8_t fleet_prov_apply_address_ = 0;
-  bool fleet_prov_apply_role_tx_ = false;
-  uint8_t fleet_prov_apply_controller_address_ = 0;
-  FixedSettingString<65> fleet_prov_apply_key_;
+  PendingCommandManager pending_commands_;
   bool mqtt_connected_ = false;
 
   struct ProvisioningDevice {
