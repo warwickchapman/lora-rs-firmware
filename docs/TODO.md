@@ -18,7 +18,6 @@
 - Default versioned maintenance debug telemetry to disabled once an explicit device debug mode exists; for pre-release diagnostics it is currently enabled by default so Flasher/Fleet can collect heap, fragmentation, relay feedback, and uptime from remotes.
 - Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
 - Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
-- Record field heap and max-free-block measurements on hardware after the current build is flashed.
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
@@ -117,17 +116,6 @@
   - advanced users retain a controlled manual recovery path
   - prevent permanent RF mismatch bricking while preserving field recovery options
 
-## Security Review Actions (2026-04-26)
-- Immediate containment: rotate credentials for devices whose OTA/admin auth values were committed, remove real OTA secrets from `platformio.ini`, and replace tracked per-device OTA environments with placeholder templates plus an ignored local operator profile.
-- Firmware credential redesign: replace deterministic chip-ID-derived AP/admin credentials with per-device random factory credentials, record them in controlled factory outputs, and force admin password rotation during first commissioning.
-- Flasher/release trust: add a signed release manifest containing firmware asset names, regions, versions, and SHA256 hashes; make the flasher verify the manifest signature and asset hash before flashing downloaded firmware. Runtime OTA pull already requires SHA256, but this still needs signed source authenticity.
-- Runtime randomness: add a central ESP8266 secure-random helper seeded during boot and use it for LoRa packet nonces, boot nonces, provisioning session nonces, and transfer IDs.
-- Network security documentation: document isolated installer/OT network requirements for ArduinoOTA, MQTT control, fleet provisioning, and support access; treat MQTT control as requiring broker ACLs plus VLAN/VPN isolation unless TLS is later proven practical.
-- SoftAP posture: decide whether `ap_always_on` should default off after successful STA commissioning and document the recovery path if the AP is disabled.
-- Secret export/support handling: make normal config export redacted by default, add an explicit include-secrets path if needed, and document how to handle stickers, CSVs, screenshots, flasher logs, and support bundles.
-- Flasher hardening: add a restrictive Tauri CSP, keep shell permissions limited to the esptool sidecar, and avoid remote UI assets.
-- LoRa operational risk: document jamming/interference limits, required link-margin checks, and intentional RX fail-safe selection for each installation.
-
 ## Provisioning
 - Validate full 12-device EasyPair sessions on real hardware, including serial `provisioning_status` response sizing and operator-visible progress.
 - Add production output records for EasyPair runs (gateway chip/serial, verified remote chip/address list, fleet key handling policy, firmware version, timestamp/operator).
@@ -146,7 +134,6 @@
 - Phase 2 guardrails: no secret leakage (fleet keys, passwords, tokens), avoid heap-heavy log string construction in hot paths, and preserve current runtime timing priorities (LoRa control path before MQTT).
 
 ## MQTT / Heap Discipline
-- Measure fragmentation impact of recent MQTT topic-churn reduction using paired before/after probes (`heap_free`, `max_free_block`, `heap_frag_percent`) around `applyConfig()`, MQTT enable/disable, reconnect, and steady-state publish loops; treat `max_free_block` as the primary success metric.
 - Deferred optimization (only if needed): tighten MQTT topic buffer sizes, reduce persistent topic buffers, and move rarely used topic buffers to stack/cold helpers to claw back static RAM **only after** confirming the publish-path refactor improves `max_free_block` stability.
 
 ## Fleet (Fleet-Wide Tools / Actions)
@@ -195,7 +182,6 @@
 - Standardize categories/tags (e.g. `SYS`, `WIFI`, `NTP`, `LORA`, `SENSOR`, `FS`).
 - Standardize one-line log format with level/category, `t=<millis>`, optional `unix=<epoch>`, `event=<name>`, and key-value fields.
 - Log serial-admin and remote-admin requests with command, status, duration (`dur_ms`), and source where available.
-- Add mandatory secret redaction in logs (WiFi passwords, fleet keys, tokens, other secrets).
 - Keep default logging at `INFO`; make `DEBUG` / `TRACE` opt-in diagnostics modes.
 - Avoid log spam in tight loops (prefer state-change logging and/or repeated-warning rate limiting).
 
@@ -203,11 +189,9 @@
 - Cloud dashboard (future workstream): capture requirements and architecture options, but do not begin implementation yet.
 
 ## Memory / Stability
-- Measure steady-state heap and `max_free_block` on hardware after flashing the current build.
 - Watch Settings `get_config` heap headroom on ESP8266 during local maintenance.
 
 ## Testing / Stability
-- Set up a stability test with two units switching every minute and a Raspberry Pi capturing console logs for the full exercise.
 - Update bench serial monitoring to treat monotonic uptime as the primary health signal during stability runs; ignore Unix time drift/resets for pass/fail.
 - Validate gateway plus multiple remotes responsiveness and MQTT control reliability before wider deployment.
 - Plan and execute a full field deployment test once gateway/remotes are confirmed stable on the bench.
@@ -223,6 +207,12 @@
 ## Paired Mode
 - Implement multi-unit paired-mode workflow with unique addresses per unit.
 - Ensure paired-mode TX builds an MQTT-readable tree of remote units and relay states for one-to-many simultaneous switching with status visibility.
+
+## Architecture Extractions (Deferred -- Pull Only If Pain Drives)
+- GroupCommandManager: extract live TX group command state (pending relay/input, command counters, ack matching, retry/deadline) from `NodeStateMachine`. Higher risk than Phase 3; only if group command debugging or modification becomes painful.
+- ChunkedLoRaTransfer: extract shared chunk/start/data/commit transfer pattern used by WiFi provision, fleet key, and OTA pull control. Protocol paths; needs careful tests. Only if provisioning bugs or transfer maintenance pain forces it.
+- ProvisioningCoordinator / ProvisioningTarget: extract provisioning subsystem from `NodeStateMachine`. Biggest remaining knot, highest regression risk. Only if provisioning bugs or maintainability pain force it.
+- Peer limit review: evaluate `LRS_MAX_PEERS = 12` vs 8 for 1.0 release. Metric-driven decision based on actual deployment sizes. Current RAM savings estimate: ~880 bytes at 8 peers.
 
 ## Deferred From Addressing/Fleet Release
 - Standalone LoRa telemetry-only behavior (local-only control with optional LoRa status broadcasting).
