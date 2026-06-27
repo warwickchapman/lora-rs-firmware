@@ -3097,10 +3097,6 @@ void NodeStateMachine::tickReceive() {
     }
   } else if (!isWifiProvision) {
     if (msg.type == MessageType::Mqtt) {
-      if (!runtime_.mqtt_control_enabled) {
-        lrslog::event("rx_mqtt_control_disabled", msg.rssi, msg.counter, msg.relay_state);
-        return;
-      }
       if (!isAuthorizedMqttController(msg.src)) {
         lrslog::event("rx_mqtt_unauthorized_source", msg.rssi, msg.counter, msg.src);
         return;
