@@ -1,7 +1,7 @@
 {
   "name": "thanda-lora-flasher",
   "private": true,
-  "version": "0.9.3-dev.100",
+  "version": "0.9.3-dev.106",
   "type": "module",
   "scripts": {
     "sync:version": "python3 sync_version.py",
@@ -10,6 +10,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "test:unit": "vitest run src/composables",
     "clean": "rm -rf dist src-tauri/target"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
     "tailwindcss": "^4.2.1",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
+    "vitest": "^4.1.9",
     "vue-tsc": "^2.1.10"
   }
 }

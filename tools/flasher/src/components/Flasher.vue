@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { useMqttAdmin } from '../composables/useMqttAdmin';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -2525,136 +2526,15 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
   };
 }
 
-interface PendingMqttRequest {
-  resolve: (value: any) => void;
-  reject: (err: any) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-const pendingMqttRequests = new Map<string, PendingMqttRequest>();
-
-interface MqttGatewaySession {
-  sessionId: number | null;
-  nextSeq: number;
-  promiseChain: Promise<any>;
-}
-const mqttGatewaySessions = new Map<string, MqttGatewaySession>();
-
-function getOrCreateMqttSession(chipId: string): MqttGatewaySession {
-  let sess = mqttGatewaySessions.get(chipId);
-  if (!sess) {
-    sess = {
-      sessionId: null,
-      nextSeq: 1,
-      promiseChain: Promise.resolve()
-    };
-    mqttGatewaySessions.set(chipId, sess);
-  }
-  return sess;
-}
-
-async function executeMqttCommandRaw<T = any>(chipId: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
-  const normalizedChipId = normalizeChipId(chipId);
-  const reqId = `req-${Math.random().toString(36).substring(2, 11)}`;
-  const topic = `${monitorMqttTopicRoot.value}/lrs-${normalizedChipId}/admin_command`;
-  const requestPayload = {
-    id: reqId,
-    cmd,
-    ...payload
-  };
-
-  return new Promise<T>(async (resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingMqttRequests.delete(reqId);
-      reject(new Error(`MQTT command timeout (${timeoutMs}ms)`));
-    }, timeoutMs);
-
-    pendingMqttRequests.set(reqId, { resolve, reject, timer });
-
-    try {
-      await invoke('publish_mqtt_command', {
-        topic,
-        payload: JSON.stringify(requestPayload)
-      });
-    } catch (e) {
-      clearTimeout(timer);
-      pendingMqttRequests.delete(reqId);
-      reject(e);
-    }
-  });
-}
-
-async function refreshMqttSession(chipId: string): Promise<void> {
-  const sess = getOrCreateMqttSession(chipId);
-  const res = await executeMqttCommandRaw<{ session_id: number; expires_in_ms: number }>(chipId, 'admin_challenge', {}, 5000);
-  if (res && res.session_id !== undefined) {
-    sess.sessionId = res.session_id;
-    sess.nextSeq = 1;
-  } else {
-    throw new Error('Failed to establish MQTT admin session');
-  }
-}
-
-async function sendMqttAdminCommand<T = any>(chipId: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000): Promise<T> {
-  if (!monitorMqttConnected.value) {
-    throw new Error('MQTT broker is not connected. Connect in the Monitor tab first.');
-  }
-
-  const normalizedChipId = normalizeChipId(chipId);
-
-  if (cmd === 'admin_challenge') {
-    const sess = getOrCreateMqttSession(normalizedChipId);
-    const p = sess.promiseChain.then(async () => {
-      return await executeMqttCommandRaw<T>(normalizedChipId, cmd, payload, timeoutMs);
-    });
-    sess.promiseChain = p.catch(() => {});
-    return p;
-  }
-
-  const envelopePayload = { ...payload };
-  if (envelopePayload.admin_password == null && envelopePayload.password == null) {
-    let password = adminPasswordForPort(normalizedChipId);
-    if (!password) {
-      password = adminPasswordForPort(`lrs-${normalizedChipId}`);
-    }
-    if (!password) {
-      throw new Error('Enter the gateway admin password');
-    }
-    envelopePayload.admin_password = password;
-  }
-
-  const sess = getOrCreateMqttSession(normalizedChipId);
-  const p = sess.promiseChain.then(async () => {
-    if (sess.sessionId === null) {
-      await refreshMqttSession(normalizedChipId);
-    }
-
-    const cmdPayload = {
-      ...envelopePayload,
-      session_id: sess.sessionId,
-      seq: sess.nextSeq++
-    };
-
-    try {
-      return await executeMqttCommandRaw<T>(normalizedChipId, cmd, cmdPayload, timeoutMs);
-    } catch (err: any) {
-      const errMsg = err?.message || '';
-      if (errMsg.includes('admin_session_expired') || errMsg.includes('admin_session_invalid')) {
-        console.warn(`MQTT session for ${normalizedChipId} expired/invalid. Refreshing and retrying...`);
-        await refreshMqttSession(normalizedChipId);
-        const retryPayload = {
-          ...envelopePayload,
-          session_id: sess.sessionId,
-          seq: sess.nextSeq++
-        };
-        return await executeMqttCommandRaw<T>(normalizedChipId, cmd, retryPayload, timeoutMs);
-      }
-      throw err;
-    }
-  });
-
-  sess.promiseChain = p.catch(() => {});
-  return p;
-}
+const {
+  sendMqttAdminCommand,
+  handleMqttAdminResponse
+} = useMqttAdmin({
+  monitorMqttConnected,
+  monitorMqttTopicRoot,
+  adminPasswordForPort,
+  normalizeChipId
+});
 
 async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
   if (!port) throw new Error('Select the USB gateway first');
@@ -6370,21 +6250,7 @@ onMounted(async () => {
   });
 
   unlistenMqttAdminResponse = await listen<any>('mqtt-admin-response', (event) => {
-    const payload = event.payload;
-    const res = payload.response;
-    const reqId = res.id;
-    if (reqId) {
-      const pending = pendingMqttRequests.get(reqId);
-      if (pending) {
-        clearTimeout(pending.timer);
-        pendingMqttRequests.delete(reqId);
-        if (res.ok === false) {
-          pending.reject(new Error(res.error || 'command_failed'));
-        } else {
-          pending.resolve(res);
-        }
-      }
-    }
+    handleMqttAdminResponse(event.payload);
   });
 
   invoke<any>('get_mqtt_state').then((state) => {
