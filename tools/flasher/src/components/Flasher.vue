@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useMqttAdmin } from '../composables/useMqttAdmin';
+import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -11,14 +12,7 @@ const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 const sessionConnectionState = defineModel<'active' | 'partial' | 'offline'>('sessionConnectionState', { default: 'offline' });
 
 type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
-type SerialJobPriority = 'user' | 'background';
 type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed' | 'unknown';
-
-interface SerialJobOptions {
-  label?: string;
-  priority?: SerialJobPriority;
-  dropIfBusy?: boolean;
-}
 
 interface ConfirmDialogState {
   message: string;
@@ -472,8 +466,6 @@ const serialUptimeMs = ref<number | null>(null);
 const networkUptimeMs = ref<number | null>(null);
 const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
 const disconnectedSerialPortSince = ref<Record<string, number>>({});
-const serialAdminPortBusy = ref<Record<string, string>>({});
-const serialAdminPortQueues = new Map<string, Promise<void>>();
 const FLEET_CACHE_POLL_INTERVAL_MS = 5000;
 const FLEET_SCAN_POLL_INTERVAL_MS = 1200;
 const FLEET_FORCE_SCAN_COOLDOWN_MS = 60000;
@@ -2393,41 +2385,7 @@ async function sendEasyPairCommand<T = any>(cmd: string, payload: Record<string,
   return sendEasyPairCommandOnPort<T>(selectedPort.value, cmd, payload, timeoutMs, options);
 }
 
-function serialAdminBusyForPort(port: string): boolean {
-  return !!serialAdminPortBusy.value[port] || serialAdminPortQueues.has(port);
-}
 
-async function runSerialAdminJob<T>(port: string, label: string, options: SerialJobOptions, job: () => Promise<T>): Promise<T> {
-  if (options.dropIfBusy && serialAdminBusyForPort(port)) {
-    throw new Error('serial_admin_background_skipped');
-  }
-
-  const previous = serialAdminPortQueues.get(port) || Promise.resolve();
-  let releaseQueue!: () => void;
-  const current = new Promise<void>(resolve => {
-    releaseQueue = resolve;
-  });
-  const queued = previous.then(() => current);
-  serialAdminPortQueues.set(port, queued);
-
-  try {
-    await previous;
-    serialAdminPortBusy.value = { ...serialAdminPortBusy.value, [port]: label };
-    return await job();
-  } finally {
-    const nextBusy = { ...serialAdminPortBusy.value };
-    if (nextBusy[port] === label) delete nextBusy[port];
-    serialAdminPortBusy.value = nextBusy;
-    releaseQueue();
-    if (serialAdminPortQueues.get(port) === queued) {
-      serialAdminPortQueues.delete(port);
-    }
-  }
-}
-
-function serialBackgroundSkipped(err: unknown): boolean {
-  return String(err || '').includes('serial_admin_background_skipped');
-}
 
 function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
@@ -2536,6 +2494,23 @@ const {
   normalizeChipId
 });
 
+const {
+  serialAdminBusyForPort,
+  runSerialAdminCommand,
+  serialBackgroundSkipped
+} = useSerialAdmin({
+  invokeSerialAdminCommand: async (port, cmd, payload, timeoutMs) => {
+    return await invoke('serial_admin_command', {
+      port,
+      request: { cmd, ...payload },
+      timeoutMs
+    });
+  },
+  onBeforeSerialCommand: (port, _cmd) => {
+    noteMonitorReleasedForPort(port, 'serial admin command needs this port');
+  }
+});
+
 async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, payload: Record<string, any> = {}, timeoutMs = 8000, options: SerialJobOptions = {}): Promise<T> {
   if (!port) throw new Error('Select the USB gateway first');
 
@@ -2545,15 +2520,7 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
     return await sendMqttAdminCommand<T>(targetChipId, cmd, payload, timeoutMs);
   }
 
-  const label = options.label || cmd.replace(/_/g, ' ');
-  return await runSerialAdminJob<T>(port, label, options, async () => {
-    noteMonitorReleasedForPort(port, 'serial admin command needs this port');
-    return await invoke<T>('serial_admin_command', {
-      port,
-      request: { cmd, ...payload },
-      timeoutMs
-    });
-  });
+  return await runSerialAdminCommand<T>(port, cmd, payload, timeoutMs, options);
 }
 
 async function loadNetworkGateway() {
