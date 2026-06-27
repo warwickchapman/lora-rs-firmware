@@ -770,7 +770,7 @@ void App::handlePendingFleetProvision() {
         memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
       } else {
         cfg.input_control_paired_lora_enabled = false;
-        if (provControllerAddr < 1 || provControllerAddr > 254) {
+        if (provControllerAddr < runtime_utils::kMinAddress || provControllerAddr > runtime_utils::kMaxAddress) {
           provControllerAddr = cfg.remote_address;
         }
         cfg.allowed_controller_count = 1;

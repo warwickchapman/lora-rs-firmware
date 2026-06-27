@@ -180,7 +180,7 @@ uint8_t parseAddressList(JsonVariantConst src, uint8_t *out, uint8_t cap) {
   for (JsonVariantConst v : arr) {
     if (!v.is<uint8_t>() && !v.is<unsigned int>() && !v.is<int>()) continue;
     const int addr = v.as<int>();
-    if (addr < 1 || addr > 254) continue;
+    if (addr < runtime_utils::kMinAddress || addr > runtime_utils::kMaxAddress) continue;
     bool dup = false;
     for (uint8_t i = 0; i < count; ++i) {
       if (out[i] == static_cast<uint8_t>(addr)) {
@@ -201,7 +201,7 @@ void writeAddressList(JsonDocument &doc, const char *key, const uint8_t *values,
   if (count > cap) count = cap;
   for (uint8_t i = 0; i < count; ++i) {
     const uint8_t addr = values[i];
-    if (addr < 1 || addr > 254) continue;
+    if (addr < runtime_utils::kMinAddress || addr > runtime_utils::kMaxAddress) continue;
     arr.add(addr);
   }
 }
@@ -390,19 +390,20 @@ bool ConfigStore::begin() {
   cfg_.admin_password = root["admin_password"] | "";
   cfg_.factory_serial = root["factory_serial"] | "";
 
-  if (cfg_.local_address < 1 || cfg_.local_address > 254 || cfg_.remote_address < 1 || cfg_.remote_address > 254 ||
+  if (cfg_.local_address < runtime_utils::kMinAddress || cfg_.local_address > runtime_utils::kMaxAddress ||
+      cfg_.remote_address < runtime_utils::kMinAddress || cfg_.remote_address > runtime_utils::kMaxAddress ||
       cfg_.local_address == cfg_.remote_address) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=address_range action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
   }
-  if (cfg_.paired_target_count == 0 && cfg_.remote_address >= 1 && cfg_.remote_address <= 254) {
+  if (cfg_.paired_target_count == 0 && cfg_.remote_address >= runtime_utils::kMinAddress && cfg_.remote_address <= runtime_utils::kMaxAddress) {
     cfg_.paired_target_count = 1;
     cfg_.paired_target_addresses[0] = cfg_.remote_address;
   } else if (cfg_.paired_target_count > 0) {
     cfg_.remote_address = cfg_.paired_target_addresses[0];
   }
-  if (cfg_.allowed_controller_count == 0 && cfg_.remote_address >= 1 && cfg_.remote_address <= 254) {
+  if (cfg_.allowed_controller_count == 0 && cfg_.remote_address >= runtime_utils::kMinAddress && cfg_.remote_address <= runtime_utils::kMaxAddress) {
     cfg_.allowed_controller_count = 1;
     cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
   } else if (cfg_.allowed_controller_count > 0) {
@@ -749,22 +750,20 @@ String ConfigStore::apPassword() const {
 }
 
 void ConfigStore::setDefaults() {
-  constexpr uint8_t kGatewayAddress = 254;
-  constexpr uint8_t kFirstRemoteAddress = 1;
   cfg_.schema_version = kConfigSchemaVersion;
   cfg_.commissioned = false;
   cfg_.mode = kModePaired;
   cfg_.role = kRoleTransmitter;
 
   cfg_.role_tx = true;
-  cfg_.local_address = kGatewayAddress;
-  cfg_.remote_address = kFirstRemoteAddress;
+  cfg_.local_address = runtime_utils::kGatewayAddress;
+  cfg_.remote_address = runtime_utils::kFirstRemoteAddress;
   cfg_.paired_target_count = 1;
   memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = kFirstRemoteAddress;
+  cfg_.paired_target_addresses[0] = runtime_utils::kFirstRemoteAddress;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
-  cfg_.allowed_controller_addresses[0] = kGatewayAddress;
+  cfg_.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
   memset(cfg_.known_peer_chip_ids, 0, sizeof(cfg_.known_peer_chip_ids));
@@ -826,23 +825,21 @@ void ConfigStore::setDefaults() {
 }
 
 void ConfigStore::ensureProvisionedDefaults() {
-  constexpr uint8_t kGatewayAddress = 254;
-  constexpr uint8_t kFirstRemoteAddress = 1;
   if (cfg_.role_tx) {
-    cfg_.local_address = kGatewayAddress;
-    cfg_.remote_address = kFirstRemoteAddress;
+    cfg_.local_address = runtime_utils::kGatewayAddress;
+    cfg_.remote_address = runtime_utils::kFirstRemoteAddress;
     cfg_.input_control_paired_lora_enabled = true;
   } else {
-    cfg_.local_address = kFirstRemoteAddress;
-    cfg_.remote_address = kGatewayAddress;
+    cfg_.local_address = runtime_utils::kFirstRemoteAddress;
+    cfg_.remote_address = runtime_utils::kGatewayAddress;
     cfg_.input_control_paired_lora_enabled = false;
   }
   cfg_.paired_target_count = 1;
   memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = kFirstRemoteAddress;
+  cfg_.paired_target_addresses[0] = runtime_utils::kFirstRemoteAddress;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
-  cfg_.allowed_controller_addresses[0] = kGatewayAddress;
+  cfg_.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;
   cfg_.known_peer_count = 0;
   memset(cfg_.known_peer_addresses, 0, sizeof(cfg_.known_peer_addresses));
   memset(cfg_.known_peer_chip_ids, 0, sizeof(cfg_.known_peer_chip_ids));

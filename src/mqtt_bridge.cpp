@@ -51,7 +51,7 @@ bool parseHexAddressSegmentCstr(const char *segment, size_t len, uint8_t &out) {
   char *end = nullptr;
   long parsed = strtol(buf, &end, 16);
   if (end == nullptr || *end != '\0') return false;
-  if (parsed < 1 || parsed > 254) return false;
+  if (parsed < runtime_utils::kMinAddress || parsed > runtime_utils::kMaxAddress) return false;
   out = static_cast<uint8_t>(parsed);
   return true;
 }
@@ -64,7 +64,7 @@ bool parseDecAddressSegmentCstr(const char *segment, size_t len, uint8_t &out) {
   char *end = nullptr;
   long parsed = strtol(buf, &end, 10);
   if (end == nullptr || *end != '\0') return false;
-  if (parsed < 1 || parsed > 254) return false;
+  if (parsed < runtime_utils::kMinAddress || parsed > runtime_utils::kMaxAddress) return false;
   out = static_cast<uint8_t>(parsed);
   return true;
 }

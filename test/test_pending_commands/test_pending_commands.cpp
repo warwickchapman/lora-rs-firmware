@@ -1,5 +1,6 @@
 #include <unity.h>
 #include "pending_command_manager.h"
+#include "runtime_utils.h"
 #include <string.h>
 
 void test_pending_command_wifi_control() {
@@ -131,7 +132,7 @@ void test_pending_command_readdress() {
   PendingCommandManager pcm;
   TEST_ASSERT_FALSE(pcm.hasPendingReaddress());
 
-  pcm.requestReaddress(12, 254);
+  pcm.requestReaddress(12, runtime_utils::kGatewayAddress);
   TEST_ASSERT_TRUE(pcm.hasPendingReaddress());
 
   uint8_t newAddress = 0;
@@ -139,7 +140,7 @@ void test_pending_command_readdress() {
 
   TEST_ASSERT_TRUE(pcm.consumeReaddress(newAddress, gwAddr));
   TEST_ASSERT_EQUAL_UINT8(12, newAddress);
-  TEST_ASSERT_EQUAL_UINT8(254, gwAddr);
+  TEST_ASSERT_EQUAL_UINT8(runtime_utils::kGatewayAddress, gwAddr);
 
   TEST_ASSERT_FALSE(pcm.hasPendingReaddress());
 }
@@ -287,7 +288,7 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
   // Set all 6 commands that should survive
   pcm.requestWifiControl(true, 100, 10);
   pcm.requestReboot();
-  pcm.requestReaddress(5, 254);
+  pcm.requestReaddress(5, runtime_utils::kGatewayAddress);
   pcm.requestPeerSync(12345, 2);
   pcm.requestSensorConfig(true, false, true, false);
   pcm.requestFleetKeyChange("fleetkey", 1);
@@ -331,7 +332,7 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
   uint8_t gwAddr = 0;
   TEST_ASSERT_TRUE(pcm.consumeReaddress(newAddr, gwAddr));
   TEST_ASSERT_EQUAL_UINT8(5, newAddr);
-  TEST_ASSERT_EQUAL_UINT8(254, gwAddr);
+  TEST_ASSERT_EQUAL_UINT8(runtime_utils::kGatewayAddress, gwAddr);
 
   uint32_t syncChipId = 0;
   uint8_t syncAddr = 0;

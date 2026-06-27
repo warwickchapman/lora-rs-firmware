@@ -71,7 +71,7 @@ uint8_t resolveGatewayTargets(
   uint8_t targetCount = 0;
 
   auto addTarget = [&](uint8_t addr) {
-    if (addr >= 1 && addr <= 254 && addr != localAddress && targetCount < maxTargets) {
+    if (addr >= kMinAddress && addr <= kMaxAddress && addr != localAddress && targetCount < maxTargets) {
       for (uint8_t i = 0; i < targetCount; ++i) {
         if (outTargets[i] == addr) return;
       }

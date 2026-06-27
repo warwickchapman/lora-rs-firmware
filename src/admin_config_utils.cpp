@@ -76,7 +76,7 @@ uint8_t parseAddressField(const JsonVariantConst &value, uint8_t fallback) {
   if (value.isNull()) return fallback;
   if (value.is<uint8_t>() || value.is<int>()) {
     const int n = value.as<int>();
-    if (n >= 1 && n <= 254) return static_cast<uint8_t>(n);
+    if (n >= runtime_utils::kMinAddress && n <= runtime_utils::kMaxAddress) return static_cast<uint8_t>(n);
     return fallback;
   }
   String text = String(static_cast<const char *>(value.as<const char *>()));
@@ -85,7 +85,7 @@ uint8_t parseAddressField(const JsonVariantConst &value, uint8_t fallback) {
   long n = -1;
   if (text.startsWith("0x") || text.startsWith("0X")) n = strtol(text.c_str(), nullptr, 16);
   else n = strtol(text.c_str(), nullptr, 10);
-  if (n < 1 || n > 254) return fallback;
+  if (n < runtime_utils::kMinAddress || n > runtime_utils::kMaxAddress) return fallback;
   return static_cast<uint8_t>(n);
 }
 
@@ -96,7 +96,7 @@ uint8_t parseAddressText(const String &text, uint8_t fallback) {
   long n = -1;
   if (t.startsWith("0x") || t.startsWith("0X")) n = strtol(t.c_str(), nullptr, 16);
   else n = strtol(t.c_str(), nullptr, 10);
-  if (n < 1 || n > 254) return fallback;
+  if (n < runtime_utils::kMinAddress || n > runtime_utils::kMaxAddress) return fallback;
   return static_cast<uint8_t>(n);
 }
 

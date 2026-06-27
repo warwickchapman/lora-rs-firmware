@@ -57,6 +57,11 @@ enum class RemoteReaddressState : uint8_t {
 
 namespace runtime_utils {
 
+constexpr uint8_t kMinAddress = 1;
+constexpr uint8_t kMaxAddress = 254;
+constexpr uint8_t kGatewayAddress = 254;
+constexpr uint8_t kFirstRemoteAddress = 1;
+
 constexpr uint32_t kUnitTestChipId = 0x0048CB85UL;
 
 inline uint32_t canonicalEspChipId() {

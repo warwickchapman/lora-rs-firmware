@@ -3125,7 +3125,7 @@ void NodeStateMachine::tickReceive() {
       // Same-key remote sensor config.
     } else if (msg.type == MessageType::FleetKeyControl) {
       // Same-key targeted Fleet Key Control.
-    } else if ((msg.type == MessageType::Change || msg.type == MessageType::Heartbeat) && msg.src == 254) {
+    } else if ((msg.type == MessageType::Change || msg.type == MessageType::Heartbeat) && msg.src == runtime_utils::kGatewayAddress) {
       // Same-key gateway fleet control remains valid even if an older or
       // manually recovered receiver has stale controller-pairing metadata.
     } else if (!isAuthorizedPairedSource(msg.src)) {

@@ -14,8 +14,6 @@
 using namespace admin_config_utils;
 
 namespace {
-constexpr uint8_t kGatewayAddress = 254;
-constexpr uint8_t kFirstRemoteAddress = 1;
 
 const char *cmdName(const JsonDocument &doc) {
   return doc["cmd"] | doc["command"] | "";
@@ -79,7 +77,7 @@ void writeAddressArray(JsonDocument &doc, const char *key, const uint8_t *values
   if (count > cap)
     count = cap;
   for (uint8_t i = 0; i < count; ++i) {
-    if (values[i] >= 1 && values[i] <= 254)
+    if (values[i] >= runtime_utils::kMinAddress && values[i] <= runtime_utils::kMaxAddress)
       arr.add(values[i]);
   }
 }
@@ -95,7 +93,7 @@ uint8_t parseAddressArrayField(JsonVariantConst src, uint8_t *out,
   uint8_t count = 0;
   for (JsonVariantConst v : arr) {
     const int addr = v.as<int>();
-    if (addr < 1 || addr > 254)
+    if (addr < runtime_utils::kMinAddress || addr > runtime_utils::kMaxAddress)
       continue;
     bool dup = false;
     for (uint8_t i = 0; i < count; ++i) {
@@ -393,14 +391,14 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     }
   }
 
-  if (cfg.local_address < 1)
-    cfg.local_address = 1;
-  if (cfg.local_address > 254)
-    cfg.local_address = 254;
-  if (cfg.remote_address < 1)
-    cfg.remote_address = 1;
-  if (cfg.remote_address > 254)
-    cfg.remote_address = 254;
+  if (cfg.local_address < runtime_utils::kMinAddress)
+    cfg.local_address = runtime_utils::kMinAddress;
+  if (cfg.local_address > runtime_utils::kMaxAddress)
+    cfg.local_address = runtime_utils::kMaxAddress;
+  if (cfg.remote_address < runtime_utils::kMinAddress)
+    cfg.remote_address = runtime_utils::kMinAddress;
+  if (cfg.remote_address > runtime_utils::kMaxAddress)
+    cfg.remote_address = runtime_utils::kMaxAddress;
   if (cfg.local_address == cfg.remote_address)
     return fail("local_remote_address_conflict");
   if (!hasRemoteAddressField) {
@@ -972,18 +970,18 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
   cfg.mode = "paired";
   cfg.role = "transmitter";
   cfg.role_tx = true;
-  const int requestedLocal = doc["local_address"] | kGatewayAddress;
-  cfg.local_address = (requestedLocal >= 1 && requestedLocal <= 254)
+  const int requestedLocal = doc["local_address"] | runtime_utils::kGatewayAddress;
+  cfg.local_address = (requestedLocal >= runtime_utils::kMinAddress && requestedLocal <= runtime_utils::kMaxAddress)
                           ? static_cast<uint8_t>(requestedLocal)
-                          : kGatewayAddress;
+                          : runtime_utils::kGatewayAddress;
   if (cfg.local_address == 0 || cfg.local_address == 255)
-    cfg.local_address = kGatewayAddress;
+    cfg.local_address = runtime_utils::kGatewayAddress;
   cfg.fleet_passphrase = fleetKey;
   cfg.fleet_setup_prompt_dismissed = true;
   if (preserveTargets) {
     cfg.remote_address = cfg.paired_target_addresses[0];
   } else {
-    cfg.remote_address = kFirstRemoteAddress;
+    cfg.remote_address = runtime_utils::kFirstRemoteAddress;
     clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
   }
   clearAddressList(cfg.allowed_controller_addresses,
@@ -1215,13 +1213,13 @@ void AdminExecutor::handleStartLoraInventory(JsonDocument &doc, ResponseWriter w
     sendError("start_lora_inventory", "factory_fleet_key", id, writer);
     return;
   }
-  int start = doc["start_address"] | 1;
+  int start = doc["start_address"] | runtime_utils::kMinAddress;
   int end = doc["end_address"] | Settings::kAddressListCap;
   uint16_t intervalMs = static_cast<uint16_t>(doc["interval_ms"] | 1500);
-  if (start < 1)
-    start = 1;
-  if (end > 254)
-    end = 254;
+  if (start < runtime_utils::kMinAddress)
+    start = runtime_utils::kMinAddress;
+  if (end > runtime_utils::kMaxAddress)
+    end = runtime_utils::kMaxAddress;
   if (end < start || !sm_->fleetScanStart(static_cast<uint8_t>(start),
                                           static_cast<uint8_t>(end),
                                           intervalMs)) {
@@ -1560,7 +1558,7 @@ void AdminExecutor::handleRemoteUdpLogControl(JsonDocument &doc, ResponseWriter 
     return;
   }
   const int rawAddr = doc["addr"] | doc["address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError("remote_udp_log_control", "invalid_address", id, writer);
     return;
   }
@@ -1610,7 +1608,7 @@ void AdminExecutor::handlePollDiagnostics(JsonDocument &doc, ResponseWriter writ
     return;
   }
   uint8_t address = doc["address"] | 0;
-  if (address < 1 || address > 254) {
+  if (address < runtime_utils::kMinAddress || address > runtime_utils::kMaxAddress) {
     sendError("poll_diagnostics", "invalid_address", id, writer);
     return;
   }
@@ -1641,7 +1639,7 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
     return;
   }
   const int rawAddr = doc["addr"] | doc["address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError("remote_ota_pull", "invalid_address", id, writer);
     return;
   }
@@ -1743,7 +1741,7 @@ void AdminExecutor::handleRemoteReboot(JsonDocument &doc, ResponseWriter writer)
     return;
   }
   const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError("remote_reboot", "invalid_address", id, writer);
     return;
   }
@@ -1772,7 +1770,7 @@ void AdminExecutor::handleRemoteSensorConfig(JsonDocument &doc, ResponseWriter w
     return;
   }
   const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError("remote_sensor_config", "invalid_address", id, writer);
     return;
   }
@@ -1814,7 +1812,7 @@ void AdminExecutor::handleRemoteFleetKeyChange(JsonDocument &doc, ResponseWriter
     return;
   }
   const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError("remote_fleet_key_change", "invalid_address", id, writer);
     return;
   }
@@ -1858,7 +1856,7 @@ void AdminExecutor::handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter w
     return;
   }
   const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError("remote_factory_reset", "invalid_address", id, writer);
     return;
   }
@@ -1907,7 +1905,7 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
   uint8_t targetAddresses[Settings::kAddressListCap]{};
   uint8_t targetCount = 0;
   auto appendTarget = [&](uint8_t addr) -> bool {
-    if (addr < 1 || addr > 254 || addr == cfg.local_address) return false;
+    if (addr < runtime_utils::kMinAddress || addr > runtime_utils::kMaxAddress || addr == cfg.local_address) return false;
     if (used[addr]) return true;
     if (targetCount >= Settings::kAddressListCap) return false;
     used[addr] = true;
@@ -1930,7 +1928,7 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
   }
   for (JsonVariantConst v : arr) {
     const int raw = v.as<int>();
-    if (raw < 1 || raw > 254 || raw == cfg.local_address) {
+    if (raw < runtime_utils::kMinAddress || raw > runtime_utils::kMaxAddress || raw == cfg.local_address) {
       sendError(cmd, "invalid_addresses", id, writer);
       return;
     }
@@ -1997,7 +1995,7 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
     return;
   }
   int rawAddr = doc["address"] | 0;
-  if (rawAddr < 1 || rawAddr > 254) {
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
     sendError(cmd, "invalid_address", id, writer);
     return;
   }
