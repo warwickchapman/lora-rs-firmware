@@ -1664,6 +1664,9 @@ bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
   if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
     return true;
   }
+  if (src == runtime_.remote_address) {
+    return true;
+  }
   const String raw(settings_->mqtt_controller_addresses.c_str());
   if (raw.length() == 0) return false;
   return csvContainsAddress(raw, src);
