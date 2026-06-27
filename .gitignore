@@ -20,6 +20,7 @@ failed_log.txt
 build/
 coverage/
 dist/
+docs/plans/
 lrs-firmware-*.bin
 node_modules/
 tools/.venv/
