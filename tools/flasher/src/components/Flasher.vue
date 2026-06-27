@@ -7478,7 +7478,7 @@ function toggleSelectAllBulkPorts() {
                 </div>
                 <label class="self-center text-right font-semibold text-slate-300">Retry sec</label>
                 <input :value="Math.round((serialAdminConfig.tx_command_retry_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.tx_command_retry_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">RX failsafe</label>
+                <label class="self-center text-right font-semibold text-slate-300">Remote failsafe</label>
                 <select v-model="serialAdminConfig.rx_failsafe_mode" class="glass-input h-9 appearance-none">
                   <option value="hold_last">Hold last</option>
                   <option value="force_off">Force off</option>
@@ -7573,7 +7573,7 @@ function toggleSelectAllBulkPorts() {
                       Remote units do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
                     </p>
                     <p class="mt-2 text-slate-300">
-                      The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote node.
+                      The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote unit.
                     </p>
                     <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
                       💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
@@ -7646,7 +7646,7 @@ function toggleSelectAllBulkPorts() {
                     <div class="flex flex-col gap-1">
                       <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
                       <div class="text-[10px] text-slate-500 leading-normal">
-                        Allowed controller addresses (comma-separated). Remote nodes will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
+                        Allowed controller addresses (comma-separated). Remote units will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
                       </div>
                     </div>
                   </div>
@@ -7812,7 +7812,7 @@ function toggleSelectAllBulkPorts() {
                             <span class="font-mono font-bold text-cyan-300">"configure_gateway"</span>
                             <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;configure_gateway\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;fleet_passphrase\&quot;:\&quot;YourKey\&quot;}', 'configure_gateway command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
                           </div>
-                          <span class="text-slate-400">Provisions a factory default node into an operational Gateway, updating security key material and starting administration mode.</span>
+                          <span class="text-slate-400">Provisions a factory default device into an operational Gateway, updating security key material and starting administration mode.</span>
                         </div>
                       </div>
                     </div>
@@ -7838,7 +7838,7 @@ function toggleSelectAllBulkPorts() {
                           <span class="font-mono text-cyan-300 font-semibold">Remote OTA Firmware Pull</span>
                           <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;remote_ota_pull\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;addr\&quot;:1,\&quot;url\&quot;:\&quot;http://192.168.1.100/fw.bin\&quot;,\&quot;sha256\&quot;:\&quot;YOUR_SHA256_HEX\&quot;}', 'remote_ota_pull')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
                         </div>
-                        Signals a remote node over LoRa carrying an HTTP URL and SHA256 checksum to trigger it to download a firmware update over WiFi.
+                        Signals a remote unit over LoRa carrying an HTTP URL and SHA256 checksum to trigger it to download a firmware update over WiFi.
                       </div>
                     </div>
                   </div>
@@ -7952,7 +7952,7 @@ function toggleSelectAllBulkPorts() {
                       <div class="flex flex-col gap-3 mt-1 text-slate-400">
                         <div>
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::Heartbeat / PollResponse</span>
-                          <p class="mt-0.5">Emitted by remote nodes periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and remote-side diagnostics.</p>
+                          <p class="mt-0.5">Emitted by remote devices periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and remote-side diagnostics.</p>
                         </div>
                         <div class="border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::MaintenanceStatus</span>
@@ -7960,7 +7960,7 @@ function toggleSelectAllBulkPorts() {
                           <ul class="list-disc pl-4 mt-1 space-y-1 text-slate-400 font-mono text-[10px]">
                             <li><span class="text-slate-300">Version Page:</span> Major, minor, patch, and build version code</li>
                             <li><span class="text-slate-300">Sensors Page:</span> 4-20mA current (mA), voltage (mV), and calibrated water level measurement (mm)</li>
-                            <li><span class="text-slate-300">Debug Page:</span> Node uptime in minutes, free heap memory blocks, and free block fragmentation percentage</li>
+                            <li><span class="text-slate-300">Debug Page:</span> Device uptime in minutes, free heap memory blocks, and free block fragmentation percentage</li>
                           </ul>
                         </div>
                       </div>
@@ -7972,7 +7972,7 @@ function toggleSelectAllBulkPorts() {
                       <div class="flex flex-col gap-3 mt-1 text-slate-400">
                         <div>
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiProvision</span>
-                          <p class="mt-0.5">The gateway broadcasts chunked network credentials packets over the air. Remote nodes assemble the chunks in memory, verify the full string FNV-1a hash, and permanently commit the SSID & Password configuration store.</p>
+                          <p class="mt-0.5">The gateway broadcasts chunked network credentials packets over the air. Remote devices assemble the chunks in memory, verify the full string FNV-1a hash, and permanently commit the SSID & Password configuration store.</p>
                         </div>
                         <div class="border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiControl</span>
@@ -7980,7 +7980,7 @@ function toggleSelectAllBulkPorts() {
                         </div>
                         <div class="border-t border-slate-800/50 pt-2">
                           <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::OtaPullControl</span>
-                          <p class="mt-0.5">Tails remote nodes to fetch new firmware binaries from a local staging web server over WiFi. Payload contains the temporary update URL and SHA-256 file signature for local validation.</p>
+                          <p class="mt-0.5">Tails remote devices to fetch new firmware binaries from a local staging web server over WiFi. Payload contains the temporary update URL and SHA-256 file signature for local validation.</p>
                         </div>
                       </div>
                     </div>
@@ -8608,14 +8608,14 @@ function toggleSelectAllBulkPorts() {
                     <span 
                       v-if="device.pending_power_save_listen_only !== undefined"
                       class="rounded border px-2 py-1 text-[10px] font-bold border-orange-500/30 bg-orange-500/10 text-orange-300 animate-pulse"
-                      title="Command transmitted. Waiting for remote node to check in over LoRa to confirm."
+                      title="Command transmitted. Waiting for remote device to check in over LoRa to confirm."
                     >
                       Pending...
                     </span>
                     <template v-else-if="device.power_save_listen_only">
                       <span 
                         class="rounded border px-2 py-1 text-[10px] font-bold border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                        title="Power save active: node is running in LoRa-only low-power mode"
+                        title="Power save active: device is running in LoRa-only low-power mode"
                       >
                         PowerSave
                       </span>
@@ -8867,12 +8867,12 @@ function toggleSelectAllBulkPorts() {
       <div v-if="factoryResetTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
         <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
           <div>
-            <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Node {{ factoryResetTargetModal.device.address }}</h3>
-            <p class="mt-1 text-xs text-slate-500">Decommissions the remote node over LoRa, formatting its state and triggering a reboot.</p>
+            <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Device {{ factoryResetTargetModal.device.address }}</h3>
+            <p class="mt-1 text-xs text-slate-500">Decommissions the remote device over LoRa, formatting its state and triggering a reboot.</p>
           </div>
           
           <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
-            💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it stays in this fleet. Unchecking it performs a full factory reset and removes the node from this fleet.
+            💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it stays in this fleet. Unchecking it performs a full factory reset and removes the device from this fleet.
           </div>
 
           <div class="flex flex-col gap-3 py-1">
@@ -8903,7 +8903,7 @@ function toggleSelectAllBulkPorts() {
               @click="executeRemoteFactoryReset(factoryResetTargetModal.device, factoryResetTargetModal.keep_shared_fleet_key, factoryResetTargetModal.keep_wifi_credentials)"
               class="m-0 h-9 rounded-md border border-rose-500/40 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30 px-4 text-xs font-bold transition-colors"
             >
-              Factory Reset Node
+              Factory Reset Device
             </button>
           </div>
         </div>
@@ -8916,7 +8916,7 @@ function toggleSelectAllBulkPorts() {
         <div class="w-full max-w-lg rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
           <!-- Header with device info -->
           <div>
-            <h3 class="text-base font-bold text-slate-200">🛠️ Command Console — Node {{ settingsDeviceModal.device.address }}</h3>
+            <h3 class="text-base font-bold text-slate-200">🛠️ Command Console — Device {{ settingsDeviceModal.device.address }}</h3>
             <p class="mt-1 text-xs text-slate-500">
               <span v-if="settingsDeviceModal.device.chip_id">{{ settingsDeviceModal.device.chip_id }}</span>
               <span v-if="settingsDeviceModal.device.fw_version"> · v{{ settingsDeviceModal.device.fw_version }}</span>
@@ -8971,7 +8971,7 @@ function toggleSelectAllBulkPorts() {
 
           <!-- Power tab content (Stateless Commands Console) -->
           <div v-if="settingsDeviceModal.activeTab === 'power'" class="flex flex-col gap-3">
-            <p class="text-xs text-slate-500">PowerSave turns off WiFi, Serial Admin, OTA, MQTT, UDP logging, LEDs, and background services. LoRa command handling remains active so the node can be returned to Full Power remotely.</p>
+            <p class="text-xs text-slate-500">PowerSave turns off WiFi, Serial Admin, OTA, MQTT, UDP logging, LEDs, and background services. LoRa command handling remains active so the device can be returned to Full Power remotely.</p>
             
             <div class="flex flex-col gap-3 py-1">
               <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-800 bg-slate-950/20 rounded p-4">
@@ -8982,10 +8982,10 @@ function toggleSelectAllBulkPorts() {
                   </div>
                   <div class="text-[10px] text-slate-400 mt-2 select-text leading-relaxed">
                     <template v-if="settingsDeviceModal.power_save_listen_only">
-                      The node is configured for deep power saving. Local Wi-Fi, Serial Admin, and background services are completely shut down to preserve battery life. LoRa receiver remains active.
+                      The device is configured for deep power saving. Local Wi-Fi, Serial Admin, and background services are completely shut down to preserve battery life. LoRa receiver remains active.
                     </template>
                     <template v-else>
-                      Keeps the remote node continuously awake. WiFi, Serial Admin, OTA, and active sensor polling remain fully operational at all times.
+                      Keeps the remote device continuously awake. WiFi, Serial Admin, OTA, and active sensor polling remain fully operational at all times.
                     </template>
                   </div>
                 </div>
@@ -9035,20 +9035,20 @@ function toggleSelectAllBulkPorts() {
 
           <!-- Security tab content -->
           <div v-if="settingsDeviceModal.activeTab === 'security'" class="flex flex-col gap-3">
-            <p class="text-xs text-slate-500">Update the node's shared fleet passphrase over LoRa.</p>
+            <p class="text-xs text-slate-500">Update the device's shared fleet passphrase over LoRa.</p>
             <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex flex-col gap-1.5 select-text leading-relaxed">
               <div class="flex items-center gap-1.5 font-bold">
                 <span class="text-sm">⚠️</span> CRITICAL OPERATIONAL WARNING
               </div>
               <div>
                 Changing the remote's Fleet Key will make it <span class="font-bold text-rose-200">immediately unreachable</span> by this Gateway once the remote reboots.
-                You must update this Gateway's Fleet Key to match, or the remote node will be permanently orphaned until manually retrieved!
+                You must update this Gateway's Fleet Key to match, or the remote device will be permanently orphaned until manually retrieved!
               </div>
             </div>
             <div class="flex flex-col gap-3.5 py-1">
               <label class="flex items-center gap-3 text-xs text-slate-300 cursor-pointer select-none">
                 <input v-model="settingsDeviceModal.fleet_key_confirmed" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-600 focus:ring-0 focus:ring-offset-0" />
-                <span class="font-semibold text-slate-200">I understand that the node will become unreachable until Gateway keys are matched.</span>
+                <span class="font-semibold text-slate-200">I understand that the device will become unreachable until Gateway keys are matched.</span>
               </label>
               <div class="flex flex-col gap-1.5 text-xs">
                 <label class="font-semibold text-slate-300">New Fleet Passphrase</label>
