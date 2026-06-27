@@ -770,13 +770,13 @@ void App::handlePendingFleetProvision() {
         memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
       } else {
         cfg.input_control_paired_lora_enabled = false;
-        if (provControllerAddr < runtime_utils::kMinAddress || provControllerAddr > runtime_utils::kMaxAddress) {
-          provControllerAddr = cfg.remote_address;
-        }
+        cfg.remote_address = runtime_utils::kGatewayAddress;
         cfg.allowed_controller_count = 1;
         memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
-        cfg.allowed_controller_addresses[0] = provControllerAddr;
-        cfg.remote_address = provControllerAddr;
+        cfg.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;
+        cfg.paired_target_count = 1;
+        memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
+        cfg.paired_target_addresses[0] = runtime_utils::kGatewayAddress;
       }
       cfg.fleet_passphrase = provFleetKey;
       cfg.fleet_setup_prompt_dismissed = (provFleetKey[0] != '\0');
