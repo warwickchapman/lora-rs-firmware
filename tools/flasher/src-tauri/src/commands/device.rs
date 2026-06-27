@@ -103,8 +103,10 @@ fn normalize_chip_id(raw: &str) -> Result<String, String> {
 }
 
 fn parse_chip_id(output: &str) -> Result<String, String> {
-    let re = regex::Regex::new(r"Chip ID:\s*0x([0-9A-Fa-f]+)").unwrap();
-    if let Some(caps) = re.captures(output) {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"Chip ID:\s*0x([0-9A-Fa-f]+)").unwrap()
+    });
+    if let Some(caps) = RE.captures(output) {
         let hex_str = caps.get(1).unwrap().as_str();
         let val = u32::from_str_radix(hex_str, 16)
             .map_err(|e| format!("Failed to parse hex chip ID '{}': {}", hex_str, e))?;
@@ -150,8 +152,10 @@ mod tests {
 }
 
 fn parse_mac(output: &str) -> Option<String> {
-    let re = regex::Regex::new(r"MAC:\s*([0-9A-Fa-f:]{17})").unwrap();
-    if let Some(caps) = re.captures(output) {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"MAC:\s*([0-9A-Fa-f:]{17})").unwrap()
+    });
+    if let Some(caps) = RE.captures(output) {
         Some(caps.get(1).unwrap().as_str().to_lowercase())
     } else {
         None

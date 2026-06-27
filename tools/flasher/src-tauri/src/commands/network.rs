@@ -1,6 +1,5 @@
 use crate::services::{firmware, network};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -79,7 +78,7 @@ pub async fn start_firmware_file_server(
 ) -> Result<FirmwareServerInfo, String> {
     stop_firmware_file_server(state.clone()).await?;
 
-    let firmware_path = resolve_firmware_path(&app, &options.firmware_path, options.region).await?;
+    let firmware_path = firmware::resolve_firmware_path(&app, &options.firmware_path, options.region, None).await?;
     let firmware_bytes = Arc::new(tokio::fs::read(&firmware_path).await.map_err(|e| e.to_string())?);
     let sha256 = firmware::calculate_sha256(&firmware_path)?;
     let filename = firmware_path
@@ -214,40 +213,4 @@ fn firmware_server_urls(port: u16) -> Vec<String> {
             .collect(),
         Err(_) => vec![format!("http://127.0.0.1:{}/firmware.bin", port)],
     }
-}
-
-async fn resolve_firmware_path(
-    app: &AppHandle,
-    firmware_path: &str,
-    region: Option<String>,
-) -> Result<PathBuf, String> {
-    let local_path = PathBuf::from(firmware_path);
-    if local_path.exists() && local_path.is_file() {
-        return Ok(local_path);
-    }
-    if region.is_none() {
-        return Err(format!(
-            "Local firmware file not found: {}. Build firmware first or choose a local .bin file.",
-            firmware_path
-        ));
-    }
-
-    let reg = region.ok_or_else(|| "Region is required for GitHub downloads".to_string())?;
-    let releases = firmware::fetch_releases().await?;
-    let release = releases
-        .into_iter()
-        .find(|r| r.tag_name == firmware_path)
-        .ok_or_else(|| format!("Release {} not found", firmware_path))?;
-    let search_suffix = format!("{}.bin", reg.to_lowercase());
-    let asset = release
-        .assets
-        .into_iter()
-        .find(|a| a.name.to_lowercase().ends_with(&search_suffix))
-        .ok_or_else(|| {
-            format!(
-                "No asset found for region {} in release {}",
-                reg, firmware_path
-            )
-        })?;
-    firmware::download_firmware(app, &asset.browser_download_url, &asset.name).await
 }

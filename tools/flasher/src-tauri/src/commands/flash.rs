@@ -34,46 +34,7 @@ pub async fn flash_firmware(
         let _ = app_clone.emit("flash-log", LogEvent { port: port_clone.clone(), message: msg });
     };
 
-    let local_path = std::path::PathBuf::from(&firmware_path);
-    
-    let flash_file = if local_path.exists() && local_path.is_file() {
-        log(format!("Using local firmware file at {}...", firmware_path));
-        local_path
-    } else {
-        if region.is_none() {
-            return Err(format!(
-                "Local firmware file not found: {}. Build firmware first or choose a local .bin file.",
-                firmware_path
-            ));
-        }
-        // Tag based GitHub download
-        let reg = region.ok_or_else(|| "Region is required for GitHub downloads".to_string())?;
-        log(format!("Starting cloud flash for {} (Region: {})...", firmware_path, reg));
-        
-        // 1. Fetch releases
-        log("Fetching release details...".into());
-        let releases = firmware::fetch_releases().await?;
-        let release = releases.into_iter()
-            .find(|r| r.tag_name == firmware_path)
-            .ok_or_else(|| format!("Release {} not found", firmware_path))?;
-
-        // 2. Find asset
-        let search_suffix = format!("{}.bin", reg.to_lowercase());
-        let asset = release.assets.into_iter()
-            .find(|a| a.name.to_lowercase().ends_with(&search_suffix))
-            .ok_or_else(|| format!("No asset found for region {} in release {}", reg, firmware_path))?;
-
-        // 3. Download
-        log(format!("Downloading asset: {}...", asset.name));
-        let path = firmware::download_firmware(&app, &asset.browser_download_url, &asset.name).await?;
-
-        // 4. Verify SHA256
-        log("Verifying checksum...".into());
-        let sha256 = firmware::calculate_sha256(&path)?;
-        log(format!("SHA256: {}", sha256));
-        
-        path
-    };
+    let flash_file = firmware::resolve_firmware_path(&app, &firmware_path, region, Some(&log)).await?;
 
     let (erase_op, write_op) = detect_flash_ops(&app).await?;
     log(format!(
@@ -177,7 +138,9 @@ fn emit_log_line(app: &AppHandle, port: &str, line: &[u8]) {
 }
 
 fn strip_ansi(s: &str) -> String {
-    // Robust ANSI escape code regex
-    let re = regex::Regex::new(r"[\u001b\u009b][\[()#;?]*(?:[0-9;]*[0-9ABCDEFGHJKSTmpeignqrsuy])").unwrap();
-    re.replace_all(s, "").to_string()
+    // Robust ANSI escape code regex cached with LazyLock
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"[\u001b\u009b][\[()#;?]*(?:[0-9;]*[0-9ABCDEFGHJKSTmpeignqrsuy])").unwrap()
+    });
+    RE.replace_all(s, "").to_string()
 }
