@@ -21,6 +21,7 @@ build/
 coverage/
 dist/
 docs/plans/
+docs/reports/
 lrs-firmware-*.bin
 node_modules/
 tools/.venv/
