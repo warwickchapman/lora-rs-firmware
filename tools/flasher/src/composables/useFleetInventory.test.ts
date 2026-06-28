@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ref } from 'vue';
-import { useFleetInventory, LoraInventoryDevice, LoraAdoptionCandidate } from './useFleetInventory';
+import { useFleetInventory } from './useFleetInventory';
+import { LoraInventoryDevice, LoraAdoptionCandidate } from '../types/fleet';
 
 describe('useFleetInventory', () => {
   let otaQueue = ref<LoraInventoryDevice[]>([]);
