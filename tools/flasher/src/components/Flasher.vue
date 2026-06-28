@@ -523,6 +523,24 @@ const isSettingsDeviceModalOpen = computed({
   }
 });
 
+function handleRemoteSettingsSensors(temp: boolean, tank: boolean, listen: boolean) {
+  const modal = settingsDeviceModal.value;
+  if (!modal) return;
+  executeRemoteSensors(modal.device, temp, tank, listen);
+}
+
+function handleRemoteSettingsWifi(ssid: string, pass: string) {
+  const modal = settingsDeviceModal.value;
+  if (!modal) return;
+  executeRemoteWifi(modal.device, ssid, pass);
+}
+
+function handleRemoteSettingsFleetKey(key: string) {
+  const modal = settingsDeviceModal.value;
+  if (!modal) return;
+  executeRemoteFleetKeyChange(modal.device, key);
+}
+
 interface FactoryResetModalState {
   device: LoraInventoryDevice;
   keep_shared_fleet_key: boolean;
@@ -6527,9 +6545,9 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
       v-model:draft="settingsDeviceModalState"
       :device="settingsDeviceModal ? settingsDeviceModal.device : { address: '' }"
       @close="settingsDeviceModal = null"
-      @execute-sensors="(temp: boolean, tank: boolean, listen: boolean) => { if (settingsDeviceModal) executeRemoteSensors(settingsDeviceModal.device, temp, tank, listen); }"
-      @execute-wifi="(ssid: string, pass: string) => { if (settingsDeviceModal) executeRemoteWifi(settingsDeviceModal.device, ssid, pass); }"
-      @execute-fleet-key="(key: string) => { if (settingsDeviceModal) executeRemoteFleetKeyChange(settingsDeviceModal.device, key); }"
+      @execute-sensors="handleRemoteSettingsSensors"
+      @execute-wifi="handleRemoteSettingsWifi"
+      @execute-fleet-key="handleRemoteSettingsFleetKey"
     />
   </div>
 </template>
