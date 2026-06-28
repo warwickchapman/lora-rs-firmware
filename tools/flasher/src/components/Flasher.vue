@@ -30,6 +30,18 @@ import SessionMqttBanner from './flasher/SessionMqttBanner.vue';
 import MonitorMqttSettingsModal from './flasher/MonitorMqttSettingsModal.vue';
 import FlashMode from './flasher/FlashMode.vue';
 import RemoteSettingsModal from './flasher/RemoteSettingsModal.vue';
+import ProvisionMode from './flasher/ProvisionMode.vue';
+import type {
+  ProvisionConfig,
+  ProvisionUiState,
+  ProvisionGatewayState,
+  ProvisionTransportState,
+  ProvisionSessionSummary,
+  ProvisionDiscoveredDeviceRow,
+  ProvisionPairState,
+  ProvisionWifiState,
+  ProvisionIdentifyState
+} from './flasher/ProvisionMode.vue';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -5883,6 +5895,131 @@ function handleAdoptCandidatePayload(payload: FleetCandidateActionPayload) {
   }
 }
 
+
+const provisionConfigComputed = computed<ProvisionConfig>({
+  get: () => ({
+    pairTransport: pairTransport.value,
+    selectedPort: selectedPort.value,
+    selectedMqttManualChipId: selectedMqttManualChipId.value,
+    selectedMqttGatewayChipId: selectedMqttGatewayChipId.value,
+    pairExpectedCount: pairExpectedCount.value,
+    pairFleetKey: pairFleetKey.value,
+    pairAdminPassword: pairAdminPassword.value,
+    pairWifiSsid: pairWifiSsid.value,
+    pairWifiPassword: pairWifiPassword.value
+  }),
+  set: (val) => {
+    pairTransport.value = val.pairTransport;
+    selectedPort.value = val.selectedPort;
+    selectedMqttManualChipId.value = val.selectedMqttManualChipId;
+    selectedMqttGatewayChipId.value = val.selectedMqttGatewayChipId;
+    pairExpectedCount.value = val.pairExpectedCount;
+    pairFleetKey.value = val.pairFleetKey;
+    pairAdminPassword.value = val.pairAdminPassword;
+    pairWifiSsid.value = val.pairWifiSsid;
+    pairWifiPassword.value = val.pairWifiPassword;
+  }
+});
+
+const provisionUiStateComputed = computed<ProvisionUiState>({
+  get: () => ({
+    pairPanelTab: pairPanelTab.value,
+    showPairFleetKey: showPairFleetKey.value,
+    showPairAdminPassword: showPairAdminPassword.value,
+    showPairWifiPassword: showPairWifiPassword.value
+  }),
+  set: (val) => {
+    pairPanelTab.value = val.pairPanelTab;
+    showPairFleetKey.value = val.showPairFleetKey;
+    showPairAdminPassword.value = val.showPairAdminPassword;
+    showPairWifiPassword.value = val.showPairWifiPassword;
+  }
+});
+
+const provisionGatewayStateComputed = computed<ProvisionGatewayState>(() => {
+  const state = gatewaySelectedPort.value ? serialDeviceState(gatewaySelectedPort.value) : null;
+  const hasWarning = !!(gatewaySelectedPort.value && state?.status && !state.status.role_tx);
+  const hasUncommissioned = !!(gatewaySelectedPort.value && state?.status && state.status.role_tx && (!state.status.commissioned || state.status.fleet_passphrase_default));
+
+  return {
+    hasGatewayDeviceWarning: hasWarning,
+    hasUncommissionedWarning: hasUncommissioned,
+    gatewayLabel: gatewaySelectedPort.value || '-',
+    isGatewayLoadDisabled: isGatewayLoading.value || isPairBusy.value || !gatewaySelectedPort.value,
+    isGatewayLoading: isGatewayLoading.value,
+    gatewayRoleLabel: state?.status?.role || '-'
+  };
+});
+
+const provisionTransportStateComputed = computed<ProvisionTransportState>(() => ({
+  ports: ports.value.map(p => ({ port_name: p.port_name, description: p.description || undefined })),
+  mqttGatewayOptions: Object.values(mqttGateways.value).map(gw => ({
+    chip_id: gw.chip_id,
+    label: `${lrsDeviceName(gw.chip_id)} (lrs-${gw.chip_id})`
+  })),
+  isSelectedMqttGatewayDiscovered: isSelectedMqttGatewayDiscovered.value,
+  manualMqttGatewayError: manualMqttGatewayError.value,
+  serialPortSelectorDisabled: serialPortSelectorDisabled.value,
+  isRefreshingPorts: isRefreshingPorts.value
+}));
+
+const provisionSessionSummaryComputed = computed<ProvisionSessionSummary | null>(() => {
+  const session = pairStatus.value?.session;
+  if (!session) return null;
+  return {
+    state: session.state,
+    foundCount: pairDiscoveredDeviceCount.value,
+    maxRemotes: session.max_remotes,
+    verifiedCount: session.verified_count,
+    failedCount: session.failed_count
+  };
+});
+
+const provisionDiscoveredDeviceRowComputed = computed<ProvisionDiscoveredDeviceRow[]>(() => {
+  const devices = pairStatus.value?.devices || [];
+  return devices.map(device => ({
+    chip_id_hex: device.chip_id_hex,
+    rssi: device.rssi,
+    current_address: device.current_address,
+    assigned_address: device.assigned_address || '-',
+    firmware: compactFirmwareVersion(device.fw_major, device.fw_minor, device.fw_patch, device.fw_build),
+    isConflict: !!device.address_conflict,
+    state: device.state,
+    stateBorderClass: device.address_conflict ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800/40 text-slate-300'
+  }));
+});
+
+const provisionPairStateComputed = computed<ProvisionPairState>(() => ({
+  isPairBusy: isPairBusy.value,
+  pairPrimaryDisabled: pairPrimaryDisabled.value,
+  gatewayReady: gatewayReady.value,
+  sessionSummary: provisionSessionSummaryComputed.value,
+  discoveredDevices: provisionDiscoveredDeviceRowComputed.value
+}));
+
+const provisionWifiStateComputed = computed<ProvisionWifiState>(() => ({
+  wifiNetworks: wifiNetworks.value.map(n => ({
+    ssid: n.ssid,
+    bssid: n.bssid,
+    rssi: n.rssi,
+    channel: n.channel,
+    secure: n.secure
+  })),
+  isWifiScanning: isWifiScanning.value,
+  isWifiApplying: isWifiApplying.value,
+  isFleetWifiSending: isFleetWifiSending.value,
+  gatewayWifiReady: gatewayWifiReady.value,
+  gatewayWifiStatusText: gatewayWifiStatusText.value,
+  gatewayWifiHelpText: gatewayWifiHelpText.value,
+  pairWifiSsidInScan: pairWifiSsidInScan.value
+}));
+
+const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
+  available: identifyAvailable.value,
+  disabled: identifyDisabled.value,
+  isIdentifying: isIdentifying.value
+}));
+
 </script>
 
 <template>
@@ -5936,308 +6073,31 @@ function handleAdoptCandidatePayload(payload: FleetCandidateActionPayload) {
         @toggle-monitor="toggleMonitor"
       />
 
-      <div v-if="activeMode === 'pair'" class="flex flex-col gap-3 h-full overflow-hidden">
-        <!-- Gateway Device Validation Warning Callout -->
-        <div v-if="gatewaySelectedPort && serialDeviceState(gatewaySelectedPort)?.status && !serialDeviceState(gatewaySelectedPort)?.status?.role_tx" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div>
-            <span class="font-bold">Gateway Device Required:</span> The device currently connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewaySelectedPort }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Please connect a gateway device instead.
-          </div>
-        </div>
-
-        <!-- Gateway Uncommissioned/Factory State Warning Callout -->
-        <div v-if="gatewaySelectedPort && serialDeviceState(gatewaySelectedPort)?.status && serialDeviceState(gatewaySelectedPort)?.status?.role_tx && (!serialDeviceState(gatewaySelectedPort)?.status?.commissioned || serialDeviceState(gatewaySelectedPort)?.status?.fleet_passphrase_default)" class="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-cyan-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-cyan-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <div>
-            <span class="font-bold">Uncommissioned Gateway:</span> The gateway connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewaySelectedPort }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
-          </div>
-        </div>
-
-        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h2 class="text-base font-bold text-cyan-300">
-                Provision
-              </h2>
-              <p class="mt-1 text-xs text-slate-400">
-                {{ pairTransport === 'serial' ? 'Selected USB device becomes the LoRa gateway.' : 'Discovered MQTT gateway will commission remote devices.' }}
-              </p>
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                v-if="identifyAvailable"
-                @click="triggerIdentify"
-                :disabled="identifyDisabled"
-                :class="['glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed', { 'identify-led-active': isIdentifying }]"
-                title="Identify gateway"
-                aria-label="Identify gateway"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
-                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
-                </svg>
-              </button>
-              <button
-                @click="() => loadEasyPairGateway(false)"
-                :disabled="isGatewayLoading || isPairBusy || !selectedPort"
-                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-cyan-300': isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
-                <span>{{ isGatewayLoading ? 'Loading...' : 'Load Gateway' }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 rounded border border-slate-800 bg-slate-950/30 text-xs font-bold">
-            <button
-              @click="pairPanelTab = 'pair'"
-              :class="['m-0 h-8 rounded-none px-3 transition-all', pairPanelTab === 'pair' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
-            >
-              Pair
-            </button>
-            <button
-              @click="openPairWifiTab"
-              :class="['m-0 h-8 rounded-none px-3 transition-all', pairPanelTab === 'wifi' ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5']"
-            >
-              WiFi
-            </button>
-          </div>
-
-          <div v-if="pairPanelTab === 'pair'" class="flex flex-col gap-3">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Connection Mode</label>
-              <select v-model="pairTransport" class="glass-input h-10 appearance-none">
-                <option value="serial">USB Serial Gateway</option>
-                <option value="mqtt">MQTT</option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">{{ pairTransport === 'serial' ? 'USB gateway' : 'MQTT gateway' }}</label>
-              <div v-if="pairTransport === 'serial'" class="flex gap-2">
-                <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 flex-1 appearance-none disabled:opacity-60">
-                  <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
-                    {{ port.port_name }}
-                  </option>
-                  <option v-if="ports.length === 0" disabled>Scanning...</option>
-                </select>
-                <button @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-6 h-6 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
-                </button>
-              </div>
-              <div v-else-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1">
-                <input
-                  v-model="selectedMqttManualChipId"
-                  @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
-                  placeholder="Enter manual gateway chip ID (e.g. 0030eb55)"
-                  class="glass-input h-10 px-2 text-xs font-mono"
-                />
-                <span class="text-[9px] text-slate-400">
-                  No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
-                </span>
-                <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
-                  {{ manualMqttGatewayError }}
-                </span>
-              </div>
-              <select v-else v-model="selectedPort" class="glass-input h-10 appearance-none">
-                <option value="" disabled>Select MQTT gateway</option>
-                <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
-                  {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
-                </option>
-                <!-- Keep manual selection visible when it is not in discovery list -->
-                <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
-                  Manual: lrs-{{ selectedMqttGatewayChipId }}
-                </option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Max remotes</label>
-              <input v-model.number="pairExpectedCount" class="glass-input h-10" type="number" min="1" max="12" />
-              <div class="text-[10px] text-slate-500">Maximum powered factory/unprovisioned remotes to listen for in this scan.</div>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Fleet key</label>
-              <div class="grid grid-cols-[3rem_minmax(0,1fr)_3rem_3rem] gap-2">
-                <button @click="generatePairFleetKey(true)" :disabled="serialDeviceState(gatewaySelectedPort)?.status?.commissioned && !serialDeviceState(gatewaySelectedPort)?.status?.fleet_passphrase_default" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed" title="Generate fleet key" aria-label="Generate fleet key">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
-                </button>
-                <input v-model="pairFleetKey" @input="markPairFleetKeyManual" class="glass-input h-10 flex-1 font-mono" :type="showPairFleetKey ? 'text' : 'password'" autocomplete="new-password" />
-                <button @click="showPairFleetKey = !showPairFleetKey" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'" :aria-label="showPairFleetKey ? 'Hide fleet key' : 'Show fleet key'">
-                  <svg v-if="!showPairFleetKey" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
-                </button>
-                <button @click="copyPairFleetKey" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" title="Copy fleet key" aria-label="Copy fleet key">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                </button>
-              </div>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Gateway admin password</label>
-              <div class="grid grid-cols-[minmax(0,1fr)_3rem_3rem] gap-2">
-                <input v-model="pairAdminPassword" class="glass-input h-10 min-w-0 font-mono" :type="showPairAdminPassword ? 'text' : 'password'" autocomplete="current-password" />
-                <button @click="showPairAdminPassword = !showPairAdminPassword" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairAdminPassword ? 'Hide password' : 'Show password'" :aria-label="showPairAdminPassword ? 'Hide password' : 'Show password'">
-                  <svg v-if="!showPairAdminPassword" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
-                </button>
-                <button @click="copyPairAdminPassword" :disabled="!pairAdminPassword" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50" title="Copy gateway password" aria-label="Copy gateway password">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-[1fr_auto] gap-3">
-            <button @click="isPairBusy ? cancelEasyPair() : runEasyPair()" :disabled="!isPairBusy && pairPrimaryDisabled" :class="['h-9 flex items-center justify-center gap-3 text-sm font-bold transition-colors', isPairBusy ? 'rounded-md border border-amber-500/40 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30' : 'primary-btn']">
-              <svg v-if="isPairBusy" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"></rect></svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
-              <span>{{ isPairBusy ? 'Cancel' : 'Provision' }}</span>
-            </button>
-            <button @click="startEasyPairDiscovery" :disabled="isPairBusy || isGatewayLoading || !selectedPort" class="glass-input h-9 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa without provisioning">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              Scan
-            </button>
-          </div>
-          </div>
-
-          <div v-else class="flex flex-col gap-3">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h2 class="text-base font-bold text-slate-300">WiFi</h2>
-              <p class="mt-1 text-xs text-slate-400">
-                {{ gatewayWifiHelpText }}
-              </p>
-            </div>
-            <button
-              @click="scanGatewayWifi"
-              :disabled="isWifiScanning || isGatewayLoading || !selectedPort"
-              class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-cyan-300': isWifiScanning || isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
-              <span>{{ isGatewayLoading ? 'Loading...' : isWifiScanning ? 'Scanning...' : gatewayReady ? 'Scan WiFi' : 'Load & Scan' }}</span>
-            </button>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">WiFi network</label>
-              <select v-model="pairWifiSsid" class="glass-input h-10 appearance-none">
-                <option v-for="network in wifiNetworks" :key="`${network.ssid}-${network.bssid}`" :value="network.ssid">
-                  {{ network.ssid }} · {{ wifiSignalLabel(network.rssi) }} · ch {{ network.channel }}
-                </option>
-                <option v-if="pairWifiSsid && !pairWifiSsidInScan" :value="pairWifiSsid">
-                  {{ pairWifiSsid }} · {{ gatewayWifiReady ? 'already connected' : 'selected' }}
-                </option>
-                <option v-if="wifiNetworks.length === 0" disabled>Scan to choose a network</option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">WiFi password</label>
-              <div class="flex gap-2">
-                <input v-model="pairWifiPassword" class="glass-input h-10 flex-1" :type="showPairWifiPassword ? 'text' : 'password'" autocomplete="new-password" />
-                <button @click="showPairWifiPassword = !showPairWifiPassword" class="glass-input h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center" :title="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'" :aria-label="showPairWifiPassword ? 'Hide WiFi password' : 'Show WiFi password'">
-                  <svg v-if="!showPairWifiPassword" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-.722-3.25"></path><path d="M2 8a10.645 10.645 0 0 0 20 0"></path><path d="m20 15-1.726-2.05"></path><path d="m4 15 1.726-2.05"></path><path d="m9 18 .722-3.25"></path></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <p :class="['text-xs', (serialDeviceState(gatewaySelectedPort)?.gatewayWifiReadySsid && serialDeviceState(gatewaySelectedPort)?.gatewayWifiReadyIp) ? 'text-emerald-300' : 'text-slate-400']">
-              {{ gatewayWifiStatusText }}
-            </p>
-            <div class="flex gap-3 mt-1">
-              <button
-                @click="connectGatewayWifi"
-                :disabled="isWifiApplying || isFleetWifiSending || !gatewayReady || !pairWifiSsid"
-                class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60 flex-1"
-              >
-                {{ isWifiApplying ? 'Saving Gateway...' : 'Save on Gateway' }}
-              </button>
-              <button
-                @click="sendWifiToRemotes"
-                :disabled="isFleetWifiSending || isWifiApplying || !gatewayReady || !pairWifiSsid"
-                class="primary-btn h-9 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60 flex-1"
-              >
-                {{ isFleetWifiSending ? 'Sending...' : 'Send to Remotes' }}
-              </button>
-            </div>
-          </div>
-          </div>
-        </div>
-
-        <div class="glass-card p-3 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-bold text-slate-300">Discovered devices</h2>
-            <button @click="refreshEasyPairStatus(true)" :disabled="isPairBusy || !gatewayReady" class="text-xs text-slate-500 hover:text-cyan-300">Refresh</button>
-          </div>
-          <div v-if="pairStatus?.session" class="grid grid-cols-4 gap-3 text-xs">
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">State</div>
-              <div class="font-mono text-slate-300 truncate">{{ pairStatus.session.state }}</div>
-            </div>
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">Found</div>
-              <div class="font-mono text-slate-300">{{ pairDiscoveredDeviceCount }} / {{ pairStatus.session.max_remotes }}</div>
-            </div>
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">Verified</div>
-              <div class="font-mono text-slate-300">{{ pairStatus.session.verified_count }}</div>
-            </div>
-            <div class="rounded-md border border-slate-800 bg-slate-900/30 p-3">
-              <div class="text-slate-500">Failed</div>
-              <div class="font-mono text-slate-300">{{ pairStatus.session.failed_count }}</div>
-            </div>
-          </div>
-
-          <div v-if="!pairStatus?.devices?.length" class="h-32 flex items-center justify-center text-slate-600 italic text-sm text-center">
-            {{ pairTransport === 'serial' ? 'Power the remote devices, then scan from the selected USB gateway.' : 'Power the remote devices, then scan from the selected MQTT gateway.' }}
-          </div>
-
-          <div v-else class="flex-1 min-h-0 overflow-auto custom-scrollbar pr-1">
-            <div
-              v-for="device in pairStatus.devices"
-              :key="device.chip_id_hex"
-              class="rounded-md border border-slate-800 bg-slate-900/30 p-3 mb-3"
-            >
-              <div class="grid grid-cols-[minmax(8rem,1fr)_repeat(4,minmax(4rem,auto))] gap-3 items-center text-xs">
-                <div class="min-w-0">
-                  <div class="font-mono text-slate-200 truncate">{{ device.chip_id_hex }}</div>
-                  <div class="font-mono text-slate-500">RSSI {{ device.rssi }}</div>
-                </div>
-                <div>
-                  <div class="text-slate-500">Current</div>
-                  <div class="font-mono text-slate-300">{{ device.current_address }}</div>
-                </div>
-                <div>
-                  <div class="text-slate-500">Assigned</div>
-                  <div class="font-mono text-slate-300">{{ device.assigned_address || '-' }}</div>
-                </div>
-                <div>
-                  <div class="text-slate-500">Firmware</div>
-                  <div class="font-mono text-slate-300">{{ compactFirmwareVersion(device.fw_major, device.fw_minor, device.fw_patch, device.fw_build) }}</div>
-                </div>
-                <div class="text-right">
-                  <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.address_conflict ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800/40 text-slate-300']">
-                    {{ device.address_conflict ? 'Conflict' : device.state }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ProvisionMode
+        v-if="activeMode === 'pair'"
+        v-model="provisionConfigComputed"
+        v-model:ui="provisionUiStateComputed"
+        :gateway-state="provisionGatewayStateComputed"
+        :transport-state="provisionTransportStateComputed"
+        :pair-state="provisionPairStateComputed"
+        :wifi-state="provisionWifiStateComputed"
+        :identify-state="provisionIdentifyStateComputed"
+        @trigger-identify="triggerIdentify"
+        @load-gateway="loadEasyPairGateway(false)"
+        @open-wifi-tab="openPairWifiTab"
+        @refresh-ports="refreshPorts"
+        @manual-chip-input="handleManualMqttGatewayInput"
+        @generate-fleet-key="generatePairFleetKey(true)"
+        @mark-fleet-key-manual="markPairFleetKeyManual"
+        @copy-fleet-key="copyPairFleetKey"
+        @copy-admin-password="copyPairAdminPassword"
+        @run-or-cancel-provision="isPairBusy ? cancelEasyPair() : runEasyPair()"
+        @start-discovery="startEasyPairDiscovery"
+        @scan-wifi="scanGatewayWifi"
+        @connect-gateway-wifi="connectGatewayWifi"
+        @send-wifi-to-remotes="sendWifiToRemotes"
+        @refresh-easy-pair-status="refreshEasyPairStatus(true)"
+      />
 
       <!-- Right Panel (Controls + Details) - Hidden in Monitor Mode -->
       <FlashMode
