@@ -116,7 +116,6 @@ function formatLabel(key: string): string {
     'remote_addr': 'Remote addr',
     'ssid': 'Soft AP SSID',
     'mac': 'MAC',
-    'serial': 'Serial',
     'password': 'Factory password'
   };
   return mapping[key] || key.replace('_', ' ').split(' ').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');

@@ -103,7 +103,6 @@ interface PortsChangedEvent {
 interface DeviceInfo {
   chip_id: string;
   mac: string;
-  serial: string;
   password: string;
   local_addr: number;
   remote_addr: number;
@@ -165,7 +164,6 @@ interface SerialAdminStatus {
   cmd: string;
   fw_version: string;
   chip_id: string;
-  serial: string;
   uptime_ms: number;
   heap_free: number;
   heap_frag_pct: number;
@@ -772,7 +770,6 @@ async function ensureMqttGatewayDefaultState(rawChipId: string | undefined | nul
   state.deviceInfo = {
     ...derived,
     mac: gw?.mac || state.deviceInfo?.mac || derived.mac,
-    serial: state.deviceInfo?.serial || derived.serial,
     password,
     ssid: gw?.sta_ssid || state.deviceInfo?.ssid || derived.ssid
   };
@@ -978,7 +975,6 @@ const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'remote_addr',
   'mac',
   'chip_id',
-  'serial',
 ];
 const EU_COUNTRY_CODES = new Set([
   'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
@@ -3785,7 +3781,7 @@ async function flashFleetGateway() {
   }
   const firmwareOptions = networkOtaFirmwareOptions();
   if (!firmwareOptions) return;
-  const label = isMqtt ? `lrs-${port}` : (fleetGatewayIdentity.value?.ssid || fleetGatewayIdentity.value?.serial || port);
+  const label = isMqtt ? `lrs-${port}` : (fleetGatewayIdentity.value?.ssid || port);
   const currentFw = fleetGatewayStatus.value?.fw_version || 'unknown';
   const targetFw = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)
     ? `${flasherAppVersion.value} (local build)`
@@ -5808,7 +5804,6 @@ onMounted(async () => {
         cmd: 'status',
         fw_version: payload.fw_version || '',
         chip_id: payload.chip_id,
-        serial: payload.mac || '',
         uptime_ms: Number(payload.uptime_ms || 0),
         heap_free: state.status?.heap_free || 0,
         heap_frag_pct: state.status?.heap_frag_pct || 0,
@@ -5965,7 +5960,6 @@ function formatLabel(key: string) {
     'remote_addr': 'Remote addr',
     'ssid': 'Soft AP SSID',
     'mac': 'MAC',
-    'serial': 'Serial',
     'password': 'Factory password'
   };
   return mapping[key] || key.replace('_', ' ').split(' ').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');

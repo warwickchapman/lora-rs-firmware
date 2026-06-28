@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_shell::ShellExt;
 use sha2::{Sha256, Digest};
-use chrono::prelude::*;
 use std::time::Duration;
 use crate::commands::monitor::{self, MonitorState};
 use crate::services::serial_port_coordinator::SerialPortCoordinator;
@@ -13,7 +12,6 @@ const PRODUCT_SECRET: &str = "LRS-v1-rotate-this-secret";
 pub struct DeviceInfo {
     pub chip_id: String,
     pub mac: String,
-    pub serial: String,
     pub password: String,
     pub local_addr: u8,
     pub remote_addr: u8,
@@ -81,7 +79,6 @@ fn derive_device_info(chip_id: &str, mac: &str) -> DeviceInfo {
     DeviceInfo {
         chip_id: chip_id.to_string(),
         mac: mac.to_string(),
-        serial: derive_serial(chip_id),
         password: derive_password(chip_id),
         local_addr,
         remote_addr,
@@ -169,13 +166,6 @@ fn derive_password(chip_hex: &str) -> String {
     let result = hasher.finalize();
     let hex = hex::encode(result);
     hex[..8].to_string()
-}
-
-fn derive_serial(chip_hex: &str) -> String {
-    let now = Local::now();
-    let yy = now.year() % 100;
-    let ww = now.iso_week().week();
-    format!("lrs{:02}{:02}-{}", yy, ww, chip_hex)
 }
 
 fn derive_addresses(chip_hex: &str) -> (u8, u8) {
