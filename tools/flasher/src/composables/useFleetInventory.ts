@@ -5,6 +5,7 @@ import {
   LoraAdoptionCandidate,
   LoraInventoryStatus
 } from '../types/fleet';
+import { ParsedVersion } from '../utils/versionHelper';
 
 export interface UseFleetInventoryOptions {
   otaQueue: Ref<LoraInventoryDevice[]>;
@@ -13,8 +14,8 @@ export interface UseFleetInventoryOptions {
   isLoraInventoryScanning: Ref<boolean>;
   canonicalChipId: (raw: string | undefined | null) => string;
   normalizeRole: (role: string | undefined | null) => string;
-  parseVersion: (v: string) => any;
-  compareParsedVersions: (a: any, b: any) => number;
+  parseVersion: (v: string) => ParsedVersion | null;
+  compareParsedVersions: (a: ParsedVersion | null, b: ParsedVersion | null) => number;
   activeGatewayId?: () => string | null;
 }
 

@@ -2,11 +2,12 @@
 import { ref, Ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
 import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS } from '../composables/useFleetInventory';
+import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
+import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
 import FleetMode from './flasher/FleetMode.vue';
 import type {
   FleetConfig,
@@ -277,7 +278,6 @@ interface SerialDeviceState {
   resetStatus: string;
 }
 
-type RegionCode = 'ZA' | 'EU' | 'US';
 
 const READABLE_KEY_CONSONANTS = 'bdfghjkmnprstvwz';
 const READABLE_KEY_VOWELS = 'aeiou';
@@ -339,11 +339,23 @@ const selectedPort = computed<string>({
     }
   }
 });
-const firmwareVersions = ref<string[]>(['__local_browse__']);
-const selectedVersion = ref('');
-const selectedLocalPath = ref('');
 const flasherAppVersion = ref('');
-const region = ref<RegionCode>('ZA');
+
+const {
+  firmwareVersions,
+  selectedVersion,
+  selectedLocalPath,
+  isFetchingFirmware,
+  region,
+  selectedFirmwareCandidateVersion,
+  networkOtaFirmwareOptions,
+  fetchFirmware,
+  initializeRegion
+} = useFirmwareManager({
+  flasherAppVersion,
+  pushLog: pushSerialLog,
+  notify
+});
 const isFlashing = ref(false);
 const isBulkFlashing = ref(false);
 const isBulkResetting = ref(false);
@@ -445,7 +457,6 @@ const FLEET_FORCE_SCAN_COOLDOWN_MS = 60000;
 const provisionCacheRefreshedChips = new Set<string>();
 const isLoadingInfo = computed(() => inFlightDeviceInfoReads.value.has(selectedPort.value));
 const isRefreshingPorts = ref(false);
-const isFetchingFirmware = ref(false);
 const fleetGatewayFlashPhase = ref<FleetGatewayFlashPhase>('idle');
 const mqttOtaStatus = ref<Record<string, { status: string; timestamp: number }>>({});
 let unlistenMqttOtaStatus: (() => void) | null = null;
@@ -966,8 +977,6 @@ const showSettingsAdminPassword = ref(false);
 const serialFactoryKeepFleet = ref(false);
 const serialFactoryKeepWifi = ref(true);
 
-const LOCAL_OPTION = '__local_browse__';
-const LOCAL_LABEL_PREFIX = 'Local: ';
 const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'ssid',
   'password',
@@ -976,15 +985,6 @@ const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'mac',
   'chip_id',
 ];
-const EU_COUNTRY_CODES = new Set([
-  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
-  'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
-  'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'NO', 'IS', 'LI',
-  'CH', 'GB',
-]);
-const US_COUNTRY_CODES = new Set(['US', 'UM', 'PR', 'GU', 'VI', 'AS', 'MP']);
-const ZA_COUNTRY_CODES = new Set(['ZA']);
-const REGION_STORAGE_KEY = 'lrs_flasher_region';
 const MONITOR_AFTER_FLASH_STORAGE_KEY = 'lrs_flasher_monitor_after_flash';
 const ERASE_BEFORE_FLASH_STORAGE_KEY = 'lrs_flasher_erase_before_flash';
 const MONITOR_AUTO_REFRESH_STORAGE_KEY = 'lrs_flasher_monitor_auto_refresh';
@@ -995,8 +995,6 @@ const TAB_PORT_STORAGE_KEYS = {
   monitor: 'lrs_flasher_monitor_port',
   settings: 'lrs_flasher_settings_port'
 } as const;
-const REGION_CONFIDENT_MIN_SCORE = 5;
-const REGION_CONFIDENT_MIN_GAP = 2;
 
 const WIFI_CREDENTIALS_CACHE_KEY = 'lrs_wifi_credentials_cache';
 
@@ -1176,34 +1174,7 @@ const fleetGatewayDevice = computed(() => serialDeviceState(targetGatewayKey.val
 const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
 const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
 
-function parseVersion(v: string) {
-  const clean = v.replace(/^Local:\s*/i, '').trim();
-  const match = clean.match(/^(\d+)\.(\d+)\.(\d+)(?:~(\d+))?/);
-  if (match) {
-    return {
-      major: parseInt(match[1], 10),
-      minor: parseInt(match[2], 10),
-      patch: parseInt(match[3], 10),
-      dev: match[4] ? parseInt(match[4], 10) : 0
-    };
-  }
-  return null;
-}
 
-function compareParsedVersions(a: ReturnType<typeof parseVersion>, b: ReturnType<typeof parseVersion>): number {
-  if (!a || !b) return 0;
-  if (a.major !== b.major) return a.major - b.major;
-  if (a.minor !== b.minor) return a.minor - b.minor;
-  if (a.patch !== b.patch) return a.patch - b.patch;
-  return a.dev - b.dev;
-}
-
-function selectedFirmwareCandidateVersion(): string {
-  if (!selectedVersion.value) return '';
-  if (!selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)) return selectedVersion.value;
-  const fileMatch = selectedLocalPath.value.match(/(\d+\.\d+\.\d+)(?:~(\d+))?/);
-  return fileMatch ? fileMatch[0] : flasherAppVersion.value;
-}
 
 const isGatewayUpgradeAvailable = computed(() => {
   const currentFw = fleetGatewayStatus.value?.fw_version;
@@ -1329,7 +1300,7 @@ const flashFormDraftState = computed({
   }),
   set: (val) => {
     bulkMode.value = val.bulkMode;
-    region.value = val.region;
+    region.value = val.region as any;
     selectedPort.value = val.selectedPort;
     selectedVersion.value = val.selectedVersion;
     eraseBeforeFlash.value = val.eraseBeforeFlash;
@@ -1868,103 +1839,7 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${(n / 1024).toFixed(1)} KB`;
 }
 
-function setLocalFirmwareSelection(path: string, announce = true) {
-  selectedLocalPath.value = path;
-  const filename = path.split(/[\\/]/).pop() || 'firmware.bin';
-  const localLabel = `${LOCAL_LABEL_PREFIX}${filename}`;
-  firmwareVersions.value = firmwareVersions.value.filter(v => !v.startsWith(LOCAL_LABEL_PREFIX));
-  firmwareVersions.value.splice(1, 0, localLabel);
-  selectedVersion.value = localLabel;
-  if (announce) {
-    pushSerialLog(`Local firmware selected: ${path}`);
-  }
-}
 
-async function openLocalFileDialog() {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [{
-        name: 'LRS Firmware',
-        extensions: ['bin']
-      }]
-    });
-
-    if (selected && typeof selected === 'string') {
-      setLocalFirmwareSelection(selected);
-    } else {
-      // If cancelled and we were on "browse", revert to previous or first available
-      if (selectedVersion.value === LOCAL_OPTION) {
-        selectedVersion.value = firmwareVersions.value[1] || ''; // Select the first remote version
-      }
-    }
-  } catch (e) {
-    notify('Error opening file dialog: ' + e);
-  }
-}
-
-watch(selectedVersion, (newVal) => {
-  if (newVal === LOCAL_OPTION) {
-    openLocalFileDialog();
-  }
-});
-
-function extractCountryCodes(locale: string): string[] {
-  return locale
-    .split(/[-_]/)
-    .filter(part => /^[A-Za-z]{2}$/.test(part))
-    .map(part => part.toUpperCase());
-}
-
-function detectRegionFromSystem(): { region: RegionCode | null; reliable: boolean; reason: string } {
-  const score: Record<RegionCode, number> = { ZA: 0, EU: 0, US: 0 };
-  const clues: string[] = [];
-  const addScore = (target: RegionCode, weight: number, clue: string) => {
-    score[target] += weight;
-    clues.push(`${target}+${weight}:${clue}`);
-  };
-
-  const localeCandidates: string[] = [];
-  const resolvedLocale = Intl.DateTimeFormat().resolvedOptions().locale;
-  if (resolvedLocale) localeCandidates.push(resolvedLocale);
-  if (navigator.language) localeCandidates.push(navigator.language);
-  if (Array.isArray(navigator.languages)) {
-    localeCandidates.push(...navigator.languages);
-  }
-
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-  if (timezone === 'Africa/Johannesburg') addScore('ZA', 8, `timezone=${timezone}`);
-  if (timezone.startsWith('Europe/')) addScore('EU', 6, `timezone=${timezone}`);
-  if (timezone.startsWith('US/')) addScore('US', 6, `timezone=${timezone}`);
-
-  const seen = new Set<string>();
-  localeCandidates
-    .filter(Boolean)
-    .forEach((locale, idx) => {
-      const norm = String(locale).trim();
-      if (!norm || seen.has(norm)) return;
-      seen.add(norm);
-      const weight = idx === 0 ? 3 : idx === 1 ? 2 : 1;
-      for (const code of extractCountryCodes(norm)) {
-        if (ZA_COUNTRY_CODES.has(code)) addScore('ZA', weight, `locale=${norm}`);
-        if (US_COUNTRY_CODES.has(code)) addScore('US', weight, `locale=${norm}`);
-        if (EU_COUNTRY_CODES.has(code)) addScore('EU', weight, `locale=${norm}`);
-      }
-    });
-
-  const ranked = (Object.entries(score) as Array<[RegionCode, number]>).sort((a, b) => b[1] - a[1]);
-  const top = ranked[0];
-  const second = ranked[1];
-  const hasSignal = top[1] > 0;
-  const reliable =
-    hasSignal &&
-    top[1] >= REGION_CONFIDENT_MIN_SCORE &&
-    (top[1] - second[1]) >= REGION_CONFIDENT_MIN_GAP;
-  const reason = clues.length ? clues.join(', ') : 'no locale/timezone signal';
-
-  if (!hasSignal) return { region: null, reliable: false, reason };
-  return { region: top[0], reliable, reason };
-}
 
 async function refreshPorts(fromPortChange: boolean | Event = false) {
   const allowPortChangeAutoSwitch = fromPortChange === true;
@@ -2163,39 +2038,7 @@ function saveTabPort(key: keyof typeof TAB_PORT_STORAGE_KEYS, port: string) {
   }
 }
 
-async function fetchFirmware() {
-  isFetchingFirmware.value = true;
-  try {
-    const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware').catch(() => null);
-    const remoteVersions = await invoke<string[]>('get_firmware_list');
-    if (defaultLocalFirmware && !selectedLocalPath.value) {
-      setLocalFirmwareSelection(defaultLocalFirmware, false);
-    }
-    // Maintain local selection if it exists
-    const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
-    firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : []), ...remoteVersions];
 
-    if (!selectedVersion.value && firmwareVersions.value.length > 1) {
-      selectedVersion.value = firmwareVersions.value[1];
-    }
-    await new Promise(resolve => setTimeout(resolve, 400));
-  } catch (e) {
-    // Keep local-flash path available even when network release fetch fails.
-    try {
-      const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware');
-      if (defaultLocalFirmware && !selectedLocalPath.value) {
-        setLocalFirmwareSelection(defaultLocalFirmware, false);
-      }
-    } catch {
-      // Ignore default-local lookup failure; the manual chooser remains available.
-    }
-    const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
-    firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : [])];
-    notify('Error fetching firmware: ' + e);
-  } finally {
-    isFetchingFirmware.value = false;
-  }
-}
 
 function notify(msg: string) {
   toastMessage.value = msg;
@@ -2399,18 +2242,6 @@ function copyPairAdminPassword() {
 }
 
 
-function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCode | null } | null {
-  const isLocal = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX);
-  const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
-  if (!firmwarePath || (isLocal && !selectedLocalPath.value)) {
-    notify('Local file path missing');
-    return null;
-  }
-  return {
-    firmware_path: firmwarePath,
-    region: isLocal ? null : region.value
-  };
-}
 
 function getLocalHostIpForTarget(targetIp?: string): string | null {
   if (!flasherInterfaces.value || flasherInterfaces.value.length === 0) {
@@ -5681,27 +5512,7 @@ onMounted(async () => {
   } catch (_) {
     // Ignore storage failures; checkbox defaults still work.
   }
-  const rememberedRegion = (() => {
-    try {
-      const saved = localStorage.getItem(REGION_STORAGE_KEY);
-      return saved === 'ZA' || saved === 'EU' || saved === 'US' ? (saved as RegionCode) : null;
-    } catch (_) {
-      return null;
-    }
-  })();
-  const detected = detectRegionFromSystem();
-  if (detected.region && detected.reliable) {
-    region.value = detected.region;
-    pushSerialLog(`Region auto-detected: ${detected.region} (${detected.reason})`);
-  } else if (rememberedRegion) {
-    region.value = rememberedRegion;
-    pushSerialLog(`Region auto-detect not confident; using last selected region: ${rememberedRegion} (${detected.reason})`);
-  } else if (detected.region) {
-    region.value = detected.region;
-    pushSerialLog(`Region auto-detect weak signal; using best guess: ${detected.region} (${detected.reason})`);
-  } else {
-    pushSerialLog(`Region auto-detection unavailable; using default: ${region.value}`);
-  }
+  initializeRegion();
 
   refreshPorts(false);
   fetchFirmware();
@@ -5889,13 +5700,7 @@ watch(fleetGatewayFlashPhase, (newPhase) => {
   }
 });
 
-watch(region, (next) => {
-  try {
-    localStorage.setItem(REGION_STORAGE_KEY, next);
-  } catch (_) {
-    // Ignore storage failures and continue with in-memory value.
-  }
-});
+
 
 watch(monitorAfterFlash, (next) => {
   try {

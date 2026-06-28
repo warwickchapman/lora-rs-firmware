@@ -11,7 +11,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:unit": "vitest run src/composables",
+    "test:unit": "vitest run src/composables src/utils",
     "clean": "rm -rf dist src-tauri/target"
   },
   "dependencies": {
