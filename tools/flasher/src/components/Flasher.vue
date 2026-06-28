@@ -269,8 +269,6 @@ interface SerialDeviceState {
   gatewayWifiReadyIp: string;
   flashLogs: string[];
   monitorLogs: string[];
-
-  // Phase 2 Operational State Fields
   isFlashing: boolean;
   flashProgress: number;
   flashStatus: string;
@@ -2001,7 +1999,7 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
     }
 
     lastPortSnapshot.value = currentNames;
-    syncDeviceInfoForSelectedPort();
+    serialDeviceState();
 
     const targetPort = selectedPort.value;
     const targetMode = activeMode.value || 'serial';
@@ -2227,8 +2225,48 @@ function copyActivePassword() {
   copyToClipboard(password, 'factory password');
 }
 
-function syncDeviceInfoForSelectedPort() {
-  serialDeviceState();
+function handleCopyLocalGatewaySettings() {
+  const settings = `mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans.value[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort.value}\nmqtt_topic_root=lora`;
+  copyToClipboard(settings, 'Local configuration');
+}
+
+function handleCopyPayload(payload: { text: string; label: string }) {
+  copyToClipboard(payload.text, payload.label);
+}
+
+function handleMonitorPollDeviceDiagnostics(address: number) {
+  const d = monitorFleetRows.value.find(x => x.address === address);
+  if (d) executeRemotePollDiagnostics(d);
+}
+
+function handleFleetRemoteFlash(address: number) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) flashLoraRemote(d);
+}
+
+function handleFleetRemoteSettings(address: number) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) openSettingsModal(d);
+}
+
+function handleFleetRemoteReboot(address: number) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) executeRemoteReboot(d);
+}
+
+function handleFleetRemoteViewLogs(address: number) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) triggerRemoteUdpLogging(d);
+}
+
+function handleFleetRemoteForget(address: number) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) executeForgetRemote(d);
+}
+
+function handleFleetRemoteFactoryReset(address: number) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) openFactoryResetModal(d);
 }
 
 function randomIndex(max: number): number {
@@ -5405,7 +5443,7 @@ watch(activeMode, (mode) => {
   if (mode === 'network') {
     nextTick(() => scrollNetworkUdpToBottom());
   }
-  syncDeviceInfoForSelectedPort();
+  serialDeviceState();
 
   const port = selectedPort.value;
   const targetMode = mode || 'serial';
@@ -5437,7 +5475,7 @@ watch(activeMode, (mode) => {
 });
 
 watch(selectedPort, (port) => {
-  syncDeviceInfoForSelectedPort();
+  serialDeviceState();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
 
   const targetMode = activeMode.value || 'serial';
@@ -6231,7 +6269,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
       :local-broker-state="localBrokerState"
       :mqtt-settings-state="mqttSettingsState"
       @start-local-broker="startAndConnectLocalBroker"
-      @copy-gateway-settings="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')"
+      @copy-gateway-settings="handleCopyLocalGatewaySettings"
       @toggle-mqtt-connection="toggleMonitorMqttConnection"
     />
 
@@ -6342,7 +6380,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @save-config="saveSerialAdminConfig"
         @reboot-device="rebootSerialDevice"
         @factory-reset="factoryResetSerialDevice"
-        @copy-payload="({ text, label }) => copyToClipboard(text, label)"
+        @copy-payload="handleCopyPayload"
       />
 
       <MonitorMode
@@ -6358,7 +6396,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @toggle-monitor-loop="toggleMonitorLoop"
         @open-mqtt-settings="openMonitorMqttSettings"
         @poll-selected-diagnostics="executeSelectedMonitorPollDiagnostics"
-        @poll-device-diagnostics="(addr: number) => { const d = monitorFleetRows.find(x => x.address === addr); if (d) executeRemotePollDiagnostics(d); }"
+        @poll-device-diagnostics="handleMonitorPollDeviceDiagnostics"
       />
 
       <MonitorMqttSettingsModal
@@ -6395,12 +6433,12 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @gateway-load="loadNetworkGateway"
         @gateway-identify="triggerIdentify"
         @gateway-flash="flashFleetGateway"
-        @remote-flash="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) flashLoraRemote(d); }"
-        @remote-settings="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) openSettingsModal(d); }"
-        @remote-reboot="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) executeRemoteReboot(d); }"
-        @remote-view-logs="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) triggerRemoteUdpLogging(d); }"
-        @remote-forget="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) executeForgetRemote(d); }"
-        @remote-factory-reset="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) openFactoryResetModal(d); }"
+        @remote-flash="handleFleetRemoteFlash"
+        @remote-settings="handleFleetRemoteSettings"
+        @remote-reboot="handleFleetRemoteReboot"
+        @remote-view-logs="handleFleetRemoteViewLogs"
+        @remote-forget="handleFleetRemoteForget"
+        @remote-factory-reset="handleFleetRemoteFactoryReset"
         @candidate-adopt="handleAdoptCandidatePayload"
       />
     </div>
