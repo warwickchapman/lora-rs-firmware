@@ -7,6 +7,20 @@ import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS } from '../composables/useFleetInventory';
+import FleetMode from './flasher/FleetMode.vue';
+import type {
+  FleetConfig,
+  FleetGatewayStatus,
+  FleetServerStatus,
+  FleetUdpLogs,
+  FleetTransportState,
+  FleetInventorySummary,
+  FleetCandidateSummary,
+  FleetDisplayRow,
+  FleetCandidateDisplayRow,
+  FleetCandidateActionPayload,
+  MqttGatewayOption
+} from './flasher/FleetMode.vue';
 import { LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, SensorReading } from '../types/fleet';
 import { useFleetInventoryPolling } from '../composables/useFleetInventoryPolling';
 import { useFleetOta } from '../composables/useFleetOta';
@@ -351,7 +365,7 @@ const filteredNetworkLogs = computed(() => {
   if (!targetLabel) {
     return networkLogs.value.map(line => formatUdpLogLine(line));
   }
-  
+
   const dev = loraInventory.value.find(d => fleetDeviceUdpLabel(d) === targetLabel);
   const targetIp = dev?.ip;
   const targetAddress = dev?.address;
@@ -694,13 +708,13 @@ function handleManualMqttGatewayInput(val: string) {
     manualMqttGatewayError.value = '';
     return;
   }
-  
+
   // Normalize by stripping "lrs-" prefix
   let clean = trimmed.toLowerCase();
   if (clean.startsWith('lrs-')) {
     clean = clean.substring(4);
   }
-  
+
   // Validate format (6 to 8 hex chars)
   if (/^[0-9a-f]{6,8}$/.test(clean)) {
     selectedMqttGatewayChipId.value = clean;
@@ -1459,7 +1473,7 @@ function pushSerialLogForPort(port: string, line: string) {
     if (state.flashLogs.length > 2000) {
       state.flashLogs = state.flashLogs.slice(-2000);
     }
-    
+
     // Detect flash phase transitions from esptool log content
     if (state.flashPhase === 'erase' && /erase complete/i.test(line)) {
       state.flashPhase = 'write';
@@ -1736,7 +1750,7 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
     for (const known of Object.keys(serialDevicesByPort.value)) {
       if (currentNames.includes(known)) continue;
       if (isMqttGatewayKey(known)) continue;
-      
+
       // Clear physical cached data immediately so a reconnect forces a fresh probe
       const state = serialDevicesByPort.value[known];
       if (state) {
@@ -1753,7 +1767,7 @@ async function refreshPorts(fromPortChange: boolean | Event = false) {
       };
       // Delete any in-flight read promise to prevent reconnects from reusing it
       inFlightDeviceInfoReads.value.delete(known);
-      
+
       const missingSince = nextDisconnectedSince[known] || now;
       nextDisconnectedSince[known] = missingSince;
       if (now - missingSince >= DISCONNECTED_PORT_CACHE_GRACE_MS) {
@@ -2191,13 +2205,13 @@ async function triggerRemoteUdpLogging(device: LoraInventoryDevice) {
     notify('No reachable Flasher LAN address');
     return;
   }
-  
+
   if (!isNetworkUdpMonitoring.value) {
     if (!await startNetworkUdpMonitor()) {
       return;
     }
   }
-  
+
   notify(`Requesting remote ${device.address} to mirror UDP logs to ${hostIp}...`);
   try {
     const res = await sendEasyPairCommandOnPort(port, 'remote_udp_log_control', {
@@ -2884,7 +2898,7 @@ async function toggleMonitorMqttConnection(preserveSessionConnectionType = false
     if (!preserveSessionConnectionType) {
       sessionConnectionType.value = 'mqtt';
     }
-    
+
     try {
       await invoke('connect_mqtt_broker', {
         config: {
@@ -3097,13 +3111,7 @@ const flasherInterfaces = ref<NetworkInterface[]>([]);
 
 
 
-function toggleFleetDropdown(address: number) {
-  if (activeDropdownAddress.value === address) {
-    activeDropdownAddress.value = null;
-  } else {
-    activeDropdownAddress.value = address;
-  }
-}
+
 
 
 function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState['activeTab'] = 'sensors') {
@@ -3181,9 +3189,9 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
     };
     loraInventory.value = loraInventory.value.map(row => {
       if (row.address === device.address) {
-        return { 
-          ...row, 
-          temp_enabled: tempEnabled, 
+        return {
+          ...row,
+          temp_enabled: tempEnabled,
           tank_enabled: tankEnabled,
           pending_power_save_listen_only: powerSaveEnabled,
           pending_power_save_tx_ms: now
@@ -3251,7 +3259,7 @@ async function executeRemoteReboot(device: LoraInventoryDevice) {
       target_address: device.address
     }, 8000);
     notify(`Reboot command sent to remote ${device.address}`);
-    
+
     // Track known reboot to prevent unexpected reboot status
     const now = Date.now();
     fleetRowHistory.value[device.address] = {
@@ -3269,7 +3277,7 @@ async function adoptCandidate(candidate: LoraAdoptionCandidate) {
   const isMqtt = fleetTransport.value === 'mqtt';
   const port = isMqtt ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
   const password = pairAdminPassword.value;
-  
+
   if (!port) {
     notify(isMqtt ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
     return;
@@ -3278,12 +3286,12 @@ async function adoptCandidate(candidate: LoraAdoptionCandidate) {
     notify('Enter the gateway admin password');
     return;
   }
-  
+
   const label = candidate.chip_id ? `remote chip ${candidate.chip_id}` : `remote at address ${candidate.address}`;
   if (!await confirmOperatorAction(`Adopt candidate ${label}?`, { confirmText: 'Adopt remote', danger: false })) {
     return;
   }
-  
+
   try {
     notify(`Adopting candidate ${label}...`);
     await sendEasyPairCommandOnPort(port, 'adopt_candidate', {
@@ -3291,14 +3299,14 @@ async function adoptCandidate(candidate: LoraAdoptionCandidate) {
       chip_id: candidate.chip_id
     }, 8000);
     notify(`Adoption request sent for candidate ${label}.`);
-    
+
     // Ensure active polling starts/continues
     if (isMqtt) {
       startLoraInventoryPolling();
     } else {
       startFleetCachePolling();
     }
-    
+
     await refreshLoraInventoryStatus(false);
   } catch (e) {
     const msg = serialFeatureError(`Candidate adoption`, e);
@@ -3425,7 +3433,7 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
       new_fleet_passphrase: newKey
     }, 15000);
     notify(`Remote fleet key change sequence transmitted. Remote ${device.address} is applying and rebooting.`);
-    
+
     // Track known reboot to prevent unexpected reboot status
     const now = Date.now();
     fleetRowHistory.value[device.address] = {
@@ -4165,7 +4173,7 @@ async function loadEasyPairGateway(isAuto = false) {
         const retrievedKey = out.config?.fleet_passphrase?.trim() || '';
         const isCommissioned = serialDeviceState(key)?.status?.commissioned;
         const isDefaultKey = serialDeviceState(key)?.status?.fleet_passphrase_default;
-        
+
         if (isCommissioned && retrievedKey && retrievedKey !== 'lora-default-passphrase' && isDefaultKey === false) {
           pairFleetKey.value = retrievedKey;
           pairFleetKeySource.value = 'gateway';
@@ -4214,7 +4222,7 @@ async function runEasyPair() {
       await loadEasyPairGateway();
       if (!gatewayReady.value) throw new Error('Unable to load gateway');
     }
-    
+
     const fleetKey = pairFleetKey.value.trim();
     if (!fleetKey) {
       throw new Error('Fleet key is empty');
@@ -4359,7 +4367,7 @@ async function startEasyPairDiscovery() {
     // Always load gateway status/config before discovery to ensure fleet key is fetched or generated correctly
     await loadEasyPairGateway();
     if (!gatewayReady.value) throw new Error('Unable to load gateway');
-    
+
     const fleetKey = pairFleetKey.value.trim();
     if (!fleetKey) {
       throw new Error('Fleet key is empty');
@@ -4750,35 +4758,35 @@ async function sendWifiToRemotes() {
 
 async function ensureDeviceInfoForPort(port: string, mode: ActiveMode | 'network', force = false): Promise<boolean> {
   if (!port) return false;
-  
+
   const state = serialDeviceState(port);
   if (state?.isFlashing || state?.isResetting || (isMonitoring.value && activeMonitorPort.value === port)) {
     return false;
   }
-  
+
   if (state?.deviceInfo && !force) {
     return true;
   }
-  
+
   const currentSeq = deviceInfoReadSeqByPort.value[port] || 0;
   const inFlight = inFlightDeviceInfoReads.value.get(port);
   if (inFlight && inFlight.seq === currentSeq) {
     return inFlight.promise;
   }
-  
+
   const nextSeq = currentSeq + 1;
   deviceInfoReadSeqByPort.value = { ...deviceInfoReadSeqByPort.value, [port]: nextSeq };
-  
+
   const promise = readDeviceInfoForPort(port, mode, nextSeq);
   inFlightDeviceInfoReads.value.set(port, { seq: nextSeq, promise });
-  
+
   promise.finally(() => {
     const active = inFlightDeviceInfoReads.value.get(port);
     if (active && active.seq === nextSeq) {
       inFlightDeviceInfoReads.value.delete(port);
     }
   });
-  
+
   return promise;
 }
 
@@ -4981,7 +4989,7 @@ async function startBulkFlash() {
           state.flashStatus = 'Completed';
           state.flashProgress = 100;
           state.flashLogs.push(result);
-          
+
           await refreshFlashPortAfterFirmwareUpdate(port);
 
           if (monitorAfterFlash.value) {
@@ -5027,7 +5035,7 @@ async function startBulkFactoryReset() {
 
         try {
           noteMonitorReleasedForPort(port, 'factory reset needs this port');
-          
+
           if (!state.deviceInfo) {
             await forceDeviceInfoReadForOperation(port, 'serial');
           }
@@ -5188,7 +5196,7 @@ watch(activeMode, (mode) => {
     nextTick(() => scrollNetworkUdpToBottom());
   }
   syncDeviceInfoForSelectedPort();
-  
+
   const port = selectedPort.value;
   const targetMode = mode || 'serial';
   if (port && !isSelectedPortMonitoring.value) {
@@ -5208,7 +5216,7 @@ watch(activeMode, (mode) => {
       }
     });
   }
-  
+
   if (mode !== 'monitor') stopMonitorPolling();
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
@@ -5221,7 +5229,7 @@ watch(activeMode, (mode) => {
 watch(selectedPort, (port) => {
   syncDeviceInfoForSelectedPort();
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
-  
+
   const targetMode = activeMode.value || 'serial';
   if (port && !isSelectedPortMonitoring.value) {
     ensureDeviceInfoForPort(port, targetMode).then((ok) => {
@@ -5240,7 +5248,7 @@ watch(selectedPort, (port) => {
       }
     });
   }
-  
+
   if (activeMode.value === 'monitor') {
     monitorFleetRows.value = [];
     stopMonitorPolling();
@@ -5347,7 +5355,7 @@ onMounted(async () => {
       if (prevStr !== nextStr) {
         pushNetworkLog('Host network interfaces changed. Updating subnets...');
         flasherInterfaces.value = nextInterfaces;
-        
+
         await handleNetworkInterfacesChanged(
           nextInterfaces,
           isFlashing.value || fleetGatewayFlashPhase.value !== 'idle'
@@ -5432,17 +5440,17 @@ onMounted(async () => {
       const trimmed = line.trim();
       if (trimmed) {
         pushNetworkLog(trimmed);
-        
+
         // Find matching device by chip ID from [lrs-xxxxxx] in log content first, falling back to IP match
         let dev: LoraInventoryDevice | undefined = undefined;
         const chipMatch = trimmed.match(/\[lrs-([0-9a-fA-F]+)\]/);
         if (chipMatch) {
           const chipId = chipMatch[1].toLowerCase();
-          dev = loraInventory.value.find(d => 
+          dev = loraInventory.value.find(d =>
             String(d.chip_id || '').trim().replace(/^0x/i, '').toLowerCase() === chipId
           );
         }
-        
+
         if (!dev) {
           const ipMatch = trimmed.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
           if (ipMatch) {
@@ -5697,6 +5705,184 @@ function toggleSelectAllBulkPorts() {
     bulkSelectedPorts.value = ports.value.map(p => p.port_name);
   }
 }
+
+const fleetDisplayRows = computed<FleetDisplayRow[]>(() => {
+  return loraInventory.value.map(device => ({
+    address: device.address,
+    selected: !!device.selected,
+    deviceName: device.chip_id ? lrsDeviceName(device.chip_id) : '-',
+    conflict_chip_id: device.conflict_chip_id,
+    fw_version: device.fw_version,
+    roleModeLabel: `${device.role || '-'} / ${device.mode || '-'}`,
+    wifi_pending_offline: !!device.wifi_pending_offline,
+    wifi_connected_known: !!device.wifi_connected_known,
+    wifi_connected: !!device.wifi_connected,
+    pending_power_save_listen_only: device.pending_power_save_listen_only,
+    power_save_listen_only: !!device.power_save_listen_only,
+    ip: device.ip,
+    relayLabel: remoteRelayLabel(device),
+    inputLabel: remoteInputLabel(device),
+    tempLabel: remoteTempLabel(device),
+    tankLabel: tankLabel(device),
+    tankDetailLabel: tankDetailLabel(device),
+    uptimeLabel: device.uptime_ms ? formatUptime(device.uptime_ms) : '-',
+    rowStatusLabel: fleetRowStatusLabel(device),
+    rowState: device.row_state,
+    rssi: device.rssi,
+    ageSeconds: device.age_ms != null ? Math.round(device.age_ms / 1000) : null,
+    freshnessClass: fleetFreshnessClass(device),
+    rowClass: fleetRowClass(device),
+    flashAvailable: fleetFlashAvailable(device),
+    flashUnavailableReason: fleetFlashUnavailableReason(device)
+  }));
+});
+
+const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
+  return loraCandidates.value.map(c => {
+    const isRecentFailed = c.state === 'failed' && (c.age_ms == null || c.age_ms < CANDIDATE_RECENT_IDENTITY_MS);
+    const textClass =
+      (c.state === 'seen_address_only' || isRecentFailed) ? 'text-slate-500 animate-pulse' :
+      c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
+      c.state === 'reset_requested' ? 'text-amber-400 animate-pulse' :
+      c.state === 'failed' ? 'text-rose-500' :
+      'text-slate-500';
+    return {
+      address: c.address,
+      chip_id: c.chip_id,
+      deviceName: c.chip_id ? lrsDeviceName(c.chip_id) : 'querying...',
+      rssi: c.rssi || 0,
+      ageSeconds: c.age_ms != null ? Math.round(c.age_ms / 1000) : null,
+      reason: c.reason || 'unknown',
+      state: c.state || '',
+      stateText: candidateStateText(c),
+      stateClass: candidateStateClass(c),
+      showAdoptButton: ['identified', 'failed'].includes(c.state || '') && !!c.chip_id,
+      adoptTextClass: textClass
+    };
+  });
+});
+
+const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
+  const info = gatewaySelectedPort.value ? serialDeviceState(gatewaySelectedPort.value) : null;
+  return {
+    hasGatewayDeviceWarning: !!(gatewaySelectedPort.value && info?.status && !info.status.role_tx),
+    badgeClass: fleetGatewayBadgeClass.value,
+    badgeLabel: fleetGatewayBadgeLabel.value,
+    statusLabel: fleetGatewayStatusLabel.value,
+    summary: fleetGatewaySummary.value,
+    isLoading: isNetworkGatewayLoading.value,
+    isIdentifyDisabled: identifyDisabled.value,
+    isIdentifying: isIdentifying.value,
+    isUpgradeAvailable: isGatewayUpgradeAvailable.value,
+    isFlashing: isFlashing.value,
+    flashDisabled: fleetGatewayFlashDisabled.value,
+    flashUnavailableReason: fleetGatewayFlashUnavailableReason(),
+    port: selectedPort.value,
+    name: lrsDeviceName(fleetGatewayStatus.value?.chip_id || fleetGatewayIdentity.value?.chip_id),
+    firmware: displayFirmwareVersion(fleetGatewayStatus.value?.fw_version),
+    role: fleetGatewayStatus.value?.role || '-',
+    addressLine: fleetGatewayStatus.value
+      ? `${fleetGatewayStatus.value.local_address}->${fleetGatewayStatus.value.remote_address}`
+      : fleetGatewayIdentity.value
+        ? `${fleetGatewayIdentity.value.local_addr}->${fleetGatewayIdentity.value.remote_addr}`
+        : '-',
+    wifiLine: fleetGatewayStatus.value?.wifi?.sta_connected
+      ? (fleetGatewayStatus.value.wifi.ip || 'connected')
+      : (fleetGatewayStatus.value?.wifi?.status || '-'),
+    uptimeLine: fleetGatewayStatus.value?.uptime_ms ? formatUptime(fleetGatewayStatus.value.uptime_ms) : '-'
+  };
+});
+
+const fleetServerStatusComputed = computed<FleetServerStatus>(() => ({
+  isServerOn: !!firmwareServerInfo.value,
+  serverFilename: firmwareServerInfo.value?.filename || null,
+  serverUrl: firmwareServerInfo.value?.urls[0] || null,
+  isLoraInventoryScanning: isLoraInventoryScanning.value,
+  scanDisabled: fleetScanDisabled.value,
+  scanLabel: fleetForceScanLabel.value,
+  statusLine: remotesAndCandidatesStatusLine.value,
+  progressLabel: loraInventoryProgressLabel.value,
+  isServerStarting: isFirmwareServerStarting.value,
+  versions: firmwareVersions.value,
+  localOption: LOCAL_OPTION,
+  isFetchingFirmware: isFetchingFirmware.value,
+  networkStatusMessage: networkStatusMessage.value
+}));
+
+const fleetUdpLogsComputed = computed<FleetUdpLogs>(() => ({
+  isMonitoring: isNetworkUdpMonitoring.value,
+  target: networkUdpTarget.value,
+  logs: filteredNetworkLogs.value
+}));
+
+const mqttGatewayOptionsComputed = computed<MqttGatewayOption[]>(() =>
+  Object.values(mqttGateways.value).map(gw => ({
+    chip_id: gw.chip_id,
+    label: `${lrsDeviceName(gw.chip_id)} (lrs-${gw.chip_id})`
+  }))
+);
+
+const fleetTransportStateComputed = computed<FleetTransportState>(() => ({
+  ports: ports.value.map(p => ({ port_name: p.port_name, description: p.description || undefined })),
+  mqttGatewayOptions: mqttGatewayOptionsComputed.value,
+  isSelectedMqttGatewayDiscovered: isSelectedMqttGatewayDiscovered.value,
+  manualMqttGatewayError: manualMqttGatewayError.value,
+  fleetTransport: fleetTransport.value,
+  serialPortSelectorDisabled: serialPortSelectorDisabled.value,
+  showPairAdminPassword: showPairAdminPassword.value
+}));
+
+const fleetInventorySummaryComputed = computed<FleetInventorySummary>(() => ({
+  totalCount: loraInventory.value.length,
+  selectedCount: selectedLoraInventoryCount.value,
+  hasAnyRemoteIp: hasAnyRemoteIp.value
+}));
+
+const fleetCandidateSummaryComputed = computed<FleetCandidateSummary>(() => ({
+  total: candidateTotal.value,
+  truncated: candidateTruncated.value
+}));
+
+const fleetConfigComputed = computed<FleetConfig>({
+  get: () => ({
+    sessionConnectionType: sessionConnectionType.value,
+    selectedPort: selectedPort.value,
+    selectedMqttManualChipId: selectedMqttManualChipId.value,
+    selectedMqttGatewayChipId: selectedMqttGatewayChipId.value,
+    pairAdminPassword: pairAdminPassword.value,
+    region: region.value,
+    selectedVersion: selectedVersion.value
+  }),
+  set: (val) => {
+    sessionConnectionType.value = val.sessionConnectionType;
+    selectedPort.value = val.selectedPort;
+    selectedMqttManualChipId.value = val.selectedMqttManualChipId;
+    selectedMqttGatewayChipId.value = val.selectedMqttGatewayChipId;
+    pairAdminPassword.value = val.pairAdminPassword;
+    region.value = val.region as any;
+    selectedVersion.value = val.selectedVersion;
+  }
+});
+
+function handleToggleRowSelection(address: number | string, selected: boolean) {
+  const d = loraInventory.value.find(x => x.address === address);
+  if (d) {
+    d.selected = selected;
+  }
+}
+
+function handleAdoptCandidatePayload(payload: FleetCandidateActionPayload) {
+  const candidate = loraCandidates.value.find(c =>
+    (payload.chip_id && c.chip_id === payload.chip_id) ||
+    (c.address === payload.address)
+  );
+  if (candidate) {
+    adoptCandidate(candidate);
+  } else {
+    notify('Selected adoption candidate not found.');
+  }
+}
+
 </script>
 
 <template>
@@ -6561,7 +6747,7 @@ function toggleSelectAllBulkPorts() {
 
               <!-- Content Cards -->
               <div class="flex flex-col gap-4">
-                
+
                 <!-- ================== SERIAL PANEL ================== -->
                 <div v-if="remoteSubTab === 'serial'" class="flex flex-col gap-3">
                   <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
@@ -6576,7 +6762,7 @@ function toggleSelectAllBulkPorts() {
                         <span>Read-Only & Telemetry Commands</span>
                         <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">NO PASSWORD REQUIRED</span>
                       </div>
-                      
+
                       <div class="flex flex-col gap-2.5">
                         <div class="flex flex-col gap-1">
                           <div class="flex justify-between items-center">
@@ -6679,7 +6865,7 @@ function toggleSelectAllBulkPorts() {
                         <span>Gateway MQTT Topics (Subscriptions)</span>
                         <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">WRITE CONTROL</span>
                       </div>
-                      
+
                       <div class="flex flex-col gap-3 mt-1">
                         <div class="flex flex-col gap-1">
                           <span class="font-semibold text-slate-300">Toggle Local Relay</span>
@@ -6694,7 +6880,7 @@ function toggleSelectAllBulkPorts() {
                         <span>Peer MQTT Downlinks (Secured LoRa Forwarding)</span>
                         <span class="text-[9px] bg-sky-950/30 text-sky-300 px-1.5 py-0.5 rounded font-mono">FORWARDED OVER LORA</span>
                       </div>
-                      
+
                       <div class="flex flex-col gap-3 mt-1">
                         <div class="flex flex-col gap-1">
                           <span class="font-semibold text-slate-300">Control Remote Peer Relay</span>
@@ -7105,496 +7291,40 @@ function toggleSelectAllBulkPorts() {
         @toggle-connection="toggleMonitorMqttConnection"
       />
 
-      <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-3">
-        <!-- Gateway Device Validation Warning Callout -->
-        <div v-if="gatewaySelectedPort && serialDeviceState(gatewaySelectedPort)?.status && !serialDeviceState(gatewaySelectedPort)?.status?.role_tx" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <div>
-            <span class="font-bold">Gateway Device Required:</span> Fleet requires a TX/gateway USB device. The selected serial port is a remote; choose the gateway port.
-          </div>
-        </div>
-
-        <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div class="min-w-0">
-              <h2 class="text-base font-bold text-cyan-300">
-                Fleet
-              </h2>
-              <p class="mt-1 text-xs text-slate-400 max-w-3xl">
-                {{ fleetGatewayStatusLabel }} · {{ remotesAndCandidatesStatusLine }} · {{ loraInventoryProgressLabel }}
-              </p>
-            </div>
-            <div class="flex flex-wrap items-center justify-end gap-3">
-              <span :class="['rounded border px-2 py-1 text-[10px] font-bold', firmwareServerInfo ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                Firmware server {{ firmwareServerInfo ? 'on' : 'off' }}
-              </span>
-              <button
-                @click="isLoraInventoryScanning ? cancelLoraInventoryScan() : startLoraInventoryScan()"
-                :disabled="fleetScanDisabled"
-                class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-              >
-                {{ fleetForceScanLabel }}
-              </button>
-              <button
-                @click="firmwareServerInfo ? stopFirmwareServer() : startFirmwareServer()"
-                :disabled="isFirmwareServerStarting"
-                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-              >
-                {{ firmwareServerInfo ? 'Stop server' : (isFirmwareServerStarting ? 'Starting...' : 'Start server') }}
-              </button>
-              <button
-                @click="isNetworkUdpMonitoring ? stopNetworkUdpMonitor() : triggerGatewayUdpLogging()"
-                class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
-              >
-                <span>{{ isNetworkUdpMonitoring ? 'Stop UDP Listener' : 'Start UDP Listener' }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Connection Mode</label>
-              <select v-model="sessionConnectionType" class="glass-input h-10 appearance-none">
-                <option value="serial">USB Serial Gateway</option>
-                <option value="mqtt">Remote MQTT Broker</option>
-                <option value="local_broker">Local MQTT Broker</option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">{{ fleetTransport === 'serial' ? 'USB gateway' : 'MQTT gateway' }}</label>
-              <select v-if="fleetTransport === 'serial'" v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-10 appearance-none disabled:opacity-60">
-                <option value="" disabled>Select USB gateway</option>
-                <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
-                  {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
-                </option>
-              </select>
-              <div v-else-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1 w-full">
-                <input
-                  v-model="selectedMqttManualChipId"
-                  @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
-                  placeholder="Enter manual gateway chip ID"
-                  class="glass-input h-10 px-2 text-xs font-mono w-full"
-                />
-                <span class="text-[9px] text-slate-400">
-                  No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
-                </span>
-                <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
-                  {{ manualMqttGatewayError }}
-                </span>
-              </div>
-              <select v-else v-model="selectedMqttGatewayChipId" class="glass-input h-10 appearance-none w-full">
-                <option value="" disabled>Select MQTT gateway</option>
-                <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
-                  {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
-                </option>
-                <!-- Keep manual selection visible when it is not in discovery list -->
-                <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
-                  Manual: lrs-{{ selectedMqttGatewayChipId }}
-                </option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Gateway admin password</label>
-              <input v-model="pairAdminPassword" class="glass-input h-10 min-w-0 font-mono" :type="showPairAdminPassword ? 'text' : 'password'" autocomplete="current-password" />
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Region</label>
-              <select v-model="region" class="glass-input h-10 appearance-none">
-                <option v-for="r in ['ZA', 'EU', 'US']" :key="r" :value="r">{{ r }}</option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Firmware version</label>
-              <div class="flex gap-2">
-                <select v-model="selectedVersion" class="glass-input h-10 flex-1 appearance-none">
-                  <option v-for="v in firmwareVersions" :key="v" :value="v">
-                    {{ v === LOCAL_OPTION ? 'Choose a file' : v }}
-                  </option>
-                </select>
-                <button @click="fetchFirmware" :disabled="isFetchingFirmware" class="glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center group/btn shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-            <span>{{ networkStatusMessage }}</span>
-            <span v-if="firmwareServerInfo" class="font-mono text-slate-500 truncate">{{ firmwareServerInfo.filename }} · {{ firmwareServerInfo.urls[0] }}</span>
-          </div>
-        </div>
-
-        <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <h2 class="text-lg font-bold text-slate-300">Gateway</h2>
-                <span :class="['rounded border px-2 py-1 text-[10px] font-bold', fleetGatewayBadgeClass]">
-                  {{ fleetGatewayBadgeLabel }}
-                </span>
-              </div>
-              <div class="mt-1 text-xs text-slate-500">{{ fleetGatewaySummary }}</div>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                @click="loadNetworkGateway"
-                :disabled="isNetworkGatewayLoading || (fleetTransport === 'mqtt' ? !selectedMqttGatewayChipId : !gatewaySelectedPort)"
-                class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
-              >
-                {{ isNetworkGatewayLoading ? 'Loading...' : 'Load gateway' }}
-              </button>
-              <button
-                @click="triggerIdentify"
-                :disabled="identifyDisabled"
-                :class="['glass-input m-0 h-9 w-11 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50', { 'identify-led-active': isIdentifying }]"
-                title="Identify selected USB gateway"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
-              </button>
-
-              <button
-                v-if="isGatewayUpgradeAvailable || isFlashing"
-                @click="flashFleetGateway"
-                :disabled="fleetGatewayFlashDisabled"
-                :title="fleetGatewayFlashUnavailableReason()"
-                class="primary-btn m-0 h-9 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-              >
-                {{ isFlashing ? 'Flashing...' : 'Upgrade gateway' }}
-              </button>
-            </div>
-          </div>
-          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 text-xs">
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Port</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ selectedPort || '-' }}</div>
-            </div>
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Name</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ lrsDeviceName(fleetGatewayStatus?.chip_id || fleetGatewayIdentity?.chip_id) }}</div>
-            </div>
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Firmware</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ displayFirmwareVersion(fleetGatewayStatus?.fw_version) }}</div>
-            </div>
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Role</div>
-              <div class="mt-1 truncate text-slate-300">{{ fleetGatewayStatus?.role || '-' }}</div>
-            </div>
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Address</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus ? `${fleetGatewayStatus.local_address}->${fleetGatewayStatus.remote_address}` : fleetGatewayIdentity ? `${fleetGatewayIdentity.local_addr}->${fleetGatewayIdentity.remote_addr}` : '-' }}</div>
-            </div>
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">WiFi</div>
-              <div class="mt-1 truncate text-slate-300">{{ fleetGatewayStatus?.wifi?.sta_connected ? (fleetGatewayStatus.wifi.ip || 'connected') : (fleetGatewayStatus?.wifi?.status || '-') }}</div>
-            </div>
-            <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-              <div class="text-[10px] uppercase tracking-wide text-slate-600">Uptime</div>
-              <div class="mt-1 truncate font-mono text-slate-300">{{ fleetGatewayStatus?.uptime_ms ? formatUptime(fleetGatewayStatus.uptime_ms) : '-' }}</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="glass-card p-3 flex flex-col gap-3 text-left flex-1 min-h-0 overflow-hidden">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h2 class="text-lg font-bold text-slate-300">Remotes</h2>
-              <div class="mt-1 text-xs text-slate-500">Gateway-owned peer cache; Scan asks the gateway to refresh LoRa state.</div>
-            </div>
-            <div class="flex items-center gap-3">
-              <div class="text-xs text-slate-500">{{ loraInventory.length }} remote{{ loraInventory.length === 1 ? '' : 's' }} cached · {{ selectedLoraInventoryCount }} selected</div>
-            </div>
-          </div>
-          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
-            <table class="w-full min-w-[1180px] border-collapse text-xs">
-              <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
-                <tr class="border-b border-slate-800">
-                  <th class="w-10 px-2 py-1.5 text-left"></th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Device</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Role</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Power Save</th>
-                  <th v-if="hasAnyRemoteIp" class="px-2 py-1.5 text-left font-semibold">IP</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Age</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="loraInventory.length === 0">
-                  <td :colspan="hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">
-                    {{ fleetTransport === 'mqtt' ? 'Select an MQTT gateway to read its peer cache, or Scan to probe remotes.' : 'Select a USB gateway to read its peer cache, or Scan to probe remotes.' }}
-                  </td>
-                </tr>
-                <tr
-                  v-for="device in loraInventory"
-                  :key="device.address"
-                  :class="['border-b border-slate-900/80 hover:bg-white/5 transition-colors', fleetRowClass(device)]"
-                >
-                  <td class="px-2 py-1.5"><input v-model="device.selected" type="checkbox" /></td>
-                  <td class="px-2 py-1.5 font-mono">
-                    <span :class="['inline-flex min-w-8 items-center justify-center rounded border px-2 py-1 text-[10px] font-bold', fleetFreshnessClass(device)]">
-                      {{ device.address }}
-                    </span>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">
-                    <div>{{ device.chip_id ? lrsDeviceName(device.chip_id) : '-' }}</div>
-                    <div
-                      v-if="device.conflict_chip_id"
-                      class="mt-1 text-[9px] font-bold text-rose-400 bg-rose-950/40 border border-rose-500/20 rounded px-1.5 py-0.5 inline-block select-none animate-pulse"
-                      :title="`Telemetry from chip lrs-${device.conflict_chip_id} rejected due to address collision`"
-                    >
-                      ⚠️ Address conflict
-                    </div>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version ? displayFirmwareVersion(device.fw_version) : '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-300">{{ device.role || '-' }} / {{ device.mode || '-' }}</td>
-                  <td class="px-2 py-1.5">
-                    <span 
-                      v-if="device.wifi_pending_offline"
-                      class="rounded border px-2 py-1 text-[10px] font-bold border-orange-500/30 bg-orange-500/10 text-orange-300 animate-pulse"
-                      title="PowerSave is active. Waiting for WiFi connection to drop."
-                    >
-                      ...
-                    </span>
-                    <span v-else :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_connected_known ? (device.wifi_connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-600 bg-slate-800/50 text-slate-400') : 'border-slate-800 bg-slate-900/50 text-slate-500']">
-                      {{ device.wifi_connected_known ? (device.wifi_connected ? 'OK' : 'Offline') : '-' }}
-                    </span>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <span 
-                      v-if="device.pending_power_save_listen_only !== undefined"
-                      class="rounded border px-2 py-1 text-[10px] font-bold border-orange-500/30 bg-orange-500/10 text-orange-300 animate-pulse"
-                      title="Command transmitted. Waiting for remote device to check in over LoRa to confirm."
-                    >
-                      Pending...
-                    </span>
-                    <template v-else-if="device.power_save_listen_only">
-                      <span 
-                        class="rounded border px-2 py-1 text-[10px] font-bold border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                        title="Power save active: device is running in LoRa-only low-power mode"
-                      >
-                        PowerSave
-                      </span>
-                    </template>
-                    <span v-else class="text-slate-500">-</span>
-                  </td>
-                  <td v-if="hasAnyRemoteIp" class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5">
-                    <template v-if="device.age_ms !== undefined && device.age_ms !== null">
-                      <span :class="['rounded border px-2 py-1 text-[10px] font-bold', remoteRelayLabel(device) === 'On' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : remoteRelayLabel(device) === 'Off' ? 'border-slate-600 bg-slate-800/50 text-slate-300' : 'border-slate-800 bg-slate-900/50 text-slate-500']">
-                        {{ remoteRelayLabel(device) }}
-                      </span>
-                    </template>
-                    <span v-else class="text-slate-500">-</span>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <div class="text-slate-300 flex items-center gap-1 flex-wrap">
-                      <template v-if="device.age_ms !== undefined && device.age_ms !== null">
-                        <span>in <span :class="remoteInputLabel(device) === 'Closed' ? 'text-emerald-400 font-semibold' : remoteInputLabel(device) === 'Open' ? 'text-orange-400 font-semibold' : 'text-slate-400'">{{ remoteInputLabel(device) }}</span></span>
-                        <span v-if="remoteTempLabel(device) !== '-'" class="text-slate-500">·</span>
-                        <span v-if="remoteTempLabel(device) !== '-'">{{ remoteTempLabel(device) }}</span>
-                        <span v-if="tankLabel(device) !== '-'" class="text-slate-500">·</span>
-                        <span v-if="tankLabel(device) !== '-'">tank {{ tankLabel(device) }}</span>
-                      </template>
-                      <template v-else>-</template>
-                    </div>
-                    <div v-if="tankDetailLabel(device)" class="mt-1 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono">
-                    <div class="text-slate-300">{{ device.uptime_ms ? formatUptime(device.uptime_ms) : '-' }}</div>
-                    <div v-if="fleetRowStatusLabel(device)" :class="['mt-1 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer select-none', (device.row_state === 'unexpected_reboot' || device.row_state === 'ota_failed') ? 'text-rose-300' : device.row_state === 'ota_updated' ? 'text-emerald-300' : device.row_state === 'ota_rebooted' ? 'text-orange-400' : 'text-sky-300']" :title="device.row_state === 'unexpected_reboot' ? 'Spontaneous restart detected: Device uptime rolled back (rebooted) without a requested OTA command. Typically caused by power cycles, brownouts, or watchdog resets.' : device.row_state === 'ota_failed' ? 'Download failed: The remote device failed to download the firmware binary from the server.' : device.row_state === 'ota_rebooted' ? 'Normal post-upgrade restart: Device rebooted successfully to boot into the newly written firmware version.' : device.row_state === 'ota_no_reboot' ? 'Upgrade timeout: The firmware binary was served, but the remote did not reboot to apply it within the expected window.' : undefined">
-                      {{ fleetRowStatusLabel(device) }}
-                      <span v-if="device.row_state === 'unexpected_reboot' || device.row_state === 'ota_failed' || device.row_state === 'ota_rebooted' || device.row_state === 'ota_no_reboot'" class="opacity-60 text-[9px]">ⓘ</span>
-                    </div>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.age_ms != null ? `${Math.round(device.age_ms / 1000)}s` : '-' }}</td>
-                  <td class="px-2 py-1.5 overflow-visible">
-                    <div class="relative inline-block text-left">
-                      <button
-                        @click.stop="toggleFleetDropdown(device.address)"
-                        class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center gap-1 select-none"
-                      >
-                        Actions
-                        <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-
-                      <div
-                        v-if="activeDropdownAddress === device.address"
-                        class="absolute right-0 mt-1 w-40 z-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium"
-                      >
-                        <button
-                          @click="flashLoraRemote(device); activeDropdownAddress = null"
-                          :disabled="isFirmwareServerStarting || ['ota_queued', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'].includes(device.row_state || '') || !fleetFlashAvailable(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
-                          :title="fleetFlashUnavailableReason(device)"
-                        >
-                          ⚡ Flash
-                        </button>
-
-                        <button
-                          @click="openSettingsModal(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
-                        >
-                          🛠️ Commands
-                        </button>
-                        <button
-                          @click="executeRemoteReboot(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
-                        >
-                          🔄 Reboot
-                        </button>
-                        <button
-                          @click="triggerRemoteUdpLogging(device); activeDropdownAddress = null"
-                          :disabled="!device.wifi_connected || !device.ip"
-                          class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none disabled:opacity-40"
-                          :title="(!device.wifi_connected || !device.ip) ? 'Remote device has no active WiFi or IP' : 'Trigger remote UDP logging'"
-                        >
-                          📋 View Logs
-                        </button>
-                        <button
-                          @click="executeForgetRemote(device); activeDropdownAddress = null"
-                          class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
-                        >
-                          🗑️ Remove from Gateway
-                        </button>
-                        <div class="h-[1px] bg-slate-800/80 my-1"></div>
-                        <button
-                          @click="openFactoryResetModal(device)"
-                          class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
-                        >
-                          ⚠️ Factory Reset
-                        </button>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div
-            v-if="isNetworkUdpMonitoring"
-            :class="networkUdpLogsExpanded ? 'fixed inset-4 z-40 flex flex-col rounded-md border border-slate-700 bg-slate-950 p-4 shadow-2xl' : 'shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3'"
-          >
-            <div class="mb-2 flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <div class="truncate text-xs font-bold text-slate-300">UDP logs · {{ networkUdpTarget || 'Fleet' }}</div>
-                <div class="mt-0.5 text-[10px] text-slate-600">{{ filteredNetworkLogs.length }} lines · following latest</div>
-              </div>
-              <div class="flex shrink-0 items-center gap-2">
-                <button @click="copyNetworkUdpLog" :disabled="filteredNetworkLogs.length === 0" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50">Copy</button>
-                <button @click="networkUdpLogsExpanded = !networkUdpLogsExpanded; nextTick(() => scrollNetworkUdpToBottom())" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">
-                  {{ networkUdpLogsExpanded ? 'Collapse' : 'Full screen' }}
-                </button>
-                <button @click="stopNetworkUdpMonitor" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Stop logs</button>
-              </div>
-            </div>
-            <div ref="networkUdpLogContainer" :class="['overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400', networkUdpLogsExpanded ? 'min-h-0 flex-1 rounded border border-slate-800 bg-slate-950/60 p-2' : 'max-h-44']">
-              <div v-for="(log, i) in filteredNetworkLogs.slice(-200)" :key="i">{{ log }}</div>
-              <div v-if="filteredNetworkLogs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Discovered Candidates -->
-        <div v-if="loraCandidates.length > 0" class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h2 class="text-lg font-bold text-slate-300">Same-Key Adoption Candidates</h2>
-              <div class="mt-1 text-xs text-slate-500">Unconfigured same-key remotes heard by the gateway.</div>
-            </div>
-            <div class="text-xs text-slate-500">
-              <span v-if="candidateTruncated">Showing {{ loraCandidates.length }} of {{ candidateTotal }} candidates</span>
-              <span v-else>{{ loraCandidates.length }} candidate{{ loraCandidates.length === 1 ? '' : 's' }} discovered</span>
-            </div>
-          </div>
-          
-          <div class="overflow-auto custom-scrollbar rounded-md border border-slate-800 max-h-64">
-            <table class="w-full border-collapse text-xs">
-              <thead class="bg-slate-950/95 text-slate-500 sticky top-0">
-                <tr class="border-b border-slate-800">
-                  <th class="px-2 py-1.5 text-left font-semibold">Address</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Device</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Age</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Reason</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">State</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="c in loraCandidates"
-                  :key="c.chip_id || c.address"
-                  class="border-b border-slate-900/80 hover:bg-white/5 transition-colors"
-                >
-                  <td class="px-2 py-1.5 font-mono text-slate-300">
-                    <span class="inline-flex min-w-8 items-center justify-center rounded border px-2 py-1 text-[10px] font-bold border-slate-700 bg-slate-800/20 text-slate-400">
-                      {{ c.address }}
-                    </span>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">
-                    {{ c.chip_id ? lrsDeviceName(c.chip_id) : 'querying...' }}
-                  </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ c.rssi }} dBm</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ c.age_ms != null ? `${Math.round(c.age_ms / 1000)}s` : '-' }}</td>
-                  <td class="px-2 py-1.5">
-                    <span :class="['rounded border px-2 py-0.5 text-[10px] font-semibold',
-                      c.reason === 'ok' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' :
-                      c.reason === 'conflict' ? 'border-rose-500/20 bg-rose-500/5 text-rose-400' :
-                      c.reason === 'out_of_range' ? 'border-amber-500/20 bg-amber-500/5 text-amber-400' :
-                      c.reason === 'known_chip_moved' ? 'border-sky-500/20 bg-sky-500/5 text-sky-400' :
-                      'border-slate-800 bg-slate-900/50 text-slate-500'
-                    ]">
-                      {{ c.reason }}
-                    </span>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono">
-                    <span :class="['text-[10px] font-bold', candidateStateClass(c)]">
-                      {{ candidateStateText(c) }}
-                    </span>
-                  </td>
-                  <td class="px-2 py-1.5 flex items-center gap-2">
-                    <button
-                      v-if="['identified', 'failed'].includes(c.state) && c.chip_id"
-                      @click="adoptCandidate(c)"
-                      class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center justify-center select-none"
-                    >
-                      Adopt
-                    </button>
-                    <span
-                      v-else
-                      :class="[
-                        'text-[10px]',
-                        c.state === 'seen_address_only' || (c.state === 'failed' && (c.age_ms == null || c.age_ms < CANDIDATE_RECENT_IDENTITY_MS)) ? 'text-slate-500 animate-pulse' :
-                        c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
-                        c.state === 'reset_requested' ? 'text-amber-400 animate-pulse' :
-                        c.state === 'failed' ? 'text-rose-500' :
-                        'text-slate-500'
-                      ]"
-                    >
-                      {{ candidateStateText(c) }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-      </div>
+      <FleetMode
+        v-if="activeMode === 'network'"
+        v-model="fleetConfigComputed"
+        v-model:active-dropdown-address="activeDropdownAddress"
+        v-model:network-udp-logs-expanded="networkUdpLogsExpanded"
+        :rows="fleetDisplayRows"
+        :candidates="fleetDisplayCandidates"
+        :gateway="fleetGatewayStatusComputed"
+        :server="fleetServerStatusComputed"
+        :udp-logs="fleetUdpLogsComputed"
+        :transport-state="fleetTransportStateComputed"
+        :inventory-summary="fleetInventorySummaryComputed"
+        :candidate-summary="fleetCandidateSummaryComputed"
+        @toggle-row-selection="handleToggleRowSelection"
+        @scan-start="startLoraInventoryScan"
+        @scan-cancel="cancelLoraInventoryScan"
+        @server-start="startFirmwareServer"
+        @server-stop="stopFirmwareServer"
+        @udp-logging-start="triggerGatewayUdpLogging"
+        @udp-logging-stop="stopNetworkUdpMonitor"
+        @udp-logs-copy="copyNetworkUdpLog"
+        @manual-chip-input="handleManualMqttGatewayInput"
+        @firmware-fetch="fetchFirmware"
+        @gateway-load="loadNetworkGateway"
+        @gateway-identify="triggerIdentify"
+        @gateway-flash="flashFleetGateway"
+        @remote-flash="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) flashLoraRemote(d); }"
+        @remote-settings="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) openSettingsModal(d); }"
+        @remote-reboot="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) executeRemoteReboot(d); }"
+        @remote-view-logs="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) triggerRemoteUdpLogging(d); }"
+        @remote-forget="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) executeForgetRemote(d); }"
+        @remote-factory-reset="(addr) => { const d = loraInventory.find(x => x.address === addr); if (d) openFactoryResetModal(d); }"
+        @candidate-adopt="handleAdoptCandidatePayload"
+      />
     </div>
 
     <!-- Operator confirmation -->
@@ -7636,7 +7366,7 @@ function toggleSelectAllBulkPorts() {
             <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Device {{ factoryResetTargetModal.device.address }}</h3>
             <p class="mt-1 text-xs text-slate-500">Decommissions the remote device over LoRa, formatting its state and triggering a reboot.</p>
           </div>
-          
+
           <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
             💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it stays in this fleet. Unchecking it performs a full factory reset and removes the device from this fleet.
           </div>
@@ -7657,7 +7387,7 @@ function toggleSelectAllBulkPorts() {
               </div>
             </label>
           </div>
-          
+
           <div class="mt-2 flex justify-end gap-2">
             <button
               @click="factoryResetTargetModal = null"
@@ -7682,9 +7412,9 @@ function toggleSelectAllBulkPorts() {
       v-model:draft="settingsDeviceModalState"
       :device="settingsDeviceModal ? settingsDeviceModal.device : { address: '' }"
       @close="settingsDeviceModal = null"
-      @execute-sensors="(temp, tank, listen) => { if (settingsDeviceModal) executeRemoteSensors(settingsDeviceModal.device, temp, tank, listen); }"
-      @execute-wifi="(ssid, pass) => { if (settingsDeviceModal) executeRemoteWifi(settingsDeviceModal.device, ssid, pass); }"
-      @execute-fleet-key="(key) => { if (settingsDeviceModal) executeRemoteFleetKeyChange(settingsDeviceModal.device, key); }"
+      @execute-sensors="(temp: boolean, tank: boolean, listen: boolean) => { if (settingsDeviceModal) executeRemoteSensors(settingsDeviceModal.device, temp, tank, listen); }"
+      @execute-wifi="(ssid: string, pass: string) => { if (settingsDeviceModal) executeRemoteWifi(settingsDeviceModal.device, ssid, pass); }"
+      @execute-fleet-key="(key: string) => { if (settingsDeviceModal) executeRemoteFleetKeyChange(settingsDeviceModal.device, key); }"
     />
   </div>
 </template>
