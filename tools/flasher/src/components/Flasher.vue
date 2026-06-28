@@ -10,6 +10,7 @@ import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS } from '../composables/
 import { LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, SensorReading } from '../types/fleet';
 import { useFleetInventoryPolling } from '../composables/useFleetInventoryPolling';
 import { useFleetOta } from '../composables/useFleetOta';
+import { useFirmwareServer, NetworkInterface } from '../composables/useFirmwareServer';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -57,13 +58,6 @@ interface DeviceInfo {
   ssid: string;
 }
 
-interface FirmwareServerInfo {
-  filename: string;
-  sha256: string;
-  size_bytes: number;
-  port: number;
-  urls: string[];
-}
 
 interface EasyPairDevice {
   chip_id_hex: string;
@@ -97,10 +91,6 @@ interface EasyPairStatus {
   devices?: EasyPairDevice[];
 }
 
-interface NetworkInterface {
-  ip: string;
-  netmask: string;
-}
 
 
 
@@ -323,11 +313,34 @@ const bulkShowLogsByPort = ref<Record<string, boolean>>({});
 const bulkLogRefs = ref<Record<string, HTMLElement>>({});
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
-const isFirmwareServerStarting = ref(false);
-
 const otaQueue = ref<LoraInventoryDevice[]>([]);
-const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
-const firmwareServerRevalidatePending = ref(false);
+const networkInterfaceInterval = ref<ReturnType<typeof window.setInterval> | null>(null);
+
+const {
+  isFirmwareServerStarting,
+  firmwareServerInfo,
+  startFirmwareServer,
+  ensureFirmwareServer,
+  stopFirmwareServer,
+  firmwareServerTarget,
+  handleNetworkInterfacesChanged,
+  revalidateFirmwareServerAfterNetworkChange,
+  cleanupFirmwareServer
+} = useFirmwareServer({
+  resolveFirmwareOptions: networkOtaFirmwareOptions,
+  onStarting: () => {
+    activeMode.value = 'network';
+  },
+  onStarted: (_info, statusMsg) => {
+    networkStatusMessage.value = statusMsg;
+  },
+  onStopped: (statusMsg) => {
+    networkStatusMessage.value = statusMsg;
+  },
+  pushNetworkLog,
+  notify
+});
+
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
 const filteredNetworkLogs = computed(() => {
@@ -723,7 +736,7 @@ const {
       throw new Error('Select a gateway and enter the admin password first');
     }
     if (!portGatewayReady(port)) await loadNetworkGateway();
-    const info = await ensureRemoteFlashFirmwareServer();
+    const info = await ensureFirmwareServer();
     const target = firmwareServerTarget(info);
     const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
       admin_password: password,
@@ -2109,81 +2122,6 @@ async function stopNetworkUdpMonitor() {
   }
 }
 
-async function startFirmwareServer() {
-  const firmwareOptions = networkOtaFirmwareOptions();
-  await startFirmwareServerWithOptions(firmwareOptions);
-}
-
-async function startFirmwareServerWithOptions(firmwareOptions: { firmware_path: string; region: RegionCode | null } | null) {
-  if (!firmwareOptions) return;
-  isFirmwareServerStarting.value = true;
-  activeMode.value = 'network';
-  pushNetworkLog('--- Firmware file server ---');
-  try {
-    const info = await invoke<FirmwareServerInfo>('start_firmware_file_server', {
-      options: firmwareOptions
-    });
-    firmwareServerInfo.value = info;
-    networkStatusMessage.value = `Serving ${info.filename} on ${info.urls[0] || `port ${info.port}`}.`;
-    pushNetworkLog(`${networkStatusMessage.value} SHA256 ${info.sha256}`);
-  } catch (e) {
-    pushNetworkLog('Firmware server failed: ' + e);
-    notify('Firmware server failed: ' + e);
-  } finally {
-    isFirmwareServerStarting.value = false;
-  }
-}
-
-async function ensureRemoteFlashFirmwareServer(): Promise<FirmwareServerInfo> {
-  if (firmwareServerInfo.value) return firmwareServerInfo.value;
-  const firmwareOptions = networkOtaFirmwareOptions();
-  if (!firmwareOptions) throw new Error('Choose a firmware file or release first');
-  await startFirmwareServerWithOptions(firmwareOptions);
-  if (!firmwareServerInfo.value) throw new Error('Firmware server did not start');
-  return firmwareServerInfo.value;
-}
-
-async function revalidateFirmwareServerAfterNetworkChange() {
-  if (!firmwareServerRevalidatePending.value) return;
-  try {
-    if (firmwareServerInfo.value) {
-      const nextInterfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
-      const currentUrls = firmwareServerInfo.value.urls;
-      const stillValid = currentUrls.some(url => {
-        try {
-          const parsed = new URL(url);
-          return nextInterfaces.some(i => i.ip === parsed.hostname);
-        } catch (_) {
-          return false;
-        }
-      });
-      if (!stillValid) {
-        pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
-        await stopFirmwareServer();
-        const firmwareOptions = networkOtaFirmwareOptions();
-        if (firmwareOptions) {
-          await startFirmwareServerWithOptions(firmwareOptions);
-        }
-      }
-    }
-    firmwareServerRevalidatePending.value = false;
-  } catch (e) {
-    pushNetworkLog('Failed to revalidate firmware server: ' + e);
-  }
-}
-
-async function stopFirmwareServer() {
-  try {
-    const stopped = await invoke<string>('stop_firmware_file_server');
-    pushNetworkLog(stopped);
-  } catch (e) {
-    pushNetworkLog('Firmware server stop error: ' + e);
-  } finally {
-    firmwareServerInfo.value = null;
-    networkStatusMessage.value = 'Firmware server stopped.';
-  }
-}
-
 function pairPassword(): string {
   return adminPasswordForPort(pairGatewayKey.value);
 }
@@ -3013,16 +2951,6 @@ async function cancelLoraInventoryScan() {
   }
 }
 
-function firmwareServerTarget(info: FirmwareServerInfo): { host: string; port: number } {
-  const raw = info.urls.find(u => !u.includes('127.0.0.1')) || info.urls[0] || '';
-  if (!raw) throw new Error('Firmware server has no reachable URL');
-  const parsed = new URL(raw);
-  return {
-    host: parsed.hostname,
-    port: Number(parsed.port || info.port)
-  };
-}
-
 
 
 const flasherInterfaces = ref<NetworkInterface[]>([]);
@@ -3429,7 +3357,7 @@ async function flashFleetGateway() {
     pushNetworkLog(`Triggering OTA upgrade for MQTT gateway ${label} with ${firmwareOptions.firmware_path}.`);
     let otaCommandAcceptedOrIndeterminate = false;
     try {
-      const info = await ensureRemoteFlashFirmwareServer();
+      const info = await ensureFirmwareServer();
       const otaUrl = info.urls.find(u => !u.includes('127.0.0.1') && !u.includes('localhost'));
       if (!otaUrl) throw new Error('No LAN firmware server URL available for the MQTT gateway');
 
@@ -5286,7 +5214,7 @@ onMounted(async () => {
   }
 
   // Poll network interfaces every 5 seconds to dynamically adapt to network configuration changes
-  window.setInterval(async () => {
+  networkInterfaceInterval.value = window.setInterval(async () => {
     try {
       const nextInterfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
       const prevStr = JSON.stringify(flasherInterfaces.value.map(i => i.ip).sort());
@@ -5295,31 +5223,10 @@ onMounted(async () => {
         pushNetworkLog('Host network interfaces changed. Updating subnets...');
         flasherInterfaces.value = nextInterfaces;
         
-        if (firmwareServerInfo.value) {
-          if (isFlashing.value || fleetGatewayFlashPhase.value !== 'idle') {
-            pushNetworkLog('Host network interfaces changed, but deferring firmware server validation/restart until active flash/upgrade completes.');
-            firmwareServerRevalidatePending.value = true;
-          } else {
-            const currentUrls = firmwareServerInfo.value.urls;
-            const stillValid = currentUrls.some(url => {
-              try {
-                const parsed = new URL(url);
-                return nextInterfaces.some(i => i.ip === parsed.hostname);
-              } catch (_) {
-                return false;
-              }
-            });
-            
-            if (!stillValid) {
-              pushNetworkLog('Firmware server is no longer reachable on this network. Restarting...');
-              await stopFirmwareServer();
-              const firmwareOptions = networkOtaFirmwareOptions();
-              if (firmwareOptions) {
-                await startFirmwareServerWithOptions(firmwareOptions);
-              }
-            }
-          }
-        }
+        await handleNetworkInterfacesChanged(
+          nextInterfaces,
+          isFlashing.value || fleetGatewayFlashPhase.value !== 'idle'
+        );
       }
     } catch (e) {
       console.error('Failed to poll network interfaces:', e);
@@ -5595,6 +5502,7 @@ onUnmounted(() => {
   stopLoraInventoryPolling();
   stopMonitorPolling();
   if (fleetClockTimer.value) window.clearInterval(fleetClockTimer.value);
+  if (networkInterfaceInterval.value) window.clearInterval(networkInterfaceInterval.value);
   cleanupFleetOtaTimers();
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
   if (unlistenFlash) unlistenFlash();
@@ -5610,9 +5518,7 @@ onUnmounted(() => {
   if (isNetworkUdpMonitoring.value) {
     invoke('stop_network_udp_monitor').catch(() => {});
   }
-  if (firmwareServerInfo.value) {
-    invoke('stop_firmware_file_server').catch(() => {});
-  }
+  cleanupFirmwareServer().catch(() => {});
 });
 
 function formatLabel(key: string) {
