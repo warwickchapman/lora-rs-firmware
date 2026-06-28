@@ -93,6 +93,15 @@ export interface UseFleetInventoryOptions {
   normalizeRole: (role: string | undefined | null) => string;
   parseVersion: (v: string) => any;
   compareParsedVersions: (a: any, b: any) => number;
+  activeGatewayId?: () => string | null;
+}
+
+export interface TelemetryCacheEntry {
+  gateway_id: string;
+  address: number;
+  chip_id?: string;
+  device: Partial<LoraInventoryDevice>;
+  sensors: Record<string, SensorReading>;
 }
 
 export const CANDIDATE_RECENT_IDENTITY_MS = 90000;
@@ -103,6 +112,37 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   const loraCandidates = ref<LoraAdoptionCandidate[]>([]);
   const fleetRowHistory = ref<Record<number, any>>({});
   const fleetForceScanCooldownUntilMs = ref(0);
+  const telemetryCache = ref<Record<string, TelemetryCacheEntry>>({});
+
+  function normalizeGatewayId(id: string | undefined | null): string {
+    if (!id) return '';
+    const norm = id.toLowerCase().trim();
+    if (norm.startsWith('lrs-')) {
+      return norm.substring(4);
+    }
+    return norm;
+  }
+
+  function applyCacheToRow(row: LoraInventoryDevice, cacheEntry: TelemetryCacheEntry) {
+    Object.assign(row, cacheEntry.device);
+    const sensorList = Object.values(cacheEntry.sensors);
+    if (sensorList.length > 0) {
+      if (!row.sensors) row.sensors = [];
+      for (const cachedSensor of sensorList) {
+        let existing = row.sensors.find(s => s.kind === cachedSensor.kind && s.instance === cachedSensor.instance);
+        if (!existing) {
+          existing = { kind: cachedSensor.kind, instance: cachedSensor.instance, state: 'waiting' };
+          row.sensors.push(existing);
+        }
+        if (cachedSensor.value !== undefined) {
+          existing.value = cachedSensor.value;
+        }
+        if (cachedSensor.state !== undefined) {
+          existing.state = cachedSensor.state;
+        }
+      }
+    }
+  }
 
   function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInventoryDevice {
     const history = fleetRowHistory.value[row.address] || {};
@@ -418,10 +458,20 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   function mergeInventoryRows(rows: LoraInventoryDevice[]): LoraInventoryDevice[] {
     const selected = new Set(loraInventory.value.filter(d => d.selected).map(d => d.address));
     const now = Date.now();
+    const activeGwId = normalizeGatewayId(options.activeGatewayId ? options.activeGatewayId() : null);
+
     const processed = rows
       .slice()
       .sort((a, b) => a.address - b.address)
-      .map(row => classifyFleetRow({ ...row, selected: selected.has(row.address) }, now));
+      .map(row => {
+        const cacheKey = `${activeGwId}:${row.address}`;
+        const cacheEntry = telemetryCache.value[cacheKey];
+        let mergedRow = { ...row };
+        if (cacheEntry) {
+          applyCacheToRow(mergedRow, cacheEntry);
+        }
+        return classifyFleetRow({ ...mergedRow, selected: selected.has(row.address) }, now);
+      });
     
     loraInventory.value = processed;
     return processed;
@@ -432,88 +482,100 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   }
 
   function applyTelemetryUpdate(payload: any) {
-    let dev = loraInventory.value.find(d => d.address === payload.address);
-    if (!dev) {
-      return;
-    }
+    const address = Number(payload.address);
+    if (!address) return;
 
-    if (payload.chip_id) {
-      const payloadCanonical = options.canonicalChipId(payload.chip_id);
-      if (dev.chip_id) {
-        const devCanonical = options.canonicalChipId(dev.chip_id);
-        if (payloadCanonical !== devCanonical) {
-          dev.conflict_chip_id = payload.chip_id;
-          return;
-        } else {
-          dev.conflict_chip_id = undefined;
-        }
-      } else {
-        dev.chip_id = payload.chip_id;
-      }
+    const gatewayIdNormalized = normalizeGatewayId(payload.gateway_id);
+    const cacheKey = `${gatewayIdNormalized}:${address}`;
+
+    if (!telemetryCache.value[cacheKey]) {
+      telemetryCache.value[cacheKey] = {
+        gateway_id: gatewayIdNormalized,
+        address,
+        device: { address },
+        sensors: {}
+      };
+    }
+    const cacheEntry = telemetryCache.value[cacheKey];
+
+    const payloadCanonical = payload.chip_id ? options.canonicalChipId(payload.chip_id) : '';
+    if (payloadCanonical && !cacheEntry.chip_id) {
+      cacheEntry.chip_id = payloadCanonical;
+      cacheEntry.device.chip_id = payloadCanonical;
     }
 
     const val = payload.value;
     const f = payload.field;
-    if (f === 'relay') dev.relay_state = (val === '1' || val === 1) ? 1 : 0;
-    else if (f === 'input') {
-      dev.input_state = (val === '1' || val === 1) ? 1 : 0;
-      dev.input_state_known = true;
+
+    // Ignore command-like topics (e.g. set/relay)
+    if (f.startsWith('set/') || f.includes('/set/')) {
+      return;
     }
-    else if (f === 'rssi' || f === 'uplink_rssi_dbm') dev.rssi = Number(val);
-    else if (f === 'fw_version') dev.fw_version = String(val);
+
+    if (f === 'relay') cacheEntry.device.relay_state = (val === '1' || val === 1) ? 1 : 0;
+    else if (f === 'input') {
+      cacheEntry.device.input_state = (val === '1' || val === 1) ? 1 : 0;
+      cacheEntry.device.input_state_known = true;
+    }
+    else if (f === 'rssi' || f === 'uplink_rssi_dbm') cacheEntry.device.rssi = Number(val);
+    else if (f === 'fw_version') cacheEntry.device.fw_version = String(val);
     else if (f === 'chip_id') {
       const canonicalVal = options.canonicalChipId(String(val));
-      if (dev.chip_id) {
-        const devCanonical = options.canonicalChipId(dev.chip_id);
-        if (canonicalVal !== devCanonical) {
-          dev.conflict_chip_id = String(val);
-          return;
-        }
-      } else {
-        dev.chip_id = String(val);
-      }
+      cacheEntry.device.chip_id = canonicalVal;
+      cacheEntry.chip_id = canonicalVal;
     }
-    else if (f === 'uptime_ms') dev.uptime_ms = Number(val);
-    else if (f === 'role') dev.role = options.normalizeRole(String(val));
-    else if (f === 'mode') dev.mode = String(val);
+    else if (f === 'uptime_ms') cacheEntry.device.uptime_ms = Number(val);
+    else if (f === 'role') cacheEntry.device.role = options.normalizeRole(String(val));
+    else if (f === 'mode') cacheEntry.device.mode = String(val);
     else if (f === 'ip') {
-      dev.ip = String(val);
-      dev.wifi_connected = !!val && val !== '0.0.0.0';
-      dev.wifi_connected_known = true;
+      cacheEntry.device.ip = String(val);
+      cacheEntry.device.wifi_connected = !!val && val !== '0.0.0.0';
+      cacheEntry.device.wifi_connected_known = true;
     }
     else if (f === 'power_save_listen_only') {
-      dev.power_save_listen_only = val === '1' || val === 1 || val === true;
+      cacheEntry.device.power_save_listen_only = val === '1' || val === 1 || val === true;
     }
     else if (f === 'power_save_active') {
-      dev.power_save_active = val === '1' || val === 1 || val === true;
+      cacheEntry.device.power_save_active = val === '1' || val === 1 || val === true;
     }
     else if (f.startsWith('sensor/')) {
       const sensorParts = f.split('/');
       if (sensorParts.length >= 4) {
-        const kind = sensorParts[1];
+        const kind = sensorParts[1] as any;
         const instance = Number(sensorParts[2]) || 0;
         const prop = sensorParts[3];
-        if (!dev.sensors) dev.sensors = [];
-        let existing = dev.sensors.find(s => s.kind === kind && s.instance === instance);
-        if (!existing) {
-          existing = { kind: kind as any, state: 'waiting', instance };
-          dev.sensors.push(existing);
+        const sKey = `${kind}/${instance}`;
+        if (!cacheEntry.sensors[sKey]) {
+          cacheEntry.sensors[sKey] = { kind, instance, state: 'waiting' };
         }
+        const sensor = cacheEntry.sensors[sKey];
         if (prop === 'value') {
-          existing.value = Number(val);
+          sensor.value = Number(val);
         } else if (prop === 'state') {
-          existing.state = String(val) as any;
+          sensor.state = String(val) as any;
         }
       }
     }
-    dev.age_ms = 0;
+    cacheEntry.device.age_ms = 0;
 
-    loraInventory.value = loraInventory.value.map(row => {
-      if (row.address === payload.address) {
-        return classifyFleetRow(row, Date.now());
+    let dev = loraInventory.value.find(d => {
+      if (d.address !== address) return false;
+      if (d.chip_id && cacheEntry.chip_id) {
+        return options.canonicalChipId(d.chip_id) === cacheEntry.chip_id;
       }
-      return row;
+      return true;
     });
+
+    if (dev) {
+      applyCacheToRow(dev, cacheEntry);
+      
+      loraInventory.value = loraInventory.value.map(row => {
+        if (row.address === address) {
+          return classifyFleetRow(row, Date.now());
+        }
+        return row;
+      });
+    }
   }
 
   function updateRowHistory(address: number, patch: Partial<any>) {
@@ -537,6 +599,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     loraCandidates.value = [];
     fleetRowHistory.value = {};
     fleetForceScanCooldownUntilMs.value = 0;
+    telemetryCache.value = {};
   }
 
   return {

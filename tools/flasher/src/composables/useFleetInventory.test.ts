@@ -53,7 +53,7 @@ describe('useFleetInventory', () => {
     return a.dev - b.dev;
   };
 
-  const createFleet = () => {
+  const createFleet = (activeGatewayIdVal: string | null = 'lrs-00001234') => {
     return useFleetInventory({
       otaQueue,
       selectedFirmwareCandidateVersion: () => selectedFwCandidateVersion.value,
@@ -62,7 +62,8 @@ describe('useFleetInventory', () => {
       canonicalChipId,
       normalizeRole,
       parseVersion,
-      compareParsedVersions
+      compareParsedVersions,
+      activeGatewayId: () => activeGatewayIdVal
     });
   };
 
@@ -161,5 +162,68 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventoryProgressLabel.value).toBe('Scanning configured remotes and same-key candidates...');
     fleet.loraInventoryScan.value = { active: false, start_address: 1, end_address: 10, next_address: 10, sent: 8, now_ms: 0 };
     expect(fleet.loraInventoryProgressLabel.value).toBe('Complete, 8 probes sent');
+  });
+
+  it('caches MQTT telemetry when no row exists, merges it on mergeInventoryRows, clears it on clear, and ignores commands', () => {
+    const fleet = createFleet('00001234'); // normalized gateway id is '00001234'
+    expect(fleet.loraInventory.value).toHaveLength(0);
+
+    // 1. Telemetry arrives while loraInventory is empty
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      chip_id: 'lrs-abcde123',
+      field: 'relay',
+      value: '1'
+    });
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'sensor/temperature/0/value',
+      value: '22.5'
+    });
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'sensor/temperature/0/state',
+      value: 'ok'
+    });
+    
+    // Command topic should be ignored and not cached as telemetry
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'set/relay',
+      value: '0'
+    });
+
+    expect(fleet.loraInventory.value).toHaveLength(0);
+
+    // 2. Later mergeInventoryRows produces a populated row with merged values
+    const newRows: LoraInventoryDevice[] = [
+      { address: 1, chip_id: 'abcde123' }
+    ];
+    fleet.mergeInventoryRows(newRows);
+
+    expect(fleet.loraInventory.value).toHaveLength(1);
+    const row = fleet.loraInventory.value[0];
+    expect(row.relay_state).toBe(1); // restored from cache
+    expect(row.chip_id).toBe('abcde123');
+
+    // 3. Nested sensor field is also restored
+    expect(row.sensors).toBeDefined();
+    const tempSensor = row.sensors?.find(s => s.kind === 'temperature' && s.instance === 0);
+    expect(tempSensor).toBeDefined();
+    expect(tempSensor?.value).toBe(22.5);
+    expect(tempSensor?.state).toBe('ok');
+
+    // 4. clearFleetGatewayCache clears cached telemetry
+    fleet.clearFleetGatewayCache();
+    expect(fleet.loraInventory.value).toHaveLength(0);
+
+    // If we merge rows again after clear, it shouldn't apply cached values
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+    expect(fleet.loraInventory.value[0].relay_state).toBeUndefined();
+    expect(fleet.loraInventory.value[0].sensors).toBeUndefined();
   });
 });

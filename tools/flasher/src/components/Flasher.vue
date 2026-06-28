@@ -664,7 +664,8 @@ const {
   canonicalChipId,
   normalizeRole,
   parseVersion,
-  compareParsedVersions
+  compareParsedVersions,
+  activeGatewayId: () => selectedMqttGatewayChipId.value
 });
 const candidateTotal = ref(0);
 const candidateTruncated = ref(false);

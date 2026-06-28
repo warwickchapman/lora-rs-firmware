@@ -129,7 +129,7 @@ impl MqttService {
 
         // Subscriptions
         let topic_root = config.topic_root.clone();
-        let telemetry_filter = format!("{}/+/peers/+/+", topic_root);
+        let telemetry_filter = format!("{}/+/peers/+/#", topic_root);
         let discovery_filter = format!("{}/discovery/+", topic_root);
         let response_filter = format!("{}/+/admin_response", topic_root);
         let status_filter = format!("{}/+/ota_status", topic_root);
