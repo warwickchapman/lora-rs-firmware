@@ -6,6 +6,7 @@
   "scripts": {
     "sync:version": "python3 sync_version.py",
     "check:version": "python3 sync_version.py --check",
+    "check:version-workflow": "python3 version_guard.py",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",

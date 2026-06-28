@@ -321,6 +321,11 @@ Local non-release flasher version policy:
 - Do not reuse a dev build version for a different firmware or Flasher artifact.
 - Run `python3 tools/bump_dev_build.py` before a new development build.
 - Firmware builds record the source tree used for each `~DEVBUILD` value and reject reusing the same dev build number after code changes.
+- Keep dev-build version bumps deliberate:
+  - If a change produces a Flasher artifact that will be shared, flashed, or field-tested, commit the version files separately from the functional change.
+  - If no artifact is being produced, restore incidental Flasher version-file changes before committing.
+  - Use `python3 tools/flasher/version_guard.py` or `npm run check:version-workflow --prefix tools/flasher` before commit review to catch accidental dirty version files.
+  - Do not stash version bumps as a long-term holding pattern; commit them as an artifact/version bump or discard them.
 
 Release execution guardrails:
 - Never trigger `package_flasher.yml` in release mode with `platform=all` or `platform=macos`.

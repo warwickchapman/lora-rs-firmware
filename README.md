@@ -82,6 +82,10 @@ Local non-release flasher build policy:
   - clean tree: `<version>.<shortsha>` or `<version>-<shortsha>`
   - dirty tree: `<version>.<shortsha>.dirty`
 - This keeps bug reports and screenshots unambiguous and prevents newer test builds from appearing older than the last shipped release.
+- Dev-build version bumps should be deliberate:
+  - If producing a Flasher artifact for sharing, flashing, or field testing, commit version files as a separate version bump commit.
+  - If not producing an artifact, restore incidental Flasher version-file changes before committing unrelated work.
+  - Check this with `python3 tools/flasher/version_guard.py` or `npm run check:version-workflow --prefix tools/flasher`.
 
 ## Release Automation Script
 Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same release flow end-to-end:
