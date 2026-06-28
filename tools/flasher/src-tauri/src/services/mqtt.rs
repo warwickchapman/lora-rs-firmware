@@ -21,7 +21,7 @@ pub enum MqttConnectionState {
     Error(String),
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct MqttTelemetryPayload {
     pub gateway_id: String,
     pub address: u8,
@@ -30,7 +30,7 @@ pub struct MqttTelemetryPayload {
     pub value: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct MqttGatewayPayload {
     pub chip_id: String,
     pub role: String,
@@ -201,89 +201,224 @@ impl MqttService {
             Err(_) => return,
         };
 
-        // 1. Check discovery topic: <topic_root>/discovery/lrs-<chip_id>
-        let discovery_prefix = format!("{}/discovery/", topic_root);
-        if topic.starts_with(&discovery_prefix) {
-            if let Ok(gw_payload) = serde_json::from_str::<MqttGatewayPayload>(&payload_str) {
-                let _ = app.emit("mqtt-gateway-update", gw_payload);
-            }
-            return;
-        }
-
-        // 2. Check admin response topic: <topic_root>/lrs-<chip_id>/admin_response
-        let parts: Vec<&str> = topic.split('/').collect();
-        if parts.len() >= 3 && parts[0] == topic_root && parts[2] == "admin_response" {
-            let chip_id = parts[1].trim_start_matches("lrs-").to_string();
-            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&payload_str) {
-                let _ = app.emit("mqtt-admin-response", MqttAdminResponsePayload {
-                    chip_id,
-                    response: json_val,
-                });
-            }
-            return;
-        }
-
-        // Check ota status topic: <topic_root>/lrs-<chip_id>/ota_status
-        if parts.len() >= 3 && parts[0] == topic_root && parts[2] == "ota_status" {
-            let chip_id = parts[1].trim_start_matches("lrs-").to_string();
-            let _ = app.emit("mqtt-ota-status-update", MqttOtaStatusPayload {
-                chip_id,
-                status: payload_str.clone(),
-            });
-            return;
-        }
-
-        // Check config topic: <topic_root>/lrs-<chip_id>/config/<field_name>
-        if parts.len() >= 4 && parts[0] == topic_root && parts[2] == "config" {
-            let chip_id = parts[1].trim_start_matches("lrs-").to_string();
-            let field = parts[3..].join("/");
-            let _ = app.emit("mqtt-config-update", MqttConfigUpdatePayload {
-                chip_id,
-                field,
-                value: payload_str.clone(),
-            });
-            return;
-        }
-
-        // 3. Check peer telemetry: <topic_root>/lrs-<chip_id>/peers/<addrSeg>/<leaf>
-        if parts.len() >= 5 && parts[0] == topic_root && parts[2] == "peers" {
-            let gateway_id = parts[1].trim_start_matches("lrs-").to_string();
-            
-            // Extract peer address segment and optional chip_id
-            let addr_seg = parts[3];
-            let mut chip_id = None;
-            let address = if let Some(underscore_idx) = addr_seg.find('_') {
-                let addr_part = &addr_seg[..underscore_idx];
-                let rest = &addr_seg[underscore_idx + 1..];
-                if rest.starts_with("lrs-") {
-                    chip_id = Some(rest["lrs-".len()..].to_string());
+        if let Some(msg) = parse_mqtt_message(topic_root, &topic, &payload_str) {
+            match msg {
+                ParsedMqttMessage::Discovery(gw_payload) => {
+                    let _ = app.emit("mqtt-gateway-update", gw_payload);
                 }
-                addr_part.parse::<u8>().unwrap_or(0)
-            } else {
-                addr_seg.parse::<u8>().unwrap_or(0)
-            };
-
-            if address == 0 {
-                return;
+                ParsedMqttMessage::AdminResponse { chip_id, response } => {
+                    let _ = app.emit("mqtt-admin-response", MqttAdminResponsePayload {
+                        chip_id,
+                        response,
+                    });
+                }
+                ParsedMqttMessage::OtaStatus { chip_id, status } => {
+                    let _ = app.emit("mqtt-ota-status-update", MqttOtaStatusPayload {
+                        chip_id,
+                        status,
+                    });
+                }
+                ParsedMqttMessage::ConfigUpdate { chip_id, field, value } => {
+                    let _ = app.emit("mqtt-config-update", MqttConfigUpdatePayload {
+                        chip_id,
+                        field,
+                        value,
+                    });
+                }
+                ParsedMqttMessage::Telemetry(telemetry_payload) => {
+                    let _ = app.emit("mqtt-telemetry-update", telemetry_payload);
+                }
             }
+        }
+    }
+}
 
-            let field = if parts[4] == "sensor" && parts.len() > 5 {
-                parts[4..].join("/")
-            } else {
-                parts[4].to_string()
-            };
-            
-            // Try to parse payload as JSON (if it is a JSON number/bool/string/null)
-            let json_value = serde_json::from_str::<serde_json::Value>(&payload_str)
-                .unwrap_or_else(|_| serde_json::Value::String(payload_str.clone()));
+#[derive(Debug, PartialEq)]
+pub enum ParsedMqttMessage {
+    Discovery(MqttGatewayPayload),
+    AdminResponse {
+        chip_id: String,
+        response: serde_json::Value,
+    },
+    OtaStatus {
+        chip_id: String,
+        status: String,
+    },
+    ConfigUpdate {
+        chip_id: String,
+        field: String,
+        value: String,
+    },
+    Telemetry(MqttTelemetryPayload),
+}
 
-            let _ = app.emit("mqtt-telemetry-update", MqttTelemetryPayload {
-                gateway_id,
-                address,
+pub fn parse_mqtt_message(topic_root: &str, topic: &str, payload_str: &str) -> Option<ParsedMqttMessage> {
+    // 1. Check discovery topic: <topic_root>/discovery/lrs-<chip_id>
+    let discovery_prefix = format!("{}/discovery/", topic_root);
+    if topic.starts_with(&discovery_prefix) {
+        if let Ok(gw_payload) = serde_json::from_str::<MqttGatewayPayload>(payload_str) {
+            return Some(ParsedMqttMessage::Discovery(gw_payload));
+        }
+        return None;
+    }
+
+    // Strip prefix for all other topics
+    let prefix = format!("{}/", topic_root);
+    let Some(rest) = topic.strip_prefix(&prefix) else { return None; };
+
+    let parts: Vec<&str> = rest.split('/').collect();
+
+    // 2. Check admin response topic: <gateway_id>/admin_response
+    if parts.len() >= 2 && parts[1] == "admin_response" {
+        let chip_id = parts[0].trim_start_matches("lrs-").to_string();
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(payload_str) {
+            return Some(ParsedMqttMessage::AdminResponse {
                 chip_id,
-                field,
-                value: json_value,
+                response: json_val,
             });
         }
+        return None;
+    }
+
+    // Check ota status topic: <gateway_id>/ota_status
+    if parts.len() >= 2 && parts[1] == "ota_status" {
+        let chip_id = parts[0].trim_start_matches("lrs-").to_string();
+        return Some(ParsedMqttMessage::OtaStatus {
+            chip_id,
+            status: payload_str.to_string(),
+        });
+    }
+
+    // Check config topic: <gateway_id>/config/<field_name>
+    if parts.len() >= 3 && parts[1] == "config" {
+        let chip_id = parts[0].trim_start_matches("lrs-").to_string();
+        let field = parts[2..].join("/");
+        return Some(ParsedMqttMessage::ConfigUpdate {
+            chip_id,
+            field,
+            value: payload_str.to_string(),
+        });
+    }
+
+    // 3. Check peer telemetry: <gateway_id>/peers/<addrSeg>/<leaf>
+    if parts.len() >= 4 && parts[1] == "peers" {
+        let gateway_id = parts[0].trim_start_matches("lrs-").to_string();
+
+        // Extract peer address segment and optional chip_id
+        let addr_seg = parts[2];
+        let mut chip_id = None;
+        let address = if let Some(underscore_idx) = addr_seg.find('_') {
+            let addr_part = &addr_seg[..underscore_idx];
+            let rest_seg = &addr_seg[underscore_idx + 1..];
+            if rest_seg.starts_with("lrs-") {
+                chip_id = Some(rest_seg["lrs-".len()..].to_string());
+            }
+            addr_part.parse::<u8>().unwrap_or(0)
+        } else {
+            addr_seg.parse::<u8>().unwrap_or(0)
+        };
+
+        if address == 0 {
+            return None;
+        }
+
+        let field = if parts[3] == "sensor" && parts.len() > 4 {
+            parts[3..].join("/")
+        } else {
+            parts[3].to_string()
+        };
+
+        // Try to parse payload as JSON (if it is a JSON number/bool/string/null)
+        let json_value = serde_json::from_str::<serde_json::Value>(payload_str)
+            .unwrap_or_else(|_| serde_json::Value::String(payload_str.to_string()));
+
+        return Some(ParsedMqttMessage::Telemetry(MqttTelemetryPayload {
+            gateway_id,
+            address,
+            chip_id,
+            field,
+            value: json_value,
+        }));
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_single_segment_root_parsing() {
+        let root = "lora";
+
+        // Admin Response
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/admin_response", "{\"cmd\":\"ok\"}");
+        assert_eq!(msg, Some(ParsedMqttMessage::AdminResponse {
+            chip_id: "123456".to_string(),
+            response: serde_json::json!({"cmd":"ok"}),
+        }));
+
+        // OTA Status
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/ota_status", "downloading");
+        assert_eq!(msg, Some(ParsedMqttMessage::OtaStatus {
+            chip_id: "123456".to_string(),
+            status: "downloading".to_string(),
+        }));
+
+        // Config Update
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/config/wifi_sta_ssid", "MySSID");
+        assert_eq!(msg, Some(ParsedMqttMessage::ConfigUpdate {
+            chip_id: "123456".to_string(),
+            field: "wifi_sta_ssid".to_string(),
+            value: "MySSID".to_string(),
+        }));
+
+        // Telemetry
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/peers/1_lrs-abcdef/relay", "1");
+        assert_eq!(msg, Some(ParsedMqttMessage::Telemetry(MqttTelemetryPayload {
+            gateway_id: "123456".to_string(),
+            address: 1,
+            chip_id: Some("abcdef".to_string()),
+            field: "relay".to_string(),
+            value: serde_json::json!(1),
+        })));
+    }
+
+    #[test]
+    fn test_nested_root_parsing() {
+        let root = "site/home/lora";
+
+        // Admin Response
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/admin_response", "{\"cmd\":\"ok\"}");
+        assert_eq!(msg, Some(ParsedMqttMessage::AdminResponse {
+            chip_id: "123456".to_string(),
+            response: serde_json::json!({"cmd":"ok"}),
+        }));
+
+        // OTA Status
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/ota_status", "downloading");
+        assert_eq!(msg, Some(ParsedMqttMessage::OtaStatus {
+            chip_id: "123456".to_string(),
+            status: "downloading".to_string(),
+        }));
+
+        // Config Update
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/config/wifi_sta_ssid", "MySSID");
+        assert_eq!(msg, Some(ParsedMqttMessage::ConfigUpdate {
+            chip_id: "123456".to_string(),
+            field: "wifi_sta_ssid".to_string(),
+            value: "MySSID".to_string(),
+        }));
+
+        // Telemetry
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/peers/1_lrs-abcdef/relay", "1");
+        assert_eq!(msg, Some(ParsedMqttMessage::Telemetry(MqttTelemetryPayload {
+            gateway_id: "123456".to_string(),
+            address: 1,
+            chip_id: Some("abcdef".to_string()),
+            field: "relay".to_string(),
+            value: serde_json::json!(1),
+        })));
     }
 }
