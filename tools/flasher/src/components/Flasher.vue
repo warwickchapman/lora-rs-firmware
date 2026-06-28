@@ -12,6 +12,7 @@ import { useFleetInventoryPolling } from '../composables/useFleetInventoryPollin
 import { useFleetOta } from '../composables/useFleetOta';
 import { useFirmwareServer, NetworkInterface } from '../composables/useFirmwareServer';
 import ActivityPanel from './flasher/ActivityPanel.vue';
+import SessionMqttBanner from './flasher/SessionMqttBanner.vue';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -464,6 +465,7 @@ const localBrokerLans = ref<string[]>([]);
 const localBrokerError = ref('');
 const localBrokerClientMessage = ref('');
 const isLocalBrokerClientConnecting = ref(false);
+const isLocalBrokerStarting = ref(false);
 const showSessionConfigPanel = ref(false);
 
 const isSessionConnected = computed(() => {
@@ -528,6 +530,34 @@ const monitorMqttDraftPort = ref(1883);
 const monitorMqttDraftUser = ref('');
 const monitorMqttDraftPassword = ref('');
 const monitorMqttDraftTopicRoot = ref('lora');
+
+const monitorMqttDraftState = computed({
+  get: () => ({
+    host: monitorMqttDraftHost.value,
+    port: monitorMqttDraftPort.value,
+    topicRoot: monitorMqttDraftTopicRoot.value
+  }),
+  set: (val) => {
+    monitorMqttDraftHost.value = val.host;
+    monitorMqttDraftPort.value = val.port;
+    monitorMqttDraftTopicRoot.value = val.topicRoot;
+  }
+});
+
+const localBrokerState = computed(() => ({
+  running: localBrokerRunning.value,
+  error: localBrokerError.value,
+  lans: localBrokerLans.value,
+  isStarting: isLocalBrokerStarting.value,
+  isClientConnecting: isLocalBrokerClientConnecting.value,
+  clientMessage: localBrokerClientMessage.value
+}));
+
+const mqttSettingsState = computed(() => ({
+  connected: monitorMqttConnected.value,
+  host: monitorMqttHost.value,
+  port: monitorMqttPort.value
+}));
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const selectedMonitorDeviceAddress = ref<number | null>(null);
 const hasDiagnosticsData = computed(() => {
@@ -2757,7 +2787,6 @@ async function toggleMonitorMqttConnection(preserveSessionConnectionType = false
   showMonitorMqttSettings.value = false;
 }
 
-const isLocalBrokerStarting = ref(false);
 
 async function startLocalMqttBroker() {
   if (localBrokerRunning.value) return;
@@ -5555,87 +5584,18 @@ function toggleSelectAllBulkPorts() {
 
 <template>
   <div class="relative h-full flex flex-col gap-3">
-    <!-- Session Gateway Connection Settings Banner -->
-    <div class="glass-card p-3 shrink-0 flex flex-wrap items-center justify-between gap-3 text-xs border border-slate-800/80 bg-slate-900/40 text-left">
-      <div class="flex items-center gap-3">
-        <span class="font-bold text-slate-300">Gateway Session:</span>
-        <select v-model="sessionConnectionType" class="glass-input h-8 appearance-none min-w-[10rem] py-0 px-2 text-xs">
-          <option value="serial">USB Serial Gateway</option>
-          <option value="mqtt">Remote MQTT Broker</option>
-          <option value="local_broker">Local MQTT Broker</option>
-        </select>
-        
-        <span v-if="sessionConnectionType === 'mqtt'" :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-          Client: {{ monitorMqttConnected ? 'Connected' : 'Offline' }}
-        </span>
-
-        <span :class="['inline-flex h-8 items-center rounded border px-2.5 text-[10px] font-mono font-bold transition-all',
-                       isSessionConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-800 bg-slate-950/20 text-slate-400']">
-          <span :class="['w-1.5 h-1.5 rounded-full mr-1.5', isSessionConnected ? 'bg-emerald-500' : 'bg-slate-500']"></span>
-          Session: {{ isSessionConnected ? 'Active' : 'Offline' }}
-        </span>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <button v-if="sessionConnectionType !== 'serial'" @click="showSessionConfigPanel = !showSessionConfigPanel" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-[11px] font-bold">
-          Configure Session Connection
-        </button>
-      </div>
-    </div>
-
-    <!-- Dropdown Session Configuration Panel -->
-    <div v-if="showSessionConfigPanel && sessionConnectionType !== 'serial'" class="glass-card p-3 shrink-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-left border border-slate-800">
-      <div v-if="sessionConnectionType === 'local_broker'" class="flex flex-col gap-1.5 text-xs">
-        <label class="font-semibold text-slate-400">Local Port</label>
-        <input v-model.number="localBrokerPort" :disabled="localBrokerRunning" type="number" class="glass-input h-9 px-2 text-xs" />
-        <span class="text-[9px] text-slate-500">
-          {{ localBrokerRunning ? 'Port locked while running until Flasher exits.' : 'Default port is 1883.' }}
-        </span>
-        <span v-if="localBrokerError" class="text-[10px] text-rose-300 mt-1">
-          {{ localBrokerError }}
-        </span>
-      </div>
-
-      <div v-if="sessionConnectionType === 'local_broker'" class="flex flex-col gap-1.5 text-xs lg:col-span-2">
-        <label class="font-semibold text-slate-400">LAN Host Details (For manual gateway config)</label>
-        <div class="glass-input h-9 flex items-center px-2 text-slate-300 overflow-x-auto whitespace-nowrap custom-scrollbar">
-          IP: {{ localBrokerLans.join(' / ') || '127.0.0.1' }}
-        </div>
-        <div class="flex flex-col gap-1 mt-1">
-          <div class="flex gap-2">
-            <button v-if="!localBrokerRunning" @click="startAndConnectLocalBroker" :disabled="isLocalBrokerStarting || isLocalBrokerClientConnecting" class="primary-btn h-7 px-2 text-[10px] whitespace-nowrap disabled:opacity-60">
-              {{ isLocalBrokerStarting ? 'Starting...' : 'Retry Start/Connect' }}
-            </button>
-            <button @click="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')" class="glass-input h-7 px-2 text-[10px] whitespace-nowrap">
-              Copy Gateway MQTT Settings
-            </button>
-          </div>
-          <span class="text-[9px] text-slate-400 mt-1">
-            Paste into the gateway Settings over USB, or use these values when configuring MQTT manually.
-          </span>
-        </div>
-        <span
-          v-if="localBrokerClientMessage"
-          :class="['text-[10px] mt-1', monitorMqttConnected && monitorMqttHost === '127.0.0.1' && monitorMqttPort === localBrokerPort ? 'text-emerald-300' : 'text-slate-400']"
-        >
-          {{ localBrokerClientMessage }}
-        </span>
-      </div>
-
-      <div v-if="sessionConnectionType === 'mqtt'" class="flex flex-col gap-1.5 text-xs lg:col-span-2">
-        <label class="font-semibold text-slate-400">Remote MQTT Broker Settings</label>
-        <div class="grid grid-cols-3 gap-2">
-          <input v-model="monitorMqttDraftHost" placeholder="Host" class="glass-input h-8 px-2 text-xs" />
-          <input v-model.number="monitorMqttDraftPort" placeholder="Port" type="number" class="glass-input h-8 px-2 text-xs" />
-          <input v-model="monitorMqttDraftTopicRoot" placeholder="Topic Root" class="glass-input h-8 px-2 text-xs" />
-        </div>
-        <div class="flex gap-2 mt-1">
-          <button @click="toggleMonitorMqttConnection()" class="primary-btn h-7 px-2 text-[10px]">
-            {{ monitorMqttConnected ? 'Disconnect Client' : 'Connect Client' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <SessionMqttBanner
+      v-model="sessionConnectionType"
+      v-model:show-session-config-panel="showSessionConfigPanel"
+      v-model:local-broker-port="localBrokerPort"
+      v-model:mqtt-draft="monitorMqttDraftState"
+      :is-session-connected="isSessionConnected"
+      :local-broker-state="localBrokerState"
+      :mqtt-settings-state="mqttSettingsState"
+      @start-local-broker="startAndConnectLocalBroker"
+      @copy-gateway-settings="copyToClipboard(`mqtt_client_enabled=true\nmqtt_control_enabled=true\nmqtt_host=${localBrokerLans[0] || '127.0.0.1'}\nmqtt_port=${localBrokerPort}\nmqtt_topic_root=lora`, 'Local configuration')"
+      @toggle-mqtt-connection="toggleMonitorMqttConnection"
+    />
 
     <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
