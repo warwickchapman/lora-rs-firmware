@@ -3305,7 +3305,8 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
     return;
   }
   try {
-    const isPowerSaveChange = powerSaveEnabled !== device.power_save_listen_only;
+    const currentPowerSave = device.power_save_listen_only === true;
+    const isPowerSaveChange = powerSaveEnabled !== currentPowerSave;
     const actionLabel = isPowerSaveChange ? 'power configuration' : 'sensor configuration';
     notify(`Transmitting ${actionLabel} to remote ${device.address}...`);
     await sendEasyPairCommandOnPort(port, 'remote_sensor_config', {
@@ -3318,20 +3319,29 @@ async function executeRemoteSensors(device: LoraInventoryDevice, tempEnabled: bo
     notify(`${actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1)} transmitted successfully to remote ${device.address}`);
     // Save to history so it survives refreshes
     const now = Date.now();
-    fleetRowHistory.value[device.address] = {
-      ...(fleetRowHistory.value[device.address] || {}),
-      pendingPowerSaveListenOnly: powerSaveEnabled,
-      pendingPowerSaveTxMs: now
+    const nextHistory = {
+      ...(fleetRowHistory.value[device.address] || {})
     };
+    if (isPowerSaveChange) {
+      nextHistory.pendingPowerSaveListenOnly = powerSaveEnabled;
+      nextHistory.pendingPowerSaveTxMs = now;
+    }
+    fleetRowHistory.value[device.address] = nextHistory;
     loraInventory.value = loraInventory.value.map(row => {
       if (row.address === device.address) {
-        return {
+        const nextRow = {
           ...row,
           temp_enabled: tempEnabled,
-          tank_enabled: tankEnabled,
-          pending_power_save_listen_only: powerSaveEnabled,
-          pending_power_save_tx_ms: now
+          tank_enabled: tankEnabled
         };
+        if (isPowerSaveChange) {
+          return {
+            ...nextRow,
+            pending_power_save_listen_only: powerSaveEnabled,
+            pending_power_save_tx_ms: now
+          };
+        }
+        return nextRow;
       }
       return row;
     });
