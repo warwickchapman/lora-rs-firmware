@@ -30,6 +30,8 @@ import SessionMqttBanner from './flasher/SessionMqttBanner.vue';
 import MonitorMqttSettingsModal from './flasher/MonitorMqttSettingsModal.vue';
 import FlashMode from './flasher/FlashMode.vue';
 import RemoteSettingsModal from './flasher/RemoteSettingsModal.vue';
+import RemoteFactoryResetModal from './flasher/RemoteFactoryResetModal.vue';
+import type { RemoteFactoryResetDraft } from './flasher/RemoteFactoryResetModal.vue';
 import ProvisionMode from './flasher/ProvisionMode.vue';
 import type {
   ProvisionConfig,
@@ -527,6 +529,42 @@ interface FactoryResetModalState {
   keep_wifi_credentials: boolean;
 }
 const factoryResetTargetModal = ref<FactoryResetModalState | null>(null);
+
+const isFactoryResetTargetModalOpen = computed({
+  get: () => !!factoryResetTargetModal.value,
+  set: (open) => {
+    if (!open) factoryResetTargetModal.value = null;
+  }
+});
+
+const factoryResetTargetDraftComputed = computed<RemoteFactoryResetDraft>({
+  get: () => ({
+    keep_shared_fleet_key: factoryResetTargetModal.value?.keep_shared_fleet_key ?? false,
+    keep_wifi_credentials: factoryResetTargetModal.value?.keep_wifi_credentials ?? false,
+  }),
+  set: (draft) => {
+    if (!factoryResetTargetModal.value) return;
+    factoryResetTargetModal.value = {
+      ...factoryResetTargetModal.value,
+      keep_shared_fleet_key: draft.keep_shared_fleet_key,
+      keep_wifi_credentials: draft.keep_wifi_credentials,
+    };
+  }
+});
+
+const factoryResetTargetAddressComputed = computed<number | string>(() => {
+  return factoryResetTargetModal.value?.device.address ?? '';
+});
+
+function confirmRemoteFactoryReset() {
+  const modal = factoryResetTargetModal.value;
+  if (!modal) return;
+  executeRemoteFactoryReset(
+    modal.device,
+    modal.keep_shared_fleet_key,
+    modal.keep_wifi_credentials
+  );
+}
 
 const networkUdpLogContainer = ref<HTMLElement | null>(null);
 const deviceInfoReadSeqByPort = ref<Record<string, number>>({});
@@ -6475,52 +6513,13 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
     </Transition>
 
     <!-- Targeted Factory Reset Dialog -->
-    <Transition name="toast">
-      <div v-if="factoryResetTargetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
-          <div>
-            <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Device {{ factoryResetTargetModal.device.address }}</h3>
-            <p class="mt-1 text-xs text-slate-500">Decommissions the remote device over LoRa, formatting its state and triggering a reboot.</p>
-          </div>
-
-          <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
-            💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it stays in this fleet. Unchecking it performs a full factory reset and removes the device from this fleet.
-          </div>
-
-          <div class="flex flex-col gap-3 py-1">
-            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-2.5 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-              <input v-model="factoryResetTargetModal.keep_shared_fleet_key" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-0 focus:ring-offset-0" />
-              <div>
-                <div class="font-semibold text-slate-200">Reset but keep in fleet</div>
-                <div class="text-[10px] text-slate-500 mt-0.5">Preserves pairing encryption keys to stay in this gateway's secure fleet.</div>
-              </div>
-            </label>
-            <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-2.5 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
-              <input v-model="factoryResetTargetModal.keep_wifi_credentials" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-0 focus:ring-offset-0" />
-              <div>
-                <div class="font-semibold text-slate-200">Keep WiFi Credentials</div>
-                <div class="text-[10px] text-slate-500 mt-0.5">Preserves local WiFi SSID and password settings.</div>
-              </div>
-            </label>
-          </div>
-
-          <div class="mt-2 flex justify-end gap-2">
-            <button
-              @click="factoryResetTargetModal = null"
-              class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold"
-            >
-              Cancel
-            </button>
-            <button
-              @click="executeRemoteFactoryReset(factoryResetTargetModal.device, factoryResetTargetModal.keep_shared_fleet_key, factoryResetTargetModal.keep_wifi_credentials)"
-              class="m-0 h-9 rounded-md border border-rose-500/40 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30 px-4 text-xs font-bold transition-colors"
-            >
-              Factory Reset Device
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+    <RemoteFactoryResetModal
+      v-model="isFactoryResetTargetModalOpen"
+      v-model:draft="factoryResetTargetDraftComputed"
+      :address="factoryResetTargetAddressComputed"
+      @cancel="factoryResetTargetModal = null"
+      @confirm="confirmRemoteFactoryReset"
+    />
 
     <!-- Device Settings Modal -->
     <RemoteSettingsModal
