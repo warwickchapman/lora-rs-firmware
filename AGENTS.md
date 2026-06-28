@@ -15,6 +15,15 @@ When reviewing an implementation plan against a defined boundary or constraint:
 - Before approving, argue the rejection case. List what should be removed and why.
 - Treat "not a blocker" as a decision that requires justification, not a default.
 
+## Implementation Review Discipline
+
+When reviewing an implementation against an approved plan:
+
+- Verify: (1) the API matches what was approved, (2) no operator-facing behaviour changed unless explicitly planned, (3) every boundary rule from the plan is respected in the code, (4) tests cover the behaviours listed in the plan, not just happy paths.
+- For every adapter/computed mapping, verify that every referenced variable/function exists in the current source and has the correct name and type.
+- For every field, computed, template binding, and constant in the child, verify it matches the original behaviour in the source. Compare adapter mappings against the original expressions line by line.
+- Flag anything added beyond the plan scope and anything from the plan that was skipped or simplified.
+
 ## Dev Build Versioning
 
 - The repo-root `VERSION` file is the operator-visible firmware and Flasher version source of truth.
