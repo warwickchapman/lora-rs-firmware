@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, Ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -7,6 +7,7 @@ import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, SensorReading, CANDIDATE_RECENT_IDENTITY_MS } from '../composables/useFleetInventory';
+import { useFleetInventoryPolling } from '../composables/useFleetInventoryPolling';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -671,9 +672,22 @@ const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
 const activeGatewaySessionKey = ref('');
 const processedEasyPairLogLines = ref<Set<string>>(new Set());
 const isNetworkGatewayLoading = ref(false);
-const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
-const networkInventoryPollMode = ref<'cache' | 'scan' | null>(null);
-const isFleetScanPollingActive = ref(false);
+const {
+  networkInventoryPollMode,
+  refreshLoraInventoryStatus,
+  startLoraInventoryPolling,
+  startFleetCachePolling,
+  stopLoraInventoryPolling
+} = useFleetInventoryPolling({
+  activeMode: activeMode as Ref<any>,
+  fleetTransport,
+  gatewaySelectedPort,
+  selectedMqttGatewayChipId,
+  isLoraInventoryScanning,
+  refreshGatewaySnapshot,
+  fleetScanPollIntervalMs: FLEET_SCAN_POLL_INTERVAL_MS,
+  fleetCachePollIntervalMs: FLEET_CACHE_POLL_INTERVAL_MS
+});
 // fleetForceScanCooldownUntilMs is managed by useFleetInventory
 const fleetClockTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const fleetOtaFollowupTimers = ref<Record<number, ReturnType<typeof window.setTimeout>>>({});
@@ -2468,46 +2482,7 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   }
 }
 
-async function refreshLoraInventoryStatus(background = true) {
-  const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
-  await refreshGatewaySnapshot(targetPort, background, 'fleet');
-}
 
-function startLoraInventoryPolling() {
-  stopLoraInventoryPolling(false, false);
-  networkInventoryPollMode.value = 'scan';
-  const interval = fleetTransport.value === 'mqtt' ? 4000 : FLEET_SCAN_POLL_INTERVAL_MS;
-  networkInventoryPollTimer.value = window.setInterval(async () => {
-    if (isFleetScanPollingActive.value) return;
-    isFleetScanPollingActive.value = true;
-    try {
-      await refreshLoraInventoryStatus();
-    } finally {
-      isFleetScanPollingActive.value = false;
-    }
-  }, interval);
-}
-
-function startFleetCachePolling() {
-  if (fleetTransport.value === 'mqtt') return;
-  const targetPort = gatewaySelectedPort.value;
-  if (activeMode.value !== 'network' || !targetPort || isLoraInventoryScanning.value) return;
-  if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
-  stopLoraInventoryPolling(false, false);
-  networkInventoryPollMode.value = 'cache';
-  networkInventoryPollTimer.value = window.setInterval(() => {
-    refreshLoraInventoryStatus(true);
-  }, FLEET_CACHE_POLL_INTERVAL_MS);
-}
-
-function stopLoraInventoryPolling(markIdle = true, clearMode = true) {
-  if (networkInventoryPollTimer.value) {
-    window.clearInterval(networkInventoryPollTimer.value);
-    networkInventoryPollTimer.value = null;
-  }
-  if (clearMode) networkInventoryPollMode.value = null;
-  if (markIdle) isLoraInventoryScanning.value = false;
-}
 
 
 function fleetFreshnessClass(row: LoraInventoryDevice): string {
