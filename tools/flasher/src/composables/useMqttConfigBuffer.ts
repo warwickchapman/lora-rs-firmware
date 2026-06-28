@@ -16,6 +16,7 @@ export function canonicalChipId(raw: string | undefined | null): string {
 
 export function useMqttConfigBuffer() {
   const mqttConfigBuffers = ref<Record<string, DeviceMqttConfig>>({});
+  const settleTimers: Record<string, any> = {};
 
   function handleConfigUpdate(
     chip_id: string,
@@ -29,37 +30,58 @@ export function useMqttConfigBuffer() {
     }
     const deviceConfig = mqttConfigBuffers.value[canonical];
 
+    const scheduleSettle = () => {
+      if (settleTimers[canonical]) {
+        clearTimeout(settleTimers[canonical]);
+      }
+      settleTimers[canonical] = setTimeout(() => {
+        if (deviceConfig.complete && onComplete) {
+          onComplete(chip_id, { ...deviceConfig.buffer });
+        }
+        delete settleTimers[canonical];
+      }, 50); // 50ms settle debounce window
+    };
+
     if (field === '_complete') {
       const isComplete = value === 'true' || value === '1';
       if (!isComplete) {
+        if (settleTimers[canonical]) {
+          clearTimeout(settleTimers[canonical]);
+          delete settleTimers[canonical];
+        }
         deviceConfig.buffer = {};
         deviceConfig.secretsMetadata = {};
         deviceConfig.complete = false;
       } else {
         deviceConfig.complete = true;
-        if (onComplete) {
-          onComplete(chip_id, { ...deviceConfig.buffer });
-        }
+        scheduleSettle();
       }
-    } else if (field.endsWith('_set')) {
-      const secretName = field.substring(0, field.length - 4);
-      deviceConfig.secretsMetadata[secretName] = value === 'true' || value === '1';
-    } else if (field === 'fleet_passphrase_default') {
-      deviceConfig.secretsMetadata['fleet_passphrase_default'] = value === 'true' || value === '1';
     } else {
-      let parsedValue: any = value;
-      if (value === 'true') parsedValue = true;
-      else if (value === 'false') parsedValue = false;
-      else if (!isNaN(Number(value)) && value.trim() !== '') {
-        parsedValue = Number(value);
-      } else if (value.startsWith('[') && value.endsWith(']')) {
-        try {
-          parsedValue = JSON.parse(value);
-        } catch (e) {
-          // ignore
+      if (field.endsWith('_set')) {
+        const secretName = field.substring(0, field.length - 4);
+        deviceConfig.secretsMetadata[secretName] = value === 'true' || value === '1';
+      } else if (field === 'fleet_passphrase_default') {
+        deviceConfig.secretsMetadata['fleet_passphrase_default'] = value === 'true' || value === '1';
+      } else {
+        let parsedValue: any = value;
+        if (value === 'true') parsedValue = true;
+        else if (value === 'false') parsedValue = false;
+        else if (!isNaN(Number(value)) && value.trim() !== '') {
+          parsedValue = Number(value);
+        } else if (value.startsWith('[') && value.endsWith(']')) {
+          try {
+            parsedValue = JSON.parse(value);
+          } catch (e) {
+            // ignore
+          }
         }
+        deviceConfig.buffer[field] = parsedValue;
       }
-      deviceConfig.buffer[field] = parsedValue;
+
+      // If already complete, any new update schedules/reschedules the settle timer
+      if (deviceConfig.complete) {
+        scheduleSettle();
+      }
     }
   }
 

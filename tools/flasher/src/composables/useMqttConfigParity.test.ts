@@ -31,11 +31,13 @@ function serialConfigPatch(cfg: any): Record<string, any> {
   return patch;
 }
 
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 describe('Settings-over-MQTT Parity', () => {
-  it('does not load or overwrite config until _complete is received', () => {
+  it('does not load or overwrite config until _complete is received and settled', async () => {
     const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
     const canonical = canonicalChipId('123456');
-    let completedConfig: Record<string, any> | null = null;
+    let completedConfig: any = null;
 
     handleConfigUpdate('123456', 'input_control_paired_lora_enabled', 'false', (_id, config) => {
       completedConfig = config;
@@ -50,21 +52,29 @@ describe('Settings-over-MQTT Parity', () => {
     });
 
     expect(mqttConfigBuffers.value[canonical].complete).toBe(true);
+    // Should still be null immediately before settling
+    expect(completedConfig).toBeNull();
+
+    // Wait for the settle window
+    await wait(60);
+
     expect(completedConfig).not.toBeNull();
     const normalized = normalizeSerialAdminConfig(completedConfig, null, 'mqtt');
     expect(normalized.input_control_paired_lora_enabled).toBe(false);
   });
 
-  it('keeps secret inputs blank on MQTT load and stores metadata separately', () => {
+  it('keeps secret inputs blank on MQTT load and stores metadata separately', async () => {
     const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
     const canonical = canonicalChipId('123456');
-    let completedConfig: Record<string, any> | null = null;
+    let completedConfig: any = null;
 
     handleConfigUpdate('123456', 'wifi_sta_ssid', 'MySSID');
     handleConfigUpdate('123456', 'wifi_sta_password_set', 'true');
     handleConfigUpdate('123456', '_complete', 'true', (_id, config) => {
       completedConfig = config;
     });
+
+    await wait(60);
 
     const normalized = normalizeSerialAdminConfig(completedConfig, null, 'mqtt');
     expect(normalized.wifi_sta_ssid).toBe('MySSID');
@@ -74,7 +84,7 @@ describe('Settings-over-MQTT Parity', () => {
     expect(meta.wifi_sta_password).toBe(true); // Metadata stored separately
   });
 
-  it('clears buffer and metadata when _complete=false is received', () => {
+  it('clears buffer and metadata when _complete=false is received', async () => {
     const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
     const canonical = canonicalChipId('123456');
 
@@ -82,6 +92,8 @@ describe('Settings-over-MQTT Parity', () => {
     handleConfigUpdate('123456', 'wifi_sta_ssid', 'MySSID');
     handleConfigUpdate('123456', 'wifi_sta_password_set', 'true');
     handleConfigUpdate('123456', '_complete', 'true');
+
+    await wait(60);
 
     expect(mqttConfigBuffers.value[canonical].complete).toBe(true);
     expect(mqttConfigBuffers.value[canonical].buffer.wifi_sta_ssid).toBe('MySSID');
@@ -107,5 +119,83 @@ describe('Settings-over-MQTT Parity', () => {
     expect(patch.wifi_sta_password).toBeUndefined(); // Omitted because blank
     expect(patch.fleet_passphrase).toBe('new-passphrase'); // Included because typed
   });
-});
 
+  // Focused Test 1: _complete=true arrives before input_control_paired_lora_enabled=false
+  it('_complete=true arrives before input_control_paired_lora_enabled=false; after settling, applied config contains false, not the default', async () => {
+    const { handleConfigUpdate } = useMqttConfigBuffer();
+    let completedConfig: any = null;
+
+    // _complete arrives first
+    handleConfigUpdate('123456', '_complete', 'true', (_id, config) => {
+      completedConfig = config;
+    });
+
+    // Then input_control_paired_lora_enabled arrives after _complete
+    handleConfigUpdate('123456', 'input_control_paired_lora_enabled', 'false', (_id, config) => {
+      completedConfig = config;
+    });
+
+    // Wait for the settle window
+    await wait(60);
+
+    expect(completedConfig).not.toBeNull();
+    const normalized = normalizeSerialAdminConfig(completedConfig, null, 'mqtt');
+    expect(normalized.input_control_paired_lora_enabled).toBe(false);
+  });
+
+  // Focused Test 2: Additional retained fields arriving after _complete=true cause config to be applied again or delayed until settled
+  it('additional retained fields arriving after _complete=true delay and re-apply completed config', async () => {
+    const { handleConfigUpdate } = useMqttConfigBuffer();
+    let completedConfig: any = null;
+    let callCount = 0;
+
+    handleConfigUpdate('123456', 'wifi_sta_ssid', 'SSID_A');
+    handleConfigUpdate('123456', '_complete', 'true', (_id, config) => {
+      completedConfig = config;
+      callCount++;
+    });
+
+    // Settle first
+    await wait(60);
+    expect(callCount).toBe(1);
+    expect(completedConfig?.wifi_sta_ssid).toBe('SSID_A');
+
+    // Send another update after it had settled once
+    handleConfigUpdate('123456', 'wifi_sta_ssid', 'SSID_B', (_id, config) => {
+      completedConfig = config;
+      callCount++;
+    });
+
+    // Immediate check (debounce should be running)
+    expect(callCount).toBe(1); // not called again yet
+
+    // Wait for reschedule to settle
+    await wait(60);
+    expect(callCount).toBe(2);
+    expect(completedConfig?.wifi_sta_ssid).toBe('SSID_B');
+  });
+
+  // Focused Test 3: _complete=false cancels any pending complete callback and clears state
+  it('_complete=false cancels pending complete callback and clears state', async () => {
+    const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
+    const canonical = canonicalChipId('123456');
+    let completedConfig: any = null;
+
+    handleConfigUpdate('123456', 'wifi_sta_ssid', 'MySSID');
+    // Start complete process
+    handleConfigUpdate('123456', '_complete', 'true', (_id, config: Record<string, any> | null) => {
+      completedConfig = config;
+    });
+
+    // Before it settles (within 50ms), send _complete=false
+    await wait(20);
+    handleConfigUpdate('123456', '_complete', 'false');
+
+    // Wait past the original 50ms settle window
+    await wait(50);
+
+    expect(completedConfig).toBeNull(); // Callback never fired
+    expect(mqttConfigBuffers.value[canonical].complete).toBe(false);
+    expect(mqttConfigBuffers.value[canonical].buffer).toEqual({});
+  });
+});
