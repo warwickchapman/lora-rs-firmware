@@ -42,6 +42,15 @@ import type {
   ProvisionWifiState,
   ProvisionIdentifyState
 } from './flasher/ProvisionMode.vue';
+import SettingsMode from './flasher/SettingsMode.vue';
+import type {
+  SettingsForm,
+  SettingsHeaderState,
+  SettingsTransportState,
+  SettingsAdminStatusState,
+  SettingsSecretState,
+  SettingsWifiState
+} from './flasher/SettingsMode.vue';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -267,14 +276,6 @@ const READABLE_KEY_VOWELS = 'aeiou';
 const NETWORK_FIRMWARE_PATH = '/firmware.bin';
 const LRS_REMOTE_SCAN_CAP = 12;
 const DISCONNECTED_PORT_CACHE_GRACE_MS = 120000;
-const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
-  { key: 'general', label: 'General' },
-  { key: 'network', label: 'Network' },
-  { key: 'mqtt', label: 'MQTT' },
-  { key: 'sensors', label: 'Sensors' },
-  { key: 'system', label: 'System' },
-  { key: 'remote', label: 'Reference' },
-];
 
 const ports = ref<SerialPort[]>([]);
 const flashSelectedPort = ref('');
@@ -750,7 +751,7 @@ const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 const monitorAutoRefresh = ref(true);
 const gatewaySnapshotPauseCount = ref(0);
-const settingsTransport = computed<'serial' | 'mqtt' | 'lora'>(() => {
+const settingsTransport = computed<'serial' | 'mqtt'>(() => {
   return sessionConnectionType.value === 'serial' ? 'serial' : 'mqtt';
 });
 const settingsTab = ref<SettingsTab>('general');
@@ -1311,6 +1312,94 @@ const systemConfigState = computed(() => ({
   firmwareVersions: firmwareVersions.value,
   isFetchingFirmware: isFetchingFirmware.value,
   localOptionConstant: LOCAL_OPTION
+}));
+
+const settingsFormComputed = computed<SettingsForm>({
+  get: () => ({
+    selectedPort: selectedPort.value,
+    sessionConnectionType: sessionConnectionType.value,
+    settingsAdminPassword: settingsAdminPassword.value,
+    selectedMqttManualChipId: selectedMqttManualChipId.value,
+    selectedMqttGatewayChipId: selectedMqttGatewayChipId.value,
+    settingsTab: settingsTab.value,
+    remoteSubTab: remoteSubTab.value,
+    showSettingsAdminPassword: showSettingsAdminPassword.value,
+    showSerialWifiPassword: showSerialWifiPassword.value,
+    showSerialMqttPassword: showSerialMqttPassword.value,
+    showSerialFleetKey: showSerialFleetKey.value,
+    serialFactoryKeepFleet: serialFactoryKeepFleet.value,
+    serialFactoryKeepWifi: serialFactoryKeepWifi.value,
+  }),
+  set: (val) => {
+    selectedPort.value = val.selectedPort;
+    sessionConnectionType.value = val.sessionConnectionType;
+    settingsAdminPassword.value = val.settingsAdminPassword;
+    selectedMqttManualChipId.value = val.selectedMqttManualChipId;
+    selectedMqttGatewayChipId.value = val.selectedMqttGatewayChipId;
+    settingsTab.value = val.settingsTab;
+    remoteSubTab.value = val.remoteSubTab;
+    showSettingsAdminPassword.value = val.showSettingsAdminPassword;
+    showSerialWifiPassword.value = val.showSerialWifiPassword;
+    showSerialMqttPassword.value = val.showSerialMqttPassword;
+    showSerialFleetKey.value = val.showSerialFleetKey;
+    serialFactoryKeepFleet.value = val.serialFactoryKeepFleet;
+    serialFactoryKeepWifi.value = val.serialFactoryKeepWifi;
+  }
+});
+
+const settingsHeaderStateComputed = computed<SettingsHeaderState>(() => ({
+  serialStatusSummary: serialStatusSummary.value,
+  identifyAvailable: identifyAvailable.value,
+  identifyDisabled: identifyDisabled.value,
+  isIdentifying: isIdentifying.value,
+  isFlashing: isFlashing.value,
+  isLoadingInfo: isLoadingInfo.value,
+  isSerialAdminLoading: isSerialAdminLoading.value,
+  serialAdminDisabled: serialAdminDisabled.value,
+  serialAdminBusy: serialAdminBusy.value,
+  serialAdminConfigExists: !!serialAdminConfig.value,
+}));
+
+const settingsTransportStateComputed = computed<SettingsTransportState>(() => ({
+  settingsTransport: settingsTransport.value,
+  ports: ports.value.map(p => ({ port_name: p.port_name, description: p.description || undefined })),
+  serialPortSelectorDisabled: serialPortSelectorDisabled.value,
+  isRefreshingPorts: isRefreshingPorts.value,
+  mqttGateways: Object.fromEntries(
+    Object.entries(mqttGateways.value).map(([k, v]) => [k, { chip_id: v.chip_id }])
+  ),
+  manualMqttGatewayError: manualMqttGatewayError.value,
+  isSelectedMqttGatewayDiscovered: isSelectedMqttGatewayDiscovered.value,
+  monitorMqttConnected: monitorMqttConnected.value,
+}));
+
+const settingsAdminStatusStateComputed = computed<SettingsAdminStatusState | null>(() => {
+  const status = serialAdminStatus.value;
+  if (!status) return null;
+  return {
+    fw_version: status.fw_version,
+    uptime_ms: status.uptime_ms,
+    heap_free: status.heap_free,
+    mode: status.mode,
+  };
+});
+
+const settingsSecretStateComputed = computed<SettingsSecretState>(() => ({
+  isWifiStaPasswordConfigured: isMqttSecretConfigured('wifi_sta_password'),
+  isMqttPasswordConfigured: isMqttSecretConfigured('mqtt_password'),
+  isFleetPassphraseConfigured: isMqttSecretConfigured('fleet_passphrase'),
+  isMqttFleetPassphraseDefault: isMqttFleetPassphraseDefault(),
+}));
+
+const settingsWifiStateComputed = computed<SettingsWifiState>(() => ({
+  isWifiScanning: isWifiScanning.value,
+  settingsWifiNetworks: settingsWifiNetworks.value.map(n => ({
+    ssid: n.ssid,
+    rssi: n.rssi,
+    channel: n.channel,
+    secure: n.secure,
+    bssid: n.bssid,
+  })),
 }));
 const serialAdminIsFactoryDefault = computed(() => {
   const st = serialAdminStatus.value;
@@ -4490,12 +4579,7 @@ async function cancelEasyPair() {
   }
 }
 
-function wifiSignalLabel(rssi: number): string {
-  if (rssi >= -60) return 'Excellent';
-  if (rssi >= -70) return 'Good';
-  if (rssi >= -80) return 'Fair';
-  return 'Weak';
-}
+
 
 async function scanGatewayWifi() {
   if (!gatewayReady.value) {
@@ -6120,771 +6204,32 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @start-bulk-reset="startBulkFactoryReset"
       />
 
-      <div v-if="activeMode === 'settings'" class="flex flex-col h-full min-h-0 overflow-hidden gap-3 text-left">
-        <div class="glass-card flex flex-col gap-3 p-3 shrink-0">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div class="min-w-0">
-              <h2 class="text-base font-bold text-cyan-300">Settings</h2>
-              <p class="mt-1 text-xs text-slate-400">{{ serialStatusSummary }}</p>
-            </div>
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <button
-                v-if="identifyAvailable"
-                @click="triggerIdentify"
-                :disabled="identifyDisabled"
-                :class="[
-                  'glass-input m-0 h-10 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed',
-                  { 'identify-led-active text-cyan-300': isIdentifying }
-                ]"
-                title="Identify selected USB device"
-                aria-label="Identify selected USB device"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
-                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
-                </svg>
-              </button>
-              <button v-if="settingsTransport !== 'mqtt'" @click="readDeviceInfo" :disabled="isFlashing || isLoadingInfo" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                {{ isLoadingInfo ? 'Reading...' : 'Read identity' }}
-              </button>
-              <button @click="refreshSerialAdminStatus" :disabled="serialAdminDisabled" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                {{ isSerialAdminLoading ? 'Loading...' : 'Refresh status' }}
-              </button>
-              <button @click="fetchSerialDeviceSettings" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy" class="primary-btn m-0 h-10 px-4 text-xs font-bold disabled:opacity-60">
-                {{ isSerialAdminLoading ? 'Fetching...' : 'Fetch settings' }}
-              </button>
-              <button @click="copySerialAdminConfigJson" :disabled="!serialAdminConfig" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                Copy config JSON
-              </button>
-            </div>
-          </div>
-
-          <div :class="['grid grid-cols-1 gap-2', settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_8rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem_10rem]']">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Device</label>
-              <div class="flex gap-2">
-                <select v-if="settingsTransport === 'serial'" v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
-                  <option value="" disabled>Select USB device</option>
-                  <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
-                    {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
-                  </option>
-                  <option v-if="ports.length === 0" disabled>Scanning...</option>
-                </select>
-                <div v-else class="flex-1 flex flex-col gap-1">
-                  <div v-if="Object.keys(mqttGateways).length === 0" class="flex flex-col gap-1.5 w-full">
-                    <input
-                      v-model="selectedMqttManualChipId"
-                      @input="handleManualMqttGatewayInput(selectedMqttManualChipId)"
-                      placeholder="Enter manual gateway chip ID"
-                      class="glass-input h-9 px-2 text-xs font-mono w-full"
-                    />
-                    <span class="text-[9px] text-slate-400">
-                      No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
-                    </span>
-                    <span v-if="manualMqttGatewayError" class="text-[9px] text-rose-300">
-                      {{ manualMqttGatewayError }}
-                    </span>
-                  </div>
-                  <select v-else v-model="selectedMqttGatewayChipId" class="glass-input h-9 flex-1 appearance-none w-full">
-                    <option value="" disabled>Select MQTT gateway</option>
-                    <option v-for="gw in Object.values(mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
-                      {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
-                    </option>
-                    <!-- Keep manual selection visible when it is not in discovery list -->
-                    <option v-if="selectedMqttGatewayChipId && !isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
-                      Manual: lrs-{{ selectedMqttGatewayChipId }}
-                    </option>
-                  </select>
-                </div>
-                <button v-if="settingsTransport === 'serial'" @click="refreshPorts" :disabled="isRefreshingPorts || serialPortSelectorDisabled" class="glass-input h-9 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all group/btn shrink-0 disabled:opacity-60">
-                  <svg xmlns="http://www.w3.org/2000/svg" :class="['w-5 h-5 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': isRefreshingPorts }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
-                </button>
-              </div>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Transport</label>
-              <select v-model="sessionConnectionType" class="glass-input h-9 appearance-none">
-                <option value="serial">USB Serial Gateway</option>
-                <option value="mqtt">Remote MQTT Broker</option>
-                <option value="local_broker">Local MQTT Broker</option>
-              </select>
-            </div>
-            <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs min-w-0">
-              <label class="font-medium text-slate-400">Admin password</label>
-              <div class="relative w-full">
-                <input
-                  v-model="settingsAdminPassword"
-                  :type="showSettingsAdminPassword ? 'text' : 'password'"
-                  class="glass-input h-9 w-full pr-10 font-mono text-xs"
-                  placeholder="Enter admin password"
-                />
-                <button
-                  type="button"
-                  @click="showSettingsAdminPassword = !showSettingsAdminPassword"
-                  class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200"
-                  style="background: transparent; border: none; padding: 0;"
-                >
-                  <svg v-if="showSettingsAdminPassword" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                  <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                </button>
-              </div>
-            </div>
-            <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">MQTT config</label>
-              <button
-                @click="openMonitorMqttSettings"
-                class="glass-input h-9 hover:bg-slate-700/70 text-xs font-bold whitespace-nowrap"
-              >
-                Broker config
-              </button>
-            </div>
-            <div v-if="settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">MQTT broker</label>
-              <span :class="['inline-flex h-9 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                {{ monitorMqttConnected ? 'Connected' : 'Offline' }}
-              </span>
-            </div>
-            <div v-else class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Admin path</label>
-              <div class="glass-input h-9 flex items-center text-slate-400">
-                USB serial admin
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="glass-card flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div class="flex shrink-0 overflow-x-auto border-b border-slate-800 bg-slate-900/50 text-xs font-bold">
-            <button
-              v-for="tab in SETTINGS_TABS"
-              :key="tab.key"
-              @click="settingsTab = tab.key"
-              :class="['m-0 h-9 rounded-none border-r border-slate-800 px-4 transition-colors', settingsTab === tab.key ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100']"
-            >
-              {{ tab.label }}
-            </button>
-          </div>
-
-          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar p-3">
-            <div v-if="serialAdminIsFactoryDefault && settingsTab !== 'remote'" class="mb-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-100">
-              Factory default: this device is not commissioned yet. Use Provision before treating it as an operational gateway or remote.
-            </div>
-
-            <div v-if="!hasActiveDeviceInfo && settingsTransport !== 'mqtt' && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
-              Select a USB device and read device info before loading or saving settings.
-            </div>
-            <div v-if="settingsTransport === 'mqtt' && !serialAdminConfig && settingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
-              Select an MQTT gateway and fetch settings to edit configuration.
-            </div>
-
-            <div v-if="settingsTab === 'general'" class="flex flex-col gap-3">
-              <div v-if="serialAdminStatus" class="grid grid-cols-2 gap-2 text-xs xl:grid-cols-5">
-                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-                  <div class="text-slate-500">Firmware</div>
-                  <div class="font-mono text-slate-200">{{ serialAdminStatus.fw_version || 'unknown' }}</div>
-                </div>
-                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-                  <div class="text-slate-500">Uptime</div>
-                  <div class="font-mono text-slate-200">{{ formatUptime(serialAdminStatus.uptime_ms || 0) }}</div>
-                </div>
-                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-                  <div class="text-slate-500">Heap</div>
-                  <div class="font-mono text-slate-200">{{ formatBytes(serialAdminStatus.heap_free) }}</div>
-                </div>
-                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-                  <div class="text-slate-500">Mode</div>
-                  <div class="font-mono text-slate-200">{{ serialAdminStatus.mode || '-' }}</div>
-                </div>
-                <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-                  <div class="text-slate-500">State</div>
-                  <div class="font-mono text-slate-200">{{ serialAdminIsFactoryDefault ? 'factory' : 'commissioned' }}</div>
-                </div>
-              </div>
-
-              <div v-if="serialAdminConfig" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-                <label class="self-center text-right font-semibold text-slate-300">Role</label>
-                <select v-model="serialAdminConfig.role_tx" class="glass-input h-9 appearance-none">
-                  <option :value="true">Gateway</option>
-                  <option :value="false">Remote</option>
-                </select>
-                <label class="self-center text-right font-semibold text-slate-300">Local addr</label>
-                <input v-model.number="serialAdminConfig.local_address" type="number" min="1" max="254" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Remote addr</label>
-                <input v-model.number="serialAdminConfig.remote_address" type="number" min="1" max="254" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Fleet key</label>
-                <div class="flex flex-col gap-1">
-                  <div class="flex gap-2">
-                    <input v-model="serialAdminConfig.fleet_passphrase" :type="showSerialFleetKey ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Fleet key passphrase" />
-                    <button @click="showSerialFleetKey = !showSerialFleetKey" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
-                      {{ showSerialFleetKey ? 'Hide' : 'Show' }}
-                    </button>
-                  </div>
-                  <span v-if="isMqttSecretConfigured('fleet_passphrase')" class="text-[10px] font-medium" :class="isMqttFleetPassphraseDefault() ? 'text-amber-400' : 'text-cyan-400'">
-                    ✓ Currently configured on device {{ isMqttFleetPassphraseDefault() ? '(using default passphrase)' : '' }}
-                  </span>
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">Heartbeat sec</label>
-                <div class="flex items-center gap-2">
-                  <input :value="Math.round((serialAdminConfig.heartbeat_ms || 60000) / 1000)" @input="serialAdminConfig.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9 flex-1" :disabled="!serialAdminConfig.heartbeat_enabled" />
-                  <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap">
-                    <input v-model="serialAdminConfig.heartbeat_enabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                    Enabled
-                  </label>
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">Retry sec</label>
-                <input :value="Math.round((serialAdminConfig.tx_command_retry_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.tx_command_retry_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Remote failsafe</label>
-                <select v-model="serialAdminConfig.rx_failsafe_mode" class="glass-input h-9 appearance-none">
-                  <option value="hold_last">Hold last</option>
-                  <option value="force_off">Force off</option>
-                  <option value="force_on">Force on</option>
-                </select>
-                <label class="self-center text-right font-semibold text-slate-300">Failsafe sec</label>
-                <input :value="Math.round((serialAdminConfig.rx_failsafe_timeout_ms || 180000) / 1000)" @input="serialAdminConfig.rx_failsafe_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Input control</label>
-                <label class="flex items-center gap-2 text-slate-300" title="When enabled, closing the gateway's input terminals will command paired remotes to close their relays">
-                  <input v-model="serialAdminConfig.input_control_paired_lora_enabled" type="checkbox" />
-                  Enabled via gateway input
-                </label>
-              </div>
-            </div>
-
-            <div v-if="settingsTab === 'network'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-              <template v-if="serialAdminConfig">
-                <div class="col-span-2 rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span>WiFi passwords are redacted on fetch. Leave password fields blank to keep the stored value.</span>
-                    <button @click="scanSettingsWifi" :disabled="!selectedPort || isFlashing || isLoadingInfo || serialAdminBusy || isWifiScanning" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                      {{ isWifiScanning ? 'Scanning...' : 'Scan WiFi' }}
-                    </button>
-                  </div>
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">WiFi SSID</label>
-                <div class="flex gap-2">
-                  <input v-model="serialAdminConfig.wifi_sta_ssid" class="glass-input h-9 flex-1" placeholder="Leave blank for no WiFi" list="settings-wifi-networks" />
-                  <datalist id="settings-wifi-networks">
-                    <option v-for="network in settingsWifiNetworks" :key="`${network.ssid}-${network.bssid}`" :value="network.ssid">
-                      {{ network.ssid }} · {{ wifiSignalLabel(network.rssi) }} · ch {{ network.channel }}{{ network.secure ? ' · secured' : ' · open' }}
-                    </option>
-                  </datalist>
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">New WiFi password</label>
-                <div class="flex flex-col gap-1">
-                  <div class="flex gap-2">
-                    <input v-model="serialAdminConfig.wifi_sta_password" :type="showSerialWifiPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
-                    <button @click="showSerialWifiPassword = !showSerialWifiPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
-                      {{ showSerialWifiPassword ? 'Hide' : 'Show' }}
-                    </button>
-                  </div>
-                  <span v-if="isMqttSecretConfigured('wifi_sta_password')" class="text-[10px] text-cyan-400 font-medium">✓ Currently configured on device</span>
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">WiFi Enabled</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.wifi_admin_enabled" type="checkbox" />
-                  Enabled
-                </label>
-                <label class="self-center text-right font-semibold text-slate-300">Hostname</label>
-                <input v-model="serialAdminConfig.lan_hostname" class="glass-input h-9" placeholder="Blank uses lrs-chipid" />
-                <label class="self-center text-right font-semibold text-slate-300">Fallback AP</label>
-                <select v-model="serialAdminConfig.wifi_ap_fallback_policy" class="glass-input h-9 appearance-none">
-                  <option value="fallback_on_disconnect">Enable when disconnected</option>
-                  <option value="secure_sta_only">Keep disabled</option>
-                </select>
-                <label class="self-center text-right font-semibold text-slate-300">Soft AP</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.ap_always_on" type="checkbox" />
-                  Always on while disconnected
-                </label>
-
-                <label class="self-center text-right font-semibold text-slate-300">TX power</label>
-                <input v-model.number="serialAdminConfig.wifi_tx_power_dbm" type="number" min="0" max="20.5" step="0.25" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">Channel</label>
-                <input v-model.number="serialAdminConfig.wifi_channel_override" type="number" min="0" max="13" class="glass-input h-9" />
-                <label class="self-center text-right font-semibold text-slate-300">WiFi sleep</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.wifi_sleep_enabled" type="checkbox" />
-                  Allow sleep
-                </label>
-                <label class="self-center text-right font-semibold text-slate-300">Static IP</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.wifi_static_ip_enabled" type="checkbox" />
-                  Enabled
-                </label>
-                <label class="self-center text-right font-semibold text-slate-300">IP address</label>
-                <input v-model="serialAdminConfig.wifi_static_ip" class="glass-input h-9" placeholder="192.168.1.50" />
-                <label class="self-center text-right font-semibold text-slate-300">Gateway</label>
-                <input v-model="serialAdminConfig.wifi_static_gateway" class="glass-input h-9" placeholder="192.168.1.1" />
-                <label class="self-center text-right font-semibold text-slate-300">Subnet</label>
-                <input v-model="serialAdminConfig.wifi_static_subnet" class="glass-input h-9" placeholder="255.255.255.0" />
-              </template>
-            </div>
-
-            <div v-if="settingsTab === 'mqtt'" class="flex flex-col gap-3 text-xs">
-              <template v-if="serialAdminConfig">
-                <!-- If it's a remote device -->
-                <div v-if="!serialAdminConfig.role_tx" class="flex flex-col gap-3">
-                  <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
-                    <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
-                      <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></span>
-                      🌐 Remote MQTT Routing Bridge Active
-                    </div>
-                    This device is configured with the <span class="font-bold text-cyan-100">Remote</span> role.
-                    <p class="mt-2 text-slate-300">
-                      Remote devices do not run local MQTT clients to conserve power, memory, and local WiFi network capacity. Instead, they communicate securely over LoRa to your central Gateway.
-                    </p>
-                    <p class="mt-2 text-slate-300">
-                      The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote device.
-                    </p>
-                    <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
-                      💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
-                    </p>
-                  </div>
-
-                  <!-- Configuration for Remote devices -->
-                  <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 mt-2 pt-3 border-t border-slate-800">
-                    <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
-                    <div class="flex flex-col gap-1">
-                      <label class="flex items-center gap-2 text-slate-300">
-                        <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
-                        Accept gateway MQTT commands
-                      </label>
-                      <div class="text-[10px] text-slate-500 leading-normal">
-                        Must be enabled for this remote to execute relay commands forwarded by the gateway over LoRa.
-                      </div>
-                    </div>
-
-                    <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
-                    <div class="flex flex-col gap-1">
-                      <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1" />
-                      <div class="text-[10px] text-slate-500 leading-normal">
-                        Comma-separated list of Gateway local addresses (typically <code>1</code>) authorized to command this remote over LoRa.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- If it's a gateway device -->
-                <div v-else class="flex flex-col gap-3">
-                  <!-- Warning banner for input control override conflict -->
-                  <div v-if="serialAdminConfig.input_control_paired_lora_enabled" class="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 select-text mb-2">
-                    ⚠️ <strong>MQTT Control Blocked:</strong> "Input control via gateway input" is enabled on the General tab. Physical input-control overrides and blocks local and remote MQTT relay command processing to prevent conflicting state loops. To use MQTT relay commands, disable "Input control" on the General tab first.
-                  </div>
-
-                  <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
-                    <label class="self-center text-right font-semibold text-slate-300">MQTT host</label>
-                    <input v-model="serialAdminConfig.mqtt_host" class="glass-input h-9" placeholder="venus.local" />
-                    <label class="self-center text-right font-semibold text-slate-300">MQTT port</label>
-                    <input v-model.number="serialAdminConfig.mqtt_port" type="number" min="1" max="65535" class="glass-input h-9" />
-                    <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
-                    <input v-model="serialAdminConfig.mqtt_topic_root" class="glass-input h-9" />
-                    <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
-                    <label class="flex items-center gap-2 text-slate-300">
-                      <input v-model="serialAdminConfig.mqtt_client_enabled" type="checkbox" />
-                      Enabled
-                    </label>
-                    <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
-                    <div class="flex flex-col gap-1">
-                      <label class="flex items-center gap-2 text-slate-300">
-                        <input v-model="serialAdminConfig.mqtt_control_enabled" type="checkbox" />
-                        Enabled
-                      </label>
-                      <div v-if="serialAdminConfig.input_control_paired_lora_enabled" class="text-[10px] text-amber-400 font-semibold leading-normal">
-                        ⚠️ Currently overridden and blocked by Input Control (General tab).
-                      </div>
-                      <div v-else class="text-[10px] text-slate-500 leading-normal">
-                        Enables processing incoming MQTT commands on local and remote topics.
-                      </div>
-                    </div>
-                    <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
-                    <input v-model="serialAdminConfig.mqtt_user" class="glass-input h-9" />
-                    <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
-                    <div class="flex flex-col gap-1">
-                      <div class="flex gap-2">
-                        <input v-model="serialAdminConfig.mqtt_password" :type="showSerialMqttPassword ? 'text' : 'password'" class="glass-input h-9 flex-1" placeholder="Blank keeps existing password" />
-                        <button @click="showSerialMqttPassword = !showSerialMqttPassword" class="glass-input h-9 px-3 hover:bg-slate-700/70" type="button">
-                          {{ showSerialMqttPassword ? 'Hide' : 'Show' }}
-                        </button>
-                      </div>
-                      <span v-if="isMqttSecretConfigured('mqtt_password')" class="text-[10px] text-cyan-400 font-medium">✓ Currently configured on device</span>
-                    </div>
-                    <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
-                    <div class="flex flex-col gap-1">
-                      <input v-model="serialAdminConfig.mqtt_controller_addresses" class="glass-input h-9" placeholder="1,84" />
-                      <div class="text-[10px] text-slate-500 leading-normal">
-                        Allowed controller addresses (comma-separated). Remote devices will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <div v-if="settingsTab === 'sensors'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-              <template v-if="serialAdminConfig">
-                <div class="col-span-2 rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
-                  Sensor wiring is fixed in firmware for this board: DS18B20 uses the configured one-wire pin, and the 4-20 mA tank input uses A0 with the 3553 mV board calibration.
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">DS18B20</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.sensor_temp_enabled" type="checkbox" />
-                  Temperature sensor enabled
-                </label>
-                <label class="self-center text-right font-semibold text-slate-300">Tank level</label>
-                <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="serialAdminConfig.sensor_tank_enabled" type="checkbox" />
-                  4-20 mA tank sensor enabled
-                </label>
-                <div class="col-start-2 text-slate-500">
-                  5000 mm water range, 120 ohm sense resistor, sampled every {{ serialAdminConfig.sensor_tank_interval_s }}s.
-                </div>
-              </template>
-            </div>
-
-            <div v-if="settingsTab === 'system'" class="flex flex-col gap-3 text-xs">
-              <div class="rounded border border-slate-800 bg-slate-950/30 p-3 text-slate-400">
-                Save applies the loaded settings over USB serial admin. Reboot clears cached live status. Factory reset clears loaded settings in Flasher because the device reboots into a new/default configuration.
-              </div>
-              <div class="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
-                Keep fleet key preserves pairing material. Keep WiFi preserves STA credentials. Clearing either one returns that part of the device to factory-default setup.
-              </div>
-              <div class="flex flex-wrap items-center gap-3">
-                <button @click="saveSerialAdminConfig" :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig" class="primary-btn h-9 px-4 text-xs font-bold disabled:opacity-60">
-                  {{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}
-                </button>
-                <button @click="rebootSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-9 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-                  Reboot
-                </button>
-                <label class="flex items-center gap-2 text-slate-400">
-                  <input v-model="serialFactoryKeepFleet" type="checkbox" />
-                  Keep fleet key
-                </label>
-                <label class="flex items-center gap-2 text-slate-400">
-                  <input v-model="serialFactoryKeepWifi" type="checkbox" />
-                  Keep WiFi
-                </label>
-                <button @click="factoryResetSerialDevice" :disabled="serialAdminDisabled" class="glass-input h-9 px-4 hover:bg-red-500/15 text-xs font-bold text-red-200 disabled:opacity-60">
-                  Factory reset
-                </button>
-              </div>
-            </div>
-
-            <!-- Remote Config Help Reference Tab -->
-            <div v-if="settingsTab === 'remote'" class="flex flex-col gap-4 text-xs select-text">
-              <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 shadow-[inset_0_1px_0_rgba(6,182,212,0.15)]">
-                <div class="font-semibold text-sm mb-1 text-cyan-100 flex items-center gap-2">
-                  <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                  Operator Reference: Remote Configuration & Telemetry Protocol
-                </div>
-                This pane maps the firmware's multi-interface parameters. Use the tabs below to explore the Serial, MQTT, and LoRa capabilities built into your fleet devices.
-              </div>
-
-              <!-- Sub-Tab Selector -->
-              <div class="flex border-b border-slate-800 bg-slate-900/20 p-0.5 rounded-t-lg">
-                <button
-                  @click="remoteSubTab = 'serial'"
-                  type="button"
-                  :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', remoteSubTab === 'serial' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
-                >
-                  <span class="font-mono text-[10px]">🔌</span> Serial Admin API
-                </button>
-                <button
-                  @click="remoteSubTab = 'mqtt'"
-                  type="button"
-                  :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', remoteSubTab === 'mqtt' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
-                >
-                  <span class="font-mono text-[10px]">🌐</span> MQTT Bridge
-                </button>
-                <button
-                  @click="remoteSubTab = 'lora'"
-                  type="button"
-                  :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', remoteSubTab === 'lora' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
-                >
-                  <span class="font-mono text-[10px]">📡</span> LoRa OTA Protocol
-                </button>
-              </div>
-
-              <!-- Content Cards -->
-              <div class="flex flex-col gap-4">
-
-                <!-- ================== SERIAL PANEL ================== -->
-                <div v-if="remoteSubTab === 'serial'" class="flex flex-col gap-3">
-                  <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
-                    <div class="font-semibold text-slate-100 mb-1">🔌 Local USB Admin Interface</div>
-                    Devices running this firmware listen on the hardware USB UART (**115200 Baud, 8N1**). All commands are JSON payloads transmitted on lines prefixed with <code class="font-mono text-cyan-400 font-bold bg-slate-950/50 px-1 rounded">LRS:</code> and terminated with a newline (<code class="font-mono text-slate-400">\n</code>).
-                  </div>
-
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <!-- Read-Only & Telemetry Commands -->
-                    <div class="glass-card p-3 flex flex-col gap-2">
-                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
-                        <span>Read-Only & Telemetry Commands</span>
-                        <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">NO PASSWORD REQUIRED</span>
-                      </div>
-
-                      <div class="flex flex-col gap-2.5">
-                        <div class="flex flex-col gap-1">
-                          <div class="flex justify-between items-center">
-                            <span class="font-mono font-bold text-cyan-300">"hello"</span>
-                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;hello\&quot;}', 'hello command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
-                          </div>
-                          <span class="text-slate-400">Verifies serial communications and fetches API limits.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <div class="flex justify-between items-center">
-                            <span class="font-mono font-bold text-cyan-300">"identity"</span>
-                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;identity\&quot;}', 'identity command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
-                          </div>
-                          <span class="text-slate-400">Returns core device hardware serial, MAC, assigned Addresses, mode, and active firmware version.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <div class="flex justify-between items-center">
-                            <span class="font-mono font-bold text-cyan-300">"status"</span>
-                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;status\&quot;}', 'status command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
-                          </div>
-                          <span class="text-slate-400">Fetches live state telemetry: free heap blocks, WiFi connection parameters, MQTT status, signal RSSI/downlink level, temperature, and analog tank level details.</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Protected Admin Settings Commands -->
-                    <div class="glass-card p-3 flex flex-col gap-2">
-                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
-                        <span>Protected Admin Settings</span>
-                        <span class="text-[9px] bg-red-950/30 text-rose-300 px-1.5 py-0.5 rounded font-mono">REQUIRES PASSWORD</span>
-                      </div>
-
-                      <div class="flex flex-col gap-2.5">
-                        <div class="flex flex-col gap-1">
-                          <div class="flex justify-between items-center">
-                            <span class="font-mono font-bold text-cyan-300">"get_config"</span>
-                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;get_config\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;include_secrets\&quot;:true}', 'get_config command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
-                          </div>
-                          <span class="text-slate-400">Reads currently stored configuration store. Set <code class="font-mono text-[10px] text-slate-300">include_secrets</code> to true to request raw WiFi credentials and keys.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <div class="flex justify-between items-center">
-                            <span class="font-mono font-bold text-cyan-300">"set_config"</span>
-                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;set_config\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;config\&quot;:{\&quot;wifi_sta_ssid\&quot;:\&quot;YourSSID\&quot;,\&quot;wifi_sta_password\&quot;:\&quot;Password\&quot;}}', 'set_config command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
-                          </div>
-                          <span class="text-slate-400">Applies a configuration patch. Supports changing WiFi client setups, MQTT properties, sensor configs, timing parameters, and addresses.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <div class="flex justify-between items-center">
-                            <span class="font-mono font-bold text-cyan-300">"configure_gateway"</span>
-                            <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;configure_gateway\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;fleet_passphrase\&quot;:\&quot;YourKey\&quot;}', 'configure_gateway command')" class="text-[10px] text-slate-500 hover:text-cyan-300 transition-colors">Copy Payload</button>
-                          </div>
-                          <span class="text-slate-400">Provisions a factory default device into an operational Gateway, updating security key material and starting administration mode.</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Fleet Coordination Commands Card -->
-                  <div class="glass-card p-3 flex flex-col gap-2">
-                    <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📡 Gateway-Only Fleet Coordination Commands</div>
-                    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-1 text-slate-400">
-                      <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
-                        <div class="flex justify-between items-center">
-                          <span class="font-mono text-cyan-300 font-semibold">LoRa Inventory Scan</span>
-                          <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;start_lora_inventory\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;start_addr\&quot;:1,\&quot;end_addr\&quot;:12}', 'start_lora_inventory')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
-                        </div>
-                        Commands gateway to query remote devices via LoRa:
-                        <code class="text-[10px] text-slate-500 mt-1">cmd: "start_lora_inventory"<br>cmd: "lora_inventory_status"</code>
-                      </div>
-
-
-
-                      <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
-                        <div class="flex justify-between items-center">
-                          <span class="font-mono text-cyan-300 font-semibold">Remote OTA Firmware Pull</span>
-                          <button @click="copyToClipboard('LRS:{\&quot;cmd\&quot;:\&quot;remote_ota_pull\&quot;,\&quot;password\&quot;:\&quot;admin_pwd\&quot;,\&quot;addr\&quot;:1,\&quot;url\&quot;:\&quot;http://192.168.1.100/fw.bin\&quot;,\&quot;sha256\&quot;:\&quot;YOUR_SHA256_HEX\&quot;}', 'remote_ota_pull')" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
-                        </div>
-                        Signals a remote device over LoRa carrying an HTTP URL and SHA256 checksum to trigger it to download a firmware update over WiFi.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- ================== MQTT PANEL ================== -->
-                <div v-if="remoteSubTab === 'mqtt'" class="flex flex-col gap-3">
-                  <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
-                    <div class="font-semibold text-slate-100 mb-1">🌐 MQTT Bridge Protocol</div>
-                    Operational gateways with <code class="font-mono bg-slate-950/50 px-1 rounded text-cyan-400">mqtt_client_enabled</code> configured will publish live local telemetry and all received LoRa remote reports, while listening on local and peer-specific control channels.
-                  </div>
-
-                  <!-- MQTT Topic Structure Details -->
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <div class="glass-card p-3 flex flex-col gap-2">
-                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
-                        <span>Gateway MQTT Topics (Subscriptions)</span>
-                        <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">WRITE CONTROL</span>
-                      </div>
-
-                      <div class="flex flex-col gap-3 mt-1">
-                        <div class="flex flex-col gap-1">
-                          <span class="font-semibold text-slate-300">Toggle Local Relay</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/set/relay</code>
-                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF). Publish non-retained.</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="glass-card p-3 flex flex-col gap-2">
-                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
-                        <span>Peer MQTT Downlinks (Secured LoRa Forwarding)</span>
-                        <span class="text-[9px] bg-sky-950/30 text-sky-300 px-1.5 py-0.5 rounded font-mono">FORWARDED OVER LORA</span>
-                      </div>
-
-                      <div class="flex flex-col gap-3 mt-1">
-                        <div class="flex flex-col gap-1">
-                          <span class="font-semibold text-slate-300">Control Remote Peer Relay</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/set/relay</code>
-                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF). Publish non-retained.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Peer Polling Interval (in seconds)</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/poll_interval_s</code>
-                          <span class="text-slate-400">Payload: integer seconds (e.g. <code class="text-slate-200">300</code>). Set 0 to disable regular telemetry polling.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Force Peer Polling (Immediate)</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/poll_now</code>
-                          <span class="text-slate-400">Payload: any. Forces the gateway to emit a secured LoRa status query reports probe.</span>
-                        </div>
-
-                        <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300">Peer WiFi Hardware Power Setup</span>
-                          <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/wifi</code>
-                          <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (Enable WiFi chip) or <code class="text-slate-200">0</code> (Power off WiFi to conserve energy).</span>
-                        </div>
-
-
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Telemetry Publishing Details -->
-                  <div class="glass-card p-3 flex flex-col gap-2">
-                    <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Telemetry & Status Publishing Map</div>
-                    <span class="text-slate-400">The gateway automatically publishes status reports to these topics when updates are heard over LoRa or changed locally. Telemetry values are published as **retained** plain-text strings. These topics are **read-only** — publishing to them has no effect.</span>
-                    <div class="grid gap-4 sm:grid-cols-2 mt-1">
-                      <div>
-                        <div class="font-bold text-slate-300 text-[11px] mb-1">Local Gateway Status Topics:</div>
-                        <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/input</span>: Input state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/relay</span>: Command relay state (<code class="text-cyan-400">1</code> or <code class="text-cyan-400">0</code>)</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Normalized reading value</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Sensor status state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/ota_status</span>: Retained OTA status (<code class="text-cyan-400">downloading</code>, <code class="text-cyan-400">failed:&lt;code&gt;</code>, <code class="text-cyan-400">rebooting</code>)</li>
-                        </ul>
-                      </div>
-                      <div>
-                        <div class="font-bold text-slate-300 text-[11px] mb-1">Remote Peer Telemetry (Forwarded):</div>
-                        <ul class="list-disc pl-4 space-y-1 text-slate-400 font-mono text-[10px]">
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/relay</span>: Remote device relay state (read-only)</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/input</span>: Remote device dry contact state</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/ack_state</span>: OTA ACK status (<code class="text-emerald-400">Ok</code>, <code class="text-amber-400">Pending</code>, <code class="text-rose-400">Timeout</code>)</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/uplink_rssi_dbm</span>: Reception signal level</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/value</span>: Peer sensor value</li>
-                          <li><span class="text-slate-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/sensor/&lt;kind&gt;/&lt;instance&gt;/state</span>: Peer sensor state</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- ================== LORA PANEL ================== -->
-                <div v-if="remoteSubTab === 'lora'" class="flex flex-col gap-3">
-                  <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
-                    <div class="font-semibold text-slate-100 mb-1">📡 LoRa Over-the-Air Secured Protocol</div>
-                    Devices communicate over the air using highly robust, low-bandwidth sub-GHz LoRa modulation. All payloads are encrypted and signed using dynamic session keys derived from the shared <code class="font-mono bg-slate-950/50 px-1 rounded text-cyan-400">fleet_passphrase</code> via **AES-128 and SHA-256**, protecting the network against spoofing and replay attacks.
-                  </div>
-
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <!-- Diagnostic Reports (Uplink) -->
-                    <div class="glass-card p-3 flex flex-col gap-2">
-                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Secured Diagnostic Reports (Uplink)</div>
-                      <div class="flex flex-col gap-3 mt-1 text-slate-400">
-                        <div>
-                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::Heartbeat / PollResponse</span>
-                          <p class="mt-0.5">Emitted by remote devices periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and remote-side diagnostics.</p>
-                        </div>
-                        <div class="border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::MaintenanceStatus</span>
-                          <p class="mt-0.5">Delivered in high-density segmented paging packets, pulling deep operational metrics to the gateway:</p>
-                          <ul class="list-disc pl-4 mt-1 space-y-1 text-slate-400 font-mono text-[10px]">
-                            <li><span class="text-slate-300">Version Page:</span> Major, minor, patch, and build version code</li>
-                            <li><span class="text-slate-300">Sensors Page:</span> 4-20mA current (mA), voltage (mV), and calibrated water level measurement (mm)</li>
-                            <li><span class="text-slate-300">Debug Page:</span> Device uptime in minutes, free heap memory blocks, and free block fragmentation percentage</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Remote Control Downlinks -->
-                    <div class="glass-card p-3 flex flex-col gap-2">
-                      <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">⚙️ Secured Remote Configuration (Downlink)</div>
-                      <div class="flex flex-col gap-3 mt-1 text-slate-400">
-                        <div>
-                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiProvision</span>
-                          <p class="mt-0.5">The gateway broadcasts chunked network credentials packets over the air. Remote devices assemble the chunks in memory, verify the full string FNV-1a hash, and permanently commit the SSID & Password configuration store.</p>
-                        </div>
-                        <div class="border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiControl</span>
-                          <p class="mt-0.5">Directly manages remote WiFi chip state. Allows toggling WiFi on or off to optimize deep sleep profiles or query current client connection IP and RSSI levels.</p>
-                        </div>
-                        <div class="border-t border-slate-800/50 pt-2">
-                          <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::OtaPullControl</span>
-                          <p class="mt-0.5">Tails remote devices to fetch new firmware binaries from a local staging web server over WiFi. Payload contains the temporary update URL and SHA-256 file signature for local validation.</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <p v-if="!serialAdminStatus && !serialAdminConfig && !isSerialAdminLoading && settingsTab !== 'remote'" class="mt-3 text-xs text-slate-500">
-              {{ settingsEmptyMessage }}
-            </p>
-          </div>
-
-          <!-- Sticky action footer for saving settings globally -->
-          <div v-if="serialAdminConfig && settingsTab !== 'remote'" class="flex shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900/60 p-3 text-xs">
-            <span class="text-slate-400">
-              💡 Changes must be saved to apply to the device.
-            </span>
-            <div class="flex items-center gap-2">
-              <button
-                @click="saveSerialAdminConfig"
-                :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig"
-                class="primary-btn m-0 h-9 px-4 text-xs font-bold disabled:opacity-60 flex items-center justify-center gap-1.5"
-              >
-                <svg v-if="isSerialAdminSaving" class="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>{{ isSerialAdminSaving ? 'Saving...' : 'Save config' }}</span>
-              </button>
-              <button
-                @click="rebootSerialDevice"
-                :disabled="serialAdminDisabled || isSerialAdminSaving || !serialAdminConfig"
-                class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
-              >
-                Reboot
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SettingsMode
+        v-if="activeMode === 'settings'"
+        v-model:form="settingsFormComputed"
+        v-model:config="serialAdminConfig"
+        :header-state="settingsHeaderStateComputed"
+        :transport-state="settingsTransportStateComputed"
+        :admin-status="settingsAdminStatusStateComputed"
+        :secret-state="settingsSecretStateComputed"
+        :wifi-state="settingsWifiStateComputed"
+        :serial-admin-is-factory-default="serialAdminIsFactoryDefault"
+        :has-active-device-info="hasActiveDeviceInfo"
+        :settings-empty-message="settingsEmptyMessage"
+        @trigger-identify="triggerIdentify"
+        @read-device-info="readDeviceInfo"
+        @refresh-status="refreshSerialAdminStatus"
+        @fetch-settings="fetchSerialDeviceSettings"
+        @copy-config-json="copySerialAdminConfigJson"
+        @refresh-ports="refreshPorts"
+        @manual-chip-input="handleManualMqttGatewayInput"
+        @open-mqtt-settings="openMonitorMqttSettings"
+        @scan-wifi="scanSettingsWifi"
+        @save-config="saveSerialAdminConfig"
+        @reboot-device="rebootSerialDevice"
+        @factory-reset="factoryResetSerialDevice"
+        @copy-payload="({ text, label }) => copyToClipboard(text, label)"
+      />
 
       <div v-if="activeMode === 'monitor'" class="flex flex-col h-full overflow-hidden gap-3">
         <!-- Gateway Device Validation Warning Callout -->
