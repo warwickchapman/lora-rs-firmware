@@ -226,4 +226,27 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].relay_state).toBeUndefined();
     expect(fleet.loraInventory.value[0].sensors).toBeUndefined();
   });
+
+  it('does not merge cached telemetry when chip IDs mismatch and instead sets conflict_chip_id', () => {
+    const fleet = createFleet('00001234');
+    
+    // Cache telemetry for address 1 with chip_id 'abcde123' (Chip A)
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      chip_id: 'lrs-abcde123',
+      field: 'relay',
+      value: '1'
+    });
+
+    // Merge row for address 1 with chip_id 'xyz98765' (Chip B)
+    fleet.mergeInventoryRows([
+      { address: 1, chip_id: 'xyz98765' }
+    ]);
+
+    expect(fleet.loraInventory.value).toHaveLength(1);
+    const row = fleet.loraInventory.value[0];
+    expect(row.relay_state).toBeUndefined(); // Should not inherit Chip A's telemetry
+    expect(row.conflict_chip_id).toBe('abcde123'); // Should record Chip A as the conflict
+  });
 });

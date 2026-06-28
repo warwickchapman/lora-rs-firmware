@@ -124,6 +124,17 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   }
 
   function applyCacheToRow(row: LoraInventoryDevice, cacheEntry: TelemetryCacheEntry) {
+    if (row.chip_id && cacheEntry.chip_id) {
+      const rowCanon = options.canonicalChipId(row.chip_id);
+      const cacheCanon = options.canonicalChipId(cacheEntry.chip_id);
+      if (rowCanon !== cacheCanon) {
+        row.conflict_chip_id = cacheEntry.chip_id;
+        return;
+      } else {
+        row.conflict_chip_id = undefined;
+      }
+    }
+
     Object.assign(row, cacheEntry.device);
     const sensorList = Object.values(cacheEntry.sensors);
     if (sensorList.length > 0) {
