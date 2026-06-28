@@ -28,6 +28,7 @@ export interface SettingsHeaderState {
   isFlashing: boolean;
   isLoadingInfo: boolean;
   isSerialAdminLoading: boolean;
+  isSerialAdminSaving: boolean;
   serialAdminDisabled: boolean;
   serialAdminBusy: boolean;
   serialAdminConfigExists: boolean;
@@ -826,8 +827,8 @@ function handleManualMqttGatewayInput(val: string) {
             Keep fleet key preserves pairing material. Keep WiFi preserves STA credentials. Clearing either one returns that part of the device to factory-default setup.
           </div>
           <div class="flex flex-wrap items-center gap-3">
-            <button @click="emit('save-config')" :disabled="headerState.serialAdminDisabled || headerState.isSerialAdminLoading || !config" class="primary-btn h-9 px-4 text-xs font-bold disabled:opacity-60">
-              {{ headerState.isSerialAdminLoading ? 'Saving...' : 'Save config' }}
+            <button @click="emit('save-config')" :disabled="headerState.serialAdminDisabled || headerState.isSerialAdminSaving || !config" class="primary-btn h-9 px-4 text-xs font-bold disabled:opacity-60">
+              {{ headerState.isSerialAdminSaving ? 'Saving...' : 'Save config' }}
             </button>
             <button @click="emit('reboot-device')" :disabled="headerState.serialAdminDisabled" class="glass-input h-9 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
               Reboot
@@ -1139,18 +1140,18 @@ function handleManualMqttGatewayInput(val: string) {
         <div class="flex items-center gap-2">
           <button
             @click="emit('save-config')"
-            :disabled="headerState.serialAdminDisabled || headerState.isSerialAdminLoading || !config"
+            :disabled="headerState.serialAdminDisabled || headerState.isSerialAdminSaving || !config"
             class="primary-btn m-0 h-9 px-4 text-xs font-bold disabled:opacity-60 flex items-center justify-center gap-1.5"
           >
-            <svg v-if="headerState.isSerialAdminLoading" class="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg v-if="headerState.isSerialAdminSaving" class="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span>{{ headerState.isSerialAdminLoading ? 'Saving...' : 'Save config' }}</span>
+            <span>{{ headerState.isSerialAdminSaving ? 'Saving...' : 'Save config' }}</span>
           </button>
           <button
             @click="emit('reboot-device')"
-            :disabled="headerState.serialAdminDisabled || headerState.isSerialAdminLoading || !config"
+            :disabled="headerState.serialAdminDisabled || headerState.isSerialAdminSaving || !config"
             class="glass-input m-0 h-9 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
           >
             Reboot

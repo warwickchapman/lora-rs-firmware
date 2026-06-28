@@ -1355,6 +1355,7 @@ const settingsHeaderStateComputed = computed<SettingsHeaderState>(() => ({
   isFlashing: isFlashing.value,
   isLoadingInfo: isLoadingInfo.value,
   isSerialAdminLoading: isSerialAdminLoading.value,
+  isSerialAdminSaving: isSerialAdminSaving.value,
   serialAdminDisabled: serialAdminDisabled.value,
   serialAdminBusy: serialAdminBusy.value,
   serialAdminConfigExists: !!serialAdminConfig.value,
