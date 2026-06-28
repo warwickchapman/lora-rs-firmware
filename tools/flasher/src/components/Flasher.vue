@@ -13,6 +13,7 @@ import { useFleetOta } from '../composables/useFleetOta';
 import { useFirmwareServer, NetworkInterface } from '../composables/useFirmwareServer';
 import ActivityPanel from './flasher/ActivityPanel.vue';
 import SessionMqttBanner from './flasher/SessionMqttBanner.vue';
+import MonitorMqttSettingsModal from './flasher/MonitorMqttSettingsModal.vue';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -535,12 +536,18 @@ const monitorMqttDraftState = computed({
   get: () => ({
     host: monitorMqttDraftHost.value,
     port: monitorMqttDraftPort.value,
-    topicRoot: monitorMqttDraftTopicRoot.value
+    topicRoot: monitorMqttDraftTopicRoot.value,
+    user: monitorMqttDraftUser.value,
+    pass: monitorMqttDraftPassword.value,
+    showPass: showMonitorMqttPassword.value
   }),
   set: (val) => {
     monitorMqttDraftHost.value = val.host;
     monitorMqttDraftPort.value = val.port;
     monitorMqttDraftTopicRoot.value = val.topicRoot;
+    if (val.user !== undefined) monitorMqttDraftUser.value = val.user;
+    if (val.pass !== undefined) monitorMqttDraftPassword.value = val.pass;
+    if (val.showPass !== undefined) showMonitorMqttPassword.value = val.showPass;
   }
 });
 
@@ -7259,64 +7266,13 @@ function toggleSelectAllBulkPorts() {
         </div>
       </div>
 
-      <div
-        v-if="showMonitorMqttSettings"
-        class="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4"
-        @click.self="closeMonitorMqttSettings"
-      >
-        <div class="glass-card w-full max-w-2xl overflow-hidden text-left">
-          <div class="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-3 py-2">
-            <div>
-              <h2 class="text-sm font-bold text-cyan-300">MQTT Broker Settings</h2>
-              <p class="mt-0.5 text-xs text-slate-500">Used when remote administration or monitoring transport is set to MQTT.</p>
-            </div>
-            <button
-              @click="closeMonitorMqttSettings"
-              class="glass-input h-8 w-8 p-0 hover:bg-slate-700/70"
-              title="Close MQTT settings"
-              aria-label="Close MQTT settings"
-            >
-              ×
-            </button>
-          </div>
-
-          <div class="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-2 p-3 text-xs">
-            <label class="self-center text-right font-semibold text-slate-300">Broker host</label>
-            <input v-model="monitorMqttDraftHost" class="glass-input h-9" placeholder="venus.local" />
-
-            <label class="self-center text-right font-semibold text-slate-300">Broker port</label>
-            <input v-model.number="monitorMqttDraftPort" class="glass-input h-9" type="number" min="1" max="65535" />
-
-            <label class="self-center text-right font-semibold text-slate-300">Topic root</label>
-            <input v-model="monitorMqttDraftTopicRoot" class="glass-input h-9" />
-
-            <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
-            <input v-model="monitorMqttDraftUser" class="glass-input h-9" />
-
-            <label class="self-center text-right font-semibold text-slate-300">MQTT password</label>
-            <div class="flex gap-2">
-              <input v-model="monitorMqttDraftPassword" :type="showMonitorMqttPassword ? 'text' : 'password'" class="glass-input h-9 min-w-0 flex-1" />
-              <button @click="showMonitorMqttPassword = !showMonitorMqttPassword" class="glass-input h-9 w-14 hover:bg-slate-700/70 text-xs font-bold">{{ showMonitorMqttPassword ? 'Hide' : 'Show' }}</button>
-            </div>
-          </div>
-
-          <div class="flex items-center justify-between border-t border-slate-800 bg-slate-950/30 px-3 py-2">
-            <span :class="['inline-flex h-8 items-center rounded border px-2 text-[10px] font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-              MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
-            </span>
-            <div class="flex gap-2">
-              <button @click="closeMonitorMqttSettings" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
-              <button
-                @click="toggleMonitorMqttConnection()"
-                :disabled="!monitorMqttDraftHost"
-                class="primary-btn h-8 px-3 text-xs font-bold disabled:opacity-50"
-              >
-                {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <MonitorMqttSettingsModal
+        v-model="showMonitorMqttSettings"
+        v-model:draft="monitorMqttDraftState"
+        :monitor-mqtt-connected="monitorMqttConnected"
+        @close="closeMonitorMqttSettings"
+        @toggle-connection="toggleMonitorMqttConnection"
+      />
 
       <div v-if="activeMode === 'network'" class="flex flex-col h-full overflow-hidden gap-3">
         <!-- Gateway Device Validation Warning Callout -->
