@@ -51,6 +51,16 @@ import type {
   SettingsSecretState,
   SettingsWifiState
 } from './flasher/SettingsMode.vue';
+import MonitorMode from './flasher/MonitorMode.vue';
+import type {
+  MonitorForm,
+  MonitorHeaderState,
+  MonitorTransportState,
+  MonitorGatewayWarningState,
+  MonitorGatewaySummaryState,
+  MonitorFleetSummaryState,
+  MonitorDisplayRow
+} from './flasher/MonitorMode.vue';
 
 type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
@@ -1402,6 +1412,109 @@ const settingsWifiStateComputed = computed<SettingsWifiState>(() => ({
     bssid: n.bssid,
   })),
 }));
+
+const monitorFormComputed = computed<MonitorForm>({
+  get: () => ({
+    selectedPort: selectedPort.value,
+    sessionConnectionType: sessionConnectionType.value,
+    monitorAutoRefresh: monitorAutoRefresh.value,
+    selectedMonitorDeviceAddress: selectedMonitorDeviceAddress.value,
+  }),
+  set: (val) => {
+    selectedPort.value = val.selectedPort;
+    sessionConnectionType.value = val.sessionConnectionType;
+    monitorAutoRefresh.value = val.monitorAutoRefresh;
+    selectedMonitorDeviceAddress.value = val.selectedMonitorDeviceAddress;
+  }
+});
+
+const monitorHeaderStateComputed = computed<MonitorHeaderState>(() => ({
+  monitorHealthSummary: monitorHealthSummary.value,
+  monitorStatusMessage: monitorStatusMessage.value,
+  identifyAvailable: identifyAvailable.value,
+  identifyDisabled: identifyDisabled.value,
+  isIdentifying: isIdentifying.value,
+  isMonitorLoopRunning: isMonitorLoopRunning.value,
+}));
+
+const monitorTransportStateComputed = computed<MonitorTransportState>(() => ({
+  ports: ports.value.map(p => ({ port_name: p.port_name, description: p.description || undefined })),
+  serialPortSelectorDisabled: serialPortSelectorDisabled.value,
+  monitorMqttConnected: monitorMqttConnected.value,
+}));
+
+const monitorGatewayWarningStateComputed = computed<MonitorGatewayWarningState>(() => ({
+  showWarning: !!(
+    selectedPort.value &&
+    serialDeviceState(selectedPort.value)?.status &&
+    !serialDeviceState(selectedPort.value)?.status?.role_tx
+  ),
+}));
+
+const monitorGatewaySummaryStateComputed = computed<MonitorGatewaySummaryState>(() => {
+  const gs = monitorGatewayStatus.value;
+  return {
+    gatewayName: gs ? lrsDeviceName(gs.chip_id) : '-',
+    role: gs?.role || '-',
+    localAddress: gs?.local_address ?? '-',
+    firmwareVersion: gs ? displayFirmwareVersion(gs.fw_version) : '-',
+    uptime: gs?.uptime_ms ? formatUptime(gs.uptime_ms) : '-',
+    memory: gs ? formatBytes(gs.heap_free) : '0 B',
+    memoryMax: gs ? formatBytes(gs.heap_max_block) : '0 B',
+    memoryFrag: gs?.heap_frag_pct !== undefined ? String(gs.heap_frag_pct) : '-',
+    wifiStatus: gs?.wifi?.sta_connected ? 'Connected' : (gs?.wifi?.status || '-'),
+    wifiIp: gs?.wifi?.ip || '-',
+    wifiRssi: gs?.wifi?.rssi ?? '-',
+    mqttStatus: gs?.mqtt?.client_enabled ? 'Enabled' : '-',
+    mqttHost: gs?.mqtt?.host || '-',
+    linkState: gs?.link_state || '-',
+    linkPeerCount: gs?.peer_count ?? '-',
+    sensors: (gs?.sensors || []).map(s => ({
+      kind: s.kind,
+      instance: s.instance,
+      displayKind: s.kind === 'temperature' ? 'Temperature' : (s.kind === 'tank_level' ? 'Tank Level' : (s.kind === 'input' ? 'Input' : s.kind)),
+      displayValue: s.kind === 'input'
+        ? (Number(s.value) === 1 ? 'Closed' : 'Open')
+        : (s.state === 'ok' ? `${s.value} ${s.unit === 'c' ? '°C' : (s.unit || '')}` : (s.state === 'overrange' ? 'Overrange' : s.state))
+    })),
+    relayBadgeClass: monitorRelayBadgeClass.value,
+    relayBadgeLabel: monitorRelayLabel.value,
+    relayStateLabel: gs?.relay_state !== undefined ? (Number(gs.relay_state) === 1 ? 'ON' : 'OFF') : '-',
+    inputStateLabel: gs?.input_state !== undefined ? (Number(gs.input_state) === 1 ? 'Closed' : 'Open') : '-',
+  };
+});
+
+const monitorFleetSummaryStateComputed = computed<MonitorFleetSummaryState>(() => ({
+  liveCount: monitorFleetLiveCount.value,
+  staleCount: monitorFleetStaleCount.value,
+  offlineCount: monitorFleetOfflineCount.value,
+  totalCount: monitorFleetRows.value.length,
+  hasDiagnosticsData: hasDiagnosticsData.value,
+}));
+
+const monitorDisplayRowsComputed = computed<MonitorDisplayRow[]>(() => {
+  return monitorFleetRows.value.map(row => ({
+    address: row.address,
+    chip_id: row.chip_id || '',
+    deviceName: lrsDeviceName(row.chip_id),
+    freshnessClass: monitorFreshnessClass(row),
+    freshnessLabel: monitorFreshnessLabel(row),
+    firmwareVersion: displayFirmwareVersion(row.fw_version),
+    ip: row.ip || '-',
+    relayLabel: remoteRelayLabel(row),
+    inputLabel: remoteInputLabel(row),
+    tempLabel: remoteTempLabel(row),
+    tankLabel: tankLabel(row),
+    tankDetailLabel: tankDetailLabel(row),
+    wifiConnectedLabel: row.wifi_connected_known ? (row.wifi_connected ? 'Connected' : 'Offline') : 'Unknown',
+    rssiLabel: row.rssi !== undefined && row.rssi !== null ? `${row.rssi} dBm` : '-',
+    heapLabel: monitorHeapLabel(row),
+    fragLabel: monitorFragLabel(row),
+    uptimeLabel: monitorUptimeLabel(row),
+    poll_pending: !!row.poll_pending,
+  }));
+});
+
 const serialAdminIsFactoryDefault = computed(() => {
   const st = serialAdminStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
@@ -6232,262 +6345,21 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @copy-payload="({ text, label }) => copyToClipboard(text, label)"
       />
 
-      <div v-if="activeMode === 'monitor'" class="flex flex-col h-full overflow-hidden gap-3">
-        <!-- Gateway Device Validation Warning Callout -->
-        <div v-if="monitorSelectedPort && serialDeviceState(monitorSelectedPort)?.status && !serialDeviceState(monitorSelectedPort)?.status?.role_tx" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <div>
-            <span class="font-bold">Gateway Device Required:</span> Monitor requires a TX/gateway USB device. The selected serial port is a remote; choose the gateway port.
-          </div>
-        </div>
-
-        <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div class="min-w-0">
-              <h2 class="text-base font-bold text-cyan-300 flex items-center gap-2">
-                <span>Monitor</span>
-                <span class="px-1.5 py-0.5 text-[9px] uppercase tracking-wider font-extrabold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded">Beta</span>
-              </h2>
-              <p class="mt-1 text-xs text-slate-400 max-w-3xl">
-                {{ monitorHealthSummary }} · {{ monitorStatusMessage }}
-              </p>
-            </div>
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <button
-                v-if="identifyAvailable"
-                @click="triggerIdentify"
-                :disabled="identifyDisabled"
-                :class="[
-                  'glass-input m-0 h-8 w-10 hover:bg-slate-700/70 flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed',
-                  { 'identify-led-active text-cyan-300': isIdentifying }
-                ]"
-                title="Identify selected USB device"
-                aria-label="Identify selected USB device"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 identify-led-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M9 18h6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                  <path d="M10 22h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-                  <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
-                  <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
-                </svg>
-              </button>
-              <label class="flex items-center gap-2 text-xs text-slate-400">
-                <input v-model="monitorAutoRefresh" type="checkbox" />
-                Auto refresh
-              </label>
-              <button
-                @click="toggleMonitorLoop"
-                :disabled="!selectedPort"
-                class="primary-btn m-0 h-8 px-3 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-              >
-                {{ isMonitorLoopRunning ? 'Stop' : 'Monitor' }}
-              </button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1.5fr)_12rem_auto_auto]">
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">USB gateway</label>
-              <select v-model="selectedPort" :disabled="serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
-                <option value="" disabled>Select USB gateway</option>
-                <option v-for="port in ports" :key="port.port_name" :value="port.port_name">
-                  {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
-                </option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-1.5 text-xs">
-              <label class="font-medium text-slate-400">Transport</label>
-              <select v-model="sessionConnectionType" class="glass-input h-9 appearance-none">
-                <option value="serial">USB Serial Gateway</option>
-                <option value="mqtt">Remote MQTT Broker</option>
-                <option value="local_broker">Local MQTT Broker</option>
-              </select>
-            </div>
-            <div class="flex flex-col justify-end">
-              <button
-                @click="openMonitorMqttSettings"
-                class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold"
-              >
-                MQTT settings
-              </button>
-            </div>
-            <div class="flex flex-col justify-end">
-              <span :class="['inline-flex h-9 min-w-28 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-                MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_22rem] shrink-0">
-          <div class="glass-card p-3 text-left">
-            <div class="grid grid-cols-1 gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway</div>
-                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ lrsDeviceName(monitorGatewayStatus?.chip_id) }}</div>
-                <div class="mt-1 text-slate-400">{{ monitorGatewayStatus?.role || '-' }} · addr {{ monitorGatewayStatus?.local_address ?? '-' }}</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Firmware</div>
-                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ displayFirmwareVersion(monitorGatewayStatus?.fw_version) }}</div>
-                <div class="mt-1 text-slate-400">uptime {{ monitorGatewayStatus?.uptime_ms ? formatUptime(monitorGatewayStatus.uptime_ms) : '-' }}</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Memory</div>
-                <div class="mt-2 font-mono text-lg font-bold text-slate-100">{{ formatBytes(monitorGatewayStatus?.heap_free) }}</div>
-                <div class="mt-1 text-slate-400">max {{ formatBytes(monitorGatewayStatus?.heap_max_block) }} · frag {{ monitorGatewayStatus?.heap_frag_pct ?? '-' }}%</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Fleet</div>
-                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorFleetLiveCount }} live · {{ monitorFleetStaleCount }} stale</div>
-                <div class="mt-1 text-slate-400">{{ monitorFleetOfflineCount }} offline · {{ monitorFleetRows.length }} total</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">WiFi</div>
-                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.wifi?.sta_connected ? 'Connected' : (monitorGatewayStatus?.wifi?.status || '-') }}</div>
-                <div class="mt-1 font-mono text-slate-400">{{ monitorGatewayStatus?.wifi?.ip || '-' }} · {{ monitorGatewayStatus?.wifi?.rssi ?? '-' }} dBm</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">MQTT</div>
-                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.mqtt?.client_enabled ? 'Enabled' : '-' }}</div>
-                <div class="mt-1 text-slate-400">{{ monitorGatewayStatus?.mqtt?.host || '-' }}</div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Link</div>
-                <div class="mt-2 text-lg font-bold text-slate-100">{{ monitorGatewayStatus?.link_state || '-' }}</div>
-                <div class="mt-1 text-slate-400">peer {{ monitorGatewayStatus?.peer_count ?? '-' }}</div>
-              </div>
-              <template v-if="monitorGatewayStatus?.sensors && monitorGatewayStatus.sensors.length > 0">
-                <div v-for="s in monitorGatewayStatus.sensors" :key="`${s.kind}-${s.instance}`" class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                  <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
-                    {{ s.kind === 'temperature' ? 'Temperature' : (s.kind === 'tank_level' ? 'Tank Level' : (s.kind === 'input' ? 'Input' : s.kind)) }} [{{ s.instance }}]
-                  </div>
-                  <div class="mt-2 text-lg font-bold text-slate-100">
-                    <template v-if="s.kind === 'input'">
-                      {{ Number(s.value) === 1 ? 'Closed' : 'Open' }}
-                    </template>
-                    <template v-else>
-                      {{ s.state === 'ok' ? `${s.value} ${s.unit === 'c' ? '°C' : (s.unit || '')}` : (s.state === 'overrange' ? 'Overrange' : s.state) }}
-                    </template>
-                  </div>
-                  <div class="mt-1 text-slate-400">local sensor</div>
-                </div>
-              </template>
-              <div v-else class="rounded border border-slate-800 bg-slate-950/25 p-3">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Sensors</div>
-                <div class="mt-2 text-lg font-bold text-slate-100">-</div>
-                <div class="mt-1 text-slate-400">no active sensors</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="glass-card flex flex-col items-center justify-center gap-3 p-5 text-center">
-            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Gateway Relay</div>
-            <div :class="['flex h-36 w-36 items-center justify-center rounded-full border text-lg font-black tracking-widest transition-all', monitorRelayBadgeClass]">
-              {{ monitorRelayLabel }}
-            </div>
-            <div class="grid w-full grid-cols-2 gap-2 text-xs">
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Relay</div>
-                <div class="mt-1 font-mono text-slate-200">
-                  {{ monitorGatewayStatus?.relay_state !== undefined ? (Number(monitorGatewayStatus?.relay_state) === 1 ? 'ON' : 'OFF') : '-' }}
-                </div>
-              </div>
-              <div class="rounded border border-slate-800 bg-slate-950/25 p-2">
-                <div class="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Input</div>
-                <div class="mt-1 font-mono text-slate-200">
-                  {{ monitorGatewayStatus?.input_state !== undefined ? (Number(monitorGatewayStatus?.input_state) === 1 ? 'Closed' : 'Open') : '-' }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="glass-card p-3 flex flex-col gap-2 text-left flex-1 min-h-0 overflow-hidden">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h2 class="text-sm font-bold text-slate-300">Gateway Peer Cache</h2>
-              <div class="mt-1 text-xs text-slate-500">Read-only serial view of the selected gateway's runtime state. Click a row to select it.</div>
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                @click="executeSelectedMonitorPollDiagnostics()"
-                :disabled="!selectedMonitorDeviceAddress"
-                class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
-              >
-                📊 Poll Diagnostics
-              </button>
-            </div>
-          </div>
-          <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
-            <table class="w-full min-w-[1480px] border-collapse text-xs">
-              <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
-                <tr class="border-b border-slate-800">
-                  <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Device</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Freshness</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">IP</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Input</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Temp</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Tank</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
-                  <th v-if="hasDiagnosticsData" class="px-2 py-1.5 text-left font-semibold">Heap</th>
-                  <th v-if="hasDiagnosticsData" class="px-2 py-1.5 text-left font-semibold">Frag</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
-                  <th class="px-2 py-1.5 text-left font-semibold">Poll</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="monitorFleetRows.length === 0">
-                  <td :colspan="hasDiagnosticsData ? 15 : 13" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
-                </tr>
-                <tr v-for="device in monitorFleetRows" :key="device.address"
-                    @click="selectedMonitorDeviceAddress = device.address"
-                    :class="['border-b border-slate-900/80 hover:bg-white/5 transition-colors cursor-pointer', selectedMonitorDeviceAddress === device.address ? 'bg-cyan-500/10 border-cyan-500/30' : '']">
-                  <td class="px-2 py-1.5 font-mono text-slate-200">{{ device.address }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ lrsDeviceName(device.chip_id) }}</td>
-                  <td class="px-2 py-1.5">
-                    <span :class="['rounded border px-2 py-1 text-[10px] font-bold', monitorFreshnessClass(device)]">{{ monitorFreshnessLabel(device) }}</span>
-                  </td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ displayFirmwareVersion(device.fw_version) }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
-                  <td class="px-2 py-1.5 text-slate-300">{{ remoteRelayLabel(device) }}</td>
-                  <td class="px-2 py-1.5 text-slate-300">{{ remoteInputLabel(device) }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ remoteTempLabel(device) }}</td>
-                  <td class="px-2 py-1.5">
-                    <div class="font-mono text-slate-300">{{ tankLabel(device) }}</div>
-                    <div v-if="tankDetailLabel(device)" class="mt-0.5 font-mono text-[10px] text-slate-500">{{ tankDetailLabel(device) }}</div>
-                  </td>
-                  <td class="px-2 py-1.5 text-slate-400">{{ device.wifi_connected_known ? (device.wifi_connected ? 'Connected' : 'Offline') : 'Unknown' }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi !== undefined && device.rssi !== null ? `${device.rssi} dBm` : '-' }}</td>
-                  <td v-if="hasDiagnosticsData" class="px-2 py-1.5 font-mono text-slate-300">{{ monitorHeapLabel(device) }}</td>
-                  <td v-if="hasDiagnosticsData" class="px-2 py-1.5 font-mono text-slate-300">{{ monitorFragLabel(device) }}</td>
-                  <td class="px-2 py-1.5 font-mono text-slate-400">{{ monitorUptimeLabel(device) }}</td>
-                  <td class="px-2 py-1.5 text-slate-400">
-                    <div class="flex items-center gap-2">
-                      <span>{{ device.poll_pending ? 'Pending' : 'Idle' }}</span>
-                      <button
-                        @click.stop="executeRemotePollDiagnostics(device)"
-                        class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold transition-colors whitespace-nowrap"
-                        title="Request one-shot diagnostics (Heap/Frag)"
-                      >
-                        Poll Diags
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <MonitorMode
+        v-if="activeMode === 'monitor'"
+        v-model:form="monitorFormComputed"
+        :header-state="monitorHeaderStateComputed"
+        :transport-state="monitorTransportStateComputed"
+        :gateway-warning-state="monitorGatewayWarningStateComputed"
+        :gateway-summary-state="monitorGatewaySummaryStateComputed"
+        :fleet-summary-state="monitorFleetSummaryStateComputed"
+        :rows="monitorDisplayRowsComputed"
+        @trigger-identify="triggerIdentify"
+        @toggle-monitor-loop="toggleMonitorLoop"
+        @open-mqtt-settings="openMonitorMqttSettings"
+        @poll-selected-diagnostics="executeSelectedMonitorPollDiagnostics"
+        @poll-device-diagnostics="(addr: number) => { const d = monitorFleetRows.find(x => x.address === addr); if (d) executeRemotePollDiagnostics(d); }"
+      />
 
       <MonitorMqttSettingsModal
         v-model="showMonitorMqttSettings"
