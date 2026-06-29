@@ -5,6 +5,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
+import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
@@ -733,6 +734,22 @@ const selectedMqttManualChipId = ref('');
 const manualMqttGatewayError = ref('');
 
 const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
+
+async function ensureMqttConfigLoaded(rawChipId: string, timeoutMs = 5000): Promise<DeviceMqttConfig> {
+  const canonical = normalizeChipId(rawChipId);
+  let bufState = mqttConfigBuffers.value[canonical];
+  if (bufState?.complete) return bufState;
+
+  let elapsed = 0;
+  while (elapsed < timeoutMs) {
+    await new Promise(resolve => setTimeout(resolve, 200));
+    elapsed += 200;
+    bufState = mqttConfigBuffers.value[canonical];
+    if (bufState?.complete) return bufState;
+  }
+
+  throw new Error('MQTT config topics not loaded');
+}
 
 function isMqttSecretConfigured(secretKey: string): boolean {
   if (settingsTransport.value !== 'mqtt' || !selectedPort.value) return false;
@@ -2477,6 +2494,7 @@ function displayFirmwareVersion(rawVersion: string | undefined | null): string {
 }
 
 function compactFirmwareVersion(major: number, minor: number, patch: number, build?: number): string {
+  if (major === 0 && minor === 0 && patch === 0) return '-';
   const core = `${major}.${minor}.${patch}`;
   // The ~N dev build convention was introduced in 0.9.2; earlier firmware has
   // unrelated data in the build byte, so suppress it to avoid e.g. "0.9.1~161".
@@ -3947,23 +3965,14 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
   pushSerialLog('Loading device configuration...');
   try {
     if (settingsTransport.value === 'mqtt') {
-      const bufState = mqttConfigBuffers.value[canonicalChipId(targetPort)];
-      if (bufState?.complete && state?.config) {
-        pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
-      } else {
+      if (!state?.config) {
         pushSerialLog('Waiting for retained MQTT config topics to load...');
-        let elapsed = 0;
-        while (elapsed < 5000) {
-          await new Promise(r => setTimeout(r, 200));
-          elapsed += 200;
-          const curBuf = mqttConfigBuffers.value[canonicalChipId(targetPort)];
-          if (curBuf?.complete && state?.config) {
-            pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
-            return;
-          }
+        const bufState = await ensureMqttConfigLoaded(targetPort);
+        if (state) {
+          state.config = normalizeSerialAdminConfig(bufState.buffer as Partial<SerialAdminConfig>, state.status);
         }
-        throw new Error('Timeout waiting for MQTT config topics');
       }
+      pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
       return;
     }
 
@@ -4247,42 +4256,36 @@ async function loadEasyPairGateway(isAuto = false) {
         };
       }
       await refreshGatewayStatusForPair();
-      const password = pairPassword();
-      if (password) {
-        pushPairLog('Fetching gateway configuration over MQTT...');
-        try {
-          const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
-            admin_password: password,
-            include_secrets: true
-          }, 15000);
-          const retrievedKey = out.config?.fleet_passphrase?.trim() || '';
-          const isCommissioned = serialDeviceState(chipId)?.status?.commissioned;
-          const isDefaultKey = serialDeviceState(chipId)?.status?.fleet_passphrase_default;
-
-          if (isCommissioned && retrievedKey && retrievedKey !== 'lora-default-passphrase' && isDefaultKey === false) {
-            pairFleetKey.value = retrievedKey;
-            pairFleetKeySource.value = 'gateway';
-            pushPairLog(`Retrieved commissioned fleet key from gateway.`);
-          } else if (isCommissioned && isDefaultKey === false && !retrievedKey) {
-            if (pairFleetKey.value) {
-              pairFleetKeySource.value = 'manual';
-              pushPairLog('Gateway is commissioned; MQTT does not return secrets, using the existing fleet key in the Provision form.');
-            } else {
-              pairFleetKeySource.value = 'manual';
-              pushPairLog('Gateway is commissioned but fleet key is hidden. Please input the fleet key to proceed.');
-            }
-          } else if (!isCommissioned || isDefaultKey === true) {
-            generatePairFleetKey(true);
-            pairFleetKeySource.value = 'factory_generated';
-            pushPairLog('Gateway is factory/uncommissioned; generated a new fleet key for first commissioning.');
-          } else {
-            clearPairFleetKey();
-            pushPairLog('Gateway fleet key could not be verified; fleet key field cleared.');
-          }
-          pairGatewayLoaded.value = true;
-        } catch (configErr) {
-          pushPairLog('Gateway config fetch failed: ' + configErr);
+      pushPairLog('Reading retained MQTT gateway configuration...');
+      try {
+        const configState = await ensureMqttConfigLoaded(chipId);
+        const latestState = serialDeviceState(chipId);
+        if (latestState) {
+          latestState.config = normalizeSerialAdminConfig(configState.buffer as Partial<SerialAdminConfig>, latestState.status);
         }
+        const status = latestState?.status;
+        const cfg = latestState?.config;
+        const isCommissioned = status?.commissioned ?? cfg?.commissioned;
+        const isDefaultKey = status?.fleet_passphrase_default ?? !!configState.secretsMetadata['fleet_passphrase_default'];
+
+        if (isCommissioned && isDefaultKey === false) {
+          pairFleetKeySource.value = 'manual';
+          if (pairFleetKey.value) {
+            pushPairLog('Gateway is commissioned; MQTT does not return secrets, using the existing fleet key in the Provision form.');
+          } else {
+            pushPairLog('Gateway is commissioned but fleet key is hidden. Please input the fleet key to proceed.');
+          }
+        } else if (!isCommissioned || isDefaultKey === true) {
+          generatePairFleetKey(true);
+          pairFleetKeySource.value = 'factory_generated';
+          pushPairLog('Gateway is factory/uncommissioned; generated a new fleet key for first commissioning.');
+        } else {
+          pairFleetKeySource.value = pairFleetKey.value ? 'manual' : 'none';
+          pushPairLog('Gateway fleet key state is unknown from retained MQTT config. Please verify the fleet key before provisioning.');
+        }
+        pairGatewayLoaded.value = true;
+      } catch (configErr) {
+        pushPairLog('Gateway config topics failed: ' + configErr);
       }
     } catch (e) {
       pushPairLog('Gateway check failed: ' + e);
@@ -4428,14 +4431,14 @@ async function refreshEasyPairStatus(log = false) {
         if (Array.isArray(device)) {
           return {
             chip_id_hex: '0x' + device[0],
-            assigned_address: device[1],
-            rssi: device[2],
-            state: device[3],
-            current_address: 0,
-            fw_major: 0,
-            fw_minor: 0,
-            fw_patch: 0,
-            fw_build: 0,
+            current_address: Number(device[1]) || 0,
+            assigned_address: Number(device[2]) || 0,
+            rssi: Number(device[3]) || 0,
+            state: device[4],
+            fw_major: Number(device[5]) || 0,
+            fw_minor: Number(device[6]) || 0,
+            fw_patch: Number(device[7]) || 0,
+            fw_build: Number(device[8]) || 0,
             role_tx: false,
             selected: true,
             address_conflict: false
@@ -4545,6 +4548,19 @@ async function startEasyPairDiscovery() {
 
 
 async function loadGatewayTargetAddresses(password: string): Promise<number[]> {
+  if (pairTransport.value === 'mqtt') {
+    const key = pairGatewayKey.value;
+    if (!key) return [];
+    const state = serialDeviceState(key);
+    let config = state?.config;
+    if (!config) {
+      const configState = await ensureMqttConfigLoaded(key);
+      config = normalizeSerialAdminConfig(configState.buffer as Partial<SerialAdminConfig>, state?.status || null);
+      if (state) state.config = config;
+    }
+    return uniqueSortedAddresses(normalizeAddressArray(config?.paired_target_addresses));
+  }
+
   const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
     admin_password: password
   }, 15000);
@@ -6038,15 +6054,19 @@ const provisionUiStateComputed = computed<ProvisionUiState>({
 });
 
 const provisionGatewayStateComputed = computed<ProvisionGatewayState>(() => {
-  const state = gatewaySelectedPort.value ? serialDeviceState(gatewaySelectedPort.value) : null;
-  const hasWarning = !!(gatewaySelectedPort.value && state?.status && !state.status.role_tx);
-  const hasUncommissioned = !!(gatewaySelectedPort.value && state?.status && state.status.role_tx && (!state.status.commissioned || state.status.fleet_passphrase_default));
+  const gatewayKey = pairTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  const state = gatewayKey ? serialDeviceState(gatewayKey) : null;
+  const hasWarning = !!(gatewayKey && state?.status && !state.status.role_tx);
+  const hasUncommissioned = !!(gatewayKey && state?.status && state.status.role_tx && (!state.status.commissioned || state.status.fleet_passphrase_default));
+  const gatewayLabel = pairTransport.value === 'mqtt' && gatewayKey
+    ? `lrs-${gatewayKey}`
+    : (gatewayKey || '-');
 
   return {
     hasGatewayDeviceWarning: hasWarning,
     hasUncommissionedWarning: hasUncommissioned,
-    gatewayLabel: gatewaySelectedPort.value || '-',
-    isGatewayLoadDisabled: isGatewayLoading.value || isPairBusy.value || !gatewaySelectedPort.value,
+    gatewayLabel,
+    isGatewayLoadDisabled: isGatewayLoading.value || isPairBusy.value || !gatewayKey,
     isGatewayLoading: isGatewayLoading.value,
     gatewayRoleLabel: state?.status?.role || '-'
   };
@@ -6081,7 +6101,7 @@ const provisionDiscoveredDeviceRowComputed = computed<ProvisionDiscoveredDeviceR
   return devices.map(device => ({
     chip_id_hex: device.chip_id_hex,
     rssi: device.rssi,
-    current_address: device.current_address,
+    current_address: device.current_address > 0 && device.current_address < 255 ? device.current_address : '-',
     assigned_address: device.assigned_address || '-',
     firmware: compactFirmwareVersion(device.fw_major, device.fw_minor, device.fw_patch, device.fw_build),
     isConflict: !!device.address_conflict,

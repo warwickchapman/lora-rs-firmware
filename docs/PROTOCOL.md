@@ -229,9 +229,10 @@ To allow remote gateway control over LAN or cloud networks:
   ```
 - Credential protection:
   - Secrets are completely excluded from get_config responses sent over MQTT. Secret exports are only available over USB serial mode.
+  - Flasher provisioning over MQTT must read retained `config/#` topics for gateway configuration state instead of issuing `get_config`, keeping the admin command channel for small action/status commands only.
 - MQTT packet buffer ceiling:
   - The gateway firmware MQTT client enforces a strict `1024`-byte packet size ceiling to prevent heap fragmentation and memory exhaustion on the ESP8266.
-  - To respect this constraint, command responses that return lists (e.g. `lora_inventory_status`) automatically prune all peer telemetry attributes when executed over MQTT (`isMqtt == true`), returning only the authoritative seed list containing `address` and `chip_id` (when known). All other peer metrics (RSSI, firmware version, IP, sensors, relay status, uptime) are received as separate, retained MQTT telemetry topics to decorate the seeded UI rows. In addition, the same-key discovery candidates list is capped at at most 4 entries, heavy timestamps (`last_seen_ms`, `age_ms`) are omitted, and `candidate_total` and `candidate_truncated` are set in the response metadata to prevent packet overflow. Similarly, `provisioning_status` responses are optimized using a highly compact array-based schema over MQTT (`devices` as `[["chip_id", address, rssi, "state"], ...]`), and all verbose debug logs are completely pruned.
+  - To respect this constraint, command responses that return lists (e.g. `lora_inventory_status`) automatically prune all peer telemetry attributes when executed over MQTT (`isMqtt == true`), returning only the authoritative seed list containing `address` and `chip_id` (when known). All other peer metrics (RSSI, firmware version, IP, sensors, relay status, uptime) are received as separate, retained MQTT telemetry topics to decorate the seeded UI rows. In addition, the same-key discovery candidates list is capped at at most 4 entries, heavy timestamps (`last_seen_ms`, `age_ms`) are omitted, and `candidate_total` and `candidate_truncated` are set in the response metadata to prevent packet overflow. Similarly, `provisioning_status` responses are optimized using a compact array-based schema over MQTT (`devices` as `[["chip_id", current_address, assigned_address, rssi, "state", fw_major, fw_minor, fw_patch, fw_build], ...]`), and all verbose debug logs are completely pruned.
 
 ## UDP Mirroring Controls
 
@@ -269,5 +270,3 @@ To allow remote gateway control over LAN or cloud networks:
   - `flags` / `temp_code`: 16-bit destination port (little-endian)
   - `sensor_mask` / `sensor_digital0` / `sensor_analog0`: 32-bit TTL duration in seconds (little-endian)
   - `unix_time_s`: 32-bit destination IPv4 host address (each byte represents an octet)
-
-

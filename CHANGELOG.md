@@ -16,12 +16,14 @@ All notable changes to this pre-release project are documented here in current o
 - Implemented automatic MQTT session establishment handshake (`admin_challenge`) and automatic one-time retry handling when sessions are invalid or expired.
 - Stripped Unix time `ts` and `ttl_ms` parameters from MQTT command payloads.
 - Renamed the Provision connection option from "Remote MQTT Broker" to "MQTT".
+- Changed Provision over MQTT to load gateway configuration from retained `config/#` topics instead of the monolithic `get_config` admin response, avoiding 15-second timeouts from oversized MQTT command responses on ESP8266.
 - Renamed "Forget device" context menu button to "Remove from Gateway", updated confirmation dialogs, and renamed "Discovered Candidates" header to "Same-Key Adoption Candidates".
 - Added `addr` and `remote_addr` fields to the Tauri Rust `MqttGatewayPayload` struct to ensure MQTT discovery details are correctly matching and parsed in the UI.
 - Extracts `chip_id` from the canonical peer topic segment format (e.g. `02_lrs-0048d1bb`) in the Tauri MQTT backend and emits it to the frontend.
 - Matches telemetry updates to seeded inventory rows using both `address` and `chip_id` (normalizing identities), surfacing address collisions as UI conflict warnings and blocking mismatched data merges.
 - Filtered incoming telemetry in MQTT mode to prevent stale or retained MQTT messages from automatically generating non-existent remote rows in the configured devices list.
 - Configured the frontend inventory list to immediately remove rows upon successful unpair command executions.
+- Extended compact MQTT provisioning status rows with current address and firmware components so the Provision UI shows real values instead of unknown placeholders while staying below the ESP8266 MQTT packet ceiling.
 - Updated the targeted factory reset modal to clarify options between full decommissioning vs keeping the device in the gateway's secure fleet (renamed "Keep Fleet Key" to "Reset but keep in fleet").
 - Suppressed the fleet key configuration warning if the fleet key is already populated in the form during MQTT gateway load.
 - Improved local broker UX: selecting "Local MQTT Broker" now automatically starts the broker (if not already running) and connects Flasher's MQTT client.

@@ -688,9 +688,14 @@ void AdminExecutor::buildProvisioningStatus(JsonDocument &doc, bool isMqtt) {
       char chipHex[9];
       snprintf(chipHex, sizeof(chipHex), "%08lx", static_cast<unsigned long>(d.chip_id));
       o.add(chipHex);
+      o.add(d.current_address);
       o.add(d.assigned_address);
       o.add(d.rssi);
       o.add(provisioningDeviceStateText(d.state));
+      o.add(d.fw_major);
+      o.add(d.fw_minor);
+      o.add(d.fw_patch);
+      o.add(d.fw_build);
     } else {
       JsonObject o = devices.add<JsonObject>();
       char chipHex[11];
@@ -2372,4 +2377,3 @@ bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
   }
   return false;
 }
-

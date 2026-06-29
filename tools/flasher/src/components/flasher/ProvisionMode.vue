@@ -191,7 +191,13 @@ function wifiSignalLabel(rssi: number): string {
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
       <div>
-        <span class="font-bold">Gateway Device Required:</span> The device currently connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewayState.gatewayLabel }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Please connect a gateway device instead.
+        <span class="font-bold">Gateway Device Required:</span>
+        <template v-if="computedPairTransport === 'serial'">
+          The device currently connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewayState.gatewayLabel }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Please connect a gateway device instead.
+        </template>
+        <template v-else>
+          The selected MQTT gateway <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewayState.gatewayLabel }}</span> is configured as a <span class="font-bold text-amber-200">Remote</span>. Select a gateway device instead.
+        </template>
       </div>
     </div>
 
@@ -203,7 +209,13 @@ function wifiSignalLabel(rssi: number): string {
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
       <div>
-        <span class="font-bold">Uncommissioned Gateway:</span> The gateway connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewayState.gatewayLabel }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
+        <span class="font-bold">Uncommissioned Gateway:</span>
+        <template v-if="computedPairTransport === 'serial'">
+          The gateway connected on <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewayState.gatewayLabel }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
+        </template>
+        <template v-else>
+          The selected MQTT gateway <span class="font-mono text-white bg-slate-900/60 px-1 py-0.5 rounded border border-slate-700/50">{{ gatewayState.gatewayLabel }}</span> is in a <span class="font-bold text-cyan-200">Factory / Uncommissioned State</span>. Provisioning it now will assign the new fleet key and commission it.
+        </template>
       </div>
     </div>
 
