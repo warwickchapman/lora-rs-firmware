@@ -14,8 +14,8 @@ The former device-hosted Web UI, REST API, and captive-portal admin flow have be
 For shipped release `.bin` files, use `esptool` and the included helper:
 
 - Helper script (recommended):
-  - Windows: `python tools/flash_release.py --port COM7 --bin firmware-lrs_za-v0.4.3-alpha.bin`
-  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin firmware-lrs_za-v0.4.3-alpha.bin`
+  - Windows: `python tools/flash_release.py --port COM7 --bin lrs-firmware-0.10.0-beta-za.bin`
+  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin lrs-firmware-0.10.0-beta-za.bin`
 
 The helper reads chip ID, flashes firmware, and prints:
 - device name: `lrs-<chipid>`
@@ -26,13 +26,13 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash at address `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 firmware-lrs_za-v0.4.3-alpha.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 lrs-firmware-0.10.0-beta-za.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 lrs-firmware-0.10.0-beta-za.bin`
 
 Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
 
 ## Desktop Flasher App
-The repository now includes a desktop flasher utility at `/Users/warwick/Code/LoRa/lora_rs/tools/flasher` for installers who want a GUI workflow.
+The repository includes a desktop flasher utility at `tools/flasher` for installers who want a GUI workflow.
 
 What it does:
 - Detects available serial ports.
@@ -42,19 +42,19 @@ What it does:
 - Flashes selected firmware via `esptool` and shows live operation logs.
 - Provisions gateways/remotes, scans Fleet inventory through a USB gateway, triggers OTA pull for WiFi-connected devices, and edits local Settings over USB serial admin.
 - **Linux Users**: Ensure you are in the `dialout` group (`sudo usermod -a -G dialout $USER`) and log out/in.
-- **Linux AppImage note**: prefer the `*.AppImage.tar.gz` release asset. Extracting it preserves executable permissions.
+- **Linux AppImage note**: Prefer the `*.AppImage.tar.gz` release asset. Extracting it preserves executable permissions.
 
 Main project:
-- `/Users/warwick/Code/LoRa/lora_rs/tools/flasher`
+- `tools/flasher`
 
-## Start Here
-- User/operator quickstart: `/Users/warwick/Code/LoRa/lora_rs/docs/USER_GUIDE.md`
-- Developer onboarding and architecture: `/Users/warwick/Code/LoRa/lora_rs/docs/DEVELOPER_GUIDE.md`
-- Protocol details: `/Users/warwick/Code/LoRa/lora_rs/docs/PROTOCOL.md`
-- Factory/provisioning flow: `/Users/warwick/Code/LoRa/lora_rs/docs/PROVISIONING.md`
-- Product manual draft: `/Users/warwick/Code/LoRa/lora_rs/docs/PRODUCT_MANUAL.md`
-- Field technician manual: `/Users/warwick/Code/LoRa/lora_rs/docs/FIELD_TECHNICIAN_MANUAL.md`
-- Deferred scope TODO list: `/Users/warwick/Code/LoRa/lora_rs/docs/TODO.md`
+## Documentation & Code Navigation
+- User/operator quickstart: `docs/USER_GUIDE.md`
+- Developer onboarding and architecture: `docs/DEVELOPER_GUIDE.md`
+- Protocol details: `docs/PROTOCOL.md`
+- Factory/provisioning flow: `docs/PROVISIONING.md`
+- Product manual draft: `docs/PRODUCT_MANUAL.md`
+- Field technician manual: `docs/FIELD_TECHNICIAN_MANUAL.md`
+- Deferred scope TODO list: `docs/TODO.md`
 
 ## Build Targets
 
@@ -67,17 +67,16 @@ Main project:
 >
 > All other environments defined in `platformio.ini` (such as the local `_ota` targets) are custom local, deployment-specific, or diagnostic environments. They are not part of the standard build or test pipeline and must be disregarded.
 
-
 ## Release Version Source
-- Single source of truth: `/Users/warwick/Code/LoRa/lora_rs/VERSION`
+- Single source of truth: `VERSION`
 - Firmware build metadata (`fw_version` reported through serial admin/MQTT), flasher app version label, and factory/release helper scripts all read from this file.
-- For a new release, bump `VERSION` once (for example `0.4.4-alpha`) and keep release tag/title/assets aligned to that value.
+- For a new release, bump `VERSION` once (for example `0.10.0-beta`) and keep release tag/title/assets aligned to that value.
 
 Local non-release flasher build policy:
 - Do not reuse the last released version string for one-off local test builds.
 - Release builds use the exact value from `VERSION`.
-- After a successful release, `tools/release_manager.py` now auto-advances `VERSION` to the next patch `-dev`, commits it, and pushes it to `main` (default behavior).
-- Example: releasing `0.6.1-alpha` auto-bumps `VERSION` to `0.6.2-dev`.
+- After a successful release, the release script auto-advances `VERSION` to the next patch `-dev`, commits it, and pushes it to `main` (default behavior).
+- Example: releasing `0.10.0-beta` auto-bumps `VERSION` to `0.10.1-dev`.
 - Local ad-hoc builds can then append git identity in artifact labels as needed:
   - clean tree: `<version>.<shortsha>` or `<version>-<shortsha>`
   - dirty tree: `<version>.<shortsha>.dirty`
@@ -88,22 +87,22 @@ Local non-release flasher build policy:
   - Check this with `python3 tools/flasher/version_guard.py` or `npm run check:version-workflow --prefix tools/flasher`.
 
 ## Release Automation Script
-Use `/Users/warwick/Code/LoRa/lora_rs/tools/release_manager.py` to run the same release flow end-to-end:
-- runs mandatory pre-release validation gate (release blocks unless all pass):
+Use `tools/release_manager.py` to run the same release flow end-to-end:
+- Runs mandatory pre-release validation gate (release blocks unless all pass):
   - `pio test -e native`
   - `python3 tools/test_version_metadata.py`
   - `pio run -e lrs_za`
   - `pio run -e lrs_us`
-- builds fresh `lrs_za` + `lrs_us` firmware
-- captures firmware RAM/Flash usage for both environments and prints deltas vs previous release in the release run output
-- generates named assets + SHA256 checksums
-- creates/updates GitHub release from `VERSION`
-- after successful publish to both repos, auto-bumps `VERSION` to next patch `-dev`, commits, and pushes (disable with `--no-post-bump-dev`)
-- applies George Bernard Shaw quote + one-word release name (name reuse allowed when the quote bank is exhausted)
-- supports firmware-only releases that reuse prior flasher binaries:
+- Builds fresh `lrs_za` + `lrs_us` firmware
+- Captures firmware RAM/Flash usage for both environments and prints deltas vs previous release in the release run output
+- Generates named assets + SHA256 checksums
+- Creates/updates GitHub release from `VERSION`
+- After successful publish to both repos, auto-bumps `VERSION` to next patch `-dev`, commits, and pushes (disable with `--no-post-bump-dev`)
+- Applies George Bernard Shaw quote + one-word release name (name reuse allowed when the quote bank is exhausted)
+- Supports firmware-only releases that reuse prior flasher binaries:
   - `--reuse-flasher vX.Y.Z-alpha` reuses flasher assets from that release
   - `--reuse-flasher-keep-names` keeps original flasher filenames (for example `0.6.3-alpha` names in a `0.6.4-alpha` release)
-- optional verification mode:
+- Optional verification mode:
   - `--verify-firmware-only-assets` for firmware-first publish
   - `--verify-full-assets` only after flasher assets are present
 
@@ -115,12 +114,12 @@ Pre-release gate notes:
 - Release metrics files (`docs/release_build_metrics.csv`, `docs/release_build_metrics.md`) are generated artifacts and should remain out of source commits unless explicitly updating release history.
 
 Release build metrics history:
-- Historical table: `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.md`
-- Canonical data source: `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.csv`
+- Historical table: `docs/release_build_metrics.md`
+- Canonical data source: `docs/release_build_metrics.csv`
 - Updated automatically by `tools/release_manager.py` after publish.
 
 Flasher rebuild policy (mandatory):
-- If any file under `/Users/warwick/Code/LoRa/lora_rs/tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.
+- If any file under `tools/flasher/` changed since the source release, flasher binaries must be rebuilt from current source.
 - Reusing flasher binaries from an older tag is allowed only when `tools/flasher/**` is unchanged.
 - If in doubt, rebuild flasher binaries.
 - If flasher code is unchanged and you intentionally want firmware-only release cadence, reuse is allowed:
@@ -169,10 +168,7 @@ Deterministic one-command release (recommended):
 - Prepare release notes in a file first (for example `docs/release_notes/v0.9.0-beta.md`).
 - Then run one command:
 ```bash
-cd /Users/warwick/Code/LoRa/lora_rs
-python3 tools/release_one_shot.py \
-  --notes-file /absolute/path/to/release-notes.md \
-  --title "vX.Y.Z-suffix OneWordName"
+python3 tools/release_one_shot.py   --notes-file /absolute/path/to/release-notes.md   --title "vX.Y.Z-suffix OneWordName"
 ```
 - This script performs the full flow:
   - firmware build + publish to both repos,
@@ -184,25 +180,11 @@ python3 tools/release_one_shot.py \
 - Release notes are used exactly as provided (no auto-generated summary/highlights).
 - Optional: `--keep-workflow-runs N` (default `10`, set `0` to disable pruning for that run).
 
-Example:
-```bash
-cd /Users/warwick/Code/LoRa/lora_rs
-python3 tools/release_manager.py \
-  --summary "Short release summary here." \
-  --highlight "Feature highlight one" \
-  --highlight "Feature highlight two" \
-  --verify-firmware-only-assets
-```
-
-## Flash
+## Direct Flash Commands
 - `python3 -m platformio run -e lrs_za -t upload --upload-port <PORT>`
 - `python3 -m platformio run -e lrs_us -t upload --upload-port <PORT>`
 
-## Current Status
-- `lrs_za` compiles successfully.
-- `lrs_us` compiles successfully.
-
 ## Notes for New Contributors
-- Main runtime entrypoint: `/Users/warwick/Code/LoRa/lora_rs/src/main.cpp`
-- Application orchestrator: `/Users/warwick/Code/LoRa/lora_rs/src/app.cpp`
-- Runtime modules are split under `/Users/warwick/Code/LoRa/lora_rs/src/` (`app`, `state_machine`, `radio_protocol`, `serial_admin`, `mqtt_bridge`, `sensor_manager`, `config_store`, `logger`).
+- Main runtime entrypoint: `src/main.cpp`
+- Application orchestrator: `src/app.cpp`
+- Runtime modules are split under `src/` (`app`, `state_machine`, `radio_protocol`, `serial_admin`, `mqtt_bridge`, `sensor_manager`, `config_store`, `logger`).
