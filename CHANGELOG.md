@@ -4,6 +4,8 @@ All notable changes to this pre-release project are documented here in current o
 
 ## [Unreleased]
 
+## [0.10.0-beta] - 2026-06-29
+
 ### Firmware Changes
 - Provisioning and gateway setup now preserve a gateway's disabled input-control setting instead of silently re-enabling physical gateway input control; remotes still force the invalid setting off.
 - Replaced MQTT `relay` topic (was dual read/write) with explicit `set/relay` command topic for local relay control. The `relay` topic is now read-only status telemetry.
