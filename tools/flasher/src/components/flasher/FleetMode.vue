@@ -584,7 +584,7 @@ function toggleNetworkUdpLogsExpanded() {
                       @click="emit('remote-forget', device.address); activeDropdownAddress = null"
                       class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
                     >
-                      🗑️ Remove from Gateway
+                      🗑️ Forget device
                     </button>
                     <div class="h-[1px] bg-slate-800/80 my-1"></div>
                     <button
