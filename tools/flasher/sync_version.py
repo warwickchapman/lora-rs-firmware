@@ -84,6 +84,24 @@ def update_cargo_lock(path: Path, version: str) -> None:
     path.write_text(new_text, encoding="utf-8")
 
 
+def update_readme(path: Path, version: str) -> None:
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    pattern = r"(lrs-firmware-)[0-9a-zA-Z.~-]+(-(za|us|eu)\.bin)"
+    new_text, count = re.subn(pattern, rf"\g<1>{version}\g<2>", text)
+    if count > 0:
+        path.write_text(new_text, encoding="utf-8")
+
+
+def read_readme_versions(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    pattern = r"lrs-firmware-([0-9a-zA-Z.~-]+)-(za|us|eu)\.bin"
+    return re.findall(pattern, text)
+
+
 def read_package_json_version(path: Path) -> str:
     data = json.loads(path.read_text(encoding="utf-8"))
     return str(data.get("version", "")).strip()
@@ -131,6 +149,13 @@ def check_versions(repo_root: Path, display_version: str, package_version: str) 
     lock_path = flasher_root / "package-lock.json"
     if lock_path.exists():
         checks.append(("package-lock.json", read_package_lock_version(lock_path), package_version))
+
+    readme_path = repo_root / "README.md"
+    if readme_path.exists():
+        found_versions = [v[0] for v in read_readme_versions(readme_path)]
+        for fv in found_versions:
+            if fv != display_version:
+                checks.append(("README.md", fv, display_version))
 
     mismatches = [(name, current, expected) for (name, current, expected) in checks if current != expected]
     if not mismatches:
@@ -192,6 +217,7 @@ def main() -> int:
     update_tauri_conf(flasher_root / "src-tauri" / "tauri.conf.json", package_version)
     update_cargo_toml(flasher_root / "src-tauri" / "Cargo.toml", package_version)
     update_cargo_lock(flasher_root / "src-tauri" / "Cargo.lock", package_version)
+    update_readme(repo_root / "README.md", release_version)
 
     print(
         f"Synchronized flasher versions: release={release_version}, "
