@@ -828,7 +828,6 @@ void ConfigStore::ensureProvisionedDefaults() {
   if (cfg_.role_tx) {
     cfg_.local_address = runtime_utils::kGatewayAddress;
     cfg_.remote_address = runtime_utils::kFirstRemoteAddress;
-    cfg_.input_control_paired_lora_enabled = true;
   } else {
     cfg_.local_address = runtime_utils::kFirstRemoteAddress;
     cfg_.remote_address = runtime_utils::kGatewayAddress;

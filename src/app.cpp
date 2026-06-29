@@ -765,7 +765,6 @@ void App::handlePendingFleetProvision() {
       cfg.mode = "paired";
       cfg.role = provRoleTx ? "transmitter" : "receiver";
       if (provRoleTx) {
-        cfg.input_control_paired_lora_enabled = true;
         cfg.paired_target_count = 0;
         memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
       } else {

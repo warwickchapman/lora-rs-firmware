@@ -2614,7 +2614,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     tx_mqtt_remote_default_poll_interval_ms: numberValue(cfg.tx_mqtt_remote_default_poll_interval_ms, 300000),
     rx_push_on_change_enabled: boolValue(cfg.rx_push_on_change_enabled, false),
     rx_push_min_interval_ms: numberValue(cfg.rx_push_min_interval_ms, 60000),
-    input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, true),
+    input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, false),
     tx_command_retry_timeout_ms: numberValue(cfg.tx_command_retry_timeout_ms, 180000),
     rx_failsafe_mode: stringValue(cfg.rx_failsafe_mode, 'hold_last'),
     rx_failsafe_timeout_ms: numberValue(cfg.rx_failsafe_timeout_ms, 180000),

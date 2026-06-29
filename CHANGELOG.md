@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Changes
+- Provisioning and gateway setup now preserve a gateway's disabled input-control setting instead of silently re-enabling physical gateway input control; remotes still force the invalid setting off.
 - Replaced MQTT `relay` topic (was dual read/write) with explicit `set/relay` command topic for local relay control. The `relay` topic is now read-only status telemetry.
 - Added `peers/<NN_lrs-peer_chipid>/set/relay` command topic for remote peer relay control via LoRa, replacing the JSON `control` topic.
 - Removed legacy MQTT `control` topic (JSON `{addr, relay}` format). Use `set/relay` topics instead.

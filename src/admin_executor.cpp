@@ -947,8 +947,6 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
   }
   clearAddressList(cfg.allowed_controller_addresses,
                    cfg.allowed_controller_count);
-  cfg.input_control_paired_lora_enabled =
-      doc["input_control_paired_lora_enabled"] | true;
 
   if (!config_->save()) {
     sendError("configure_gateway", "save_failed", requestId(doc), writer);
