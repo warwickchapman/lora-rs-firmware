@@ -20,6 +20,18 @@ void test_paired_receiver_is_rx() {
   TEST_ASSERT_FALSE(roleTx);
 }
 
+void test_paired_gateway_is_tx() {
+  bool roleTx = false;
+  TEST_ASSERT_TRUE(runtime_utils::parseRoleTxFromModeRole("paired", "gateway", roleTx));
+  TEST_ASSERT_TRUE(roleTx);
+}
+
+void test_paired_remote_is_rx() {
+  bool roleTx = true;
+  TEST_ASSERT_TRUE(runtime_utils::parseRoleTxFromModeRole("paired", "remote", roleTx));
+  TEST_ASSERT_FALSE(roleTx);
+}
+
 void test_standalone_none_is_local_tx_path() {
   bool roleTx = false;
   TEST_ASSERT_TRUE(runtime_utils::parseRoleTxFromModeRole("standalone", "none", roleTx));
@@ -634,6 +646,8 @@ int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_paired_transmitter_is_tx);
   RUN_TEST(test_paired_receiver_is_rx);
+  RUN_TEST(test_paired_gateway_is_tx);
+  RUN_TEST(test_paired_remote_is_rx);
   RUN_TEST(test_standalone_none_is_local_tx_path);
   RUN_TEST(test_mesh_aliases_are_rejected_without_changing_output);
   RUN_TEST(test_invalid_inputs_are_rejected_without_changing_output);

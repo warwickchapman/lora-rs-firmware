@@ -763,7 +763,7 @@ void App::handlePendingFleetProvision() {
       cfg.local_address = provAddr;
       cfg.role_tx = provRoleTx;
       cfg.mode = "paired";
-      cfg.role = provRoleTx ? "transmitter" : "receiver";
+      cfg.role = provRoleTx ? "gateway" : "remote";
       if (provRoleTx) {
         cfg.paired_target_count = 0;
         memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));

@@ -17,13 +17,11 @@ constexpr char kPostOtaActionTmpPath[] = "/post_ota_action.tmp";
 constexpr char kPostOtaWifiFastMarkerPath[] = "/post_ota_wifi_fast";
 constexpr size_t kConfigMaxBytes = 8192;
 constexpr size_t kPostOtaActionMaxBytes = 256;
-constexpr uint16_t kConfigSchemaVersion = 3;
+constexpr uint16_t kConfigSchemaVersion = 4;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
 constexpr char kRoleNone[] = "none";
-constexpr char kRoleTransmitter[] = "transmitter";
-constexpr char kRoleReceiver[] = "receiver";
 #ifdef REGION_US
 constexpr long kLockedLoraFrequencyHz = 915000000L;
 constexpr float kDefaultWifiTxPowerDbm = 19.37f;
@@ -36,7 +34,7 @@ constexpr const char *kAllowedFields[] = {
     "schema_version",
     "commissioned",
     "mode",
-    "role",
+    "role_tx",
     "local_address",
     "remote_address",
     "paired_target_addresses",
@@ -308,14 +306,21 @@ bool ConfigStore::begin() {
   }
   cfg_.commissioned = root["commissioned"] | false;
   cfg_.mode = root["mode"] | "";
-  cfg_.role = root["role"] | "";
-  if (!runtime_utils::parseRoleTxFromModeRole(String(cfg_.mode.c_str()),
-                                              String(cfg_.role.c_str()),
-                                              cfg_.role_tx)) {
-    LRS_LOGW(FS, "event=config_invalid path=%s reason=mode_role_invalid mode=%s role=%s action=reset_defaults", kConfigPath,
-             cfg_.mode.c_str(), cfg_.role.c_str());
-    ensureProvisionedDefaults();
-    return save();
+  if (root.containsKey("role_tx")) {
+    cfg_.role_tx = root["role_tx"] | false;
+    cfg_.role = cfg_.role_tx ? "gateway" : "remote";
+  } else {
+    String role_str = root["role"] | "";
+    if (!runtime_utils::parseRoleTxFromModeRole(String(cfg_.mode.c_str()),
+                                                role_str,
+                                                cfg_.role_tx)) {
+      LRS_LOGW(FS, "event=config_invalid path=%s reason=mode_role_invalid mode=%s role=%s action=reset_defaults", kConfigPath,
+               cfg_.mode.c_str(), role_str.c_str());
+      ensureProvisionedDefaults();
+      return save();
+    }
+    cfg_.role = cfg_.role_tx ? "gateway" : "remote";
+    needs_save = true;
   }
 
   cfg_.local_address = root["local_address"] | 1;
@@ -475,7 +480,7 @@ bool ConfigStore::save() {
   doc["schema_version"] = cfg_.schema_version;
   doc["commissioned"] = cfg_.commissioned;
   doc["mode"] = cfg_.mode;
-  doc["role"] = cfg_.role;
+  doc["role_tx"] = cfg_.role_tx;
   doc["local_address"] = cfg_.local_address;
   doc["remote_address"] = cfg_.remote_address;
   writeAddressList(doc, "paired_target_addresses", cfg_.paired_target_addresses, cfg_.paired_target_count, Settings::kAddressListCap);
@@ -753,9 +758,8 @@ void ConfigStore::setDefaults() {
   cfg_.schema_version = kConfigSchemaVersion;
   cfg_.commissioned = false;
   cfg_.mode = kModePaired;
-  cfg_.role = kRoleTransmitter;
-
   cfg_.role_tx = true;
+  cfg_.role = "gateway";
   cfg_.local_address = runtime_utils::kGatewayAddress;
   cfg_.remote_address = runtime_utils::kFirstRemoteAddress;
   cfg_.paired_target_count = 1;
@@ -855,7 +859,7 @@ void ConfigStore::ensureProvisionedDefaults() {
   cfg_.factory_serial = serialBuf;
   cfg_.commissioned = true;
   cfg_.mode = kModePaired;
-  cfg_.role = cfg_.role_tx ? kRoleTransmitter : kRoleReceiver;
+  cfg_.role = cfg_.role_tx ? "gateway" : "remote";
 }
 
 bool ConfigStore::writePostOtaWifiFastMarker() {

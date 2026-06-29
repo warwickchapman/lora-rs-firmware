@@ -142,20 +142,27 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   };
 
   cfg.mode = doc["mode"] | cfg.mode.c_str();
-  cfg.role = doc["role"] | cfg.role.c_str();
-  cfg.role_tx = parseBoolField(doc["role_tx"], cfg.role_tx);
+  if (!doc["role_tx"].isNull()) {
+    cfg.role_tx = parseBoolField(doc["role_tx"], cfg.role_tx);
+  } else if (!doc["role"].isNull()) {
+    String role_input = doc["role"] | "";
+    bool role_parsed = false;
+    if (runtime_utils::parseRoleTxFromModeRole(String(cfg.mode.c_str()), role_input, role_parsed)) {
+      cfg.role_tx = role_parsed;
+    }
+  }
   const bool hasRemoteAddressField = !doc["remote_address"].isNull();
   const bool hasPairedTargetsField = !doc["paired_target_addresses"].isNull();
   const bool hasAllowedControllersField =
       !doc["allowed_controller_addresses"].isNull();
   if (cfg.mode == "paired") {
-    cfg.role = cfg.role_tx ? "transmitter" : "receiver";
+    cfg.role = cfg.role_tx ? "gateway" : "remote";
   } else if (cfg.mode == "standalone") {
     cfg.role = "none";
     cfg.role_tx = true;
   } else if (cfg.mode.length() == 0) {
     cfg.mode = "paired";
-    cfg.role = cfg.role_tx ? "transmitter" : "receiver";
+    cfg.role = cfg.role_tx ? "gateway" : "remote";
   } else {
     return fail("mode_invalid");
   }
@@ -446,7 +453,7 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["schema_version"] = cfg.schema_version;
   doc["commissioned"] = cfg.commissioned;
   doc["mode"] = cfg.mode;
-  doc["role"] = cfg.role;
+  doc["role"] = cfg.role_tx ? "gateway" : "remote";
   doc["role_tx"] = cfg.role_tx;
   doc["local_address"] = cfg.local_address;
   doc["remote_address"] = cfg.remote_address;
@@ -737,7 +744,7 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
   out["heap_frag_pct"] = lrslog::heapFragPercent();
   out["heap_max_block"] = lrslog::heapMaxFreeBlock();
   out["mode"] = cfg.mode;
-  out["role"] = cfg.role;
+  out["role"] = cfg.role_tx ? "gateway" : "remote";
   out["role_tx"] = cfg.role_tx;
   out["local_address"] = cfg.local_address;
   out["remote_address"] = cfg.remote_address;
@@ -929,7 +936,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
                                cfg.paired_target_count > 0;
   cfg.commissioned = true;
   cfg.mode = "paired";
-  cfg.role = "transmitter";
+  cfg.role = "gateway";
   cfg.role_tx = true;
   const int requestedLocal = doc["local_address"] | runtime_utils::kGatewayAddress;
   cfg.local_address = (requestedLocal >= runtime_utils::kMinAddress && requestedLocal <= runtime_utils::kMaxAddress)
@@ -2055,7 +2062,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     out["serial"] = cfg.factory_serial;
     out["ap_ssid"] = config_->apSsid();
     out["mode"] = cfg.mode;
-    out["role"] = cfg.role;
+    out["role"] = cfg.role_tx ? "gateway" : "remote";
     out["role_tx"] = cfg.role_tx;
     out["local_address"] = cfg.local_address;
     out["remote_address"] = cfg.remote_address;

@@ -4,7 +4,6 @@ const ConfigField kConfigFields[] = {
     {"schema_version", ConfigFieldClass::RetainedConfig},
     {"commissioned", ConfigFieldClass::RetainedConfig},
     {"mode", ConfigFieldClass::RetainedConfig},
-    {"role", ConfigFieldClass::RetainedConfig},
     {"role_tx", ConfigFieldClass::RetainedConfig},
     {"local_address", ConfigFieldClass::RetainedConfig},
     {"remote_address", ConfigFieldClass::RetainedConfig},

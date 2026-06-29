@@ -13,11 +13,11 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
 bool parseRoleTxFromModeRole(const char *mode, const char *role, bool &roleTx) {
   if (mode == nullptr || role == nullptr) return false;
   if (strcmp(mode, "paired") == 0) {
-    if (strcmp(role, "transmitter") == 0) {
+    if (strcmp(role, "transmitter") == 0 || strcmp(role, "gateway") == 0) {
       roleTx = true;
       return true;
     }
-    if (strcmp(role, "receiver") == 0) {
+    if (strcmp(role, "receiver") == 0 || strcmp(role, "remote") == 0) {
       roleTx = false;
       return true;
     }

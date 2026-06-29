@@ -17,7 +17,7 @@ DERIVED_METADATA_EXCEPTIONS = {
     "fleet_passphrase_default": "Boolean flag indicating if fleet_passphrase is still the default value",
     "admin_password_set": "Boolean flag indicating if admin_password is set",
     "computed_lan_hostname": "Status value returning either configured lan_hostname or default lrs-<chip_id>",
-    "role_tx": "Derived boolean flag indicating if the device's role is transmitter (derived from role)"
+    "role": "Derived string flag indicating if the device is a gateway or remote (derived from role_tx)"
 }
 
 
@@ -79,9 +79,6 @@ class ConfigSchemaDocsTest(unittest.TestCase):
         missing = allowed - set(classifications.keys())
         self.assertEqual(missing, set(), f"Fields in kAllowedFields missing classification: {missing}")
         extra = set(classifications.keys()) - allowed
-        # Allow role_tx as a derived but public/writable field that is classified in kConfigFields
-        # but not persisted in kAllowedFields (since its value is derived on save).
-        extra = extra - {"role_tx"}
         self.assertEqual(extra, set(), f"Classified fields not in kAllowedFields: {extra}")
 
     def test_retained_config_fields_are_non_secret(self):

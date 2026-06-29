@@ -4,6 +4,12 @@ All notable changes to this pre-release project are documented here in current o
 
 ## [Unreleased]
 
+### Firmware Changes
+- Upgraded configuration schema version from 3 to 4.
+- Deprecated the persisted `"role"` string field in favor of `"role_tx"` (boolean).
+- Modernized user/operator-facing role terminology in JSON output, status, and identity endpoints from legacy `"transmitter"`/`"receiver"` to `"gateway"`/`"remote"`.
+- Added transparent config migration on load to convert legacy `"role"` values and old transmitter/receiver labels to `"role_tx"`.
+
 ## [0.10.0-beta] - 2026-06-29
 
 ### Firmware Changes
