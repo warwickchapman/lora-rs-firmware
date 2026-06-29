@@ -438,7 +438,7 @@ function handleManualMqttGatewayInput(val: string) {
         </div>
       </div>
 
-      <div :class="['grid grid-cols-1 gap-2', transportState.settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_8rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem_10rem]']">
+      <div :class="['grid grid-cols-1 gap-2', transportState.settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_8rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem]']">
         <div class="flex flex-col gap-1.5 text-xs">
           <label class="font-medium text-slate-400">Device</label>
           <div class="flex gap-2">
@@ -483,7 +483,7 @@ function handleManualMqttGatewayInput(val: string) {
         <div class="flex flex-col gap-1.5 text-xs">
           <label class="font-medium text-slate-400">Transport</label>
           <select v-model="computedSessionConnectionType" class="glass-input h-9 appearance-none">
-            <option value="serial">USB Serial Gateway</option>
+            <option value="serial">USB Serial</option>
             <option value="mqtt">Remote MQTT Broker</option>
             <option value="local_broker">Local MQTT Broker</option>
           </select>
@@ -522,12 +522,6 @@ function handleManualMqttGatewayInput(val: string) {
           <span :class="['inline-flex h-9 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', transportState.monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
             {{ transportState.monitorMqttConnected ? 'Connected' : 'Offline' }}
           </span>
-        </div>
-        <div v-else class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Admin path</label>
-          <div class="glass-input h-9 flex items-center text-slate-400">
-            USB serial admin
-          </div>
         </div>
       </div>
     </div>
