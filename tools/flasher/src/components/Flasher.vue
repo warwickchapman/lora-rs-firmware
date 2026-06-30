@@ -5636,6 +5636,7 @@ const fleetDisplayRows = computed<FleetDisplayRow[]>(() => {
     wifi_pending_offline: !!device.wifi_pending_offline,
     wifi_connected_known: !!device.wifi_connected_known,
     wifi_connected: !!device.wifi_connected,
+    wifi_rssi_dbm: device.wifi_rssi_dbm,
     pending_power_save_listen_only: device.pending_power_save_listen_only,
     power_save_listen_only: !!device.power_save_listen_only,
     ip: device.ip,
