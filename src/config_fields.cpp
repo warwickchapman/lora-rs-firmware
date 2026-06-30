@@ -76,3 +76,7 @@ const ConfigField *findConfigField(const char *name) {
   return nullptr;
 }
 
+bool isMqttWritableConfigField(const char *name) {
+  const ConfigField *field = findConfigField(name);
+  return field != nullptr && field->classification != ConfigFieldClass::InternalOnly;
+}

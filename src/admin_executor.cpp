@@ -848,8 +848,7 @@ void AdminExecutor::handleSetConfig(JsonDocument &doc, ResponseWriter writer, bo
   if (isMqtt) {
     for (auto kv : patch) {
       const char *key = kv.key().c_str();
-      const ConfigField *field = findConfigField(key);
-      if (field == nullptr || field->classification == ConfigFieldClass::InternalOnly) {
+      if (!isMqttWritableConfigField(key)) {
         sendError("set_config", "security_write_restricted_over_mqtt", id, writer);
         return;
       }

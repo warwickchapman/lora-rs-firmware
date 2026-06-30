@@ -17,3 +17,4 @@ extern const ConfigField kConfigFields[];
 extern const size_t kConfigFieldCount;
 
 const ConfigField *findConfigField(const char *name);
+bool isMqttWritableConfigField(const char *name);

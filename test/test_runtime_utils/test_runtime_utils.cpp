@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <cstring>
 
+#include "config_fields.h"
 #include "runtime_utils.h"
 #include "state_machine.h"
 
@@ -69,6 +70,27 @@ void test_wifi_status_text_known_values() {
 
 void test_wifi_status_text_unknown_value() {
   TEST_ASSERT_EQUAL_STRING("unknown", runtime_utils::wifiStatusText(12345));
+}
+
+void test_mqtt_config_write_authorization_boundary() {
+  const ConfigField *retained = findConfigField("mqtt_control_enabled");
+  TEST_ASSERT_NOT_NULL(retained);
+  TEST_ASSERT_EQUAL(static_cast<int>(ConfigFieldClass::RetainedConfig), static_cast<int>(retained->classification));
+  TEST_ASSERT_TRUE(isMqttWritableConfigField("mqtt_control_enabled"));
+
+  const ConfigField *secret = findConfigField("fleet_passphrase");
+  TEST_ASSERT_NOT_NULL(secret);
+  TEST_ASSERT_EQUAL(static_cast<int>(ConfigFieldClass::SecretMetadata), static_cast<int>(secret->classification));
+  TEST_ASSERT_TRUE(isMqttWritableConfigField("fleet_passphrase"));
+
+  const ConfigField *internal = findConfigField("known_peer_chip_ids");
+  TEST_ASSERT_NOT_NULL(internal);
+  TEST_ASSERT_EQUAL(static_cast<int>(ConfigFieldClass::InternalOnly), static_cast<int>(internal->classification));
+  TEST_ASSERT_FALSE(isMqttWritableConfigField("known_peer_chip_ids"));
+
+  TEST_ASSERT_NULL(findConfigField("not_a_real_config_field"));
+  TEST_ASSERT_FALSE(isMqttWritableConfigField("not_a_real_config_field"));
+  TEST_ASSERT_FALSE(isMqttWritableConfigField(nullptr));
 }
 
 void test_resolve_gateway_targets_paired_empty() {
@@ -653,6 +675,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_invalid_inputs_are_rejected_without_changing_output);
   RUN_TEST(test_wifi_status_text_known_values);
   RUN_TEST(test_wifi_status_text_unknown_value);
+  RUN_TEST(test_mqtt_config_write_authorization_boundary);
   RUN_TEST(test_resolve_gateway_targets_paired_empty);
   RUN_TEST(test_resolve_gateway_targets_paired_with_peers);
   RUN_TEST(test_resolve_gateway_targets_standalone_fallback);
@@ -677,4 +700,3 @@ int main(int argc, char **argv) {
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }
-
