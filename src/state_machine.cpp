@@ -2960,7 +2960,7 @@ void NodeStateMachine::tickTransmitter() {
       if (radioTxBudgetAvailable()) {
         last_counter_++;
         const uint32_t unixTimeS = currentUnixTimeS(now);
-        if (radio_->send(MessageType::Heartbeat, input_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
+        if (radio_->send(MessageType::Heartbeat, relay_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
                          runtime_.remote_address,
                          localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
           last_tx_ms_ = now;
@@ -3428,6 +3428,8 @@ void NodeStateMachine::tickReceive() {
       lrslog::event("rx_slave_block_mqtt", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
+    const bool heartbeatControlsRelay =
+        msg.type != MessageType::Heartbeat || ((msg.flags & kFlagPairedInputSlave) != 0U);
     if (!runtime_.role_tx && msg.type != MessageType::Mqtt) {
       const bool nextSlaveMode = (msg.flags & kFlagPairedInputSlave) != 0U;
       if (nextSlaveMode != paired_input_slave_mode_) {
@@ -3435,6 +3437,10 @@ void NodeStateMachine::tickReceive() {
         lrslog::event(paired_input_slave_mode_ ? "rx_slave_mode_on" : "rx_slave_mode_off", msg.rssi, msg.counter,
                       msg.relay_state);
       }
+    }
+    if (!heartbeatControlsRelay) {
+      scheduleDeferredAck(msg.src, relay_state_, input_state_, msg.counter);
+      return;
     }
     relay_state_ = msg.relay_state;
     input_state_ = msg.input_state;
