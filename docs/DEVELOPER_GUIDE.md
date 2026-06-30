@@ -95,6 +95,7 @@ USB serial admin protocol:
 - Replies use the same `LRS:` prefix and include `ok`, `cmd`, optional `id`, and command-specific fields.
 - Read-only commands: `hello`, `identity`, `status`, `provisioning_status`.
 - Password-gated commands: `get_config`, `set_config`, `factory_reset`, `configure_gateway`, `set_gateway_targets`, `start_discovery`, `provision_all`, `cancel_provisioning`, `wifi_scan`, `configure_wifi`, `provision_fleet_wifi`, `identify`, `reboot`, `ota_pull`, `remote_ota_pull`, `start_lora_inventory`, `lora_inventory_status`, and `cancel_lora_inventory`.
+  wifi_scan is a synchronous provisioning/support command and may pause LoRa, MQTT, and sensor processing while the scan runs; tooling must not poll it during normal runtime.
 - `get_config` returns redacted secrets by default. `set_config` accepts a partial `config` object, validates safety bounds, saves atomically, and applies runtime changes through the normal config reload hook.
 - `factory_reset` supports `keep_shared_fleet_key` and `keep_wifi_credentials`, then reboots after acknowledging the command.
 - `ota_pull` and `remote_ota_pull` require a 64-character SHA256 for the firmware payload. The remote LoRa trigger sends that digest over the encrypted LoRa control channel before the target downloads `/firmware.bin`.

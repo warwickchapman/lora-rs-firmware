@@ -9,6 +9,8 @@
 #include "logger.h"
 #include "runtime_utils.h"
 
+#include "lora_config.h"
+
 namespace {
 constexpr char kConfigPath[] = "/config.json";
 constexpr char kConfigTmpPath[] = "/config.tmp";
@@ -23,10 +25,8 @@ constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
 constexpr char kRoleNone[] = "none";
 #ifdef REGION_US
-constexpr long kLockedLoraFrequencyHz = 915000000L;
 constexpr float kDefaultWifiTxPowerDbm = 19.37f;
 #else
-constexpr long kLockedLoraFrequencyHz = 433000000L;
 constexpr float kDefaultWifiTxPowerDbm = 20.5f;
 #endif
 

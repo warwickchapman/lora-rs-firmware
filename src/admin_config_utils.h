@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 
 #include "state_machine.h"
+#include "lora_config.h"
 
 namespace admin_config_utils {
 
@@ -21,7 +22,6 @@ extern const uint32_t kMaxRxPushIntervalMs;
 extern const size_t kMinDeploymentKeyLen;
 extern const long kMinFrequencyHz;
 extern const long kMaxFrequencyHz;
-extern const long kDefaultFrequencyHz;
 
 bool isOwnLrsSoftApLike(const String &ssid);
 const char *wifiStatusText(wl_status_t st);

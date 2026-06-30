@@ -3,6 +3,9 @@
 #include <cstring>
 #include <ESP8266WiFi.h>
 
+#include "config_serializer.h"
+#include "admin_session.h"
+
 #include "build_info.h"
 #include "logger.h"
 #include "ota_pull.h"
@@ -70,18 +73,7 @@ const char* candidateStateToString(CandidateState s) {
 }
 
 
-void writeAddressArray(JsonDocument &doc, const char *key, const uint8_t *values,
-                       uint8_t count, uint8_t cap) {
-  JsonArray arr = doc[key].to<JsonArray>();
-  if (values == nullptr || cap == 0)
-    return;
-  if (count > cap)
-    count = cap;
-  for (uint8_t i = 0; i < count; ++i) {
-    if (values[i] >= runtime_utils::kMinAddress && values[i] <= runtime_utils::kMaxAddress)
-      arr.add(values[i]);
-  }
-}
+
 
 uint8_t parseAddressArrayField(JsonVariantConst src, uint8_t *out,
                                uint8_t cap) {
@@ -452,84 +444,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
 }
 } // namespace
 
-void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
-                       bool includeSecrets) {
-  const auto &cfg = config.settings();
-  doc["schema_version"] = cfg.schema_version;
-  doc["commissioned"] = cfg.commissioned;
-  doc["mode"] = cfg.mode;
-  doc["role"] = cfg.role_tx ? "gateway" : "remote";
-  doc["role_tx"] = cfg.role_tx;
-  doc["local_address"] = cfg.local_address;
-  doc["remote_address"] = cfg.remote_address;
-  writeAddressArray(doc, "paired_target_addresses", cfg.paired_target_addresses,
-                    cfg.paired_target_count, Settings::kAddressListCap);
-  writeAddressArray(doc, "allowed_controller_addresses",
-                    cfg.allowed_controller_addresses,
-                    cfg.allowed_controller_count, Settings::kAddressListCap);
-  writeAddressArray(doc, "known_peer_addresses", cfg.known_peer_addresses,
-                    cfg.known_peer_count, Settings::kAddressListCap);
-  doc["lora_frequency_hz"] = cfg.lora_frequency_hz;
-  doc["lora_tx_power"] = cfg.lora_tx_power;
-  doc["lora_spreading_factor"] = cfg.lora_spreading_factor;
-  doc["lora_bandwidth_hz"] = cfg.lora_bandwidth_hz;
-  doc["lora_coding_rate"] = cfg.lora_coding_rate;
-  doc["heartbeat_ms"] = cfg.heartbeat_ms;
-  doc["heartbeat_enabled"] = cfg.heartbeat_enabled;
-  doc["ack_timeout_ms"] = cfg.ack_timeout_ms;
-  doc["mqtt_remote_retry_timeout_ms"] = cfg.mqtt_remote_retry_timeout_ms;
-  doc["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
-  doc["tx_mqtt_remote_default_poll_interval_ms"] =
-      cfg.tx_mqtt_remote_default_poll_interval_ms;
-  doc["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
-  doc["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
-  doc["input_control_paired_lora_enabled"] =
-      cfg.input_control_paired_lora_enabled;
-  doc["tx_command_retry_timeout_ms"] = cfg.tx_command_retry_timeout_ms;
-  doc["rx_failsafe_mode"] = cfg.rx_failsafe_mode;
-  doc["rx_failsafe_timeout_ms"] = cfg.rx_failsafe_timeout_ms;
-  doc["wifi_sta_ssid"] = cfg.wifi_sta_ssid;
-  doc["wifi_sta_password"] = includeSecrets ? cfg.wifi_sta_password : "";
-  doc["wifi_sta_password_set"] = cfg.wifi_sta_password.length() > 0;
-  doc["lan_hostname"] =
-      cfg.lan_hostname.length() > 0 ? cfg.lan_hostname.c_str() : config.defaultLanHostname();
-  doc["computed_lan_hostname"] = config.defaultLanHostname();
-  doc["ap_always_on"] = cfg.ap_always_on;
-  doc["wifi_tx_power_dbm"] = cfg.wifi_tx_power_dbm;
-  doc["wifi_sleep_enabled"] = cfg.wifi_sleep_enabled;
-  doc["wifi_static_ip_enabled"] = cfg.wifi_static_ip_enabled;
-  doc["wifi_static_ip"] = cfg.wifi_static_ip;
-  doc["wifi_static_gateway"] = cfg.wifi_static_gateway;
-  doc["wifi_static_subnet"] = cfg.wifi_static_subnet;
-  doc["wifi_channel_override"] = cfg.wifi_channel_override;
-  doc["wifi_ap_fallback_policy"] = cfg.wifi_ap_fallback_policy;
-  doc["wifi_admin_enabled"] = cfg.wifi_admin_enabled;
-  doc["power_save_listen_only"] = cfg.power_save_listen_only;
-  doc["mqtt_client_enabled"] = cfg.mqtt_client_enabled;
-  doc["mqtt_control_enabled"] = cfg.mqtt_control_enabled;
-  doc["mqtt_controller_addresses"] = cfg.mqtt_controller_addresses;
-  doc["mqtt_host"] = cfg.mqtt_host;
-  doc["mqtt_port"] = cfg.mqtt_port;
-  doc["mqtt_user"] = cfg.mqtt_user;
-  doc["mqtt_password"] = includeSecrets ? cfg.mqtt_password : "";
-  doc["mqtt_password_set"] = cfg.mqtt_password.length() > 0;
-  doc["mqtt_topic_root"] = cfg.mqtt_topic_root;
-  doc["sensor_temp_enabled"] = cfg.sensor_temp_enabled;
-  doc["sensor_temp_pin"] = cfg.sensor_temp_pin;
-  doc["sensor_temp_interval_s"] = cfg.sensor_temp_interval_s;
-  doc["sensor_tank_enabled"] = cfg.sensor_tank_enabled;
-  doc["sensor_tank_range_mm"] = cfg.sensor_tank_range_mm;
-  doc["sensor_tank_vref_mv"] = cfg.sensor_tank_vref_mv;
-  doc["sensor_tank_sense_ohms"] = cfg.sensor_tank_sense_ohms;
-  doc["sensor_tank_interval_s"] = cfg.sensor_tank_interval_s;
-  doc["fleet_passphrase"] = includeSecrets ? cfg.fleet_passphrase : "";
-  doc["fleet_passphrase_set"] = cfg.fleet_passphrase.length() > 0;
-  doc["fleet_passphrase_default"] = runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
-  doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
-  doc["admin_password"] = includeSecrets ? cfg.admin_password : "";
-  doc["admin_password_set"] = cfg.admin_password.length() > 0;
-  doc["factory_serial"] = cfg.factory_serial;
-}
 
 
 bool AdminExecutor::begin(ConfigStore *config, NodeStateMachine *sm,
@@ -538,23 +452,20 @@ bool AdminExecutor::begin(ConfigStore *config, NodeStateMachine *sm,
   sm_ = sm;
   on_apply_ = onApply;
   on_apply_ctx_ = context;
-  mqtt_session_ = MqttSession{};
+  mqtt_session_ = AdminSession{};
   return true;
 }
 
 void AdminExecutor::handleAdminChallenge(JsonDocument &doc, ResponseWriter writer) {
   const char *id = doc["id"] | "";
   uint32_t session_id = random(1, 0x7FFFFFFF);
-  mqtt_session_.session_id = session_id;
-  mqtt_session_.created_ms = millis();
-  mqtt_session_.last_seq = 0;
-  mqtt_session_.active = true;
+  mqtt_session_.create(millis(), session_id);
 
   JsonDocument out;
   out["cmd"] = "admin_challenge";
   if (id[0] != '\0')
     out["id"] = id;
-  out["session_id"] = session_id;
+  out["session_id"] = mqtt_session_.state().session_id;
   out["expires_in_ms"] = 300000;
   sendOk(out, writer);
 }
@@ -577,35 +488,23 @@ void AdminExecutor::execute(const char *jsonCommand, size_t length, ResponseWrit
     }
 
     if (strcmp(cmd, "admin_challenge") != 0) {
-      if (doc["session_id"].isNull()) {
-        sendError(cmd, "admin_session_required", id, writer);
-        return;
+      AdminSession::ValidationResult res = mqtt_session_.validate(doc, millis());
+      switch (res) {
+        case AdminSession::ValidationResult::SessionRequired:
+          sendError(cmd, "admin_session_required", id, writer);
+          return;
+        case AdminSession::ValidationResult::SessionInvalid:
+          sendError(cmd, "admin_session_invalid", id, writer);
+          return;
+        case AdminSession::ValidationResult::SessionExpired:
+          sendError(cmd, "admin_session_expired", id, writer);
+          return;
+        case AdminSession::ValidationResult::SequenceReplay:
+          sendError(cmd, "admin_sequence_replay", id, writer);
+          return;
+        case AdminSession::ValidationResult::Ok:
+          break;
       }
-
-      const uint32_t req_session_id = doc["session_id"].as<uint32_t>();
-      if (!mqtt_session_.active || mqtt_session_.session_id != req_session_id) {
-        sendError(cmd, "admin_session_invalid", id, writer);
-        return;
-      }
-
-      if (millis() - mqtt_session_.created_ms >= 300000UL) {
-        mqtt_session_.active = false;
-        sendError(cmd, "admin_session_expired", id, writer);
-        return;
-      }
-
-      if (doc["seq"].isNull()) {
-        sendError(cmd, "admin_sequence_replay", id, writer);
-        return;
-      }
-
-      const uint32_t seq = doc["seq"].as<uint32_t>();
-      if (seq <= mqtt_session_.last_seq) {
-        sendError(cmd, "admin_sequence_replay", id, writer);
-        return;
-      }
-
-      mqtt_session_.last_seq = seq;
     }
   }
 

@@ -21,11 +21,9 @@ const size_t kMinDeploymentKeyLen = 16;
 #ifdef REGION_US
 const long kMinFrequencyHz = 902000000L;
 const long kMaxFrequencyHz = 928000000L;
-const long kDefaultFrequencyHz = 915000000L;
 #else
 const long kMinFrequencyHz = 433000000L;
 const long kMaxFrequencyHz = 434790000L;
-const long kDefaultFrequencyHz = 433000000L;
 #endif
 
 bool isOwnLrsSoftApLike(const String &ssid) {

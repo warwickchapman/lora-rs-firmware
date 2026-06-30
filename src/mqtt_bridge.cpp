@@ -1,6 +1,7 @@
 #include "mqtt_bridge.h"
 #include "admin_executor.h"
 #include "config_fields.h"
+#include "config_serializer.h"
 
 #include <ArduinoJson.h>
 #include <ctype.h>

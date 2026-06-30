@@ -6,6 +6,7 @@
 
 #include "config_store.h"
 #include "state_machine.h"
+#include "admin_session.h"
 
 class AdminExecutor {
 public:
@@ -31,13 +32,7 @@ private:
   ConfigApplyCallback on_apply_ = nullptr;
   void *on_apply_ctx_ = nullptr;
 
-  struct MqttSession {
-    uint32_t session_id = 0;
-    uint32_t created_ms = 0;
-    uint32_t last_seq = 0;
-    bool active = false;
-  };
-  MqttSession mqtt_session_;
+  AdminSession mqtt_session_;
 
   void handleAdminChallenge(JsonDocument &doc, ResponseWriter writer);
   static void otaStatusCallback(const char *status, void *ctx);
@@ -73,7 +68,5 @@ private:
   void handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter writer);
   void handleAdoptCandidate(JsonDocument &doc, ResponseWriter writer);
 };
-
-void writeSettingsJson(ArduinoJson::JsonDocument &doc, ConfigStore &config, bool includeSecrets);
 
 
