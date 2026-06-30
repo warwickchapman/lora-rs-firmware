@@ -340,24 +340,7 @@ void MqttBridge::tick(bool wifiConnected) {
 
   mqtt_client_.loop();
 
-  static uint32_t last_config_state_log = 0;
-  if (mqtt_client_.connected() && (millis() - last_config_state_log > 10000)) {
-    last_config_state_log = millis();
-    LRS_LOGI(SYS,
-             "event=mqtt_config_state connected=%d dirty=%d root=%s chip=%s",
-             mqtt_client_.connected(),
-             config_dirty_,
-             settings_ ? settings_->mqtt_topic_root.c_str() : "-",
-             chip_id_hex_.c_str());
-  }
-
   if (config_dirty_ && mqtt_client_.connected()) {
-    LRS_LOGI(SYS,
-             "event=mqtt_config_publish_due connected=%d dirty=%d root=%s chip=%s",
-             mqtt_client_.connected(),
-             config_dirty_,
-             settings_ ? settings_->mqtt_topic_root.c_str() : "-",
-             chip_id_hex_.c_str());
     publishLocalConfig();
   }
 
@@ -1108,14 +1091,6 @@ void MqttBridge::publishOtaStatus(const char *status) {
 }
 
 void MqttBridge::publishLocalConfig() {
-  LRS_LOGI(SYS,
-           "event=mqtt_config_publish_start connected=%d config=%d settings=%d root=%s chip=%s",
-           mqtt_client_.connected(),
-           config_ != nullptr,
-           settings_ != nullptr,
-           settings_ ? settings_->mqtt_topic_root.c_str() : "-",
-           chip_id_hex_.c_str());
-
   if (!mqtt_client_.connected() || !config_ || !settings_) {
     LRS_LOGW(SYS, "event=mqtt_config_publish_early_return");
     return;
@@ -1127,11 +1102,8 @@ void MqttBridge::publishLocalConfig() {
   char complete_topic[256];
   snprintf(complete_topic, sizeof(complete_topic), "%s/lrs-%s/config/_complete", topic_root, chip_id_hex_.c_str());
   bool complete_false_ok = mqtt_client_.publish(complete_topic, "false", true);
-  LRS_LOGI(SYS,
-           "event=mqtt_config_complete_false ok=%d topic=%s",
-           complete_false_ok,
-           complete_topic);
   if (!complete_false_ok) {
+    LRS_LOGW(SYS, "event=mqtt_config_complete_false_failed topic=%s", complete_topic);
     success = false;
   }
   yield();
@@ -1141,12 +1113,17 @@ void MqttBridge::publishLocalConfig() {
 
   size_t doc_size = measureJson(doc);
   bool doc_overflowed = doc.overflowed();
-  LRS_LOGI(SYS,
-           "event=mqtt_config_doc_built size=%u overflowed=%d heap_free=%lu heap_max=%lu",
-           static_cast<unsigned int>(doc_size),
-           doc_overflowed ? 1 : 0,
-           static_cast<unsigned long>(lrslog::heapFree()),
-           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+  if (doc_overflowed || doc_size == 0) {
+    LRS_LOGW(SYS,
+             "event=mqtt_config_doc_invalid size=%u overflowed=%d heap_free=%lu heap_max=%lu",
+             static_cast<unsigned int>(doc_size),
+             doc_overflowed ? 1 : 0,
+             static_cast<unsigned long>(lrslog::heapFree()),
+             static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
+    mqtt_client_.publish(complete_topic, "false", true);
+    yield();
+    return;
+  }
 
   char topic[256];
   char payload[512];
@@ -1156,10 +1133,9 @@ void MqttBridge::publishLocalConfig() {
     if (field.classification == ConfigFieldClass::RetainedConfig) {
       if (doc.containsKey(field.name)) {
         snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), field.name);
-        size_t n = 0;
         bool pub_ok = false;
         if (doc[field.name].is<JsonArray>()) {
-          n = serializeJson(doc[field.name], payload, sizeof(payload));
+          serializeJson(doc[field.name], payload, sizeof(payload));
           pub_ok = mqtt_client_.publish(topic, payload, true);
         } else if (doc[field.name].is<bool>()) {
           bool val = doc[field.name].as<bool>();
@@ -1167,7 +1143,7 @@ void MqttBridge::publishLocalConfig() {
         } else if (doc[field.name].is<const char*>()) {
           pub_ok = mqtt_client_.publish(topic, doc[field.name].as<const char*>(), true);
         } else {
-          n = serializeJson(doc[field.name], payload, sizeof(payload));
+          serializeJson(doc[field.name], payload, sizeof(payload));
           pub_ok = mqtt_client_.publish(topic, payload, true);
         }
         if (!pub_ok) {
@@ -1210,19 +1186,16 @@ void MqttBridge::publishLocalConfig() {
 
   const char *final_complete = success ? "true" : "false";
   bool complete_final_ok = mqtt_client_.publish(complete_topic, final_complete, true);
-  LRS_LOGI(SYS,
-           "event=mqtt_config_complete_final ok=%d value=%s success=%d topic=%s",
-           complete_final_ok,
-           final_complete,
-           success,
-           complete_topic);
+  if (!complete_final_ok) {
+    LRS_LOGW(SYS,
+             "event=mqtt_config_complete_final_failed value=%s success=%d topic=%s",
+             final_complete,
+             success,
+             complete_topic);
+  }
 
   if (complete_final_ok && success) {
     config_dirty_ = false;
   }
-  LRS_LOGI(SYS,
-           "event=mqtt_config_publish_done success=%d dirty=%d",
-           success,
-           config_dirty_);
   yield();
 }
