@@ -185,7 +185,13 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
                                cfg.known_peer_addresses,
                                Settings::kAddressListCap);
   }
-  cfg.lora_frequency_hz = doc["lora_frequency_hz"] | cfg.lora_frequency_hz;
+  if (!doc["lora_frequency_hz"].isNull()) {
+    const long requestedFrequency = doc["lora_frequency_hz"] | kDefaultFrequencyHz;
+    if (requestedFrequency != kDefaultFrequencyHz) {
+      return fail("lora_frequency_locked");
+    }
+  }
+  cfg.lora_frequency_hz = kDefaultFrequencyHz;
   cfg.lora_tx_power = static_cast<uint8_t>(doc["lora_tx_power"] | cfg.lora_tx_power);
   cfg.lora_spreading_factor =
       static_cast<uint8_t>(doc["lora_spreading_factor"] | cfg.lora_spreading_factor);
@@ -339,7 +345,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.fleet_setup_prompt_dismissed = true;
   }
 
-  cfg.lora_frequency_hz = kDefaultFrequencyHz;
   if (cfg.heartbeat_ms < kMinHeartbeatMs)
     cfg.heartbeat_ms = kMinHeartbeatMs;
   if (cfg.heartbeat_ms > kMaxHeartbeatMs)
