@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_CPP = ROOT / "src" / "config_store.cpp"
-ADMIN_EXECUTOR_CPP = ROOT / "src" / "admin_executor.cpp"
+CONFIG_SERIALIZER_CPP = ROOT / "src" / "config_serializer.cpp"
 CONFIG_FIELDS_CPP = ROOT / "src" / "config_fields.cpp"
 
 # Explicit table of derived/metadata fields emitted by writeSettingsJson
@@ -42,7 +42,7 @@ def saved_fields():
 
 
 def serial_admin_config_fields():
-    text = ADMIN_EXECUTOR_CPP.read_text(encoding="utf-8")
+    text = CONFIG_SERIALIZER_CPP.read_text(encoding="utf-8")
     write_match = re.search(r"void writeSettingsJson\(.*?\{(?P<body>.*?)\n\}", text, re.S)
     if not write_match:
         raise AssertionError("writeSettingsJson body not found")
