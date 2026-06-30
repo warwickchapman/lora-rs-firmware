@@ -51,6 +51,7 @@ struct PeerStatusSnapshot {
   uint8_t heap_frag_pct = 0;
   uint32_t debug_uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
+  int16_t wifi_rssi_dbm = 0;
   bool power_save_listen_only = false;
   bool power_save_active = false;
 };
@@ -90,6 +91,7 @@ struct PeerRuntime {
   uint8_t heap_frag_pct = 0;
   uint32_t debug_uptime_ms = 0;
   uint32_t wifi_last_confirm_ms = 0;
+  int16_t wifi_rssi_dbm = 0;
   bool power_save_listen_only = false;
   bool power_save_active = false;
   bool wifi_pending = false;

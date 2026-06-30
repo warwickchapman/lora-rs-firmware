@@ -103,7 +103,7 @@ Otherwise packet is dropped and logged.
   - Page `0` (Identity) carries identity and connectivity.
   - Page `3` (Version) carries the firmware build number and uptime.
   - Page `2` (Sensors) carries page-indexed generic sensor readings from the local `SensorRegistry` (up to 2 readings per 4-byte slot per page; packs `kind`, `instance`, `state` (0=Disabled, 1=Missing, 2=Fault, 3=Ok, 4=Overrange, 5=Waiting), `scale`, and clamped `int16` values).
-  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, and uptime minutes).
+  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, bytes 7..8 carry WiFi RSSI as int16_t LE, and uptime minutes).
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - TX applies ACK-confirmed relay state with 500 ms delay.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.

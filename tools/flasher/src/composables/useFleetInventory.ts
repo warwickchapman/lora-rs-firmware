@@ -189,6 +189,12 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     const inputState = inputStateKnown ? row.input_state : undefined;
 
     const rssi = (row.rssi !== undefined && row.rssi !== null && row.rssi !== 0 && row.rssi !== -127) ? row.rssi : history.rssi;
+    let wifiRssiDbm: number | undefined = undefined;
+    if (row.wifi_rssi_dbm !== undefined && row.wifi_rssi_dbm !== null) {
+      wifiRssiDbm = row.wifi_rssi_dbm === 0 ? undefined : row.wifi_rssi_dbm;
+    } else {
+      wifiRssiDbm = history.wifi_rssi_dbm;
+    }
 
     fleetRowHistory.value[row.address] = {
       ...history,
@@ -216,6 +222,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       input_state: inputState,
       input_state_known: inputStateKnown,
       rssi,
+      wifi_rssi_dbm: wifiRssiDbm,
       lastTelemetryTimestamp,
       rowState,
       rowStateUntilMs,
@@ -249,6 +256,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       input_state: inputState,
       input_state_known: inputStateKnown,
       rssi: rssi ?? row.rssi,
+      wifi_rssi_dbm: wifiRssiDbm,
       age_ms: ageMs,
       row_state: rowState,
       row_state_until_ms: rowStateUntilMs
@@ -452,6 +460,11 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       cacheEntry.device.input_state_known = true;
     }
     else if (f === 'rssi' || f === 'uplink_rssi_dbm') cacheEntry.device.rssi = Number(val);
+    else if (f === 'wifi_rssi_dbm') {
+      cacheEntry.device.wifi_rssi_dbm = (val === '' || val === null || val === undefined || val === '0' || val === 0)
+        ? undefined
+        : Number(val);
+    }
     else if (f === 'fw_version') cacheEntry.device.fw_version = String(val);
     else if (f === 'chip_id') {
       const canonicalVal = options.canonicalChipId(String(val));

@@ -102,6 +102,7 @@ export interface FleetDisplayRow {
   uptimeLabel: string;
   rowStatusLabel: string | null;
   rowState?: string;
+  wifi_rssi_dbm?: number;
   rssi?: number;
   ageSeconds: number | null;
   freshnessClass: string;
@@ -434,7 +435,7 @@ function toggleNetworkUdpLogsExpanded() {
               <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
               <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
               <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
-              <th class="px-2 py-1.5 text-left font-semibold">RSSI</th>
+              <th class="px-2 py-1.5 text-left font-semibold" title="LoRa uplink signal from remote to gateway">LoRa RSSI</th>
               <th class="px-2 py-1.5 text-left font-semibold">Age</th>
               <th class="px-2 py-1.5 text-left font-semibold">Actions</th>
             </tr>
@@ -482,8 +483,29 @@ function toggleNetworkUdpLogsExpanded() {
                 >
                   ...
                 </span>
-                <span v-else :class="['rounded border px-2 py-1 text-[10px] font-bold', device.wifi_connected_known ? (device.wifi_connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-600 bg-slate-800/50 text-slate-400') : 'border-slate-800 bg-slate-900/50 text-slate-500']">
-                  {{ device.wifi_connected_known ? (device.wifi_connected ? 'OK' : 'Offline') : '-' }}
+                <template v-else-if="device.wifi_connected_known && device.wifi_connected">
+                  <span
+                    v-if="device.wifi_rssi_dbm !== undefined && device.wifi_rssi_dbm !== null && device.wifi_rssi_dbm !== 0"
+                    :class="[
+                      'rounded border px-2 py-1 text-[10px] font-bold font-mono',
+                      device.wifi_rssi_dbm >= -60 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                      device.wifi_rssi_dbm >= -70 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                      device.wifi_rssi_dbm >= -80 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
+                      'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                    ]"
+                    :title="`WiFi RSSI: ${device.wifi_rssi_dbm} dBm`"
+                  >
+                    {{ device.wifi_rssi_dbm >= -60 ? '▂▄▆' : device.wifi_rssi_dbm >= -70 ? '▂▄▅' : device.wifi_rssi_dbm >= -80 ? '▂▄_' : '▂__' }} {{ device.wifi_rssi_dbm }}
+                  </span>
+                  <span v-else class="rounded border px-2 py-1 text-[10px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                    OK
+                  </span>
+                </template>
+                <span v-else-if="device.wifi_connected_known && !device.wifi_connected" class="rounded border px-2 py-1 text-[10px] font-bold border-slate-600 bg-slate-800/50 text-slate-400">
+                  Offline
+                </span>
+                <span v-else class="rounded border px-2 py-1 text-[10px] font-bold border-slate-800 bg-slate-900/50 text-slate-500">
+                  -
                 </span>
               </td>
               <td class="px-2 py-1.5">

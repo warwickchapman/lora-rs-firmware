@@ -13,6 +13,13 @@ All notable changes to this pre-release project are documented here in current o
 - Deprecated the persisted `"role"` string field in favor of `"role_tx"` (boolean).
 - Modernized user/operator-facing role terminology in JSON output, status, and identity endpoints from legacy `"transmitter"`/`"receiver"` to `"gateway"`/`"remote"`.
 - Added transparent config migration on load to convert legacy `"role"` values and old transmitter/receiver labels to `"role_tx"`.
+- Incorporated remote WiFi STA RSSI tracking in debug maintenance page payload without packet format expansion, exposing it as `wifi_rssi_dbm` via `lora_inventory_status` when connected.
+- Gateway publishes `wifi_rssi_dbm` retained MQTT topic for peers when connected and available, publishing empty payloads when unknown, offline, or cleared.
+
+### Flasher Features
+- Repurposed the existing WiFi column in the Fleet table to display compact signal bars and dBm (e.g., `▂▄▆ -67`) for connected remote devices when the RSSI is known, coloring it by signal strength.
+- Renamed the existing Fleet RSSI column to "LoRa RSSI" with a detailed tooltip.
+- Integrated safety checks at the frontend boundary to ignore and filter out `wifi_rssi_dbm` values of 0 (sentinels for unknown/disconnected states).
 
 ## [0.10.0-beta] - 2026-06-29
 

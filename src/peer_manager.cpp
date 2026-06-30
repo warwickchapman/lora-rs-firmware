@@ -223,6 +223,7 @@ bool PeerManager::buildStatusSnapshot(size_t index, PeerStatusSnapshot &out) con
   out.heap_frag_pct = p.heap_frag_pct;
   out.debug_uptime_ms = p.debug_uptime_ms;
   out.wifi_last_confirm_ms = p.wifi_last_confirm_ms;
+  out.wifi_rssi_dbm = p.wifi_rssi_dbm;
   out.power_save_listen_only = p.power_save_listen_only;
   out.power_save_active = p.power_save_active;
   return true;

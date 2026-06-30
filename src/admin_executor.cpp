@@ -1280,6 +1280,9 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
         row["heap_max_block"] = p.heap_max_block;
         row["heap_frag_pct"] = p.heap_frag_pct;
         row["debug_uptime_ms"] = p.debug_uptime_ms;
+        if (p.wifi_connected && p.wifi_rssi_dbm != 0) {
+          row["wifi_rssi_dbm"] = p.wifi_rssi_dbm;
+        }
       }
       row["rssi"] = p.uplink_rssi;
       if (p.last_seen_ms != 0) {

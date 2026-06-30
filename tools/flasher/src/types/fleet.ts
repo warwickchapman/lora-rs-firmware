@@ -32,6 +32,7 @@ export interface LoraInventoryDevice {
   heap_max_block?: number;
   heap_frag_pct?: number;
   debug_uptime_ms?: number;
+  wifi_rssi_dbm?: number;
   rssi?: number;
   uptime_ms?: number;
   age_ms?: number;

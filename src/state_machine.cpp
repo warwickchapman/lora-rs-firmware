@@ -2566,6 +2566,15 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
   payload[4] = static_cast<uint8_t>(heapMaxBlock & 0xFFU);
   payload[5] = static_cast<uint8_t>((heapMaxBlock >> 8) & 0xFFU);
   payload[6] = lrslog::heapFragPercent();
+
+  // WiFi RSSI on debug page payload[7..8] (LE int16_t)
+  int16_t wifiRssi = 0;
+  if (WiFi.isConnected()) {
+    wifiRssi = static_cast<int16_t>(WiFi.RSSI());
+  }
+  payload[7] = static_cast<uint8_t>(wifiRssi & 0xFFU);
+  payload[8] = static_cast<uint8_t>((wifiRssi >> 8) & 0xFFU);
+
   uint32_t uptimeMinutes = millis() / 60000UL;
   if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
   payload[9] = static_cast<uint8_t>(uptimeMinutes & 0xFFU);
@@ -2729,6 +2738,9 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->heap_max_block = static_cast<uint32_t>(p[4]) |
                            (static_cast<uint32_t>(p[5]) << 8);
     node->heap_frag_pct = p[6];
+    // Parse WiFi RSSI
+    node->wifi_rssi_dbm = static_cast<int16_t>(p[7] | (static_cast<uint16_t>(p[8]) << 8));
+
     node->debug_uptime_ms = (static_cast<uint32_t>(p[9]) |
                              (static_cast<uint32_t>(p[10]) << 8)) * 60000UL;
   } else {

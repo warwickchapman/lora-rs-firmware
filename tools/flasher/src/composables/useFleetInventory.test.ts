@@ -250,4 +250,72 @@ describe('useFleetInventory', () => {
     expect(row.relay_state).toBeUndefined(); // Should not inherit Chip A's telemetry
     expect(row.conflict_chip_id).toBe('abcde123'); // Should record Chip A as the conflict
   });
+
+  it('serial inventory includes wifi_rssi_dbm when known', () => {
+    const fleet = createFleet();
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }]);
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBe(-67);
+  });
+
+  it('serial inventory omits wifi_rssi_dbm when unknown', () => {
+    const fleet = createFleet();
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined();
+  });
+
+  it('MQTT telemetry maps wifi_rssi_dbm', () => {
+    const fleet = createFleet();
+    fleet.loraInventory.value = [{ address: 1, chip_id: 'abcde123' }];
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'wifi_rssi_dbm',
+      value: '-67'
+    });
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBe(-67);
+  });
+
+  it('MQTT telemetry clears wifi_rssi_dbm when empty', () => {
+    const fleet = createFleet();
+    fleet.loraInventory.value = [{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }];
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'wifi_rssi_dbm',
+      value: ''
+    });
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined();
+  });
+
+  it('fleetRowHistory preserves wifi_rssi_dbm across poll cycles', () => {
+    const fleet = createFleet();
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }]);
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]); // second poll, no RSSI
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBe(-67); // preserved from history
+  });
+
+  it('serial inventory treats wifi_rssi_dbm value of 0 as unknown/undefined', () => {
+    const fleet = createFleet();
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: 0 }]);
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined();
+  });
+
+  it('MQTT telemetry treats value "0" or 0 as unknown/undefined', () => {
+    const fleet = createFleet();
+    fleet.loraInventory.value = [{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }];
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'wifi_rssi_dbm',
+      value: '0'
+    });
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined();
+  });
+
+  it('serial inventory treats explicit wifi_rssi_dbm value of 0 as clearing history', () => {
+    const fleet = createFleet();
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }]);
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: 0 }]); // explicit zero
+    expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined(); // history cleared
+  });
 });

@@ -3,7 +3,7 @@
 #include <string.h>
 
 void test_peer_manager_sizeof() {
-  TEST_ASSERT_EQUAL_UINT32(172, sizeof(PeerRuntime));
+  TEST_ASSERT_EQUAL_UINT32(176, sizeof(PeerRuntime));
   TEST_ASSERT_EQUAL_UINT32(24, sizeof(PollRuntime));
 }
 
@@ -114,6 +114,7 @@ void test_peer_manager_snapshot_consistency() {
   p->input_state = 0;
   p->input_state_known = true;
   p->uplink_rssi = -70;
+  p->wifi_rssi_dbm = -65;
 
   PeerStatusSnapshot snap{};
   TEST_ASSERT_TRUE(pm.buildStatusSnapshot(0, snap));
@@ -122,6 +123,7 @@ void test_peer_manager_snapshot_consistency() {
   TEST_ASSERT_EQUAL_UINT8(0, snap.input_state);
   TEST_ASSERT_TRUE(snap.input_state_known);
   TEST_ASSERT_EQUAL_INT(-70, snap.uplink_rssi);
+  TEST_ASSERT_EQUAL_INT(-65, snap.wifi_rssi_dbm);
   TEST_ASSERT_EQUAL_UINT32(1002, snap.chip_id);
 
   // Bounds check snapshot
