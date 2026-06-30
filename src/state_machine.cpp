@@ -2876,7 +2876,7 @@ void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
   if (peer_maintenance_cursor_ >= targetCount) peer_maintenance_cursor_ = 0;
   const uint8_t dst = targets[peer_maintenance_cursor_++];
   uint32_t sentCounter = 0;
-  if (sendMaintenanceRequest(dst, false, &sentCounter)) {
+  if (sendMaintenanceRequest(dst, true, &sentCounter)) {
     lrslog::event("peer_maint_probe", 0, sentCounter, dst);
     next_peer_maintenance_ms_ = now + spacingMs;
   } else {
