@@ -30,6 +30,9 @@ export interface FleetGatewayStatus {
   role: string;
   addressLine: string;
   wifiLine: string;
+  wifiIp?: string;
+  wifiRssi?: number;
+  wifiConnected?: boolean;
   uptimeLine: string;
 }
 
@@ -401,7 +404,27 @@ function toggleNetworkUdpLogsExpanded() {
         </div>
         <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
           <div class="text-[10px] uppercase tracking-wide text-slate-600">WiFi</div>
-          <div class="mt-1 truncate text-slate-300">{{ gateway.wifiLine }}</div>
+          <div class="mt-1 flex items-center gap-1.5 truncate">
+            <span class="text-slate-300">{{ gateway.wifiConnected ? gateway.wifiIp : gateway.wifiLine }}</span>
+            <span
+              v-if="gateway.wifiConnected && gateway.wifiRssi"
+              :class="[
+                'rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono inline-flex items-center gap-1 leading-none',
+                gateway.wifiRssi >= -60 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                gateway.wifiRssi >= -70 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                gateway.wifiRssi >= -80 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
+                'border-rose-500/30 bg-rose-500/10 text-rose-300'
+              ]"
+              :title="`Gateway WiFi RSSI: ${gateway.wifiRssi} dBm`"
+            >
+              <span class="inline-flex items-end gap-[1px] h-2.5 w-3 mb-[0.5px]">
+                <span class="w-[2.5px] h-[3px] rounded-t-[0.5px] bg-current"></span>
+                <span :class="['w-[2.5px] rounded-t-[0.5px]', gateway.wifiRssi >= -80 ? 'h-[6px] bg-current' : 'h-[6px] bg-current/20']"></span>
+                <span :class="['w-[2.5px] rounded-t-[0.5px]', gateway.wifiRssi >= -60 ? 'h-[9px] bg-current' : gateway.wifiRssi >= -70 ? 'h-[7.5px] bg-current' : 'h-[9px] bg-current/20']"></span>
+              </span>
+              <span>{{ gateway.wifiRssi }}</span>
+            </span>
+          </div>
         </div>
         <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
           <div class="text-[10px] uppercase tracking-wide text-slate-600">Uptime</div>

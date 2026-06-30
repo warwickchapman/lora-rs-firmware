@@ -5719,6 +5719,9 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
       }
       return ipStr;
     })(),
+    wifiIp: fleetGatewayStatus.value?.wifi?.ip || '',
+    wifiRssi: (fleetGatewayStatus.value?.wifi?.sta_connected && fleetGatewayStatus.value?.wifi?.rssi) ? fleetGatewayStatus.value.wifi.rssi : undefined,
+    wifiConnected: !!fleetGatewayStatus.value?.wifi?.sta_connected,
     uptimeLine: fleetGatewayStatus.value?.uptime_ms ? formatUptime(fleetGatewayStatus.value.uptime_ms) : '-'
   };
 });
