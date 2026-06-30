@@ -88,8 +88,10 @@ Otherwise packet is dropped and logged.
   same multi-target group command path rather than the legacy single
   `remote_address`.
 - When paired LoRa input control is disabled, TX sends periodic `Heartbeat` to
-  the configured `remote_address`.
-- RX applies `Change`/`Heartbeat`/`Mqtt` relay state.
+  the configured `remote_address`. Plain heartbeats carry `relay_state_` for
+  alive/link status but do not control the remote relay.
+- RX applies relay state from `Change`, `Mqtt`, and `Heartbeat` only when the
+  `kFlagPairedInputSlave` flag is set (input-control heartbeats).
 - RX sends `Ack` for `Change` and `Heartbeat`.
 - `Ack` carries the acknowledged command counter in payload bytes `b8..b11` (`unix_time_s` slot reused for ACK correlation).
 - RX sends `MqttStatus` for `Mqtt` with applied relay/input/temp state.

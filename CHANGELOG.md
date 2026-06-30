@@ -5,6 +5,10 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Changes
+- Fixed heartbeat relay control: plain heartbeats no longer leak input state as relay commands when paired input control is disabled.
+- MQTT config completion sentinel now publishes `false` on partial failure instead of staying stuck.
+- Reject locked LoRa frequency changes via `set_config` with explicit error instead of silent overwrite.
+- Adoption candidate evaluation no longer treats unknown chip ID as a proven mismatch, preventing false conflicts for address-only candidates.
 - Upgraded configuration schema version from 3 to 4.
 - Deprecated the persisted `"role"` string field in favor of `"role_tx"` (boolean).
 - Modernized user/operator-facing role terminology in JSON output, status, and identity endpoints from legacy `"transmitter"`/`"receiver"` to `"gateway"`/`"remote"`.
