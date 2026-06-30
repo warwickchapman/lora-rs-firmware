@@ -151,16 +151,6 @@ bool parsePeerAddressSegmentCstr(const char *segment, size_t len, NodeStateMachi
   return true;
 }
 
-// Format peer address topic segment: "01_lrs-8829ca6f" when chip_id is known, "01" otherwise.
-void formatPeerAddrSegment(char *out, size_t outLen, uint8_t addr, uint32_t chipId) {
-  if (chipId != 0) {
-    snprintf(out, outLen, "%02u_lrs-%08lx",
-             static_cast<unsigned>(addr), static_cast<unsigned long>(chipId));
-  } else {
-    snprintf(out, outLen, "%02u", static_cast<unsigned>(addr));
-  }
-}
-
 // Format canonical peer address topic segment: "01_lrs-8829ca6f". Returns false if chipId is 0.
 bool formatCanonicalPeerAddrSegment(char *out, size_t outLen, uint8_t addr, uint32_t chipId) {
   if (chipId == 0) {
@@ -598,9 +588,14 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
 
   // Read chip_id from cache/SM/Settings before clearing
   const PeerPublishCacheEntry *entry = findPeerPublishCache(addr);
+  PeerStatusSnapshot snapshot{};
+  const bool hasSnapshot = sm_ != nullptr && sm_->peerByAddress(addr, snapshot);
   uint32_t chipId = passedChipId;
   if (chipId == 0 && entry != nullptr) {
     chipId = entry->chip_id;
+  }
+  if (chipId == 0 && hasSnapshot) {
+    chipId = snapshot.chip_id;
   }
   if (chipId == 0 && sm_ != nullptr) {
     chipId = sm_->resolveChipIdForAddress(addr);
@@ -615,6 +610,7 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
     }
   }
   clearPeerPublishCache(addr);
+  if (chipId == 0) return;
 
   const char *leaves[] = {
       "relay",           "input",              "ack_state",
@@ -627,41 +623,26 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
   };
 
   char canonicalSeg[24];
-  char legacySeg[24];
-  bool hasCanonical = false;
-  if (chipId != 0) {
-    hasCanonical = formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId);
-  }
-  snprintf(legacySeg, sizeof(legacySeg), "%02u", static_cast<unsigned>(addr));
+  if (!formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId)) return;
 
-  const char *segments[2];
-  int segCount = 0;
-  if (hasCanonical) {
-    segments[segCount++] = canonicalSeg;
+  char topic[kMqttTopicBufBytes];
+  for (const char *leaf : leaves) {
+    if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, leaf)) {
+      mqtt_client_.publish(topic, "", true);
+    }
   }
-  segments[segCount++] = legacySeg;
-
-  for (int s = 0; s < segCount; ++s) {
-    const char *seg = segments[s];
-    char topic[kMqttTopicBufBytes];
-    for (const char *leaf : leaves) {
-      if (buildPeerTopic(topic, sizeof(topic), seg, leaf)) {
+  if (hasSnapshot) {
+    for (uint8_t i = 0; i < snapshot.sensors.count(); ++i) {
+      SensorReading reading{};
+      if (!snapshot.sensors.byIndex(i, reading)) continue;
+      char suffix[64];
+      snprintf(suffix, sizeof(suffix), "sensor/%s/%u/value", sensorKindToString(reading.kind), reading.instance);
+      if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, suffix)) {
         mqtt_client_.publish(topic, "", true);
       }
-    }
-    const char *sensorKinds[] = {"input", "temperature", "tank_level"};
-    for (const char *kind : sensorKinds) {
-      for (int inst = 0; inst <= 5; ++inst) {
-        char valSuffix[48];
-        snprintf(valSuffix, sizeof(valSuffix), "sensor/%s/%d/value", kind, inst);
-        char stateSuffix[48];
-        snprintf(stateSuffix, sizeof(stateSuffix), "sensor/%s/%d/state", kind, inst);
-        if (buildPeerTopic(topic, sizeof(topic), seg, valSuffix)) {
-          mqtt_client_.publish(topic, "", true);
-        }
-        if (buildPeerTopic(topic, sizeof(topic), seg, stateSuffix)) {
-          mqtt_client_.publish(topic, "", true);
-        }
+      snprintf(suffix, sizeof(suffix), "sensor/%s/%u/state", sensorKindToString(reading.kind), reading.instance);
+      if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, suffix)) {
+        mqtt_client_.publish(topic, "", true);
       }
     }
   }

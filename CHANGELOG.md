@@ -5,6 +5,7 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Changes
+- MQTT retained peer cleanup now clears only canonical `peers/<NN_lrs-chip>/...` topics and actual known sensor leaves, avoiding legacy `peers/<NN>/...` cleanup trees and fake sensor slots in MQTT browsers.
 - Fixed heartbeat relay control: plain heartbeats no longer leak input state as relay commands when paired input control is disabled.
 - MQTT config completion sentinel now publishes `false` on partial failure instead of staying stuck.
 - Removed temporary MQTT retained-config success-path diagnostics while preserving failure-only logs and retry behavior for invalid retained-config documents.
