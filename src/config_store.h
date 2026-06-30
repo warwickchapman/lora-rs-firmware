@@ -77,8 +77,6 @@ struct Settings {
   FixedSettingString<65> fleet_passphrase;
   bool fleet_setup_prompt_dismissed;
   FixedSettingString<33> admin_password;
-
-  FixedSettingString<33> factory_serial;
 };
 
 class ConfigStore {

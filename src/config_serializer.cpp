@@ -106,5 +106,4 @@ void writeSettingsJson(JsonDocument &doc, ConfigStore &config,
   doc["fleet_setup_prompt_dismissed"] = cfg.fleet_setup_prompt_dismissed;
   doc["admin_password"] = includeSecrets ? cfg.admin_password : "";
   doc["admin_password_set"] = cfg.admin_password.length() > 0;
-  doc["factory_serial"] = cfg.factory_serial;
 }

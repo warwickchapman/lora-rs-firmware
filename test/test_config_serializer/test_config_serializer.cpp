@@ -27,8 +27,8 @@ void test_serializer_field_count_and_types() {
   ConfigStore store;
   writeSettingsJson(doc, store, false);
 
-  // 1. Verify exact 67 fields
-  TEST_ASSERT_EQUAL(67, doc.size());
+  // 1. Verify exact 66 fields
+  TEST_ASSERT_EQUAL(66, doc.size());
 
   // 2. Booleans serialize as JSON booleans
   TEST_ASSERT_TRUE(doc["commissioned"].is<bool>());

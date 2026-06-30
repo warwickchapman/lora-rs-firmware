@@ -642,7 +642,6 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
     out["id"] = id;
   out["fw_version"] = LRS_FW_VERSION;
   out["chip_id"] = config_->chipIdHex();
-  out["serial"] = cfg.factory_serial;
   out["uptime_ms"] = millis();
   out["heap_free"] = lrslog::heapFree();
   out["heap_frag_pct"] = lrslog::heapFragPercent();
@@ -1965,7 +1964,6 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     if (id[0] != '\0')
       out["id"] = id;
     out["chip_id"] = config_->chipIdHex();
-    out["serial"] = cfg.factory_serial;
     out["ap_ssid"] = config_->apSsid();
     out["mode"] = cfg.mode;
     out["role"] = cfg.role_tx ? "gateway" : "remote";

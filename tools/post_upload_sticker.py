@@ -15,13 +15,6 @@ def _derive_password(chip_hex: str) -> str:
     return digest[:8]
 
 
-def _serial_for(chip_hex: str) -> str:
-    today = dt.date.today()
-    yy = today.year % 100
-    ww = int(today.strftime("%W")) + 1
-    return f"lrs{yy:02d}{ww:02d}-{chip_hex}"
-
-
 def _derive_addresses(chip_hex: str):
     chip = int(chip_hex, 16)
     local_addr = (chip & 0xFF) % 254 + 1
@@ -73,7 +66,6 @@ def _print_sticker_values(port: str):
     local_addr, remote_addr = _derive_addresses(chip)
 
     print("\n=== LRS Sticker Values ===")
-    print(f"serial: { _serial_for(chip) }")
     print(f"chip_id: {chip}")
     print(f"mac: {mac}")
     print(f"factory_role: {role}")

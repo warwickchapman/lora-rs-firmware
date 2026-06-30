@@ -1069,7 +1069,6 @@ void MqttBridge::publishDiscovery() {
 
   JsonDocument doc;
   if (!settings_) return;
-  doc["serial"] = settings_->factory_serial;
   doc["chip_id"] = chip_id_hex_;
   doc["role"] = runtime_.role_tx ? "gateway" : "remote";
   doc["addr"] = runtime_.local_address;

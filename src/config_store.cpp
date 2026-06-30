@@ -91,7 +91,6 @@ constexpr const char *kAllowedFields[] = {
     "fleet_passphrase",
     "fleet_setup_prompt_dismissed",
     "admin_password",
-    "factory_serial",
 };
 constexpr size_t kAllowedFieldCount = sizeof(kAllowedFields) / sizeof(kAllowedFields[0]);
 constexpr const char *kDeprecatedAcceptedFields[] = {
@@ -102,43 +101,6 @@ constexpr const char *kDeprecatedAcceptedFields[] = {
     "audit_boot_count",
 };
 constexpr size_t kDeprecatedAcceptedFieldCount = sizeof(kDeprecatedAcceptedFields) / sizeof(kDeprecatedAcceptedFields[0]);
-
-int monthFromShort(const String &m) {
-  if (m == "Jan") return 1;
-  if (m == "Feb") return 2;
-  if (m == "Mar") return 3;
-  if (m == "Apr") return 4;
-  if (m == "May") return 5;
-  if (m == "Jun") return 6;
-  if (m == "Jul") return 7;
-  if (m == "Aug") return 8;
-  if (m == "Sep") return 9;
-  if (m == "Oct") return 10;
-  if (m == "Nov") return 11;
-  return 12;
-}
-
-int dayOfYear(int y, int m, int d) {
-  static const int kCumulative[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
-  int doy = kCumulative[m - 1] + d;
-  const bool leap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
-  if (leap && m > 2) {
-    doy += 1;
-  }
-  return doy;
-}
-
-void compileWeekStamp(char out[5]) {
-  const String date = __DATE__;
-  const int mon = monthFromShort(date.substring(0, 3));
-  const int day = date.substring(4, 6).toInt();
-  const int year = date.substring(7, 11).toInt();
-
-  const unsigned yy = static_cast<unsigned>(year % 100);
-  const unsigned ww = static_cast<unsigned>(((dayOfYear(year, mon, day) - 1) / 7) + 1);
-
-  snprintf(out, 5, "%02u%02u", yy, ww);
-}
 
 String deriveShortPassword(const String &chip) {
   uint8_t digest[32];
@@ -393,7 +355,6 @@ bool ConfigStore::begin() {
   cfg_.fleet_passphrase = root["fleet_passphrase"] | "lora-default-passphrase";
   cfg_.fleet_setup_prompt_dismissed = root["fleet_setup_prompt_dismissed"] | false;
   cfg_.admin_password = root["admin_password"] | "";
-  cfg_.factory_serial = root["factory_serial"] | "";
 
   if (cfg_.local_address < runtime_utils::kMinAddress || cfg_.local_address > runtime_utils::kMaxAddress ||
       cfg_.remote_address < runtime_utils::kMinAddress || cfg_.remote_address > runtime_utils::kMaxAddress ||
@@ -435,7 +396,7 @@ bool ConfigStore::begin() {
   }
   if (cfg_.rx_failsafe_timeout_ms < 5000UL) cfg_.rx_failsafe_timeout_ms = 5000UL;
   if (cfg_.rx_failsafe_timeout_ms > 3600000UL) cfg_.rx_failsafe_timeout_ms = 3600000UL;
-  if (cfg_.admin_password.length() < 8 || cfg_.factory_serial.length() < 4) {
+  if (cfg_.admin_password.length() < 8) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=identity_fields_invalid action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
@@ -545,7 +506,6 @@ bool ConfigStore::save() {
   doc["fleet_passphrase"] = cfg_.fleet_passphrase;
   doc["fleet_setup_prompt_dismissed"] = cfg_.fleet_setup_prompt_dismissed;
   doc["admin_password"] = cfg_.admin_password;
-  doc["factory_serial"] = cfg_.factory_serial;
 
   const size_t estimatedBytes = measureJson(doc);
   if (estimatedBytes == 0 || estimatedBytes > kConfigMaxBytes) {
@@ -825,7 +785,6 @@ void ConfigStore::setDefaults() {
   cfg_.fleet_passphrase = "lora-default-passphrase";
   cfg_.fleet_setup_prompt_dismissed = false;
   cfg_.admin_password = "";
-  cfg_.factory_serial = "";
 }
 
 void ConfigStore::ensureProvisionedDefaults() {
@@ -852,11 +811,6 @@ void ConfigStore::ensureProvisionedDefaults() {
   const String chipHex = chipIdHex();
   cfg_.lan_hostname = defaultLanHostname();
   cfg_.admin_password = deriveShortPassword(chipHex);
-  char weekStamp[5];
-  compileWeekStamp(weekStamp);
-  char serialBuf[24];
-  snprintf(serialBuf, sizeof(serialBuf), "lrs%s-%s", weekStamp, chipHex.c_str());
-  cfg_.factory_serial = serialBuf;
   cfg_.commissioned = true;
   cfg_.mode = kModePaired;
   cfg_.role = cfg_.role_tx ? "gateway" : "remote";

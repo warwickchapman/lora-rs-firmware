@@ -60,8 +60,7 @@ const ConfigField kConfigFields[] = {
     {"sensor_tank_interval_s", ConfigFieldClass::RetainedConfig},
     {"fleet_passphrase", ConfigFieldClass::SecretMetadata},
     {"fleet_setup_prompt_dismissed", ConfigFieldClass::RetainedConfig},
-    {"admin_password", ConfigFieldClass::SecretMetadata},
-    {"factory_serial", ConfigFieldClass::RetainedConfig}
+    {"admin_password", ConfigFieldClass::SecretMetadata}
 };
 
 const size_t kConfigFieldCount = sizeof(kConfigFields) / sizeof(kConfigFields[0]);
