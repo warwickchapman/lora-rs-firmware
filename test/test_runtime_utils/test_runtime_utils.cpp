@@ -388,6 +388,21 @@ void test_candidate_conflict_readdress() {
   TEST_ASSERT_EQUAL_UINT8(7, resolved2);
 }
 
+void test_candidate_unknown_chip_is_not_conflict() {
+  uint8_t known_peers[12] = {5, 6};
+  uint32_t known_peer_chip_ids[12] = {111, 222};
+
+  CandidateReason unknownReason = runtime_utils::evaluateCandidateReason(
+      6, 0, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL(CandidateReason::Ok, unknownReason);
+
+  CandidateReason realConflict = runtime_utils::evaluateCandidateReason(
+      6, 333, 2, known_peers, known_peer_chip_ids
+  );
+  TEST_ASSERT_EQUAL(CandidateReason::Conflict, realConflict);
+}
+
 void test_candidate_out_of_range_readdress() {
   uint8_t known_peers[12] = {5, 6};
   uint32_t known_peer_chip_ids[12] = {111, 222};
@@ -688,6 +703,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_candidate_lifecycle);
   RUN_TEST(test_candidate_ok);
   RUN_TEST(test_candidate_conflict_readdress);
+  RUN_TEST(test_candidate_unknown_chip_is_not_conflict);
   RUN_TEST(test_candidate_out_of_range_readdress);
   RUN_TEST(test_full_fleet_dangerous_reset_guarded);
   RUN_TEST(test_remote_two_stage_confirm_success);

@@ -117,7 +117,7 @@ CandidateReason evaluateCandidateReason(
   if (knownPeerAddresses != nullptr) {
     for (size_t i = 0; i < knownPeerCount; ++i) {
       if (knownPeerAddresses[i] == address) {
-        if (knownPeerChipIds != nullptr && knownPeerChipIds[i] != chipId) {
+        if (chipId != 0 && knownPeerChipIds != nullptr && knownPeerChipIds[i] != chipId) {
           return CandidateReason::Conflict;
         }
       }
@@ -294,4 +294,3 @@ bool isDefaultDeploymentKey(const String &v) {
 #endif
 
 } // namespace runtime_utils
-

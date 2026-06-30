@@ -368,10 +368,11 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   
   // Filter out any candidates that are now configured
   for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
-    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id != 0) {
+    if (discovery_candidates_[i].in_use) {
       bool configured = false;
       for (size_t j = 0; j < cfg.known_peer_count; ++j) {
-        if (cfg.known_peer_chip_ids[j] == discovery_candidates_[i].chip_id) {
+        if ((discovery_candidates_[i].chip_id != 0 && cfg.known_peer_chip_ids[j] == discovery_candidates_[i].chip_id) ||
+            (discovery_candidates_[i].chip_id == 0 && cfg.known_peer_addresses[j] == discovery_candidates_[i].address)) {
           configured = true;
           break;
         }
@@ -4392,10 +4393,13 @@ bool NodeStateMachine::candidateByChipId(uint32_t chipId, DiscoveryCandidate &ou
 void NodeStateMachine::recordDiscoveryCandidate(uint8_t address, uint32_t chipId, int rssi) {
   const uint32_t now = millis();
   
-  if (chipId != 0 && settings_ != nullptr) {
+  if (settings_ != nullptr) {
     for (size_t i = 0; i < settings_->known_peer_count; ++i) {
-      if (settings_->known_peer_chip_ids[i] == chipId) {
+      if (chipId != 0 && settings_->known_peer_chip_ids[i] == chipId) {
         removeDiscoveryCandidate(chipId);
+        return;
+      }
+      if (chipId == 0 && settings_->known_peer_addresses[i] == address) {
         return;
       }
     }
