@@ -57,7 +57,7 @@ describe('useFleetOta', () => {
 
   it('queueing marks ota_queued', () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
     triggerOtaCommandMock.mockResolvedValue({
       out: { path: '' },
@@ -73,7 +73,7 @@ describe('useFleetOta', () => {
 
   it('duplicate queue requests are ignored', () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
 
     composable.flashLoraRemote(dev);
@@ -84,7 +84,7 @@ describe('useFleetOta', () => {
 
   it('successful command lifecycle marks downloading, starts follow-up, logs/notifies', async () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
     triggerOtaCommandMock.mockResolvedValue({
       out: { path: '/custom.bin' },
@@ -93,7 +93,7 @@ describe('useFleetOta', () => {
     });
 
     composable.flashLoraRemote(dev);
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(loraInventory.value[0].row_state).toBe('ota_downloading');
     expect(notifyMock).toHaveBeenCalledWith('Flash triggered for LoRa 12');
@@ -104,24 +104,25 @@ describe('useFleetOta', () => {
 
   it('failed command clears busy state, removes queue item, resets row state', async () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
     triggerOtaCommandMock.mockRejectedValue(new Error('connection refused'));
 
     composable.flashLoraRemote(dev);
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(loraInventory.value[0].row_state).toBeUndefined();
     expect(otaQueue.value).toHaveLength(0);
-    expect(composable.remoteOtaBusyAddress.value).toBeNull();
+    expect(composable.otaTriggerBusyAddress.value).toBeNull();
   });
 
   it('terminal row state advances queue', async () => {
     const composable = createComposable();
     composable.startFleetOtaWatchdog();
-    const dev1: LoraInventoryDevice = { address: 12 };
-    const dev2: LoraInventoryDevice = { address: 14 };
-    loraInventory.value = [dev1, dev2];
+
+    // We want to test capacity limit (max 6 active pulls)
+    const devices: LoraInventoryDevice[] = Array.from({ length: 7 }, (_, i) => ({ address: 10 + i, fw_version: '0.9.0' }));
+    loraInventory.value = [...devices];
 
     triggerOtaCommandMock.mockResolvedValue({
       out: { path: '' },
@@ -129,31 +130,41 @@ describe('useFleetOta', () => {
       sha256: 'hash'
     });
 
-    // Flash both, they enter the queue
-    composable.flashLoraRemote(dev1);
-    composable.flashLoraRemote(dev2);
+    // Flash all 7
+    devices.forEach(d => composable.flashLoraRemote(d));
 
-    await vi.advanceTimersByTimeAsync(2500);
-    expect(composable.remoteOtaBusyAddress.value).toBe(12);
+    // Process first 6 with spacing delay of 500ms each
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(500);
+    }
 
-    // Make dev1 reach a terminal state
+    // First 6 should be in active pull addresses
+    expect(composable.activeOtaPullAddresses.value).toHaveLength(6);
+    expect(composable.activeOtaPullAddresses.value).toContain(10);
+    expect(composable.activeOtaPullAddresses.value).toContain(15);
+    // 7th should still be in queue
+    expect(otaQueue.value).toHaveLength(1);
+    expect(otaQueue.value[0].address).toBe(16);
+
+    // Make device 10 (first active) reach a terminal state
     loraInventory.value = loraInventory.value.map(row => 
-      row.address === 12 ? { ...row, row_state: 'ota_updated' } : row
+      row.address === 10 ? { ...row, row_state: 'ota_updated' } : row
     );
 
     // Run interval watchdog
     vi.advanceTimersByTime(1000);
-    expect(pushNetworkLogMock).toHaveBeenCalledWith(expect.stringContaining('OTA Session for Address 12 completed with status: ota_updated. Advancing queue.'));
 
-    // Advancing queue has a 2500ms delay before processing next item
-    await vi.advanceTimersByTimeAsync(2500);
+    // Now 10 is removed, leaving 5 active pulls, queue pumps and triggers 16
+    await vi.advanceTimersByTimeAsync(500);
 
-    expect(composable.remoteOtaBusyAddress.value).toBe(14);
+    expect(composable.activeOtaPullAddresses.value).not.toContain(10);
+    expect(composable.activeOtaPullAddresses.value).toContain(16);
+    expect(otaQueue.value).toHaveLength(0);
   });
 
   it('retry path increments retry count and stops after three attempts', async () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
     triggerOtaCommandMock.mockResolvedValue({
       out: { path: '' },
@@ -162,7 +173,7 @@ describe('useFleetOta', () => {
     });
 
     composable.flashLoraRemote(dev);
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(500);
 
     // Simulate first failure log event
     composable.handleOtaLogLine('event=ota_pull_control_failed', loraInventory.value[0]);
@@ -194,7 +205,7 @@ describe('useFleetOta', () => {
   it('watchdog triggers retry after 8s stalled activity', async () => {
     const composable = createComposable();
     composable.startFleetOtaWatchdog();
-    const dev: LoraInventoryDevice = { address: 12, row_state: 'ota_downloading' };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0', row_state: 'ota_downloading' };
     loraInventory.value = [dev];
     
     const now = Date.now();
@@ -213,7 +224,7 @@ describe('useFleetOta', () => {
   it('watchdog triggers retry after 45s no initial activity', async () => {
     const composable = createComposable();
     composable.startFleetOtaWatchdog();
-    const dev: LoraInventoryDevice = { address: 12, row_state: 'ota_downloading' };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0', row_state: 'ota_downloading' };
     loraInventory.value = [dev];
 
     const now = Date.now();
@@ -231,7 +242,7 @@ describe('useFleetOta', () => {
 
   it('apply log event moves row to ota_apply_wait', () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12, row_state: 'ota_downloading' };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0', row_state: 'ota_downloading' };
     loraInventory.value = [dev];
 
     composable.handleOtaLogLine('event=ota_pull_control_apply', loraInventory.value[0]);
@@ -241,7 +252,7 @@ describe('useFleetOta', () => {
 
   it('failure log event only triggers retry for active OTA states', () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12, row_state: 'ota_failed' };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0', row_state: 'ota_failed' };
     loraInventory.value = [dev];
 
     composable.handleOtaLogLine('event=ota_pull_control_failed', loraInventory.value[0]);
@@ -260,7 +271,7 @@ describe('useFleetOta', () => {
 
   it('follow-up timer sends inventory follow-up, not remote_ota_pull', async () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
     triggerOtaCommandMock.mockResolvedValue({
       out: { path: '' },
@@ -270,7 +281,7 @@ describe('useFleetOta', () => {
     
     composable.flashLoraRemote(dev);
     // Wait for queue delay
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(500);
     
     // Trigger follow-up timer (starts at 2500ms delay)
     await vi.advanceTimersByTimeAsync(2500);
@@ -282,7 +293,7 @@ describe('useFleetOta', () => {
   it('missing gateway/password does not queue or mark a row ota_queued', () => {
     const composable = createComposable();
     checkPreflightMock.mockReturnValue(false);
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     loraInventory.value = [dev];
     
     composable.flashLoraRemote(dev);
@@ -297,7 +308,7 @@ describe('useFleetOta', () => {
     composable.cleanupFleetOtaTimers();
     
     notifyMock.mockClear();
-    const dev: LoraInventoryDevice = { address: 12, row_state: 'ota_downloading' };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0', row_state: 'ota_downloading' };
     loraInventory.value = [dev];
     const now = Date.now();
     fleetRowHistory.value[12] = {
@@ -312,7 +323,7 @@ describe('useFleetOta', () => {
 
   it('fleetFlashUnavailableReason preserves original behavior', () => {
     const composable = createComposable();
-    const dev: LoraInventoryDevice = { address: 12 };
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
     expect(composable.fleetFlashAvailable(dev)).toBe(true);
     expect(composable.fleetFlashUnavailableReason(dev)).toBe('Ready to trigger OTA pull');
   });
@@ -321,5 +332,77 @@ describe('useFleetOta', () => {
     const composable = createComposable();
     expect(composable).not.toHaveProperty('checkOtaProgressWatchdog');
     expect(composable).not.toHaveProperty('processOtaQueue');
+  });
+
+  it('reschedules gateway_busy without incrementing retry or failing', async () => {
+    const composable = createComposable();
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
+    loraInventory.value = [dev];
+
+    triggerOtaCommandMock.mockRejectedValueOnce(new Error('gateway_busy'));
+
+    composable.flashLoraRemote(dev);
+
+    // Wait for trigger rejection to propagate
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(otaQueue.value).toContainEqual(expect.objectContaining({ address: 12 }));
+    expect(composable.otaTriggerBusyAddress.value).toBeNull();
+    expect(fleetRowHistory.value[12]?.otaRetryCount).toBeUndefined();
+    expect(notifyMock).not.toHaveBeenCalled();
+
+    // Eventual successful retry
+    triggerOtaCommandMock.mockResolvedValueOnce({
+      out: { path: '' },
+      target: { host: '192.168.0.100', port: 8080 },
+      sha256: 'hash'
+    });
+
+    await vi.advanceTimersByTimeAsync(750);
+
+    expect(composable.activeOtaPullAddresses.value).toContain(12);
+    expect(otaQueue.value).toHaveLength(0);
+  });
+
+  it('duplicate click on active pull does not queue or call trigger again', async () => {
+    const composable = createComposable();
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
+    loraInventory.value = [dev];
+    triggerOtaCommandMock.mockResolvedValue({
+      out: { path: '' },
+      target: { host: '192.168.0.100', port: 8080 },
+      sha256: 'hash'
+    });
+
+    composable.flashLoraRemote(dev);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(composable.activeOtaPullAddresses.value).toContain(12);
+    expect(triggerOtaCommandMock).toHaveBeenCalledTimes(1);
+
+    // Duplicate click
+    composable.flashLoraRemote(dev);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(otaQueue.value).toHaveLength(0);
+    expect(triggerOtaCommandMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ota_retrying blocks manual retrigger', () => {
+    const composable = createComposable();
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0', row_state: 'ota_retrying' };
+    loraInventory.value = [dev];
+
+    expect(composable.fleetFlashAvailable(dev)).toBe(false);
+    expect(composable.fleetFlashUnavailableReason(dev)).toBe('OTA flash is already active or queued for this device');
+  });
+
+  it('missing fw_version blocks manual trigger', () => {
+    const composable = createComposable();
+    const dev: LoraInventoryDevice = { address: 12 };
+    loraInventory.value = [dev];
+
+    expect(composable.fleetFlashAvailable(dev)).toBe(false);
+    expect(composable.fleetFlashUnavailableReason(dev)).toBe('Running firmware version unknown');
   });
 });

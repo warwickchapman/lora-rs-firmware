@@ -844,7 +844,7 @@ const {
 const fleetClockTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
 
 const {
-  remoteOtaBusyAddress,
+  hasActiveRemoteOtaPulls,
   fleetFlashAvailable,
   fleetFlashUnavailableReason,
   flashLoraRemote,
@@ -1161,7 +1161,7 @@ const fleetGatewayFlashDisabled = computed(() => {
   return fleetGatewayFlashPhase.value !== 'idle' ||
     isNetworkGatewayLoading.value ||
     isLoraInventoryScanning.value ||
-    remoteOtaBusyAddress.value !== null ||
+    hasActiveRemoteOtaPulls.value ||
     isFirmwareServerStarting.value ||
     isPairBusy.value;
 });
@@ -3430,7 +3430,7 @@ function fleetGatewayFlashUnavailableReason(): string {
   if (fleetGatewayFlashPhase.value !== 'idle') return 'Gateway flash is already running';
   if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
   if (isLoraInventoryScanning.value) return 'Stop the fleet scan before flashing the gateway';
-  if (remoteOtaBusyAddress.value !== null) return 'Wait for the remote flash command to finish';
+  if (hasActiveRemoteOtaPulls.value) return 'Wait for remote OTA pulls to finish';
   if (isFirmwareServerStarting.value) return 'Firmware server is starting';
   if (isPairBusy.value) return 'Provisioning is active';
   return isMqtt ? 'Upgrade the selected MQTT gateway via OTA' : 'Upgrade the selected USB gateway';

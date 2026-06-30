@@ -1,4 +1,4 @@
-import { ref, Ref, onMounted, onUnmounted, getCurrentInstance } from 'vue';
+import { ref, Ref, onMounted, onUnmounted, getCurrentInstance, computed } from 'vue';
 import { LoraInventoryDevice } from '../types/fleet';
 
 export interface UseFleetOtaOptions {
@@ -19,6 +19,10 @@ export interface UseFleetOtaOptions {
   serialFeatureError: (feature: string, err: unknown) => string;
 }
 
+const FLEET_OTA_MAX_ACTIVE_PULLS = 6;
+const FLEET_OTA_TRIGGER_RETRY_MS = 750;
+const FLEET_OTA_TRIGGER_SPACING_MS = 500;
+
 export function useFleetOta(options: UseFleetOtaOptions) {
   const {
     loraInventory,
@@ -34,10 +38,27 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     serialFeatureError
   } = options;
 
-  const remoteOtaBusyAddress = ref<number | null>(null);
+  const otaTriggerBusyAddress = ref<number | null>(null);
+  const activeOtaPullAddresses = ref<number[]>([]);
   const fleetOtaFollowupTimers = ref<Record<number, any>>({});
   
   let watchdogInterval: any = null;
+
+  const hasActiveRemoteOtaPulls = computed(() => activeOtaPullAddresses.value.length > 0);
+
+  function hasActiveOtaPull(address: number): boolean {
+    return activeOtaPullAddresses.value.includes(address);
+  }
+
+  function addActiveOtaPull(address: number) {
+    if (!activeOtaPullAddresses.value.includes(address)) {
+      activeOtaPullAddresses.value = [...activeOtaPullAddresses.value, address];
+    }
+  }
+
+  function removeActiveOtaPull(address: number) {
+    activeOtaPullAddresses.value = activeOtaPullAddresses.value.filter(addr => addr !== address);
+  }
 
   function startFleetOtaWatchdog() {
     if (watchdogInterval) clearInterval(watchdogInterval);
@@ -68,7 +89,12 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     return fleetFlashUnavailableReason(device) === 'Ready to trigger OTA pull';
   }
 
-  function fleetFlashUnavailableReason(_device: LoraInventoryDevice): string {
+  function fleetFlashUnavailableReason(device: LoraInventoryDevice): string {
+    if (!device.fw_version) return 'Running firmware version unknown';
+    const state = device.row_state || '';
+    if (state === 'ota_queued' || state === 'ota_downloading' || state === 'ota_apply_wait' || state === 'ota_retrying') {
+      return 'OTA flash is already active or queued for this device';
+    }
     return 'Ready to trigger OTA pull';
   }
 
@@ -95,6 +121,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     const now = Date.now();
     if (history.rowState === 'ota_rebooted' || history.rowState === 'ota_updated') {
       delete fleetOtaFollowupTimers.value[address];
+      reconcileActiveOtaPulls();
       return;
     }
     if (now >= history.otaExpectedUntilMs) {
@@ -109,10 +136,12 @@ export function useFleetOta(options: UseFleetOtaOptions) {
           : row
       );
       delete fleetOtaFollowupTimers.value[address];
+      reconcileActiveOtaPulls();
       return;
     }
     try {
       await runFollowupInventoryScan(address);
+      reconcileActiveOtaPulls();
     } catch (e) {
       pushNetworkLog(serialFeatureError(`Flash follow-up ${address}`, e));
     } finally {
@@ -144,9 +173,10 @@ export function useFleetOta(options: UseFleetOtaOptions) {
       notify(fleetFlashUnavailableReason(device));
       return;
     }
-    if (otaQueue.value.find(d => d.address === device.address)) return;
+    if (otaQueue.value.some(d => d.address === device.address)) return;
+    if (hasActiveOtaPull(device.address)) return;
     
-    otaQueue.value.push(device);
+    otaQueue.value = [...otaQueue.value, device];
     fleetRowHistory.value[device.address] = {
       ...(fleetRowHistory.value[device.address] || {}),
       rowState: 'ota_queued',
@@ -157,21 +187,19 @@ export function useFleetOta(options: UseFleetOtaOptions) {
       row.address === device.address ? { ...row, row_state: 'ota_queued' } : row
     );
     
-    if (otaQueue.value.length === 1 && remoteOtaBusyAddress.value === null) {
-      processOtaQueue();
-    }
+    processOtaQueue();
+  }
+
+  function isGatewayBusyError(err: unknown): boolean {
+    const msg = String((err as any)?.message || err || '').toLowerCase();
+    return msg.includes('gateway_busy') || msg.includes('sm_busy');
   }
 
   async function triggerOtaFailureOrRetry(device: LoraInventoryDevice) {
     const history = fleetRowHistory.value[device.address] || {};
     const currentRetry = (history.otaRetryCount || 0) + 1;
 
-    if (remoteOtaBusyAddress.value === device.address) {
-      remoteOtaBusyAddress.value = null;
-      if (otaQueue.value.filter(d => d.address !== device.address).length > 0) {
-        setTimeout(() => processOtaQueue(), 2500);
-      }
-    }
+    removeActiveOtaPull(device.address);
     otaQueue.value = otaQueue.value.filter(d => d.address !== device.address);
 
     if (currentRetry <= 3) {
@@ -199,16 +227,17 @@ export function useFleetOta(options: UseFleetOtaOptions) {
           if (!currentDev || currentDev.row_state !== 'ota_retrying') {
             return;
           }
-          if (remoteOtaBusyAddress.value === null) {
-            notify(`Retrying OTA flash for remote ${device.address} now...`);
-            
-            const cleanHistory = fleetRowHistory.value[device.address] || {};
-            delete cleanHistory.lastOtaActivityMs;
-            
-            flashLoraRemote(device);
-          } else {
-            setTimeout(checkAndRetry, 5000);
-          }
+          notify(`Retrying OTA flash for remote ${device.address} now...`);
+
+          const cleanHistory = fleetRowHistory.value[device.address] || {};
+          delete cleanHistory.lastOtaActivityMs;
+
+          // Re-queue by clearing current retrying state and running flashLoraRemote
+          fleetRowHistory.value[device.address].rowState = undefined;
+          loraInventory.value = loraInventory.value.map(row =>
+            row.address === device.address ? { ...row, row_state: undefined } : row
+          );
+          flashLoraRemote(device);
         };
         checkAndRetry();
       }, retryDelay);
@@ -226,6 +255,28 @@ export function useFleetOta(options: UseFleetOtaOptions) {
           ? { ...row, row_state: 'ota_failed', row_state_until_ms: undefined } 
           : row
       );
+      reconcileActiveOtaPulls();
+    }
+  }
+
+  function reconcileActiveOtaPulls() {
+    const terminalStates = ['ota_updated', 'ota_rebooted', 'ota_failed', 'ota_no_reboot'];
+    const activeCopy = [...activeOtaPullAddresses.value];
+
+    let changed = false;
+    for (const address of activeCopy) {
+      const dev = loraInventory.value.find(d => d.address === address);
+      if (!dev || terminalStates.includes(dev.row_state || '')) {
+        removeActiveOtaPull(address);
+        changed = true;
+        if (fleetOtaFollowupTimers.value[address]) {
+          clearTimeout(fleetOtaFollowupTimers.value[address]);
+          delete fleetOtaFollowupTimers.value[address];
+        }
+      }
+    }
+    if (changed) {
+      processOtaQueue();
     }
   }
 
@@ -251,61 +302,55 @@ export function useFleetOta(options: UseFleetOtaOptions) {
       }
     });
 
-    if (remoteOtaBusyAddress.value !== null) {
-      const activeAddress = remoteOtaBusyAddress.value;
-      const activeDev = loraInventory.value.find(d => d.address === activeAddress);
-      if (activeDev) {
-        const terminalStates = ['ota_updated', 'ota_failed', 'ota_no_reboot', 'ota_rebooted'];
-        if (terminalStates.includes(activeDev.row_state || '')) {
-          pushNetworkLog(`OTA Session for Address ${activeAddress} completed with status: ${activeDev.row_state}. Advancing queue.`);
-          remoteOtaBusyAddress.value = null;
-          otaQueue.value.shift();
-          if (otaQueue.value.length > 0) {
-            setTimeout(() => processOtaQueue(), 2500);
-          }
-        }
-      } else {
-        remoteOtaBusyAddress.value = null;
-        otaQueue.value.shift();
-        if (otaQueue.value.length > 0) {
-          setTimeout(() => processOtaQueue(), 2500);
-        }
-      }
-    }
+    reconcileActiveOtaPulls();
   }
 
   async function processOtaQueue() {
-    if (remoteOtaBusyAddress.value != null || otaQueue.value.length === 0) return;
+    if (otaQueue.value.length === 0) return;
+    if (activeOtaPullAddresses.value.length >= FLEET_OTA_MAX_ACTIVE_PULLS) return;
+    if (otaTriggerBusyAddress.value !== null) return;
 
     const device = otaQueue.value[0];
     let success = false;
+    let isBusy = false;
     try {
-      remoteOtaBusyAddress.value = device.address;
+      otaTriggerBusyAddress.value = device.address;
       
       const { out, target, sha256 } = await triggerOtaCommand(device);
+
+      addActiveOtaPull(device.address);
       markFleetOtaPending(device);
       startFleetOtaFollowup(device);
-      
+
       setNetworkStatusMessage(`Remote OTA pull triggered for LoRa ${device.address} from ${target.host}:${target.port}.`);
       pushNetworkLog(`Remote OTA pull: addr ${device.address} -> http://${target.host}:${target.port}${networkFirmwarePath} (${out.path || networkFirmwarePath}), SHA256 ${sha256}`);
       notify(`Flash triggered for LoRa ${device.address}`);
       success = true;
     } catch (e: any) {
-      const msg = serialFeatureError(`Remote flash ${device.address}`, e);
-      setNetworkStatusMessage(msg);
-      pushNetworkLog(msg);
-      notify(msg);
-      delete fleetRowHistory.value[device.address];
-      loraInventory.value = loraInventory.value.map(row => 
-        row.address === device.address ? { ...row, row_state: undefined, row_state_until_ms: undefined } : row
-      );
+      if (isGatewayBusyError(e)) {
+        isBusy = true;
+        // Reschedule without incrementing retry or failing
+        setTimeout(() => {
+          processOtaQueue();
+        }, FLEET_OTA_TRIGGER_RETRY_MS);
+      } else {
+        const msg = serialFeatureError(`Remote flash ${device.address}`, e);
+        setNetworkStatusMessage(msg);
+        pushNetworkLog(msg);
+        notify(msg);
+        delete fleetRowHistory.value[device.address];
+        loraInventory.value = loraInventory.value.map(row =>
+          row.address === device.address ? { ...row, row_state: undefined, row_state_until_ms: undefined } : row
+        );
+      }
     } finally {
-      if (!success) {
-        remoteOtaBusyAddress.value = null;
-        otaQueue.value.shift();
-        if (otaQueue.value.length > 0) {
-          setTimeout(() => processOtaQueue(), 2500);
-        }
+      otaTriggerBusyAddress.value = null;
+      if (success) {
+        otaQueue.value = otaQueue.value.filter(d => d.address !== device.address);
+        setTimeout(() => processOtaQueue(), FLEET_OTA_TRIGGER_SPACING_MS);
+      } else if (!isBusy) {
+        otaQueue.value = otaQueue.value.filter(d => d.address !== device.address);
+        setTimeout(() => processOtaQueue(), FLEET_OTA_TRIGGER_SPACING_MS);
       }
     }
   }
@@ -344,7 +389,9 @@ export function useFleetOta(options: UseFleetOtaOptions) {
 
   return {
     otaQueue,
-    remoteOtaBusyAddress,
+    otaTriggerBusyAddress,
+    activeOtaPullAddresses,
+    hasActiveRemoteOtaPulls,
     fleetOtaFollowupTimers,
     fleetFlashAvailable,
     fleetFlashUnavailableReason,
