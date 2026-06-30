@@ -1172,11 +1172,9 @@ void MqttBridge::publishLocalConfig() {
     }
   }
 
-  if (success) {
-    if (mqtt_client_.publish(complete_topic, "true", true)) {
-      config_dirty_ = false;
-    }
+  const char *final_complete = success ? "true" : "false";
+  if (mqtt_client_.publish(complete_topic, final_complete, true) && success) {
+    config_dirty_ = false;
   }
   yield();
 }
-
