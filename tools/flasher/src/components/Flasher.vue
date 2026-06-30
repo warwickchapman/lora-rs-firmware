@@ -5714,7 +5714,7 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
       const ipStr = wifi.ip || 'connected';
       if (wifi.rssi !== undefined && wifi.rssi !== null && wifi.rssi !== 0) {
         const rssi = wifi.rssi;
-        const bars = rssi >= -60 ? '▂▄▆' : rssi >= -70 ? '▂▄▅' : rssi >= -80 ? '▂▄_' : '▂__';
+        const bars = rssi >= -60 ? '▂▄▆' : rssi >= -70 ? '▂▄▅' : rssi >= -80 ? '▂▄' : '▂';
         return `${ipStr} (${bars} ${rssi})`;
       }
       return ipStr;

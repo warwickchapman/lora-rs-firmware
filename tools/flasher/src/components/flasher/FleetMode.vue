@@ -487,7 +487,7 @@ function toggleNetworkUdpLogsExpanded() {
                   <span
                     v-if="device.wifi_rssi_dbm !== undefined && device.wifi_rssi_dbm !== null && device.wifi_rssi_dbm !== 0"
                     :class="[
-                      'rounded border px-2 py-1 text-[10px] font-bold font-mono',
+                      'rounded border px-2 py-1 text-[10px] font-bold font-mono inline-flex items-center gap-1.5',
                       device.wifi_rssi_dbm >= -60 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
                       device.wifi_rssi_dbm >= -70 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
                       device.wifi_rssi_dbm >= -80 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
@@ -495,7 +495,12 @@ function toggleNetworkUdpLogsExpanded() {
                     ]"
                     :title="`WiFi RSSI: ${device.wifi_rssi_dbm} dBm`"
                   >
-                    {{ device.wifi_rssi_dbm >= -60 ? '▂▄▆' : device.wifi_rssi_dbm >= -70 ? '▂▄▅' : device.wifi_rssi_dbm >= -80 ? '▂▄_' : '▂__' }} {{ device.wifi_rssi_dbm }}
+                    <span class="inline-flex items-end gap-[1px] h-3 w-3.5 mb-[1px]">
+                      <span class="w-[3px] h-[4px] rounded-t-[1px] bg-current"></span>
+                      <span :class="['w-[3px] rounded-t-[1px]', device.wifi_rssi_dbm >= -80 ? 'h-[8px] bg-current' : 'h-[8px] bg-current/20']"></span>
+                      <span :class="['w-[3px] rounded-t-[1px]', device.wifi_rssi_dbm >= -60 ? 'h-[12px] bg-current' : device.wifi_rssi_dbm >= -70 ? 'h-[10px] bg-current' : 'h-[12px] bg-current/20']"></span>
+                    </span>
+                    <span>{{ device.wifi_rssi_dbm }}</span>
                   </span>
                   <span v-else class="rounded border px-2 py-1 text-[10px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
                     OK
@@ -559,7 +564,7 @@ function toggleNetworkUdpLogsExpanded() {
                 <span
                   v-if="device.rssi !== undefined && device.rssi !== null && device.rssi !== 0 && device.rssi !== -127"
                   :class="[
-                    'rounded border px-2 py-1 text-[10px] font-bold',
+                    'rounded border px-2 py-1 text-[10px] font-bold inline-flex items-center gap-1.5',
                     device.rssi >= -90 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
                     device.rssi >= -100 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
                     device.rssi >= -110 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
@@ -567,7 +572,12 @@ function toggleNetworkUdpLogsExpanded() {
                   ]"
                   :title="`LoRa RSSI: ${device.rssi} dBm`"
                 >
-                  {{ device.rssi >= -90 ? '▂▄▆' : device.rssi >= -100 ? '▂▄▅' : device.rssi >= -110 ? '▂▄_' : '▂__' }} {{ device.rssi }}
+                  <span class="inline-flex items-end gap-[1px] h-3 w-3.5 mb-[1px]">
+                    <span class="w-[3px] h-[4px] rounded-t-[1px] bg-current"></span>
+                    <span :class="['w-[3px] rounded-t-[1px]', device.rssi >= -110 ? 'h-[8px] bg-current' : 'h-[8px] bg-current/20']"></span>
+                    <span :class="['w-[3px] rounded-t-[1px]', device.rssi >= -90 ? 'h-[12px] bg-current' : device.rssi >= -100 ? 'h-[10px] bg-current' : 'h-[12px] bg-current/20']"></span>
+                  </span>
+                  <span>{{ device.rssi }}</span>
                 </span>
                 <span v-else class="text-slate-500">-</span>
               </td>
