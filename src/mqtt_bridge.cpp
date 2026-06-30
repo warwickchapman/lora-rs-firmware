@@ -340,7 +340,24 @@ void MqttBridge::tick(bool wifiConnected) {
 
   mqtt_client_.loop();
 
+  static uint32_t last_config_state_log = 0;
+  if (mqtt_client_.connected() && (millis() - last_config_state_log > 10000)) {
+    last_config_state_log = millis();
+    LRS_LOGI(SYS,
+             "event=mqtt_config_state connected=%d dirty=%d root=%s chip=%s",
+             mqtt_client_.connected(),
+             config_dirty_,
+             settings_ ? settings_->mqtt_topic_root.c_str() : "-",
+             chip_id_hex_.c_str());
+  }
+
   if (config_dirty_ && mqtt_client_.connected()) {
+    LRS_LOGI(SYS,
+             "event=mqtt_config_publish_due connected=%d dirty=%d root=%s chip=%s",
+             mqtt_client_.connected(),
+             config_dirty_,
+             settings_ ? settings_->mqtt_topic_root.c_str() : "-",
+             chip_id_hex_.c_str());
     publishLocalConfig();
   }
 
@@ -481,31 +498,6 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
 
   if (strcmp(sub, "admin_command") == 0) {
     if (length == 0 || executor_ == nullptr) {
-      return;
-    }
-    if (!runtime_.mqtt_control_enabled) {
-      lrslog::event("mqtt_control_blocked_mode", 0, 0, 0);
-      JsonDocument reqDoc;
-      deserializeJson(reqDoc, payload, length);
-      const char *reqId = reqDoc["id"] | "";
-      const char *cmd = reqDoc["cmd"] | "";
-
-      JsonDocument respDoc;
-      respDoc["ok"] = false;
-      respDoc["cmd"] = cmd;
-      if (reqId[0] != '\0') {
-        respDoc["id"] = reqId;
-      }
-      respDoc["error"] = "mqtt_control_disabled";
-      String respStr;
-      serializeJson(respDoc, respStr);
-      if (mqtt_client_.connected()) {
-        char admin_resp_topic[160];
-        snprintf(admin_resp_topic, sizeof(admin_resp_topic), "%s/admin_response", topic_base_);
-        if (!mqtt_client_.publish(admin_resp_topic, respStr.c_str(), false)) {
-          LRS_LOGW(API, "admin_response_publish_failed cmd=%s size=%u", cmd, (unsigned)respStr.length());
-        }
-      }
       return;
     }
     if (length >= 1024) {
@@ -727,11 +719,14 @@ bool MqttBridge::connectIfNeeded() {
 
   resetFibonacci();
 
+  // Always subscribe to authenticated admin command channel when MQTT client is enabled.
+  char topicBuf[160];
+  snprintf(topicBuf, sizeof(topicBuf), "%s/admin_command", topic_base_);
+  mqtt_client_.subscribe(topicBuf);
+
+  // Only subscribe to unauthenticated/direct relay-control MQTT topics when MQTT control is enabled.
   if (runtime_.mqtt_control_enabled) {
-    char topicBuf[160];
     snprintf(topicBuf, sizeof(topicBuf), "%s/set/relay", topic_base_);
-    mqtt_client_.subscribe(topicBuf);
-    snprintf(topicBuf, sizeof(topicBuf), "%s/admin_command", topic_base_);
     mqtt_client_.subscribe(topicBuf);
     char topic[kMqttTopicBufBytes];
     if (buildPeerTopic(topic, sizeof(topic), "+", "set/relay")) mqtt_client_.subscribe(topic);
@@ -1114,7 +1109,16 @@ void MqttBridge::publishOtaStatus(const char *status) {
 }
 
 void MqttBridge::publishLocalConfig() {
+  LRS_LOGI(SYS,
+           "event=mqtt_config_publish_start connected=%d config=%d settings=%d root=%s chip=%s",
+           mqtt_client_.connected(),
+           config_ != nullptr,
+           settings_ != nullptr,
+           settings_ ? settings_->mqtt_topic_root.c_str() : "-",
+           chip_id_hex_.c_str());
+
   if (!mqtt_client_.connected() || !config_ || !settings_) {
+    LRS_LOGW(SYS, "event=mqtt_config_publish_early_return");
     return;
   }
 
@@ -1123,13 +1127,27 @@ void MqttBridge::publishLocalConfig() {
 
   char complete_topic[256];
   snprintf(complete_topic, sizeof(complete_topic), "%s/lrs-%s/config/_complete", topic_root, chip_id_hex_.c_str());
-  if (!mqtt_client_.publish(complete_topic, "false", true)) {
+  bool complete_false_ok = mqtt_client_.publish(complete_topic, "false", true);
+  LRS_LOGI(SYS,
+           "event=mqtt_config_complete_false ok=%d topic=%s",
+           complete_false_ok,
+           complete_topic);
+  if (!complete_false_ok) {
     success = false;
   }
   yield();
 
   JsonDocument doc;
   writeSettingsJson(doc, *config_, false);
+
+  size_t doc_size = measureJson(doc);
+  bool doc_overflowed = doc.overflowed();
+  LRS_LOGI(SYS,
+           "event=mqtt_config_doc_built size=%u overflowed=%d heap_free=%lu heap_max=%lu",
+           static_cast<unsigned int>(doc_size),
+           doc_overflowed ? 1 : 0,
+           static_cast<unsigned long>(lrslog::heapFree()),
+           static_cast<unsigned long>(lrslog::heapMaxFreeBlock()));
 
   char topic[256];
   char payload[512];
@@ -1154,6 +1172,10 @@ void MqttBridge::publishLocalConfig() {
           pub_ok = mqtt_client_.publish(topic, payload, true);
         }
         if (!pub_ok) {
+          LRS_LOGW(SYS,
+                   "event=mqtt_config_field_publish_failed field=%s topic=%s",
+                   field.name,
+                   topic);
           success = false;
         }
         yield();
@@ -1165,6 +1187,10 @@ void MqttBridge::publishLocalConfig() {
         snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), set_field_name);
         bool is_set = doc[set_field_name].as<bool>();
         if (!mqtt_client_.publish(topic, is_set ? "true" : "false", true)) {
+          LRS_LOGW(SYS,
+                   "event=mqtt_config_field_publish_failed field=%s topic=%s",
+                   set_field_name,
+                   topic);
           success = false;
         }
         yield();
@@ -1173,6 +1199,9 @@ void MqttBridge::publishLocalConfig() {
         snprintf(topic, sizeof(topic), "%s/lrs-%s/config/fleet_passphrase_default", topic_root, chip_id_hex_.c_str());
         bool is_default = doc["fleet_passphrase_default"].as<bool>();
         if (!mqtt_client_.publish(topic, is_default ? "true" : "false", true)) {
+          LRS_LOGW(SYS,
+                   "event=mqtt_config_field_publish_failed field=fleet_passphrase_default topic=%s",
+                   topic);
           success = false;
         }
         yield();
@@ -1181,8 +1210,20 @@ void MqttBridge::publishLocalConfig() {
   }
 
   const char *final_complete = success ? "true" : "false";
-  if (mqtt_client_.publish(complete_topic, final_complete, true) && success) {
+  bool complete_final_ok = mqtt_client_.publish(complete_topic, final_complete, true);
+  LRS_LOGI(SYS,
+           "event=mqtt_config_complete_final ok=%d value=%s success=%d topic=%s",
+           complete_final_ok,
+           final_complete,
+           success,
+           complete_topic);
+
+  if (complete_final_ok && success) {
     config_dirty_ = false;
   }
+  LRS_LOGI(SYS,
+           "event=mqtt_config_publish_done success=%d dirty=%d",
+           success,
+           config_dirty_);
   yield();
 }
