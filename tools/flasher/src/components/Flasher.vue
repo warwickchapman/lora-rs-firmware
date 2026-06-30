@@ -5706,9 +5706,19 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
       : fleetGatewayIdentity.value
         ? `${fleetGatewayIdentity.value.local_addr}->${fleetGatewayIdentity.value.remote_addr}`
         : '-',
-    wifiLine: fleetGatewayStatus.value?.wifi?.sta_connected
-      ? (fleetGatewayStatus.value.wifi.ip || 'connected')
-      : (fleetGatewayStatus.value?.wifi?.status || '-'),
+    wifiLine: (() => {
+      const wifi = fleetGatewayStatus.value?.wifi;
+      if (!wifi?.sta_connected) {
+        return wifi?.status || '-';
+      }
+      const ipStr = wifi.ip || 'connected';
+      if (wifi.rssi !== undefined && wifi.rssi !== null && wifi.rssi !== 0) {
+        const rssi = wifi.rssi;
+        const bars = rssi >= -60 ? '▂▄▆' : rssi >= -70 ? '▂▄▅' : rssi >= -80 ? '▂▄_' : '▂__';
+        return `${ipStr} (${bars} ${rssi})`;
+      }
+      return ipStr;
+    })(),
     uptimeLine: fleetGatewayStatus.value?.uptime_ms ? formatUptime(fleetGatewayStatus.value.uptime_ms) : '-'
   };
 });

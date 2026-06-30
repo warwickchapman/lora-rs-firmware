@@ -555,7 +555,22 @@ function toggleNetworkUdpLogsExpanded() {
                   <span v-if="device.rowState === 'unexpected_reboot' || device.rowState === 'ota_failed' || device.rowState === 'ota_rebooted' || device.rowState === 'ota_no_reboot'" class="opacity-60 text-[9px]">ⓘ</span>
                 </div>
               </td>
-              <td class="px-2 py-1.5 font-mono text-slate-300">{{ device.rssi ?? '-' }}</td>
+              <td class="px-2 py-1.5 font-mono">
+                <span
+                  v-if="device.rssi !== undefined && device.rssi !== null && device.rssi !== 0 && device.rssi !== -127"
+                  :class="[
+                    'rounded border px-2 py-1 text-[10px] font-bold',
+                    device.rssi >= -90 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                    device.rssi >= -100 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                    device.rssi >= -110 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
+                    'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                  ]"
+                  :title="`LoRa RSSI: ${device.rssi} dBm`"
+                >
+                  {{ device.rssi >= -90 ? '▂▄▆' : device.rssi >= -100 ? '▂▄▅' : device.rssi >= -110 ? '▂▄_' : '▂__' }} {{ device.rssi }}
+                </span>
+                <span v-else class="text-slate-500">-</span>
+              </td>
               <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ageSeconds != null ? `${device.ageSeconds}s` : '-' }}</td>
               <td class="px-2 py-1.5 overflow-visible">
                 <div class="relative inline-block text-left">
