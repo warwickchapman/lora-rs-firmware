@@ -6,7 +6,7 @@ import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
-import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS } from '../composables/useFleetInventory';
+import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
 import { useMqttConnection } from '../composables/useMqttConnection';
@@ -2734,8 +2734,8 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
 
 
 
-function fleetFreshnessClass(row: LoraInventoryDevice): string {
-  const state = rowFreshness(row);
+function fleetFreshnessClass(row: LoraInventoryDevice, ageMs?: number): string {
+  const state = rowFreshness(row, ageMs);
   if (state === 'live') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (state === 'stale') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   if (state === 'offline') return 'border-slate-600 bg-slate-800/50 text-slate-400';
@@ -2885,7 +2885,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
     if (port === targetPort) {
       loraInventoryScan.value = inventory.scan || null;
       mergeLoraInventoryRows(inventory.devices || []);
-      loraCandidates.value = inventory.candidates || [];
+      loraCandidates.value = (inventory.candidates || []).map(c => deriveCandidateLocalTimestamp(c, fleetClockMs.value));
       candidateTotal.value = inventory.candidate_total || (inventory.candidates || []).length;
       candidateTruncated.value = !!inventory.candidate_truncated;
       loraAdoptionStatus.value = inventory.adoption || null;
@@ -5656,40 +5656,49 @@ function toggleSelectAllBulkPorts() {
 }
 
 const fleetDisplayRows = computed<FleetDisplayRow[]>(() => {
-  return loraInventory.value.map(device => ({
-    address: device.address,
-    selected: !!device.selected,
-    deviceName: device.chip_id ? lrsDeviceName(device.chip_id) : '-',
-    conflict_chip_id: device.conflict_chip_id,
-    fw_version: device.fw_version,
-    roleModeLabel: `${device.role || '-'} / ${device.mode || '-'}`,
-    wifi_pending_offline: !!device.wifi_pending_offline,
-    wifi_connected_known: !!device.wifi_connected_known,
-    wifi_connected: !!device.wifi_connected,
-    wifi_rssi_dbm: device.wifi_rssi_dbm,
-    pending_power_save_listen_only: device.pending_power_save_listen_only,
-    power_save_listen_only: !!device.power_save_listen_only,
-    ip: device.ip,
-    relayLabel: remoteRelayLabel(device),
-    inputLabel: remoteInputLabel(device),
-    tempLabel: remoteTempLabel(device),
-    tankLabel: tankLabel(device),
-    tankDetailLabel: tankDetailLabel(device),
-    uptimeLabel: device.uptime_ms ? formatUptime(device.uptime_ms) : '-',
-    rowStatusLabel: fleetRowStatusLabel(device),
-    rowState: device.row_state,
-    rssi: device.rssi,
-    ageSeconds: device.age_ms != null ? Math.round(device.age_ms / 1000) : null,
-    freshnessClass: fleetFreshnessClass(device),
-    rowClass: fleetRowClass(device),
-    flashAvailable: fleetFlashAvailable(device),
-    flashUnavailableReason: fleetFlashUnavailableReason(device)
-  }));
+  const clock = fleetClockMs.value;
+  return loraInventory.value.map(device => {
+    const history = fleetRowHistory.value[device.address];
+    const ageMs = calculateDynamicAgeMs(device, history, clock);
+
+    return {
+      address: device.address,
+      selected: !!device.selected,
+      deviceName: device.chip_id ? lrsDeviceName(device.chip_id) : '-',
+      conflict_chip_id: device.conflict_chip_id,
+      fw_version: device.fw_version,
+      roleModeLabel: `${device.role || '-'} / ${device.mode || '-'}`,
+      wifi_pending_offline: !!device.wifi_pending_offline,
+      wifi_connected_known: !!device.wifi_connected_known,
+      wifi_connected: !!device.wifi_connected,
+      wifi_rssi_dbm: device.wifi_rssi_dbm,
+      pending_power_save_listen_only: device.pending_power_save_listen_only,
+      power_save_listen_only: !!device.power_save_listen_only,
+      ip: device.ip,
+      relayLabel: remoteRelayLabel(device),
+      inputLabel: remoteInputLabel(device),
+      tempLabel: remoteTempLabel(device),
+      tankLabel: tankLabel(device),
+      tankDetailLabel: tankDetailLabel(device),
+      uptimeLabel: device.uptime_ms ? formatUptime(device.uptime_ms) : '-',
+      rowStatusLabel: fleetRowStatusLabel(device),
+      rowState: device.row_state,
+      rssi: device.rssi,
+      ageSeconds: ageMs != null ? Math.round(ageMs / 1000) : null,
+      freshnessClass: fleetFreshnessClass(device, ageMs),
+      rowClass: fleetRowClass(device),
+      flashAvailable: fleetFlashAvailable(device),
+      flashUnavailableReason: fleetFlashUnavailableReason(device)
+    };
+  });
 });
 
 const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
+  const clock = fleetClockMs.value;
   return loraCandidates.value.map(c => {
-    const isRecentFailed = c.state === 'failed' && (c.age_ms == null || c.age_ms < CANDIDATE_RECENT_IDENTITY_MS);
+    const ageMs = calculateCandidateAgeMs(c, clock);
+
+    const isRecentFailed = c.state === 'failed' && (ageMs == null || ageMs < CANDIDATE_RECENT_IDENTITY_MS);
     const textClass =
       (c.state === 'seen_address_only' || isRecentFailed) ? 'text-slate-500 animate-pulse' :
       c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
@@ -5701,7 +5710,7 @@ const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
       chip_id: c.chip_id,
       deviceName: c.chip_id ? lrsDeviceName(c.chip_id) : 'querying...',
       rssi: c.rssi || 0,
-      ageSeconds: c.age_ms != null ? Math.round(c.age_ms / 1000) : null,
+      ageSeconds: ageMs != null ? Math.round(ageMs / 1000) : null,
       reason: c.reason || 'unknown',
       state: c.state || '',
       stateText: candidateStateText(c),

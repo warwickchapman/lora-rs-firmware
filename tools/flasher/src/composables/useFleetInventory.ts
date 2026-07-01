@@ -281,9 +281,9 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     };
   }
 
-  function rowFreshness(row: LoraInventoryDevice): 'live' | 'stale' | 'offline' | 'unknown' {
-    const age = Number(row.age_ms || 0);
-    if (!row.age_ms && row.age_ms !== 0) return 'unknown';
+  function rowFreshness(row: LoraInventoryDevice, overrideAgeMs?: number): 'live' | 'stale' | 'offline' | 'unknown' {
+    const age = Number(overrideAgeMs ?? row.age_ms ?? 0);
+    if (overrideAgeMs === undefined && row.age_ms === undefined && row.age_ms !== 0) return 'unknown';
     if (age <= 90000) return 'live';
     if (age <= 180000) return 'stale';
     return 'offline';
@@ -417,7 +417,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
 
   function mergeInventoryRows(rows: LoraInventoryDevice[]): LoraInventoryDevice[] {
     const selected = new Set(loraInventory.value.filter(d => d.selected).map(d => d.address));
-    const now = Date.now();
+    const now = options.fleetClockMs.value;
     const activeGwId = normalizeGatewayId(options.activeGatewayId ? options.activeGatewayId() : null);
 
     const processed = rows
@@ -599,4 +599,25 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     updateRowHistory,
     clearFleetGatewayCache
   };
+}
+
+export function deriveCandidateLocalTimestamp(c: LoraAdoptionCandidate, nowMs: number): LoraAdoptionCandidate {
+  if (c.age_ms !== undefined && c.age_ms !== null) {
+    return { ...c, last_seen_local_ms: nowMs - c.age_ms };
+  }
+  return c;
+}
+
+export function calculateDynamicAgeMs(device: { age_ms?: number, address: number }, history: { lastTelemetryTimestamp?: number } | undefined, nowMs: number): number | undefined {
+  if (history?.lastTelemetryTimestamp !== undefined && history.lastTelemetryTimestamp !== null) {
+    return nowMs - history.lastTelemetryTimestamp;
+  }
+  return device.age_ms;
+}
+
+export function calculateCandidateAgeMs(c: LoraAdoptionCandidate, nowMs: number): number | undefined {
+  if (c.last_seen_local_ms !== undefined && c.last_seen_local_ms !== null) {
+    return nowMs - c.last_seen_local_ms;
+  }
+  return c.age_ms;
 }

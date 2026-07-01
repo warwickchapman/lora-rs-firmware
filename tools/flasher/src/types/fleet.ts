@@ -54,6 +54,7 @@ export interface LoraAdoptionCandidate {
   chip_id?: string;
   rssi: number;
   last_seen_ms: number;
+  last_seen_local_ms?: number;
   age_ms?: number;
   reason: 'ok' | 'known_chip_moved' | 'conflict' | 'out_of_range' | 'full';
   state: 'seen_address_only' | 'identified' | 'readdressing' | 'adopted' | 'failed' | 'reset_requested';
