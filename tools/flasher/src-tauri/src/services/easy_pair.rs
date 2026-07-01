@@ -62,6 +62,9 @@ pub fn send_serial_admin_command(
                                         human_command_label(&cmd)
                                     ));
                                 }
+                                if let Some(detail) = parsed.get("detail").and_then(Value::as_str) {
+                                    return Err(format!("{}: {}", error, detail));
+                                }
                                 return Err(error.to_string());
                             }
                             return Ok(parsed);

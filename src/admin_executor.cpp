@@ -910,8 +910,20 @@ void AdminExecutor::handleConfigureWifi(JsonDocument &doc, ResponseWriter writer
     sendError("configure_wifi", "runtime_unavailable", requestId(doc), writer);
     return;
   }
-  const char *ssid = doc["wifi_sta_ssid"] | doc["ssid"] | "";
-  const char *pass = doc["wifi_sta_password"] | doc["password_value"] | "";
+  const char *ssid = nullptr;
+  if (doc["wifi_sta_ssid"].is<const char *>() && doc["wifi_sta_ssid"].as<const char *>()[0] != '\0') {
+    ssid = doc["wifi_sta_ssid"].as<const char *>();
+  } else if (doc["ssid"].is<const char *>() && doc["ssid"].as<const char *>()[0] != '\0') {
+    ssid = doc["ssid"].as<const char *>();
+  }
+  if (ssid == nullptr) ssid = "";
+  const char *pass = nullptr;
+  if (doc["wifi_sta_password"].is<const char *>()) {
+    pass = doc["wifi_sta_password"].as<const char *>();
+  } else if (doc["password_value"].is<const char *>()) {
+    pass = doc["password_value"].as<const char *>();
+  }
+  if (pass == nullptr) pass = "";
   const size_t ssidLen = strlen(ssid);
   const size_t passLen = strlen(pass);
   if (ssidLen == 0U) {
@@ -953,9 +965,18 @@ void AdminExecutor::handleProvisionFleetWifi(JsonDocument &doc, ResponseWriter w
   }
 
   const auto &cfg = config_->settings();
-  const char *requestedSsid = doc["wifi_sta_ssid"] | doc["ssid"] | nullptr;
-  const char *requestedPass =
-      doc["wifi_sta_password"] | doc["password_value"] | nullptr;
+  const char *requestedSsid = nullptr;
+  if (doc["wifi_sta_ssid"].is<const char *>() && doc["wifi_sta_ssid"].as<const char *>()[0] != '\0') {
+    requestedSsid = doc["wifi_sta_ssid"].as<const char *>();
+  } else if (doc["ssid"].is<const char *>() && doc["ssid"].as<const char *>()[0] != '\0') {
+    requestedSsid = doc["ssid"].as<const char *>();
+  }
+  const char *requestedPass = nullptr;
+  if (doc["wifi_sta_password"].is<const char *>()) {
+    requestedPass = doc["wifi_sta_password"].as<const char *>();
+  } else if (doc["password_value"].is<const char *>()) {
+    requestedPass = doc["password_value"].as<const char *>();
+  }
   const char *ssid =
       (requestedSsid != nullptr && requestedSsid[0] != '\0')
           ? requestedSsid
@@ -966,8 +987,29 @@ void AdminExecutor::handleProvisionFleetWifi(JsonDocument &doc, ResponseWriter w
           : cfg.wifi_sta_password.c_str();
   const size_t ssidLen = (ssid != nullptr) ? strlen(ssid) : 0U;
   const size_t passLen = (pass != nullptr) ? strlen(pass) : 0U;
+  LRS_LOGI(SYS,
+           "event=provision_fleet_wifi_request wifi_sta_ssid_present=%d ssid_present=%d cfg_ssid_len=%u selected_ssid_len=%u",
+           (doc["wifi_sta_ssid"].is<const char *>() && doc["wifi_sta_ssid"].as<const char *>()[0] != '\0') ? 1 : 0,
+           (doc["ssid"].is<const char *>() && doc["ssid"].as<const char *>()[0] != '\0') ? 1 : 0,
+           static_cast<unsigned>(cfg.wifi_sta_ssid.length()),
+           static_cast<unsigned>(ssidLen));
   if (ssidLen == 0U) {
-    sendError("provision_fleet_wifi", "ssid_required", requestId(doc), writer);
+    {
+      JsonDocument errDoc;
+      errDoc["ok"] = false;
+      errDoc["cmd"] = "provision_fleet_wifi";
+      const char *id = requestId(doc);
+      if (id != nullptr && id[0] != '\0') errDoc["id"] = id;
+      errDoc["error"] = "ssid_required";
+      errDoc["detail"] = String("wifi_sta_ssid_present=") +
+          ((doc["wifi_sta_ssid"].is<const char *>() && doc["wifi_sta_ssid"].as<const char *>()[0] != '\0') ? "1" : "0") +
+          " ssid_present=" +
+          ((doc["ssid"].is<const char *>() && doc["ssid"].as<const char *>()[0] != '\0') ? "1" : "0") +
+          " cfg_ssid_len=" + String(static_cast<unsigned>(cfg.wifi_sta_ssid.length()));
+      String output;
+      serializeJson(errDoc, output);
+      writer(output);
+    }
     return;
   }
   if (ssidLen > 32U || passLen > 64U) {

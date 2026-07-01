@@ -1077,6 +1077,15 @@ const pairWifiSsid = computed<string>({
     if (state) state.wifiSsid = ssid;
   }
 });
+
+function selectedProvisionWifiSsid(): string {
+  return pairWifiSsid.value.trim();
+}
+
+function selectedProvisionAdminPassword(): string {
+  return adminPasswordForPort(pairGatewayKey.value);
+}
+
 const serialAdminStatus = computed<SerialAdminStatus | null>({
   get: () => activeSerialDevice.value?.status || null,
   set: (status) => {
@@ -4687,9 +4696,9 @@ async function waitForGatewayWifiConnection(ssid: string, attemptId: number, tim
 
 async function connectGatewayWifi() {
   if (isFleetWifiSending.value) return;
-  const password = pairPassword();
-  const ssid = pairWifiSsid.value.trim();
-  if (!password || !ssid) {
+  const ssid = selectedProvisionWifiSsid();
+  const password = selectedProvisionAdminPassword();
+  if (!ssid || !password) {
     notify('Select a WiFi network and load the gateway password first');
     return;
   }
@@ -4728,10 +4737,10 @@ async function connectGatewayWifi() {
 
 async function sendWifiToRemotes() {
   if (isWifiApplying.value) return;
-  const ssid = pairWifiSsid.value;
-  const password = pairAdminPassword.value;
-  if (!ssid) {
-    notify('Select a WiFi network to send first');
+  const ssid = selectedProvisionWifiSsid();
+  const password = selectedProvisionAdminPassword();
+  if (!ssid || !password) {
+    notify('Select a WiFi network and enter the admin password first');
     return;
   }
   isFleetWifiSending.value = true;
@@ -4740,7 +4749,10 @@ async function sendWifiToRemotes() {
     const out = await sendPairCommand<any>('provision_fleet_wifi', {
       admin_password: password,
       wifi_sta_ssid: ssid,
-      wifi_sta_password: pairWifiPassword.value
+      ssid,
+      wifi_sta_password: pairWifiPassword.value,
+      password_value: pairWifiPassword.value,
+      target_address: 255
     }, 60000);
     pushPairLog(`LoRa WiFi provisioning sent (${out.packets || '?'} packets).`);
   } catch (e) {
