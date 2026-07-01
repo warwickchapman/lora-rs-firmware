@@ -2892,6 +2892,12 @@ void NodeStateMachine::tickFleetScan(uint32_t now) {
     return;
   }
   if (!fleet_scan_active_) return;
+  if (static_cast<int32_t>(now - fleet_scan_started_ms_) > 60000) {
+    fleet_scan_active_ = false;
+    fleet_scan_next_ms_ = 0;
+    lrslog::event("fleet_scan_timeout", 0, fleet_scan_sent_, fleet_scan_next_address_);
+    return;
+  }
   if (static_cast<int32_t>(now - fleet_scan_next_ms_) < 0) return;
   if (isGroupActive()) return;
   if (!radioTxBudgetAvailable()) return;

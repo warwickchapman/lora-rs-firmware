@@ -11,6 +11,16 @@ export interface UseFleetInventoryPollingOptions {
   fleetCachePollIntervalMs?: number;
 }
 
+export function shouldClearScanStateOnTimeout(
+  isScanning: boolean,
+  scanActiveSinceMs: number,
+  nowMs: number,
+  scanStaleThresholdMs = 75000
+): boolean {
+  if (!isScanning || scanActiveSinceMs <= 0) return false;
+  return (nowMs - scanActiveSinceMs) > scanStaleThresholdMs;
+}
+
 export function useFleetInventoryPolling(options: UseFleetInventoryPollingOptions) {
   const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
   const networkInventoryPollMode = ref<'cache' | 'scan' | null>(null);

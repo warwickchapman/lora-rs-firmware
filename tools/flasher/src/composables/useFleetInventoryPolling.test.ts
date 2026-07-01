@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref } from 'vue';
-import { useFleetInventoryPolling } from './useFleetInventoryPolling';
+import { useFleetInventoryPolling, shouldClearScanStateOnTimeout } from './useFleetInventoryPolling';
 
 describe('useFleetInventoryPolling', () => {
   let activeMode = ref('network');
@@ -118,5 +118,33 @@ describe('useFleetInventoryPolling', () => {
 
     polling.stopLoraInventoryPolling(true);
     expect(isLoraInventoryScanning.value).toBe(false);
+  });
+});
+
+describe('shouldClearScanStateOnTimeout', () => {
+  const NOW = 100000;
+
+  it('returns false when not scanning', () => {
+    expect(shouldClearScanStateOnTimeout(false, NOW - 80000, NOW)).toBe(false);
+  });
+
+  it('returns false when scan timestamp is zero', () => {
+    expect(shouldClearScanStateOnTimeout(true, 0, NOW)).toBe(false);
+  });
+
+  it('returns false when scan is fresh (30s)', () => {
+    expect(shouldClearScanStateOnTimeout(true, NOW - 30000, NOW)).toBe(false);
+  });
+
+  it('returns false at exact threshold boundary (75000ms)', () => {
+    expect(shouldClearScanStateOnTimeout(true, NOW - 75000, NOW)).toBe(false);
+  });
+
+  it('returns true when scan exceeds threshold (80s)', () => {
+    expect(shouldClearScanStateOnTimeout(true, NOW - 80000, NOW)).toBe(true);
+  });
+
+  it('returns true just past threshold (75001ms)', () => {
+    expect(shouldClearScanStateOnTimeout(true, NOW - 75001, NOW)).toBe(true);
   });
 });
