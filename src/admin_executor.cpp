@@ -720,12 +720,7 @@ void AdminExecutor::handleGetConfig(JsonDocument &doc, ResponseWriter writer, bo
   out["cmd"] = "get_config";
   if (id[0] != '\0')
     out["id"] = id;
-  JsonObject config = out["config"].to<JsonObject>();
-  JsonDocument cfgDoc;
-  writeSettingsJson(cfgDoc, *config_, includeSecrets);
-  for (JsonPair kv : cfgDoc.as<JsonObject>()) {
-    config[kv.key()] = kv.value();
-  }
+  writeSettingsJsonObject(out["config"].to<JsonObject>(), *config_, includeSecrets);
   sendOk(out, writer);
 }
 

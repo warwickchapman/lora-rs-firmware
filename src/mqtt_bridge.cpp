@@ -1080,8 +1080,12 @@ void MqttBridge::publishLocalConfig() {
   const char *topic_root = settings_->mqtt_topic_root.c_str();
   bool success = true;
 
-  char complete_topic[256];
-  snprintf(complete_topic, sizeof(complete_topic), "%s/lrs-%s/config/_complete", topic_root, chip_id_hex_.c_str());
+  char complete_topic[192];
+  int complete_topic_len = snprintf(complete_topic, sizeof(complete_topic), "%s/lrs-%s/config/_complete", topic_root, chip_id_hex_.c_str());
+  if (complete_topic_len < 0 || complete_topic_len >= static_cast<int>(sizeof(complete_topic))) {
+    LRS_LOGW(SYS, "event=mqtt_config_topic_truncated topic=_complete");
+    return;
+  }
   bool complete_false_ok = mqtt_client_.publish(complete_topic, "false", true);
   if (!complete_false_ok) {
     LRS_LOGW(SYS, "event=mqtt_config_complete_false_failed topic=%s", complete_topic);
@@ -1106,14 +1110,20 @@ void MqttBridge::publishLocalConfig() {
     return;
   }
 
-  char topic[256];
-  char payload[512];
+  char topic[192];
+  char payload[256];
 
   for (size_t i = 0; i < kConfigFieldCount; ++i) {
     const auto &field = kConfigFields[i];
     if (field.classification == ConfigFieldClass::RetainedConfig) {
       if (doc.containsKey(field.name)) {
-        snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), field.name);
+        int topic_len = snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), field.name);
+        if (topic_len < 0 || topic_len >= static_cast<int>(sizeof(topic))) {
+          LRS_LOGW(SYS, "event=mqtt_config_topic_truncated field=%s", field.name);
+          success = false;
+          yield();
+          continue;
+        }
         bool pub_ok = false;
         if (doc[field.name].is<JsonArray>()) {
           serializeJson(doc[field.name], payload, sizeof(payload));
@@ -1137,10 +1147,16 @@ void MqttBridge::publishLocalConfig() {
         yield();
       }
     } else if (field.classification == ConfigFieldClass::SecretMetadata) {
-      char set_field_name[128];
+      char set_field_name[96];
       snprintf(set_field_name, sizeof(set_field_name), "%s_set", field.name);
       if (doc.containsKey(set_field_name)) {
-        snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), set_field_name);
+        int set_topic_len = snprintf(topic, sizeof(topic), "%s/lrs-%s/config/%s", topic_root, chip_id_hex_.c_str(), set_field_name);
+        if (set_topic_len < 0 || set_topic_len >= static_cast<int>(sizeof(topic))) {
+          LRS_LOGW(SYS, "event=mqtt_config_topic_truncated field=%s", set_field_name);
+          success = false;
+          yield();
+          continue;
+        }
         bool is_set = doc[set_field_name].as<bool>();
         if (!mqtt_client_.publish(topic, is_set ? "true" : "false", true)) {
           LRS_LOGW(SYS,
@@ -1152,7 +1168,13 @@ void MqttBridge::publishLocalConfig() {
         yield();
       }
       if (strcmp(field.name, "fleet_passphrase") == 0) {
-        snprintf(topic, sizeof(topic), "%s/lrs-%s/config/fleet_passphrase_default", topic_root, chip_id_hex_.c_str());
+        int fp_topic_len = snprintf(topic, sizeof(topic), "%s/lrs-%s/config/fleet_passphrase_default", topic_root, chip_id_hex_.c_str());
+        if (fp_topic_len < 0 || fp_topic_len >= static_cast<int>(sizeof(topic))) {
+          LRS_LOGW(SYS, "event=mqtt_config_topic_truncated field=fleet_passphrase_default");
+          success = false;
+          yield();
+          continue;
+        }
         bool is_default = doc["fleet_passphrase_default"].as<bool>();
         if (!mqtt_client_.publish(topic, is_default ? "true" : "false", true)) {
           LRS_LOGW(SYS,

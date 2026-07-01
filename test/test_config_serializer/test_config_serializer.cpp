@@ -100,11 +100,41 @@ void test_fleet_passphrase_default() {
   TEST_ASSERT_FALSE(doc2["fleet_passphrase_default"].as<bool>());
 }
 
+void test_write_settings_json_object_nested() {
+  g_test_settings.schema_version = 4;
+  g_test_settings.commissioned = true;
+  g_test_settings.mode = "paired";
+  g_test_settings.role_tx = true;
+  g_test_settings.local_address = 1;
+  g_test_settings.remote_address = 2;
+
+  JsonDocument doc;
+  doc["cmd"] = "get_config";
+  JsonObject config = doc["config"].to<JsonObject>();
+  ConfigStore store;
+  writeSettingsJsonObject(config, store, false);
+
+  // Fields land under out["config"], not at root
+  TEST_ASSERT_TRUE(doc.containsKey("cmd"));
+  TEST_ASSERT_EQUAL_STRING("get_config", doc["cmd"].as<const char*>());
+  TEST_ASSERT_FALSE(doc.containsKey("schema_version"));
+  TEST_ASSERT_TRUE(doc["config"].containsKey("schema_version"));
+  TEST_ASSERT_EQUAL(4, doc["config"]["schema_version"].as<int>());
+  TEST_ASSERT_TRUE(doc["config"].containsKey("commissioned"));
+  TEST_ASSERT_TRUE(doc["config"]["commissioned"].as<bool>());
+  TEST_ASSERT_TRUE(doc["config"].containsKey("mode"));
+  TEST_ASSERT_EQUAL_STRING("paired", doc["config"]["mode"].as<const char*>());
+  TEST_ASSERT_TRUE(doc["config"].containsKey("local_address"));
+  TEST_ASSERT_EQUAL(1, doc["config"]["local_address"].as<int>());
+  TEST_ASSERT_EQUAL(66, doc["config"].size());
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_serializer_field_count_and_types);
   RUN_TEST(test_serializer_secrets_redaction);
   RUN_TEST(test_serializer_secrets_inclusion);
   RUN_TEST(test_fleet_passphrase_default);
+  RUN_TEST(test_write_settings_json_object_nested);
   return UNITY_END();
 }

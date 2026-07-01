@@ -43,12 +43,16 @@ def saved_fields():
 
 def serial_admin_config_fields():
     text = CONFIG_SERIALIZER_CPP.read_text(encoding="utf-8")
-    write_match = re.search(r"void writeSettingsJson\(.*?\{(?P<body>.*?)\n\}", text, re.S)
+    # Look for writeSettingsJsonObject (the real implementation) first,
+    # fall back to writeSettingsJson (the wrapper) for older code.
+    write_match = re.search(r"void writeSettingsJsonObject\(.*?\{(?P<body>.*?)\n\}", text, re.S)
     if not write_match:
-        raise AssertionError("writeSettingsJson body not found")
+        write_match = re.search(r"void writeSettingsJson\(.*?\{(?P<body>.*?)\n\}", text, re.S)
+    if not write_match:
+        raise AssertionError("writeSettingsJsonObject/writeSettingsJson body not found")
     body = write_match.group("body")
-    fields = set(re.findall(r'doc\["([^"]+)"\]', body))
-    fields.update(re.findall(r'writeAddressArray\(doc,\s*"([^"]+)"', body))
+    fields = set(re.findall(r'(?:doc|config)\["([^"]+)"\]', body))
+    fields.update(re.findall(r'writeAddressArray(?:Impl)?\((?:doc|config),\s*"([^"]+)"', body))
     return fields
 
 

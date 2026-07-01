@@ -119,8 +119,8 @@ void emitUdpMirrorLine(const char *line) {
 
 void logWithVaList(Level level, Category cat, uint32_t ms, uint32_t unixTimeS, const char *fmt, va_list ap) {
   if (!enabled(level)) return;
-  char msg[384];
-  char line[512];
+  char msg[256];
+  char line[384];
   msg[0] = '\0';
   line[0] = '\0';
   if (fmt != nullptr && fmt[0] != '\0') {
