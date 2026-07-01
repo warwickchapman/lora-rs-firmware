@@ -78,6 +78,24 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     }
   }
 
+  function findInventoryRow(address: number, cacheEntry: TelemetryCacheEntry) {
+    return loraInventory.value.find(d => {
+      if (d.address !== address) return false;
+      if (d.chip_id && cacheEntry.chip_id) {
+        return options.canonicalChipId(d.chip_id) === cacheEntry.chip_id;
+      }
+      return true;
+    });
+  }
+
+  function removeSensorFromRow(row: LoraInventoryDevice, kind: SensorReading['kind'], instance: number) {
+    if (!row.sensors) return;
+    row.sensors = row.sensors.filter(s => !(s.kind === kind && s.instance === instance));
+    if (row.sensors.length === 0) {
+      row.sensors = undefined;
+    }
+  }
+
   function classifyFleetRow(row: LoraInventoryDevice, now = Date.now()): LoraInventoryDevice {
     const history = fleetRowHistory.value[row.address] || {};
     let rowState = history.rowState;
@@ -492,6 +510,20 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
         const instance = Number(sensorParts[2]) || 0;
         const prop = sensorParts[3];
         const sKey = `${kind}/${instance}`;
+        if (val === '' || val === null || val === undefined) {
+          delete cacheEntry.sensors[sKey];
+          const existingRow = findInventoryRow(address, cacheEntry);
+          if (existingRow) {
+            removeSensorFromRow(existingRow, kind, instance);
+            loraInventory.value = loraInventory.value.map(row => {
+              if (row.address === address) {
+                return classifyFleetRow(row, Date.now());
+              }
+              return row;
+            });
+          }
+          return;
+        }
         if (!cacheEntry.sensors[sKey]) {
           cacheEntry.sensors[sKey] = { kind, instance, state: 'waiting' };
         }
@@ -505,13 +537,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     }
     cacheEntry.device.age_ms = 0;
 
-    let dev = loraInventory.value.find(d => {
-      if (d.address !== address) return false;
-      if (d.chip_id && cacheEntry.chip_id) {
-        return options.canonicalChipId(d.chip_id) === cacheEntry.chip_id;
-      }
-      return true;
-    });
+    let dev = findInventoryRow(address, cacheEntry);
 
     if (dev) {
       applyCacheToRow(dev, cacheEntry);

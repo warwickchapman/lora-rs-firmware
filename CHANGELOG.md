@@ -19,6 +19,7 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway publishes `wifi_rssi_dbm` retained MQTT topic for peers when connected and available, publishing empty payloads when unknown, offline, or cleared.
 
 ### Flasher Features
+- Treat empty retained MQTT sensor telemetry as a delete/clear signal so cleared sensor topics no longer appear as enabled sensors in Fleet or remote settings.
 - Repurposed the existing WiFi column in the Fleet table to display compact signal bars and dBm (e.g., `▂▄▆ -67`) for connected remote devices when the RSSI is known, coloring it by signal strength.
 - Renamed the existing Fleet RSSI column to "LoRa RSSI" with a detailed tooltip.
 - Integrated safety checks at the frontend boundary to ignore and filter out `wifi_rssi_dbm` values of 0 (sentinels for unknown/disconnected states).

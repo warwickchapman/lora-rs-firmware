@@ -259,6 +259,10 @@ interface SerialAdminConfig {
   admin_password?: string;
 }
 
+function sensorTelemetryStateEnabled(state: unknown): boolean {
+  return ['ok', 'missing', 'fault', 'overrange', 'waiting'].includes(String(state || '').toLowerCase());
+}
+
 interface SerialDeviceState {
   deviceInfo: DeviceInfo | null;
   adminSupported: boolean;
@@ -2575,10 +2579,10 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     mqtt_user: stringValue(cfg.mqtt_user, ''),
     mqtt_password: '',
     mqtt_topic_root: stringValue(cfg.mqtt_topic_root, mqtt?.topic_root || 'lora'),
-    sensor_temp_enabled: boolValue(cfg.sensor_temp_enabled, !!status?.sensors?.some(s => s.kind === 'temperature' && s.state !== 'disabled')),
+    sensor_temp_enabled: boolValue(cfg.sensor_temp_enabled, !!status?.sensors?.some(s => s.kind === 'temperature' && sensorTelemetryStateEnabled(s.state))),
     sensor_temp_pin: numberValue(cfg.sensor_temp_pin, 0),
     sensor_temp_interval_s: numberValue(cfg.sensor_temp_interval_s, 10),
-    sensor_tank_enabled: boolValue(cfg.sensor_tank_enabled, !!status?.sensors?.some(s => s.kind === 'tank_level' && s.state !== 'disabled')),
+    sensor_tank_enabled: boolValue(cfg.sensor_tank_enabled, !!status?.sensors?.some(s => s.kind === 'tank_level' && sensorTelemetryStateEnabled(s.state))),
     sensor_tank_range_mm: numberValue(cfg.sensor_tank_range_mm, 5000),
     sensor_tank_vref_mv: numberValue(cfg.sensor_tank_vref_mv, 3553),
     sensor_tank_sense_ohms: numberValue(cfg.sensor_tank_sense_ohms, 120),
@@ -3084,8 +3088,8 @@ function openSettingsModal(device: LoraInventoryDevice, tab: SettingsModalState[
     activeTab: tab,
     wifi_ssid: ssid,
     wifi_password: getCachedWifiPassword(ssid) || pairAdminPassword.value || '',
-    sensor_temp_enabled: !!device.sensors?.some(s => s.kind === 'temperature' && s.state !== 'disabled'),
-    sensor_tank_enabled: !!device.sensors?.some(s => s.kind === 'tank_level' && s.state !== 'disabled'),
+    sensor_temp_enabled: !!device.sensors?.some(s => s.kind === 'temperature' && sensorTelemetryStateEnabled(s.state)),
+    sensor_tank_enabled: !!device.sensors?.some(s => s.kind === 'tank_level' && sensorTelemetryStateEnabled(s.state)),
     power_save_listen_only: !!device.power_save_listen_only,
     fleet_key: '',
     fleet_key_confirmed: false,

@@ -251,6 +251,32 @@ describe('useFleetInventory', () => {
     expect(row.conflict_chip_id).toBe('abcde123'); // Should record Chip A as the conflict
   });
 
+  it('treats empty retained sensor telemetry as a delete instead of an enabled sensor', () => {
+    const fleet = createFleet('00001234');
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      chip_id: 'lrs-abcde123',
+      field: 'sensor/temperature/0/state',
+      value: 'ok'
+    });
+    expect(fleet.loraInventory.value[0].sensors?.[0]?.state).toBe('ok');
+
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      chip_id: 'lrs-abcde123',
+      field: 'sensor/temperature/0/state',
+      value: ''
+    });
+    expect(fleet.loraInventory.value[0].sensors).toBeUndefined();
+
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+    expect(fleet.loraInventory.value[0].sensors).toBeUndefined();
+  });
+
   it('serial inventory includes wifi_rssi_dbm when known', () => {
     const fleet = createFleet();
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }]);
