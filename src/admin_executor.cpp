@@ -2266,6 +2266,10 @@ bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
     if (cfg.known_peer_count >= Settings::kAddressListCap) {
       return false;
     }
+    const bool firstKnownPeer = (cfg.known_peer_count == 0);
+    if (firstKnownPeer) {
+      clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
+    }
     cfg.known_peer_addresses[cfg.known_peer_count] = address;
     cfg.known_peer_chip_ids[cfg.known_peer_count] = chipId;
     cfg.known_peer_count++;
@@ -2273,7 +2277,7 @@ bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
     if (cfg.paired_target_count < Settings::kAddressListCap) {
       cfg.paired_target_addresses[cfg.paired_target_count++] = address;
     }
-    if (cfg.remote_address == 0 && cfg.paired_target_count > 0) {
+    if ((firstKnownPeer || cfg.remote_address == 0) && cfg.paired_target_count > 0) {
       cfg.remote_address = cfg.paired_target_addresses[0];
     }
   }
