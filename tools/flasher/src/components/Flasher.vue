@@ -6,7 +6,7 @@ import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
-import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs } from '../composables/useFleetInventory';
+import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
 import { useMqttConnection } from '../composables/useMqttConnection';
@@ -460,6 +460,7 @@ const disconnectedSerialPortSince = ref<Record<string, number>>({});
 const FLEET_CACHE_POLL_INTERVAL_MS = 5000;
 const FLEET_SCAN_POLL_INTERVAL_MS = 1200;
 const FLEET_FORCE_SCAN_COOLDOWN_MS = 60000;
+const FLEET_INVENTORY_STATUS_TIMEOUT_MS = 15000;
 const provisionCacheRefreshedChips = new Set<string>();
 const isLoadingInfo = computed(() => inFlightDeviceInfoReads.value.has(selectedPort.value));
 const isRefreshingPorts = ref(false);
@@ -2877,7 +2878,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       port,
       'lora_inventory_status',
       {},
-      5000,
+      FLEET_INVENTORY_STATUS_TIMEOUT_MS,
       { label: 'Gateway peer cache snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
 
@@ -3063,8 +3064,8 @@ async function beginLoraInventoryScan(port: string, showErrors = true) {
         interval_ms: 1500
       }, 8000);
       networkStatusMessage.value = 'LoRa inventory scan started.';
-      await refreshLoraInventoryStatus(false);
       startLoraInventoryPolling();
+      void refreshLoraInventoryStatus(true);
     } catch (e) {
       isLoraInventoryScanning.value = false;
       fleetScanActiveSinceMs.value = 0;
@@ -5660,35 +5661,36 @@ const fleetDisplayRows = computed<FleetDisplayRow[]>(() => {
   return loraInventory.value.map(device => {
     const history = fleetRowHistory.value[device.address];
     const ageMs = calculateDynamicAgeMs(device, history, clock);
+    const displayDevice = fleetDeviceWithDisplayState(device, clock);
 
     return {
-      address: device.address,
-      selected: !!device.selected,
-      deviceName: device.chip_id ? lrsDeviceName(device.chip_id) : '-',
-      conflict_chip_id: device.conflict_chip_id,
-      fw_version: device.fw_version,
-      roleModeLabel: `${device.role || '-'} / ${device.mode || '-'}`,
-      wifi_pending_offline: !!device.wifi_pending_offline,
-      wifi_connected_known: !!device.wifi_connected_known,
-      wifi_connected: !!device.wifi_connected,
-      wifi_rssi_dbm: device.wifi_rssi_dbm,
-      pending_power_save_listen_only: device.pending_power_save_listen_only,
-      power_save_listen_only: !!device.power_save_listen_only,
-      ip: device.ip,
-      relayLabel: remoteRelayLabel(device),
-      inputLabel: remoteInputLabel(device),
-      tempLabel: remoteTempLabel(device),
-      tankLabel: tankLabel(device),
-      tankDetailLabel: tankDetailLabel(device),
-      uptimeLabel: device.uptime_ms ? formatUptime(device.uptime_ms) : '-',
-      rowStatusLabel: fleetRowStatusLabel(device),
-      rowState: device.row_state,
-      rssi: device.rssi,
+      address: displayDevice.address,
+      selected: !!displayDevice.selected,
+      deviceName: displayDevice.chip_id ? lrsDeviceName(displayDevice.chip_id) : '-',
+      conflict_chip_id: displayDevice.conflict_chip_id,
+      fw_version: displayDevice.fw_version,
+      roleModeLabel: `${displayDevice.role || '-'} / ${displayDevice.mode || '-'}`,
+      wifi_pending_offline: !!displayDevice.wifi_pending_offline,
+      wifi_connected_known: !!displayDevice.wifi_connected_known,
+      wifi_connected: !!displayDevice.wifi_connected,
+      wifi_rssi_dbm: displayDevice.wifi_rssi_dbm,
+      pending_power_save_listen_only: displayDevice.pending_power_save_listen_only,
+      power_save_listen_only: !!displayDevice.power_save_listen_only,
+      ip: displayDevice.ip,
+      relayLabel: remoteRelayLabel(displayDevice),
+      inputLabel: remoteInputLabel(displayDevice),
+      tempLabel: remoteTempLabel(displayDevice),
+      tankLabel: tankLabel(displayDevice),
+      tankDetailLabel: tankDetailLabel(displayDevice),
+      uptimeLabel: displayDevice.uptime_ms ? formatUptime(displayDevice.uptime_ms) : '-',
+      rowStatusLabel: fleetRowStatusLabel(displayDevice),
+      rowState: displayDevice.row_state,
+      rssi: displayDevice.rssi,
       ageSeconds: ageMs != null ? Math.round(ageMs / 1000) : null,
-      freshnessClass: fleetFreshnessClass(device, ageMs),
-      rowClass: fleetRowClass(device),
-      flashAvailable: fleetFlashAvailable(device),
-      flashUnavailableReason: fleetFlashUnavailableReason(device)
+      freshnessClass: fleetFreshnessClass(displayDevice, ageMs),
+      rowClass: fleetRowClass(displayDevice),
+      flashAvailable: fleetFlashAvailable(displayDevice),
+      flashUnavailableReason: fleetFlashUnavailableReason(displayDevice)
     };
   });
 });

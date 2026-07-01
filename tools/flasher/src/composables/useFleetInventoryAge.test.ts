@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ref } from 'vue';
-import { useFleetInventory, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs } from './useFleetInventory';
+import { useFleetInventory, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState } from './useFleetInventory';
 import { LoraInventoryDevice, LoraAdoptionCandidate } from '../types/fleet';
 
 describe('useFleetInventory Age Ticking', () => {
@@ -172,5 +172,20 @@ describe('useFleetInventory Age Ticking', () => {
 
     // 3. displayed age becomes 8000
     expect(calculateCandidateAgeMs(processed, t1)).toBe(8000);
+  });
+
+  it('clears expired display-only OTA row state without requiring a fresh inventory merge', () => {
+    const device: LoraInventoryDevice = {
+      address: 1,
+      row_state: 'ota_updated',
+      row_state_until_ms: 1000
+    };
+
+    expect(fleetDeviceWithDisplayState(device, 999).row_state).toBe('ota_updated');
+
+    const expired = fleetDeviceWithDisplayState(device, 1000);
+    expect(expired.row_state).toBeUndefined();
+    expect(expired.row_state_until_ms).toBeUndefined();
+    expect(device.row_state).toBe('ota_updated');
   });
 });

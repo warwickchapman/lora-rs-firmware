@@ -621,3 +621,16 @@ export function calculateCandidateAgeMs(c: LoraAdoptionCandidate, nowMs: number)
   }
   return c.age_ms;
 }
+
+export function fleetDeviceWithDisplayState(device: LoraInventoryDevice, nowMs: number): LoraInventoryDevice {
+  if (device.row_state_until_ms !== undefined &&
+      device.row_state_until_ms !== null &&
+      device.row_state_until_ms <= nowMs) {
+    return {
+      ...device,
+      row_state: undefined,
+      row_state_until_ms: undefined
+    };
+  }
+  return device;
+}

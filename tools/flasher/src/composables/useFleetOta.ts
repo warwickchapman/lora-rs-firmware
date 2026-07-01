@@ -380,7 +380,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     if (trimmed.includes('event=ota_pull_control_failed') ||
         trimmed.includes('event=ota_pull_control_incomplete') ||
         trimmed.includes('event=ota_pull_control_bad_hash')) {
-      const activeStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'];
+      const activeStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait'];
       if (activeStates.includes(dev.row_state || '')) {
         triggerOtaFailureOrRetry(dev);
       }

@@ -202,6 +202,32 @@ describe('useFleetOta', () => {
     expect(notifyMock).toHaveBeenCalledWith('OTA for Address 12 failed after 3 attempts.');
   });
 
+  it('does not consume additional retries from repeated failure logs while retry is waiting', async () => {
+    const composable = createComposable();
+    const dev: LoraInventoryDevice = { address: 12, fw_version: '0.9.0' };
+    loraInventory.value = [dev];
+    triggerOtaCommandMock.mockResolvedValue({
+      out: { path: '' },
+      target: { host: '192.168.0.100', port: 8080 },
+      sha256: 'hash'
+    });
+
+    composable.flashLoraRemote(dev);
+    await vi.advanceTimersByTimeAsync(500);
+
+    composable.handleOtaLogLine('event=ota_pull_control_failed', loraInventory.value[0]);
+    expect(fleetRowHistory.value[12].otaRetryCount).toBe(1);
+    expect(loraInventory.value[0].row_state).toBe('ota_retrying');
+
+    composable.handleOtaLogLine('event=ota_pull_control_failed', loraInventory.value[0]);
+    composable.handleOtaLogLine('event=ota_pull_control_incomplete', loraInventory.value[0]);
+    composable.handleOtaLogLine('event=ota_pull_control_bad_hash', loraInventory.value[0]);
+
+    expect(fleetRowHistory.value[12].otaRetryCount).toBe(1);
+    expect(loraInventory.value[0].row_state).toBe('ota_retrying');
+    expect(notifyMock).not.toHaveBeenCalledWith('OTA for Address 12 failed after 3 attempts.');
+  });
+
   it('watchdog triggers retry after 8s stalled activity', async () => {
     const composable = createComposable();
     composable.startFleetOtaWatchdog();
