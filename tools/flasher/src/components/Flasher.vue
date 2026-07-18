@@ -621,6 +621,8 @@ const portSeenCounter = ref(0);
 const networkUdpLogsExpanded = ref(false);
 const fleetGatewayEventsExpanded = ref(false);
 const fleetGatewayEventsIncludeLogLines = ref(false);
+const monitorGatewayEventsExpanded = ref(false);
+const monitorGatewayEventsIncludeLogLines = ref(false);
 const gatewayEvents = ref<GatewayEventRecord[]>([]);
 const gatewayEventsStatus = ref('Waiting for firmware log events.');
 const gatewayEventLastMsByPort = ref<Record<string, number>>({});
@@ -856,6 +858,7 @@ const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
 const lastLoraInventoryStatus = ref<LoraInventoryStatus | null>(null);
 const lastLoraInventoryStatusAtMs = ref(0);
 const lastLoraInventoryStatusPort = ref('');
+const lastLoraInventoryPeerStatusByAddress = ref<Record<number, LoraInventoryPeerStatus>>({});
 const fleetInventoryHydrateCursor = ref(0);
 const activeGatewaySessionKey = ref('');
 const gatewayUptimeHistory = ref<Record<string, number>>({});
@@ -2312,8 +2315,10 @@ function copyLoraInventoryDebug() {
     `scan=${JSON.stringify(inventory.scan || null)}`,
     ...addresses.flatMap(address => {
       const rendered = renderedByAddress.get(address);
+      const peerStatus = lastLoraInventoryPeerStatusByAddress.value[address];
       return [
         `addr ${address} admin_json: ${inventoryFieldSummary(rawByAddress.get(address))}`,
+        `addr ${address} peer_json: ${inventoryFieldSummary(peerStatus?.device)}`,
         `addr ${address} fleet_row: chip=${rendered?.deviceName || '-'} fw=${rendered?.fw_version || '-'} wifi=${rendered?.wifi_rssi_dbm ?? (rendered?.wifi_connected ? 'OK' : '-')} ip=${rendered?.ip || '-'} relay=${rendered?.relayLabel || '-'} input=${rendered?.inputLabel || '-'} sensors=${rendered ? [rendered.inputLabel, rendered.tempLabel, rendered.tankLabel].filter(Boolean).join('|') : '-'} uptime=${rendered?.uptimeLabel || '-'} rssi=${rendered?.rssi ?? '-'} age=${rendered?.ageSeconds ?? '-'}`
       ];
     }),
@@ -3052,6 +3057,7 @@ async function refreshLoraInventoryPeers(port: string, addresses: number[], back
         3000,
         { label: `Gateway peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
       );
+      lastLoraInventoryPeerStatusByAddress.value[address] = peer;
       if (!peer.device) continue;
       if (source === 'fleet') {
         const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
@@ -6536,6 +6542,8 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
       <MonitorMode
         v-if="activeMode === 'monitor'"
         v-model:form="monitorFormComputed"
+        v-model:gateway-events-expanded="monitorGatewayEventsExpanded"
+        v-model:gateway-events-include-log-lines="monitorGatewayEventsIncludeLogLines"
         :header-state="monitorHeaderStateComputed"
         :transport-state="monitorTransportStateComputed"
         :gateway-warning-state="monitorGatewayWarningStateComputed"

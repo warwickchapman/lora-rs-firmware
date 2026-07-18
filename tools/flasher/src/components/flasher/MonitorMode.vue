@@ -108,8 +108,10 @@ export interface GatewayEventsState {
 }
 
 const form = defineModel<MonitorForm>('form', { required: true });
+const gatewayEventsExpanded = defineModel<boolean>('gatewayEventsExpanded', { required: true });
+const gatewayEventsIncludeLogLines = defineModel<boolean>('gatewayEventsIncludeLogLines', { required: true });
 
-defineProps<{
+const props = defineProps<{
   headerState: MonitorHeaderState;
   transportState: MonitorTransportState;
   gatewayWarningState: MonitorGatewayWarningState;
@@ -126,7 +128,7 @@ const emit = defineEmits<{
   (e: 'poll-selected-diagnostics'): void;
   (e: 'poll-device-diagnostics', address: number): void;
   (e: 'gateway-events-clear'): void;
-  (e: 'gateway-events-copy'): void;
+  (e: 'gateway-events-copy', includeLogLines?: boolean): void;
 }>();
 
 // Computed bridges to avoid direct mutations in the child
@@ -162,6 +164,11 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
   }
   return 'text-slate-300';
 }
+
+const visibleGatewayEvents = computed(() => {
+  if (gatewayEventsIncludeLogLines.value) return props.gatewayEvents.events;
+  return props.gatewayEvents.events.filter(event => event.level !== 'log_line');
+});
 </script>
 
 <template>
@@ -343,13 +350,21 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
         </div>
         <div class="flex items-center gap-2">
           <button
-            @click="emit('gateway-events-copy')"
+            @click="gatewayEventsExpanded = !gatewayEventsExpanded"
+            :class="['glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none', gatewayEventsExpanded ? 'border-cyan-500/40 text-cyan-200' : 'text-slate-300']"
+          >
+            {{ gatewayEventsExpanded ? 'Hide events' : 'Events' }}
+          </button>
+          <button
+            v-if="gatewayEventsExpanded"
+            @click="emit('gateway-events-copy', gatewayEventsIncludeLogLines)"
             :disabled="gatewayEvents.events.length === 0"
             class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
           >
             Copy Events
           </button>
           <button
+            v-if="gatewayEventsExpanded"
             @click="emit('gateway-events-clear')"
             :disabled="gatewayEvents.events.length === 0"
             class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
@@ -365,17 +380,23 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           </button>
         </div>
       </div>
-      <div class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-2">
-        <div class="mb-1.5 text-[10px] text-slate-600">{{ gatewayEvents.status }}</div>
+      <div v-if="gatewayEventsExpanded" class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-2">
+        <div class="mb-1.5 flex items-center justify-between gap-3">
+          <div class="min-w-0 truncate text-[10px] text-slate-600">{{ gatewayEvents.status }}</div>
+          <label class="flex shrink-0 items-center gap-1.5 text-[10px] text-slate-500">
+            <input v-model="gatewayEventsIncludeLogLines" type="checkbox" class="accent-cyan-500">
+            Log lines
+          </label>
+        </div>
         <div class="max-h-32 overflow-auto custom-scrollbar rounded border border-slate-800 bg-slate-950/60 p-2 font-mono text-[10px] leading-tight">
-          <div v-for="(event, i) in gatewayEvents.events.slice(-64)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
+          <div v-for="(event, i) in visibleGatewayEvents.slice(-64)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
             <span class="text-slate-500">{{ event.ms }}ms</span>
             <span :class="['truncate', eventLevelClass(event)]" :title="event.raw">{{ event.event || '-' }}</span>
             <span class="text-slate-500">rssi {{ event.rssi }}</span>
             <span class="text-slate-500">ctr {{ event.counter }}</span>
             <span class="text-slate-500">st {{ event.state }}</span>
           </div>
-          <div v-if="gatewayEvents.events.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
+          <div v-if="visibleGatewayEvents.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
         </div>
       </div>
       <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
