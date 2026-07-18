@@ -617,6 +617,8 @@ const lastPortSnapshot = ref<string[]>([]);
 const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
 const networkUdpLogsExpanded = ref(false);
+const fleetGatewayEventsExpanded = ref(false);
+const fleetGatewayEventsIncludeLogLines = ref(false);
 const gatewayEvents = ref<GatewayEventRecord[]>([]);
 const gatewayEventsStatus = ref('Waiting for firmware log events.');
 const gatewayEventLastMsByPort = ref<Record<string, number>>({});
@@ -2234,14 +2236,21 @@ function formatGatewayEvent(event: GatewayEventRecord): string {
   return `${meta} · ${event.raw}`;
 }
 
-function copyGatewayEvents() {
+function copyGatewayEvents(includeLogLines = true) {
   if (gatewayEvents.value.length === 0) {
     notify('No gateway events to copy');
     return;
   }
+  const events = includeLogLines
+    ? gatewayEvents.value
+    : gatewayEvents.value.filter(event => event.level !== 'log_line');
+  if (events.length === 0) {
+    notify('No gateway events to copy with current filters');
+    return;
+  }
   const block = [
     `gateway_events: ${gatewayEventsStatus.value}`,
-    ...gatewayEvents.value.map(formatGatewayEvent)
+    ...events.map(formatGatewayEvent)
   ].join('\n');
   copyToClipboard(block, 'gateway events');
 }
@@ -4966,6 +4975,28 @@ async function ensureDeviceInfoForPort(port: string, mode: ActiveMode | 'network
   return promise;
 }
 
+async function readSerialAdminDeviceInfoForPort(port: string): Promise<DeviceInfo> {
+  const identity = await sendEasyPairCommandOnPort<any>(
+    port,
+    'identity',
+    {},
+    5000,
+    { label: 'Read serial admin identity' }
+  );
+  const chipId = String(identity.chip_id || '').replace(/^0x/i, '').toLowerCase();
+  if (!/^[0-9a-f]{6,8}$/.test(chipId)) {
+    throw new Error('serial admin identity did not return a valid chip_id');
+  }
+  const derived = await invoke<DeviceInfo>('derive_device_info_from_chip_id', { chipId });
+  return {
+    ...derived,
+    chip_id: chipId.padStart(8, '0'),
+    local_addr: Number(identity.local_address ?? derived.local_addr),
+    remote_addr: Number(identity.remote_address ?? derived.remote_addr),
+    ssid: String(identity.ap_ssid || derived.ssid)
+  };
+}
+
 async function forceDeviceInfoReadForOperation(port: string, mode: ActiveMode | 'network'): Promise<boolean> {
   if (!port) return false;
   if (isMonitoring.value && activeMonitorPort.value === port) return false;
@@ -5005,7 +5036,9 @@ async function readDeviceInfoForPort(port: string, _ownerMode: ActiveMode | 'net
   }
   pushSerialLog(`Reading device information from ${port}...`);
   try {
-    const info = await invoke<DeviceInfo>('get_device_info', { port });
+    const info = _ownerMode === 'serial'
+      ? await invoke<DeviceInfo>('get_device_info', { port })
+      : await readSerialAdminDeviceInfoForPort(port);
     if (deviceInfoReadSeqByPort.value[port] !== seq) {
       pushSerialLog(`Ignored stale device info from ${port}`);
       return false;
@@ -6341,6 +6374,8 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         v-model="fleetConfigComputed"
         v-model:active-dropdown-address="activeDropdownAddress"
         v-model:network-udp-logs-expanded="networkUdpLogsExpanded"
+        v-model:gateway-events-expanded="fleetGatewayEventsExpanded"
+        v-model:gateway-events-include-log-lines="fleetGatewayEventsIncludeLogLines"
         :rows="fleetDisplayRows"
         :candidates="fleetDisplayCandidates"
         :gateway="fleetGatewayStatusComputed"

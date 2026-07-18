@@ -19,7 +19,12 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
             
             // 1. Filter out redundant/noisy ports
             #[cfg(target_os = "macos")]
-            if name.contains("cu.") || name.contains("bluetooth") || name.contains("debug-console") {
+            if name.contains("bluetooth") || name.contains("debug-console") {
+                return None;
+            }
+
+            #[cfg(target_os = "macos")]
+            if name.contains("/dev/tty.") {
                 return None;
             }
 
@@ -55,9 +60,9 @@ pub fn list_ports() -> Vec<SerialPortInfo> {
 
             // 3. Platform-specific name scoring
             #[cfg(target_os = "macos")]
-            if name.contains("usbserial") {
+            if name.contains("/dev/cu.") && name.contains("usbserial") {
                 score += 100;
-            } else if name.contains("usb") {
+            } else if name.contains("/dev/cu.") && name.contains("usb") {
                 score += 50;
             }
 

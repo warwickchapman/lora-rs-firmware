@@ -156,6 +156,8 @@ export interface FleetCandidateActionPayload {
 const config = defineModel<FleetConfig>({ required: true });
 const activeDropdownAddress = defineModel<number | string | null>('activeDropdownAddress', { required: true });
 const networkUdpLogsExpanded = defineModel<boolean>('networkUdpLogsExpanded', { required: true });
+const gatewayEventsExpanded = defineModel<boolean>('gatewayEventsExpanded', { required: true });
+const gatewayEventsIncludeLogLines = defineModel<boolean>('gatewayEventsIncludeLogLines', { required: true });
 
 const props = defineProps<{
   rows: FleetDisplayRow[];
@@ -179,7 +181,7 @@ const emit = defineEmits<{
   (e: 'udp-logging-stop'): void;
   (e: 'udp-logs-copy'): void;
   (e: 'gateway-events-clear'): void;
-  (e: 'gateway-events-copy'): void;
+  (e: 'gateway-events-copy', includeLogLines: boolean): void;
   (e: 'manual-chip-input', val: string): void;
   (e: 'firmware-fetch'): void;
   (e: 'gateway-load'): void;
@@ -233,6 +235,11 @@ const computedRegion = computed({
 const computedSelectedVersion = computed({
   get: () => config.value.selectedVersion,
   set: (val) => { config.value = { ...config.value, selectedVersion: val }; }
+});
+
+const visibleGatewayEvents = computed(() => {
+  if (gatewayEventsIncludeLogLines.value) return props.gatewayEvents.events;
+  return props.gatewayEvents.events.filter(event => event.level !== 'log_line');
 });
 
 function toggleNetworkUdpLogsExpanded() {
@@ -404,6 +411,12 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           <div class="mt-1 text-xs text-slate-500">{{ gateway.summary }}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <button
+            @click="gatewayEventsExpanded = !gatewayEventsExpanded"
+            :class="['glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold', gatewayEventsExpanded ? 'border-cyan-500/40 text-cyan-200' : 'text-slate-300']"
+          >
+            {{ gatewayEventsExpanded ? 'Hide events' : 'Events' }}
+          </button>
           <button
             @click="emit('gateway-load')"
             :disabled="gateway.isLoading || (transportState.fleetTransport === 'mqtt' ? !computedSelectedMqttGatewayChipId : !config.selectedPort)"
@@ -720,16 +733,20 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           </tbody>
         </table>
       </div>
-      <div class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
+      <div v-if="gatewayEventsExpanded" class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
         <div class="mb-2 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="truncate text-xs font-bold text-slate-300">Gateway events</div>
             <div class="mt-0.5 text-[10px] text-slate-600">{{ gatewayEvents.status }}</div>
           </div>
           <div class="flex items-center gap-2">
+            <label class="flex h-8 items-center gap-1.5 rounded border border-slate-700/70 px-2 text-[10px] font-bold text-slate-400">
+              <input v-model="gatewayEventsIncludeLogLines" type="checkbox" class="accent-cyan-500">
+              Log lines
+            </label>
             <button
-              @click="emit('gateway-events-copy')"
-              :disabled="gatewayEvents.events.length === 0"
+              @click="emit('gateway-events-copy', gatewayEventsIncludeLogLines)"
+              :disabled="visibleGatewayEvents.length === 0"
               class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
             >
               Copy
@@ -744,14 +761,14 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           </div>
         </div>
         <div class="max-h-36 overflow-auto custom-scrollbar rounded border border-slate-800 bg-slate-950/60 p-2 font-mono text-[10px] leading-tight">
-          <div v-for="(event, i) in gatewayEvents.events.slice(-64)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
+          <div v-for="(event, i) in visibleGatewayEvents.slice(-64)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
             <span class="text-slate-500">{{ event.ms }}ms</span>
             <span :class="['truncate', eventLevelClass(event)]" :title="event.raw">{{ event.event || '-' }}</span>
             <span class="text-slate-500">rssi {{ event.rssi }}</span>
             <span class="text-slate-500">ctr {{ event.counter }}</span>
             <span class="text-slate-500">st {{ event.state }}</span>
           </div>
-          <div v-if="gatewayEvents.events.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
+          <div v-if="visibleGatewayEvents.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
         </div>
       </div>
       <div
