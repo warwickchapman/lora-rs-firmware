@@ -182,6 +182,7 @@ const emit = defineEmits<{
   (e: 'udp-logs-copy'): void;
   (e: 'gateway-events-clear'): void;
   (e: 'gateway-events-copy', includeLogLines: boolean): void;
+  (e: 'lora-inventory-debug-copy'): void;
   (e: 'manual-chip-input', val: string): void;
   (e: 'firmware-fetch'): void;
   (e: 'gateway-load'): void;
@@ -744,6 +745,12 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
               <input v-model="gatewayEventsIncludeLogLines" type="checkbox" class="accent-cyan-500">
               Log lines
             </label>
+            <button
+              @click="emit('lora-inventory-debug-copy')"
+              class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold"
+            >
+              Copy inventory
+            </button>
             <button
               @click="emit('gateway-events-copy', gatewayEventsIncludeLogLines)"
               :disabled="visibleGatewayEvents.length === 0"

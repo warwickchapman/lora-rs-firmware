@@ -964,7 +964,7 @@ function handleManualMqttGatewayInput(val: string) {
                       <button @click="emit('copy-payload', { text: 'LRS:{&quot;cmd&quot;:&quot;start_lora_inventory&quot;,&quot;password&quot;:&quot;admin_pwd&quot;,&quot;start_addr&quot;:1,&quot;end_addr&quot;:12}', label: 'start_lora_inventory' })" class="text-[10px] text-slate-500 hover:text-cyan-300">Copy</button>
                     </div>
                     Commands gateway to query remote devices via LoRa:
-                    <code class="text-[10px] text-slate-500 mt-1">cmd: "start_lora_inventory"<br>cmd: "lora_inventory_status"</code>
+                    <code class="text-[10px] text-slate-500 mt-1">cmd: "start_lora_inventory"<br>cmd: "lora_inventory_status"<br>cmd: "refresh_lora_peer"<br>cmd: "lora_inventory_peer"</code>
                   </div>
 
                   <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
@@ -1083,7 +1083,7 @@ function handleManualMqttGatewayInput(val: string) {
                   <div class="flex flex-col gap-3 mt-1 text-slate-400">
                     <div>
                       <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::Heartbeat / PollResponse</span>
-                      <p class="mt-0.5">Emitted by remote devices periodically or immediately when a dry contact input changes. Carries logical state, active flags, current temperature code, and remote-side diagnostics.</p>
+                      <p class="mt-0.5">Emitted by remote devices for operational state such as relay, input, and sensor updates. Memory diagnostics stay out of the normal control path unless explicitly polled.</p>
                     </div>
                     <div class="border-t border-slate-800/50 pt-2">
                       <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::MaintenanceStatus</span>

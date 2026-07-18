@@ -54,6 +54,8 @@ private:
   void handleIdentify(JsonDocument &doc, ResponseWriter writer);
   void handleStartLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer, bool isMqtt = false);
+  void handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter writer, bool isMqtt = false);
+  void handleRefreshLoraPeer(JsonDocument &doc, ResponseWriter writer);
   void handleCancelLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handlePollDiagnostics(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer);

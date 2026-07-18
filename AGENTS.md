@@ -18,6 +18,21 @@ metadata, WiFi details, heap stats, and UI freshness are observability.
 - Diagnostics/inventory includes firmware version, heap/free/frag, WiFi IP/RSSI, detailed uptime, and Fleet/Monitor freshness enrichment.
 - Diagnostics/inventory must be low priority, interruptible, stale-tolerant, and clearly displayed as stale/deferred by Flasher rather than pressuring firmware.
 
+## ESP8266 Data Movement Rule
+
+The ESP8266 gateway is memory-constrained. Host software is not. Design data
+movement so the gateway does the least possible buffering, formatting, and
+serialization work.
+
+- Never build a large whole-fleet JSON/status payload when a compact summary plus one-row/detail fetches will do.
+- Prefer incremental, bounded responses: one peer, one diagnostic page, one candidate, or one compact seed list at a time.
+- Treat ArduinoJson object growth and temporary `String` serialization as expensive firmware work, even over USB serial.
+- Do not justify bulky firmware responses by saying the host UI needs a complete table; the host must assemble tables progressively.
+- Diagnostics are pulled explicitly by the operator or Flasher, not streamed or bundled into normal operational refreshes.
+- If a command response can grow with fleet size, sensors, logs, retained state, or diagnostics, it needs a hard size budget and a simpler streaming or paging design.
+- Prefer stale-but-clear UI state over firmware load that competes with relay/input control or LoRa scheduler timing.
+- If a future plan adds whole-fleet telemetry, broad debug fields, or always-on observability traffic, reject it unless it proves why the incremental design cannot work.
+
 ## Plan Review Discipline
 
 When reviewing an implementation plan against a defined boundary or constraint:

@@ -97,6 +97,7 @@ fn emit_non_admin_line(line: &[u8], on_log_line: &mut impl FnMut(&str)) {
         .windows(SERIAL_ADMIN_PREFIX.len())
         .any(|w| w == SERIAL_ADMIN_PREFIX.as_bytes())
     {
+        on_log_line(&format!("serial_admin_malformed_response len={}", line.len()));
         return;
     }
     let text = String::from_utf8_lossy(line);

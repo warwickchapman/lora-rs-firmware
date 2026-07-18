@@ -24,7 +24,7 @@ import type {
   FleetCandidateActionPayload,
   MqttGatewayOption
 } from './flasher/FleetMode.vue';
-import { LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, SensorReading } from '../types/fleet';
+import { LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, LoraInventoryPeerStatus, SensorReading } from '../types/fleet';
 import { useFleetInventoryPolling, shouldClearScanStateOnTimeout } from '../composables/useFleetInventoryPolling';
 import { useFleetOta } from '../composables/useFleetOta';
 import { useFirmwareServer, NetworkInterface } from '../composables/useFirmwareServer';
@@ -468,6 +468,8 @@ const serialDevicesByPort = ref<Record<string, SerialDeviceState>>({});
 const disconnectedSerialPortSince = ref<Record<string, number>>({});
 const FLEET_CACHE_POLL_INTERVAL_MS = 5000;
 const FLEET_SCAN_POLL_INTERVAL_MS = 1200;
+const FLEET_SCAN_SETTLE_REFRESH_MS = 1800;
+const FLEET_PEER_REFRESH_SETTLE_MS = 900;
 const FLEET_FORCE_SCAN_COOLDOWN_MS = 60000;
 const FLEET_INVENTORY_STATUS_TIMEOUT_MS = 15000;
 const provisionCacheRefreshedChips = new Set<string>();
@@ -804,7 +806,9 @@ const networkUdpTarget = ref('');
 const activeRemoteUdpAddress = ref<number | null>(null);
 const fleetClockMs = ref(Date.now());
 const isLoraInventoryScanning = ref(false);
+const isLoraInventoryScanStarting = ref(false);
 const fleetScanActiveSinceMs = ref(0);
+const fleetScanSettleTimer = ref<ReturnType<typeof window.setTimeout> | null>(null);
 const GATEWAY_REBOOT_ALERT_MS = 120000;
 const GATEWAY_UPTIME_ROLLBACK_GRACE_MS = 30000;
 
@@ -849,6 +853,10 @@ const {
 const candidateTotal = ref(0);
 const candidateTruncated = ref(false);
 const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
+const lastLoraInventoryStatus = ref<LoraInventoryStatus | null>(null);
+const lastLoraInventoryStatusAtMs = ref(0);
+const lastLoraInventoryStatusPort = ref('');
+const fleetInventoryHydrateCursor = ref(0);
 const activeGatewaySessionKey = ref('');
 const gatewayUptimeHistory = ref<Record<string, number>>({});
 const gatewayUnexpectedReboots = ref<Record<string, GatewayUnexpectedRebootAlert>>({});
@@ -1658,6 +1666,7 @@ const fleetGatewaySummary = computed(() => {
 });
 const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
+  isLoraInventoryScanStarting.value ||
   !selectedPort.value ||
   (!isLoraInventoryScanning.value && fleetForceScanCooldownRemainingMs.value > 0)
 );
@@ -2253,6 +2262,65 @@ function copyGatewayEvents(includeLogLines = true) {
     ...events.map(formatGatewayEvent)
   ].join('\n');
   copyToClipboard(block, 'gateway events');
+}
+
+function inventoryFieldSummary(row: Partial<LoraInventoryDevice> | undefined): string {
+  if (!row) return 'missing';
+  const sensors = row.sensors?.map(s => `${s.kind}[${s.instance}]=${s.state}${s.value !== undefined ? `:${s.value}${s.unit || ''}` : ''}`).join('|') || '-';
+  return [
+    `chip=${row.chip_id || '-'}`,
+    `fw=${row.fw_version || '-'}`,
+    `wifiKnown=${row.wifi_connected_known === true ? '1' : '0'}`,
+    `wifi=${row.wifi_connected === true ? '1' : '0'}`,
+    `wifiRssi=${row.wifi_rssi_dbm ?? '-'}`,
+    `ip=${row.ip || '-'}`,
+    `relay=${row.relay_state ?? '-'}`,
+    `inputKnown=${row.input_state_known === true ? '1' : '0'}`,
+    `input=${row.input_state ?? '-'}`,
+    `uptime=${row.uptime_ms ?? '-'}`,
+    `age=${row.age_ms ?? '-'}`,
+    `rssi=${row.rssi ?? '-'}`,
+    `sensors=${sensors}`
+  ].join(' ');
+}
+
+function copyLoraInventoryDebug() {
+  const inventory = lastLoraInventoryStatus.value;
+  if (!inventory) {
+    notify('No lora_inventory_status response captured yet');
+    return;
+  }
+  const rawRows = inventory.devices || [];
+  const rawByAddress = new Map(rawRows.map(row => [row.address, row]));
+  const renderedByAddress = new Map(fleetDisplayRows.value.map(row => [row.address, row]));
+  const bestRaw = rawRows
+    .slice()
+    .sort((a, b) => {
+      const score = (row: LoraInventoryDevice) =>
+        Number(!!row.fw_version) +
+        Number(!!row.ip) +
+        Number(row.input_state_known === true) +
+        Number(row.relay_state !== undefined) +
+        Number(!!row.uptime_ms) +
+        Number((row.sensors || []).length > 0);
+      return score(b) - score(a);
+    })[0];
+  const addresses = Array.from(new Set([1, 2, bestRaw?.address].filter((addr): addr is number => Number.isFinite(addr))));
+  const capturedAt = lastLoraInventoryStatusAtMs.value ? new Date(lastLoraInventoryStatusAtMs.value).toISOString() : 'unknown';
+  const lines = [
+    `lora_inventory_debug: captured_at=${capturedAt} port=${lastLoraInventoryStatusPort.value || '-'} devices=${rawRows.length} candidates=${inventory.candidates?.length || 0}`,
+    `scan=${JSON.stringify(inventory.scan || null)}`,
+    ...addresses.flatMap(address => {
+      const rendered = renderedByAddress.get(address);
+      return [
+        `addr ${address} admin_json: ${inventoryFieldSummary(rawByAddress.get(address))}`,
+        `addr ${address} fleet_row: chip=${rendered?.deviceName || '-'} fw=${rendered?.fw_version || '-'} wifi=${rendered?.wifi_rssi_dbm ?? (rendered?.wifi_connected ? 'OK' : '-')} ip=${rendered?.ip || '-'} relay=${rendered?.relayLabel || '-'} input=${rendered?.inputLabel || '-'} sensors=${rendered ? [rendered.inputLabel, rendered.tempLabel, rendered.tankLabel].filter(Boolean).join('|') : '-'} uptime=${rendered?.uptimeLabel || '-'} rssi=${rendered?.rssi ?? '-'} age=${rendered?.ageSeconds ?? '-'}`
+      ];
+    }),
+    'raw_lora_inventory_status:',
+    JSON.stringify(inventory, null, 2)
+  ];
+  copyToClipboard(lines.join('\n'), 'lora inventory debug');
 }
 
 function clearGatewayEvents() {
@@ -2907,9 +2975,14 @@ function fleetRowClass(device: LoraInventoryDevice): string {
 }
 
 function clearFleetGatewayCache() {
+  if (fleetScanSettleTimer.value) {
+    window.clearTimeout(fleetScanSettleTimer.value);
+    fleetScanSettleTimer.value = null;
+  }
   clearFleetGatewayCacheComposable();
   loraAdoptionStatus.value = null;
   isLoraInventoryScanning.value = false;
+  isLoraInventoryScanStarting.value = false;
   fleetScanActiveSinceMs.value = 0;
   stopLoraInventoryPolling(false);
 }
@@ -2919,6 +2992,96 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   if (gatewaySelectedPort.value && gatewaySelectedPort.value === monitorSelectedPort.value) {
     monitorFleetRows.value = mergeMonitorRows(processed);
   }
+}
+
+function mergeLoraInventorySeedRows(rows: LoraInventoryDevice[]) {
+  const existingByAddress = new Map(loraInventory.value.map(row => [row.address, row]));
+  mergeLoraInventoryRows(rows.map(row => ({
+    ...(existingByAddress.get(row.address) || {}),
+    ...row,
+  })));
+}
+
+function mergeLoraInventoryRow(row: LoraInventoryDevice) {
+  mergeLoraInventoryRows([
+    ...loraInventory.value.filter(existing => existing.address !== row.address),
+    row
+  ]);
+}
+
+function mergeMonitorSeedRows(rows: LoraInventoryDevice[]) {
+  const existingByAddress = new Map(monitorFleetRows.value.map(row => [row.address, row]));
+  monitorFleetRows.value = mergeMonitorRows(rows.map(row => ({
+    ...(existingByAddress.get(row.address) || {}),
+    ...row,
+  })));
+}
+
+function scheduleFleetScanSettleRefresh(port: string) {
+  if (fleetScanSettleTimer.value) {
+    window.clearTimeout(fleetScanSettleTimer.value);
+  }
+  fleetScanSettleTimer.value = window.setTimeout(() => {
+    fleetScanSettleTimer.value = null;
+    const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+    if (activeMode.value !== 'network' || port !== targetPort || isLoraInventoryScanning.value) return;
+    void refreshGatewaySnapshot(port, true, 'fleet');
+  }, FLEET_SCAN_SETTLE_REFRESH_MS);
+}
+
+async function refreshLoraInventoryPeers(port: string, addresses: number[], background: boolean, source: 'fleet' | 'monitor') {
+  const uniqueAddresses = Array.from(new Set(addresses.filter(address => Number.isFinite(address) && address >= 1 && address <= LRS_REMOTE_SCAN_CAP)))
+    .sort((a, b) => a - b);
+  const password = adminPasswordForPort(port);
+  for (const address of uniqueAddresses) {
+    try {
+      if (password) {
+        await sendEasyPairCommandOnPort(
+          port,
+          'refresh_lora_peer',
+          { admin_password: password, address },
+          2500,
+          { label: `Refresh LoRa peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
+        );
+        await new Promise(resolve => setTimeout(resolve, FLEET_PEER_REFRESH_SETTLE_MS));
+      }
+      const peer = await sendEasyPairCommandOnPort<LoraInventoryPeerStatus>(
+        port,
+        'lora_inventory_peer',
+        { address },
+        3000,
+        { label: `Gateway peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
+      );
+      if (!peer.device) continue;
+      if (source === 'fleet') {
+        const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+        if (port === targetPort) {
+          mergeLoraInventoryRow(peer.device);
+        }
+      }
+      const targetMonitor = monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+      if (source === 'monitor' && port === targetMonitor) {
+        monitorFleetRows.value = mergeMonitorRows([
+          ...monitorFleetRows.value.filter(existing => existing.address !== peer.device!.address),
+          peer.device
+        ]);
+      }
+    } catch (e) {
+      if (serialBackgroundSkipped(e)) return;
+      if (!background) {
+        pushNetworkLog(`Peer ${address} inventory read failed: ${String(e || '')}`);
+      }
+    }
+  }
+}
+
+function nextFleetHydrateAddress(addresses: number[]): number | null {
+  const uniqueAddresses = Array.from(new Set(addresses.filter(address => Number.isFinite(address) && address >= 1 && address <= LRS_REMOTE_SCAN_CAP)))
+    .sort((a, b) => a - b);
+  if (uniqueAddresses.length === 0) return null;
+  const next = uniqueAddresses[fleetInventoryHydrateCursor.value % uniqueAddresses.length];
+  fleetInventoryHydrateCursor.value = (fleetInventoryHydrateCursor.value + 1) % uniqueAddresses.length;
+  return next;
 }
 
 
@@ -3070,31 +3233,50 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       FLEET_INVENTORY_STATUS_TIMEOUT_MS,
       { label: 'Gateway peer cache snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
+    lastLoraInventoryStatus.value = inventory;
+    lastLoraInventoryStatusAtMs.value = Date.now();
+    lastLoraInventoryStatusPort.value = port;
 
     const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
-    if (port === targetPort) {
+    if (source === 'fleet' && port === targetPort) {
+      const wasScanning = isLoraInventoryScanning.value;
+      const scanActive = !!inventory.scan?.active;
+      const inventoryAddresses = (inventory.devices || []).map(device => device.address);
       loraInventoryScan.value = inventory.scan || null;
-      mergeLoraInventoryRows(inventory.devices || []);
+      mergeLoraInventorySeedRows(inventory.devices || []);
+      const hydrateAddress = fleetTransport.value === 'serial' ? nextFleetHydrateAddress(inventoryAddresses) : null;
+      if (hydrateAddress !== null) {
+        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'fleet');
+      }
       loraCandidates.value = (inventory.candidates || []).map(c => deriveCandidateLocalTimestamp(c, fleetClockMs.value));
       candidateTotal.value = inventory.candidate_total || (inventory.candidates || []).length;
       candidateTruncated.value = !!inventory.candidate_truncated;
       loraAdoptionStatus.value = inventory.adoption || null;
-      isLoraInventoryScanning.value = !!inventory.scan?.active;
-      if (inventory.scan?.active && fleetScanActiveSinceMs.value === 0) {
+      isLoraInventoryScanning.value = scanActive;
+      isLoraInventoryScanStarting.value = false;
+      if (scanActive && fleetScanActiveSinceMs.value === 0) {
         fleetScanActiveSinceMs.value = Date.now();
       }
-      if (!inventory.scan?.active) {
+      if (!scanActive) {
         fleetScanActiveSinceMs.value = 0;
       }
       networkStatusMessage.value = `${loraInventoryProgressLabel.value}; gateway cache has ${loraInventory.value.length} peer${loraInventory.value.length === 1 ? '' : 's'}.`;
-      if (!inventory.scan?.active && networkInventoryPollMode.value === 'scan') {
+      if (wasScanning && !scanActive) {
+        scheduleFleetScanSettleRefresh(port);
+      }
+      if (!scanActive && networkInventoryPollMode.value === 'scan') {
         stopLoraInventoryPolling(false);
         startFleetCachePolling();
       }
     }
     const targetMonitor = monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
-    if (port === targetMonitor) {
-      monitorFleetRows.value = mergeMonitorRows(inventory.devices || []);
+    if (source === 'monitor' && port === targetMonitor) {
+      mergeMonitorSeedRows(inventory.devices || []);
+      const monitorAddresses = (inventory.devices || []).map(device => device.address);
+      const hydrateAddress = monitorTransport.value === 'serial' ? nextFleetHydrateAddress(monitorAddresses) : null;
+      if (hydrateAddress !== null) {
+        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'monitor');
+      }
       monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
     }
   } catch (e) {
@@ -3211,6 +3393,7 @@ function fleetScanErrorMessage(err: unknown): string {
 }
 
 async function startLoraInventoryScan() {
+  if (isLoraInventoryScanning.value || isLoraInventoryScanStarting.value) return;
   const { port } = fleetGatewayCommandTarget();
   if (!port) {
     notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
@@ -3225,22 +3408,26 @@ async function startLoraInventoryScan() {
 }
 
 async function beginLoraInventoryScan(port: string, showErrors = true) {
-  await withGatewayForeground(port, async () => {
-    if (!portGatewayReady(port)) await loadNetworkGateway();
-    const { password } = fleetGatewayCommandTarget();
-    if (!password) {
-      if (showErrors) notify('Unable to read the gateway admin password from device details');
-      return;
-    }
-    const gatewayStatus = await ensureFleetGatewayStatus(true);
-    const blockedMessage = fleetScanBlockedMessage(gatewayStatus);
-    if (blockedMessage) {
-      isLoraInventoryScanning.value = false;
-      networkStatusMessage.value = blockedMessage;
-      if (showErrors) notify(blockedMessage);
-      return;
-    }
-    try {
+  isLoraInventoryScanStarting.value = true;
+  networkStatusMessage.value = 'Starting LoRa inventory scan...';
+  try {
+    await withGatewayForeground(port, async () => {
+      if (!portGatewayReady(port)) await loadNetworkGateway();
+      const { password } = fleetGatewayCommandTarget();
+      if (!password) {
+        isLoraInventoryScanStarting.value = false;
+        if (showErrors) notify('Unable to read the gateway admin password from device details');
+        return;
+      }
+      const gatewayStatus = await ensureFleetGatewayStatus(true);
+      const blockedMessage = fleetScanBlockedMessage(gatewayStatus);
+      if (blockedMessage) {
+        isLoraInventoryScanning.value = false;
+        isLoraInventoryScanStarting.value = false;
+        networkStatusMessage.value = blockedMessage;
+        if (showErrors) notify(blockedMessage);
+        return;
+      }
       isLoraInventoryScanning.value = true;
       if (fleetScanActiveSinceMs.value === 0) {
         fleetScanActiveSinceMs.value = Date.now();
@@ -3252,16 +3439,18 @@ async function beginLoraInventoryScan(port: string, showErrors = true) {
         end_address: LRS_REMOTE_SCAN_CAP,
         interval_ms: 1500
       }, 8000);
+      isLoraInventoryScanStarting.value = false;
       networkStatusMessage.value = 'LoRa inventory scan started.';
       startLoraInventoryPolling();
       void refreshLoraInventoryStatus(true);
-    } catch (e) {
-      isLoraInventoryScanning.value = false;
-      fleetScanActiveSinceMs.value = 0;
-      networkStatusMessage.value = fleetScanErrorMessage(e);
-      if (showErrors) notify(networkStatusMessage.value);
-    }
-  });
+    });
+  } catch (e) {
+    isLoraInventoryScanning.value = false;
+    isLoraInventoryScanStarting.value = false;
+    fleetScanActiveSinceMs.value = 0;
+    networkStatusMessage.value = fleetScanErrorMessage(e);
+    if (showErrors) notify(networkStatusMessage.value);
+  }
 }
 
 async function cancelLoraInventoryScan() {
@@ -3277,6 +3466,7 @@ async function cancelLoraInventoryScan() {
   try {
     await withGatewayForeground(port, async () => {
       await sendEasyPairCommandOnPort(port, 'cancel_lora_inventory', { admin_password: password }, 5000);
+      isLoraInventoryScanStarting.value = false;
       fleetScanActiveSinceMs.value = 0;
       stopLoraInventoryPolling();
       await refreshLoraInventoryStatus(false);
@@ -5799,6 +5989,7 @@ onUnmounted(() => {
   stopLoraInventoryPolling();
   stopMonitorPolling();
   if (fleetClockTimer.value) window.clearInterval(fleetClockTimer.value);
+  if (fleetScanSettleTimer.value) window.clearTimeout(fleetScanSettleTimer.value);
   if (networkInterfaceInterval.value) window.clearInterval(networkInterfaceInterval.value);
   cleanupFleetOtaTimers();
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
@@ -5996,7 +6187,7 @@ const fleetServerStatusComputed = computed<FleetServerStatus>(() => ({
   serverUrl: firmwareServerInfo.value?.urls[0] || null,
   isLoraInventoryScanning: isLoraInventoryScanning.value,
   scanDisabled: fleetScanDisabled.value,
-  scanLabel: fleetForceScanLabel.value,
+  scanLabel: isLoraInventoryScanStarting.value ? 'Starting...' : fleetForceScanLabel.value,
   statusLine: remotesAndCandidatesStatusLine.value,
   progressLabel: loraInventoryProgressLabel.value,
   isServerStarting: isFirmwareServerStarting.value,
@@ -6395,6 +6586,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @udp-logs-copy="copyNetworkUdpLog"
         @gateway-events-clear="clearGatewayEvents"
         @gateway-events-copy="copyGatewayEvents"
+        @lora-inventory-debug-copy="copyLoraInventoryDebug"
         @manual-chip-input="handleManualMqttGatewayInput"
         @firmware-fetch="fetchFirmware"
         @gateway-load="loadNetworkGateway"

@@ -5,6 +5,9 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Changes
+- Reworked Fleet inventory admin responses for ESP8266 memory safety: `lora_inventory_status` now returns a compact configured-peer seed list plus scan/candidate metadata, while full cached details for a single remote are fetched with the new `lora_inventory_peer` command.
+- Added `refresh_lora_peer` so Flasher can request normal maintenance pages for one remote at a time before reading that peer's cached details, keeping Fleet/Monitor current without rebuilding a whole-fleet JSON payload.
+- Kept Fleet diagnostics out of the normal inventory hot path; heap/fragmentation/debug uptime remain explicit per-peer diagnostics instead of being serialized for the whole fleet on every refresh.
 - Removed obsolete `rx_push_on_change_enabled` and `rx_push_min_interval_ms` settings; input changes now use the fixed operational push path instead of misleading configurable knobs.
 - Relay state in Fleet now requires an actual state-carrying packet or ACK; group-command timeout bookkeeping no longer creates peer-cache entries that look like real `Off` relay reports.
 - Codified relay/input control as the top priority path: removed the gateway's always-on round-robin maintenance sweep, kept Fleet/Monitor inventory as explicit low-priority observability, and moved normal input/sensor reporting to remote-originated operational pushes.
@@ -26,6 +29,8 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway publishes `wifi_rssi_dbm` retained MQTT topic for peers when connected and available, publishing empty payloads when unknown, offline, or cleared.
 
 ### Flasher Features
+- Fleet and Monitor now hydrate serial gateway inventory one cached remote at a time after the compact seed response, avoiding multi-kilobyte whole-fleet JSON responses from ESP8266 gateways while progressively filling firmware, IP, relay, input, sensor, uptime, and RSSI fields.
+- Serial Fleet/Monitor refresh now asks the gateway to refresh one remote's normal maintenance state before reading that row, so firmware, WiFi/IP, uptime, and sensor fields can converge progressively while Flasher is open.
 - Gateway Events now retains raw serial evidence lines as well as structured firmware `event=` logs, highlights crash/reset signatures, and includes exact raw text in Copy output for debugging.
 - Fleet no longer preserves stale relay values when the gateway inventory row omits `relay_state`, so unknown relay state is shown as unknown instead of a cached `Off`/`On`.
 - Fleet and Monitor now capture firmware event log lines emitted during serial-admin activity, keeping a host-side Gateway Events buffer with Copy/Clear controls while the serial monitor is unavailable.

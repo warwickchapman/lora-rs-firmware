@@ -83,3 +83,9 @@ export interface LoraInventoryStatus {
   candidate_truncated?: boolean;
   adoption?: LoraAdoptionStatus | null;
 }
+
+export interface LoraInventoryPeerStatus {
+  ok: boolean;
+  cmd: string;
+  device?: LoraInventoryDevice;
+}

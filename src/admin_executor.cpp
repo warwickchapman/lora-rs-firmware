@@ -1220,116 +1220,10 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
 
     row["role"] = "remote";
     row["mode"] = "paired";
-
-    if (hasCached) {
-      if (p.wifi_state_known) {
-        row["wifi_enabled_known"] = true;
-      }
-      if (p.wifi_enabled) {
-        row["wifi_enabled"] = true;
-      }
-      if (p.wifi_connected_known) {
-        row["wifi_connected_known"] = true;
-      }
-      if (p.wifi_connected) {
-        row["wifi_connected"] = true;
-      }
-      if (p.wifi_connected && p.ip[0] != 0) {
-        char ipBuf[16];
-        snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
-        row["ip"] = ipBuf;
-      }
-      if (p.mqtt_state_known) {
-        row["mqtt_known"] = true;
-      }
-      if (p.mqtt_enabled) {
-        row["mqtt_enabled"] = true;
-      }
-      if (p.mqtt_connected) {
-        row["mqtt_connected"] = true;
-      }
-      if (p.power_save_listen_only) {
-        row["power_save_listen_only"] = true;
-      }
-      if (p.power_save_active) {
-        row["power_save_active"] = true;
-      }
-      if (p.chip_id != 0) {
-        char chipBuf[9];
-        snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
-        row["chip_id"] = chipBuf;
-        if (p.fw_major != 0 || p.fw_minor != 0 || p.fw_patch != 0) {
-          char fwBuf[24];
-          if (p.fw_build > 0) {
-            snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
-            row["fw_build"] = p.fw_build;
-          } else {
-            snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
-          }
-          row["fw_version"] = fwBuf;
-        }
-      }
-      if (p.uptime_ms > 0) {
-        row["uptime_ms"] = p.uptime_ms;
-      }
-      if (p.last_seen_ms != 0) {
-        row["relay_state"] = p.relay_state;
-        if (p.input_state_known) {
-          row["input_state_known"] = true;
-          row["input_state"] = p.input_state;
-        }
-        if (p.sensors.count() > 0) {
-          JsonArray sensorsArr = row["sensors"].to<JsonArray>();
-          for (uint8_t j = 0; j < p.sensors.count(); ++j) {
-            SensorReading r{};
-            if (p.sensors.byIndex(j, r)) {
-              JsonObject sObj = sensorsArr.add<JsonObject>();
-              sObj["kind"] = sensorKindToString(r.kind);
-              sObj["state"] = sensorStateToString(r.state);
-              sObj["instance"] = r.instance;
-              if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
-                if (r.scale == 0) {
-                  sObj["value"] = r.value;
-                } else {
-                  float divisor = 1.0f;
-                  for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
-                  sObj["value"] = static_cast<float>(r.value) / divisor;
-                }
-              }
-              sObj["unit"] = sensorKindToUnit(r.kind);
-            }
-          }
-        }
-      }
-      if (p.maintenance_debug_known) {
-        row["maintenance_debug_known"] = true;
-        row["heap_free"] = p.heap_free;
-        row["heap_max_block"] = p.heap_max_block;
-        row["heap_frag_pct"] = p.heap_frag_pct;
-        row["debug_uptime_ms"] = p.debug_uptime_ms;
-        if (p.wifi_connected && p.wifi_rssi_dbm != 0) {
-          row["wifi_rssi_dbm"] = p.wifi_rssi_dbm;
-        }
-      }
-      row["rssi"] = p.uplink_rssi;
-      if (p.last_seen_ms != 0) {
-        row["last_seen_ms"] = p.last_seen_ms;
-        row["age_ms"] = now - p.last_seen_ms;
-      }
-      if (p.poll_pending) {
-        row["poll_pending"] = true;
-      }
-      const bool otaEligible = p.wifi_connected_known && p.wifi_connected && p.ip[0] != 0;
-      if (otaEligible) {
-        row["ota_eligible"] = true;
-        row["ota_reason"] = "ready";
-      } else if (p.wifi_connected_known) {
-        row["ota_reason"] = p.wifi_connected ? "ip_missing" : "wifi_offline";
-      } else {
-        row["ota_reason"] = "wifi_status_unknown";
-      }
-    } else {
-      row["ota_reason"] = "wifi_status_unknown";
+    if (hasCached && p.chip_id != 0) {
+      char chipBuf[9];
+      snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
+      row["chip_id"] = chipBuf;
     }
   }
 
@@ -1388,6 +1282,177 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
 #endif
   }
 
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter writer, bool isMqtt) {
+  const char *id = requestId(doc);
+  const uint8_t addr = static_cast<uint8_t>(doc["address"] | 0);
+  const bool includeDiagnostics = doc["include_diagnostics"] | false;
+  if (sm_ == nullptr) {
+    sendError("lora_inventory_peer", "runtime_unavailable", id, writer);
+    return;
+  }
+  if (addr < 1 || addr > Settings::kAddressListCap) {
+    sendError("lora_inventory_peer", "invalid_address", id, writer);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "lora_inventory_peer";
+  if (id[0] != '\0')
+    out["id"] = id;
+
+  const uint32_t now = millis();
+  PeerStatusSnapshot p{};
+  const bool hasCached = sm_->peerByAddress(addr, p);
+  JsonObject row = out["device"].to<JsonObject>();
+  row["address"] = addr;
+
+  if (isMqtt) {
+    if (hasCached && p.chip_id != 0) {
+      char chipBuf[9];
+      snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
+      row["chip_id"] = chipBuf;
+    }
+    sendOk(out, writer);
+    return;
+  }
+
+  row["role"] = "remote";
+  row["mode"] = "paired";
+  if (!hasCached) {
+    row["ota_reason"] = "wifi_status_unknown";
+    sendOk(out, writer);
+    return;
+  }
+
+  if (p.wifi_state_known)
+    row["wifi_enabled_known"] = true;
+  if (p.wifi_enabled)
+    row["wifi_enabled"] = true;
+  if (p.wifi_connected_known)
+    row["wifi_connected_known"] = true;
+  if (p.wifi_connected)
+    row["wifi_connected"] = true;
+  if (p.wifi_connected && p.ip[0] != 0) {
+    char ipBuf[16];
+    snprintf(ipBuf, sizeof(ipBuf), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
+    row["ip"] = ipBuf;
+  }
+  if (p.mqtt_state_known)
+    row["mqtt_known"] = true;
+  if (p.mqtt_enabled)
+    row["mqtt_enabled"] = true;
+  if (p.mqtt_connected)
+    row["mqtt_connected"] = true;
+  if (p.power_save_listen_only)
+    row["power_save_listen_only"] = true;
+  if (p.power_save_active)
+    row["power_save_active"] = true;
+  if (p.chip_id != 0) {
+    char chipBuf[9];
+    snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
+    row["chip_id"] = chipBuf;
+    if (p.fw_major != 0 || p.fw_minor != 0 || p.fw_patch != 0) {
+      char fwBuf[24];
+      if (p.fw_build > 0) {
+        snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u~%u", p.fw_major, p.fw_minor, p.fw_patch, p.fw_build);
+        row["fw_build"] = p.fw_build;
+      } else {
+        snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
+      }
+      row["fw_version"] = fwBuf;
+    }
+  }
+  if (p.uptime_ms > 0)
+    row["uptime_ms"] = p.uptime_ms;
+  if (p.last_seen_ms != 0) {
+    row["relay_state"] = p.relay_state;
+    if (p.input_state_known) {
+      row["input_state_known"] = true;
+      row["input_state"] = p.input_state;
+    }
+    if (p.sensors.count() > 0) {
+      JsonArray sensorsArr = row["sensors"].to<JsonArray>();
+      for (uint8_t j = 0; j < p.sensors.count(); ++j) {
+        SensorReading r{};
+        if (p.sensors.byIndex(j, r)) {
+          JsonObject sObj = sensorsArr.add<JsonObject>();
+          sObj["kind"] = sensorKindToString(r.kind);
+          sObj["state"] = sensorStateToString(r.state);
+          sObj["instance"] = r.instance;
+          if (r.state == SensorState::Ok || r.state == SensorState::Overrange) {
+            if (r.scale == 0) {
+              sObj["value"] = r.value;
+            } else {
+              float divisor = 1.0f;
+              for (uint8_t s = 0; s < r.scale; ++s) divisor *= 10.0f;
+              sObj["value"] = static_cast<float>(r.value) / divisor;
+            }
+          }
+          sObj["unit"] = sensorKindToUnit(r.kind);
+        }
+      }
+    }
+  }
+  if (p.wifi_connected && p.wifi_rssi_dbm != 0)
+    row["wifi_rssi_dbm"] = p.wifi_rssi_dbm;
+  if (includeDiagnostics && p.maintenance_debug_known) {
+    row["maintenance_debug_known"] = true;
+    row["heap_free"] = p.heap_free;
+    row["heap_max_block"] = p.heap_max_block;
+    row["heap_frag_pct"] = p.heap_frag_pct;
+    row["debug_uptime_ms"] = p.debug_uptime_ms;
+  }
+  row["rssi"] = p.uplink_rssi;
+  if (p.last_seen_ms != 0) {
+    row["last_seen_ms"] = p.last_seen_ms;
+    row["age_ms"] = now - p.last_seen_ms;
+  }
+  if (p.poll_pending)
+    row["poll_pending"] = true;
+
+  const bool otaEligible = p.wifi_connected_known && p.wifi_connected && p.ip[0] != 0;
+  if (otaEligible) {
+    row["ota_eligible"] = true;
+    row["ota_reason"] = "ready";
+  } else if (p.wifi_connected_known) {
+    row["ota_reason"] = p.wifi_connected ? "ip_missing" : "wifi_offline";
+  } else {
+    row["ota_reason"] = "wifi_status_unknown";
+  }
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleRefreshLoraPeer(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("refresh_lora_peer", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("refresh_lora_peer", "runtime_unavailable", id, writer);
+    return;
+  }
+  uint8_t address = doc["address"] | 0;
+  if (address < runtime_utils::kMinAddress || address > Settings::kAddressListCap) {
+    sendError("refresh_lora_peer", "invalid_address", id, writer);
+    return;
+  }
+
+  uint32_t sentCounter = 0;
+  if (!sm_->sendMaintenanceRequest(address, false, &sentCounter)) {
+    sendError("refresh_lora_peer", "send_failed", id, writer);
+    return;
+  }
+
+  JsonDocument out;
+  out["cmd"] = "refresh_lora_peer";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["address"] = address;
+  out["counter"] = sentCounter;
   sendOk(out, writer);
 }
 
@@ -2055,6 +2120,16 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
 
   if (strcmp(cmd, "lora_inventory_status") == 0) {
     handleLoraInventoryStatus(doc, writer, isMqtt);
+    return;
+  }
+
+  if (strcmp(cmd, "lora_inventory_peer") == 0) {
+    handleLoraInventoryPeer(doc, writer, isMqtt);
+    return;
+  }
+
+  if (strcmp(cmd, "refresh_lora_peer") == 0) {
+    handleRefreshLoraPeer(doc, writer);
     return;
   }
 
