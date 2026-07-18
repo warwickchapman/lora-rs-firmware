@@ -5,6 +5,10 @@
 #include "runtime_utils.h"
 #include "state_machine.h"
 
+size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
+size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
+size_t NodeStateMachine::replaySourceStateSize() { return sizeof(NodeStateMachine::ReplaySourceState); }
+
 void test_paired_transmitter_is_tx() {
   bool roleTx = false;
   TEST_ASSERT_TRUE(runtime_utils::parseRoleTxFromModeRole("paired", "transmitter", roleTx));
@@ -680,6 +684,99 @@ void test_candidate_telemetry_does_not_reset_active_attempts() {
   TEST_ASSERT_EQUAL_UINT32(0, c.last_probe_ms);
 }
 
+static Settings makeRemoteSettings(uint8_t controllerAddress) {
+  Settings cfg{};
+  cfg.role_tx = false;
+  cfg.local_address = 1;
+  cfg.controller_address = controllerAddress;
+  cfg.allowed_controller_count = 0;
+  memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
+  cfg.mqtt_controller_addresses = "";
+  cfg.heartbeat_ms = 60000;
+  cfg.tx_command_retry_timeout_ms = 180000;
+  cfg.rx_failsafe_timeout_ms = 180000;
+  return cfg;
+}
+
+static Settings makeGatewaySettings() {
+  Settings cfg{};
+  cfg.role_tx = true;
+  cfg.local_address = 254;
+  cfg.controller_address = 0;
+  cfg.allowed_controller_count = 0;
+  memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
+  cfg.mqtt_controller_addresses = "";
+  cfg.heartbeat_ms = 60000;
+  cfg.tx_command_retry_timeout_ms = 180000;
+  cfg.rx_failsafe_timeout_ms = 180000;
+  return cfg;
+}
+
+void test_mqtt_controller_authorization_remote_accepts_controller_address() {
+  const Settings cfg = makeRemoteSettings(254);
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 254));
+}
+
+void test_mqtt_controller_authorization_remote_rejects_unconfigured_sources() {
+  const Settings cfg = makeRemoteSettings(254);
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 1));
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 2));
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 253));
+}
+
+void test_mqtt_controller_authorization_stale_allowed_list_does_not_block_controller() {
+  Settings cfg = makeRemoteSettings(254);
+  cfg.allowed_controller_count = 1;
+  cfg.allowed_controller_addresses[0] = 3;  // stale/wrong explicit entry
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 254));
+}
+
+void test_mqtt_controller_authorization_gateway_not_remote_authority() {
+  const Settings cfg = makeGatewaySettings();
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 254));
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 1));
+}
+
+void test_mqtt_controller_authorization_rejects_reserved_addresses() {
+  const Settings cfg = makeRemoteSettings(254);
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 0));
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 255));
+}
+
+void test_mqtt_controller_authorization_allowed_list_extra_controller() {
+  Settings cfg = makeRemoteSettings(254);
+  cfg.allowed_controller_count = 1;
+  cfg.allowed_controller_addresses[0] = 3;
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 254));  // configured controller
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 3));    // explicit extra controller
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 2));    // not authorized
+}
+
+void test_mqtt_controller_authorization_mqtt_csv_extra_controller() {
+  Settings cfg = makeRemoteSettings(254);
+  cfg.mqtt_controller_addresses = "5,6";
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 254));  // configured controller
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 5));    // CSV extra controller
+  TEST_ASSERT_TRUE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 6));    // CSV extra controller
+  TEST_ASSERT_FALSE(runtime_utils::isAuthorizedMqttController(
+      cfg.role_tx, cfg.controller_address, &cfg, 4));    // not authorized
+}
+
 void test_struct_sizes() {
   size_t peerSize = NodeStateMachine::peerRuntimeSize();
   size_t pollSize = NodeStateMachine::pollRuntimeSize();
@@ -735,6 +832,13 @@ int main(int argc, char **argv) {
   RUN_TEST(test_start_adoption_reverts_on_tx_fail);
   RUN_TEST(test_candidate_probe_tick_flow);
   RUN_TEST(test_candidate_telemetry_does_not_reset_active_attempts);
+  RUN_TEST(test_mqtt_controller_authorization_remote_accepts_controller_address);
+  RUN_TEST(test_mqtt_controller_authorization_remote_rejects_unconfigured_sources);
+  RUN_TEST(test_mqtt_controller_authorization_stale_allowed_list_does_not_block_controller);
+  RUN_TEST(test_mqtt_controller_authorization_gateway_not_remote_authority);
+  RUN_TEST(test_mqtt_controller_authorization_rejects_reserved_addresses);
+  RUN_TEST(test_mqtt_controller_authorization_allowed_list_extra_controller);
+  RUN_TEST(test_mqtt_controller_authorization_mqtt_csv_extra_controller);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

@@ -121,42 +121,6 @@ inline void startupTxSendTimingTrace(const char *phase, uint32_t startMs) {
            static_cast<unsigned long>(endMs - startMs));
 }
 
-bool csvContainsAddress(const String &raw, uint8_t src) {
-  const char *cursor = raw.c_str();
-  while (*cursor != '\0') {
-    while (*cursor == ',' || *cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') {
-      ++cursor;
-    }
-    if (*cursor == '\0') break;
-
-    char *tail = nullptr;
-    const long parsed = strtol(cursor, &tail, 0);
-    if (tail != cursor) {
-      while (*tail == ' ' || *tail == '\t' || *tail == '\r' || *tail == '\n') {
-        ++tail;
-      }
-      if ((*tail == ',' || *tail == '\0') && parsed > 0 && parsed < 255 && static_cast<uint8_t>(parsed) == src) {
-        return true;
-      }
-    }
-
-    while (*cursor != '\0' && *cursor != ',') {
-      ++cursor;
-    }
-    if (*cursor == ',') ++cursor;
-  }
-  return false;
-}
-
-bool fixedListContainsAddress(const uint8_t *values, uint8_t count, uint8_t src) {
-  if (values == nullptr || src == 0 || src == 255) return false;
-  if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
-  for (uint8_t i = 0; i < count; ++i) {
-    if (values[i] == src) return true;
-  }
-  return false;
-}
-
 uint16_t crc16Ccitt(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFFU;
   for (size_t i = 0; i < len; ++i) {
@@ -1698,14 +1662,8 @@ bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, bool
 }
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
-  if (settings_ == nullptr || src == 0 || src == 255) return false;
-  if (!runtime_.role_tx && src == runtime_.controller_address) return true;
-  if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
-    return true;
-  }
-  const String raw(settings_->mqtt_controller_addresses.c_str());
-  if (raw.length() == 0) return false;
-  return csvContainsAddress(raw, src);
+  return runtime_utils::isAuthorizedMqttController(
+      runtime_.role_tx, runtime_.controller_address, settings_, src);
 }
 
 bool NodeStateMachine::isAuthorizedPairedSource(uint8_t src) const {
