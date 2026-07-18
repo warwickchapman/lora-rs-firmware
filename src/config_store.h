@@ -34,8 +34,6 @@ struct Settings {
   uint32_t mqtt_remote_retry_timeout_ms;
   bool tx_mqtt_remote_polling_enabled;
   uint32_t tx_mqtt_remote_default_poll_interval_ms;
-  bool rx_push_on_change_enabled;
-  uint32_t rx_push_min_interval_ms;
   bool input_control_paired_lora_enabled;
   uint32_t tx_command_retry_timeout_ms;
   FixedSettingString<16> rx_failsafe_mode;

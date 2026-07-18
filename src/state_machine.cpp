@@ -98,6 +98,8 @@ constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
 constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
 constexpr uint32_t kStartupRelaySyncDelayMs = 10000;
+constexpr uint32_t kOperationalSensorPushIntervalMs = 60000;
+constexpr uint32_t kStartupOperationalPushDelayMs = 10000;
 
 inline void startupTxPhaseTrace(const char *phase) {
   const uint32_t now = millis();
@@ -314,6 +316,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
+  rx_next_sensor_push_ms_ = millis() + kStartupOperationalPushDelayMs;
   last_rx_control_ms_ = 0;
   maintenance_debug_pending_ = false;
   maintenance_debug_dst_ = 0;
@@ -408,6 +411,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
+  rx_next_sensor_push_ms_ = millis() + kStartupOperationalPushDelayMs;
   last_rx_control_ms_ = 0;
   maintenance_debug_pending_ = false;
   maintenance_debug_dst_ = 0;
@@ -447,8 +451,6 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
   runtime_.tx_mqtt_remote_default_poll_interval_ms = cfg.tx_mqtt_remote_default_poll_interval_ms;
-  runtime_.rx_push_on_change_enabled = cfg.rx_push_on_change_enabled;
-  runtime_.rx_push_min_interval_ms = cfg.rx_push_min_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
   runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
   runtime_.rx_failsafe_mode = parseRxFailsafeMode(String(cfg.rx_failsafe_mode.c_str()));
@@ -888,18 +890,18 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint
   if (runtime_.role_tx && settings_ != nullptr && settings_->mode == "paired") {
     if (!isConfiguredOperationalPeer(src)) return;
   }
-  PeerRuntime *node = findOrCreatePeer(src);
+  PeerRuntime *node = (ackState == PeerAckState::Ok) ? findOrCreatePeer(src) : peer_manager_.find(src);
   if (node == nullptr) return;
   (void)inputState;
   if (ackState == PeerAckState::Ok) {
     node->relay_state = relayState ? 1 : 0;
+    node->last_seen_ms = millis();
+    if (rssi != -127) {
+      node->uplink_rssi = rssi;
+    }
   }
-  node->last_seen_ms = millis();
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
-  if (rssi != -127) {
-    node->uplink_rssi = rssi;
-  }
 }
 
 uint8_t NodeStateMachine::pairedAckRankForLocalAddress() const {
@@ -2386,6 +2388,48 @@ PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t address) {
   return peer_manager_.findOrCreate(address, chip_id, interval, runtime_.tx_mqtt_remote_polling_enabled, millis());
 }
 
+bool NodeStateMachine::localOperationalSensorsEnabled() const {
+  for (uint8_t i = 0; i < local_sensors_.count(); ++i) {
+    SensorReading r{};
+    if (!local_sensors_.byIndex(i, r)) continue;
+    if (r.kind == SensorKind::Input) continue;
+    if (r.state != SensorState::Disabled) return true;
+  }
+  return false;
+}
+
+bool NodeStateMachine::sendInputStatePush(uint32_t now) {
+  if (runtime_.remote_address == 0 || runtime_.remote_address == 255) return false;
+  if (!radioTxBudgetAvailable()) return false;
+
+  last_counter_++;
+  const uint32_t unixTimeS = currentUnixTimeS(now);
+  if (!radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_,
+                    runtime_.local_address, runtime_.remote_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF,
+                    unixTimeS)) {
+    return false;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  rx_last_push_ms_ = now;
+  rx_push_pending_ = false;
+  lrslog::event("rx_input_push", 0, last_counter_, input_state_);
+  return true;
+}
+
+bool NodeStateMachine::sendSensorStatePush(uint32_t now) {
+  if (runtime_.role_tx) return false;
+  if (runtime_.remote_address == 0 || runtime_.remote_address == 255) return false;
+  if (!localOperationalSensorsEnabled()) return false;
+  if (maintenance_version_pending_ || maintenance_sensor_pending_ || maintenance_debug_pending_) return false;
+  if (static_cast<int32_t>(now - rx_next_sensor_push_ms_) < 0) return false;
+  if (!sendMaintenanceStatus(runtime_.remote_address, false)) return false;
+
+  rx_next_sensor_push_ms_ = now + kOperationalSensorPushIntervalMs;
+  lrslog::event("rx_sensor_push", 0, last_counter_, runtime_.remote_address);
+  return true;
+}
+
 bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter) {
   if (!radioTxBudgetAvailable()) return false;
   last_counter_++;
@@ -2856,48 +2900,6 @@ void NodeStateMachine::tickPeerPolling(uint32_t now) {
   }
 }
 
-void NodeStateMachine::tickPeerMaintenance(uint32_t now) {
-  if (!runtime_.role_tx || settings_ == nullptr || fleet_scan_active_) return;
-  if (static_cast<int32_t>(now - next_peer_maintenance_ms_) < 0) return;
-  if (isGroupActive()) return;
-  if (!radioTxBudgetAvailable()) return;
-
-  uint8_t targets[Settings::kAddressListCap]{};
-  const bool isPairedMode = (settings_->mode == "paired");
-
-  uint8_t targetCount = runtime_utils::resolveGatewayTargets(
-    isPairedMode,
-    runtime_.local_address,
-    settings_->known_peer_count,
-    settings_->known_peer_addresses,
-    settings_->paired_target_count,
-    settings_->paired_target_addresses,
-    settings_->remote_address,
-    targets,
-    Settings::kAddressListCap
-  );
-
-  if (targetCount == 0) return;
-
-  // 2. Dynamically calculate staggering spacing over the full configured cycle
-  uint32_t spacingMs = runtime_.heartbeat_ms / targetCount;
-  if (spacingMs < 2000UL) {
-    spacingMs = 2000UL; // Safe lower bound to prevent radio flooding
-  }
-
-  // 3. Query the next peer in round-robin fashion
-  if (peer_maintenance_cursor_ >= targetCount) peer_maintenance_cursor_ = 0;
-  const uint8_t dst = targets[peer_maintenance_cursor_++];
-  uint32_t sentCounter = 0;
-  if (sendMaintenanceRequest(dst, true, &sentCounter)) {
-    lrslog::event("peer_maint_probe", 0, sentCounter, dst);
-    next_peer_maintenance_ms_ = now + spacingMs;
-  } else {
-    // If radio fails, retry in 2 seconds
-    next_peer_maintenance_ms_ = now + 2000UL;
-  }
-}
-
 void NodeStateMachine::tickFleetScan(uint32_t now) {
   if (!runtime_.role_tx) {
     fleet_scan_active_ = false;
@@ -3014,7 +3016,6 @@ void NodeStateMachine::tickTransmitter() {
   tickFleetScan(now);
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
-  tickPeerMaintenance(now);
   tickCandidatesAndAdoption(now);
   startupTxPhaseTrace("after_peer_polling");
 
@@ -3044,32 +3045,8 @@ void NodeStateMachine::tickReceiver() {
     rx_push_pending_ = true;
   }
 
-  if (!runtime_.rx_push_on_change_enabled || !rx_push_pending_) {
-    return;
-  }
-  if (runtime_.remote_address == 0 || runtime_.remote_address == 255) {
-    return;
-  }
-
-  const uint32_t minIntervalMs = runtime_.rx_push_min_interval_ms < 60000U ? 60000U : runtime_.rx_push_min_interval_ms;
-  const bool firstPush = (rx_last_push_ms_ == 0);
-  if (!firstPush && (now - rx_last_push_ms_) < minIntervalMs) {
-    return;
-  }
-  if (!radioTxBudgetAvailable()) {
-    return;
-  }
-
-  last_counter_++;
-  const uint32_t unixTimeS = currentUnixTimeS(now);
-  if (radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
-                   runtime_.remote_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
-    last_tx_ms_ = now;
-    markRadioTxSentThisTick();
-    rx_last_push_ms_ = now;
-    rx_push_pending_ = false;
-    lrslog::event("rx_push_on_change", 0, last_counter_, input_state_);
-  }
+  if (rx_push_pending_ && sendInputStatePush(now)) return;
+  sendSensorStatePush(now);
 }
 
 void NodeStateMachine::tickReceive() {

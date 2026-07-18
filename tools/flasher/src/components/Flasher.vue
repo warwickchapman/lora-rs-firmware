@@ -209,6 +209,7 @@ interface GatewayEventRecord {
   counter: number;
   state: number;
   raw: string;
+  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'raw';
 }
 
 interface SerialAdminConfig {
@@ -230,8 +231,6 @@ interface SerialAdminConfig {
   mqtt_remote_retry_timeout_ms?: number;
   tx_mqtt_remote_polling_enabled?: boolean;
   tx_mqtt_remote_default_poll_interval_ms?: number;
-  rx_push_on_change_enabled?: boolean;
-  rx_push_min_interval_ms?: number;
   input_control_paired_lora_enabled?: boolean;
   tx_command_retry_timeout_ms?: number;
   rx_failsafe_mode?: string;
@@ -1822,17 +1821,27 @@ function parseLogNumberField(line: string, field: string): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-function parseGatewayEventLogLine(port: string, line: string): GatewayEventRecord | null {
+function gatewayEventLevel(line: string, event: string): GatewayEventRecord['level'] {
+  if (isCrashStart(line)) return 'crash';
+  if (event === 'boot_banner' || event === 'boot' || event === 'gateway_log_timestamp_reset') return 'reset';
+  if (line.includes('[ERROR]') || event.includes('_fail') || event.includes('failed')) return 'error';
+  if (line.includes('[WARN]') || event.includes('timeout') || event.includes('_bad')) return 'warn';
+  if (!event || event === 'serial_raw') return 'raw';
+  return 'info';
+}
+
+function parseGatewayEventLogLine(port: string, line: string): GatewayEventRecord {
   const eventMatch = line.match(/\bevent=([^\s]+)/);
-  if (!eventMatch) return null;
+  const eventName = eventMatch?.[1] || (isCrashStart(line) ? 'crash_signature' : 'serial_raw');
   return {
     port,
     ms: parseLogNumberField(line, 't') ?? 0,
-    event: eventMatch[1],
+    event: eventName,
     rssi: parseLogNumberField(line, 'rssi') ?? 0,
     counter: parseLogNumberField(line, 'counter') ?? 0,
     state: parseLogNumberField(line, 'state') ?? 0,
-    raw: line
+    raw: line,
+    level: gatewayEventLevel(line, eventName)
   };
 }
 
@@ -1841,15 +1850,20 @@ function appendGatewayEvent(event: GatewayEventRecord) {
   if (gatewayEvents.value.length > 2000) {
     gatewayEvents.value = gatewayEvents.value.slice(-2000);
   }
-  gatewayEventsStatus.value = `${gatewayEvents.value.length} live serial event${gatewayEvents.value.length === 1 ? '' : 's'} captured.`;
+  const crashCount = gatewayEvents.value.filter(e => e.level === 'crash').length;
+  const resetCount = gatewayEvents.value.filter(e => e.level === 'reset').length;
+  const details = [
+    crashCount > 0 ? `${crashCount} crash signature${crashCount === 1 ? '' : 's'}` : '',
+    resetCount > 0 ? `${resetCount} reset marker${resetCount === 1 ? '' : 's'}` : ''
+  ].filter(Boolean).join(' · ');
+  gatewayEventsStatus.value = `${gatewayEvents.value.length} live serial line${gatewayEvents.value.length === 1 ? '' : 's'} captured${details ? ` · ${details}` : ''}.`;
 }
 
 function pushGatewayEventFromLog(port: string, line: string) {
   const event = parseGatewayEventLogLine(port, line);
-  if (!event) return;
 
   const lastMs = gatewayEventLastMsByPort.value[port];
-  if (lastMs !== undefined && event.ms + GATEWAY_UPTIME_ROLLBACK_GRACE_MS < lastMs) {
+  if (event.ms > 0 && lastMs !== undefined && event.ms + GATEWAY_UPTIME_ROLLBACK_GRACE_MS < lastMs) {
     appendGatewayEvent({
       port,
       ms: event.ms,
@@ -1857,13 +1871,16 @@ function pushGatewayEventFromLog(port: string, line: string) {
       rssi: 0,
       counter: 0,
       state: 0,
-      raw: `Gateway log timestamp rolled back from ${lastMs}ms to ${event.ms}ms.`
+      raw: `Gateway log timestamp rolled back from ${lastMs}ms to ${event.ms}ms.`,
+      level: 'reset'
     });
   }
-  gatewayEventLastMsByPort.value = {
-    ...gatewayEventLastMsByPort.value,
-    [port]: event.ms
-  };
+  if (event.ms > 0) {
+    gatewayEventLastMsByPort.value = {
+      ...gatewayEventLastMsByPort.value,
+      [port]: event.ms
+    };
+  }
   appendGatewayEvent(event);
 }
 
@@ -2208,7 +2225,11 @@ function copyNetworkUdpLog() {
 }
 
 function formatGatewayEvent(event: GatewayEventRecord): string {
-  return `${event.ms}ms ${event.event || '-'} port=${event.port} rssi=${event.rssi} ctr=${event.counter} st=${event.state} · ${event.raw}`;
+  const meta = `${event.ms}ms ${event.level} ${event.event || '-'} port=${event.port} rssi=${event.rssi} ctr=${event.counter} st=${event.state}`;
+  if (event.level === 'raw' || event.level === 'crash' || event.event === 'serial_raw') {
+    return `${meta}\n${event.raw}`;
+  }
+  return `${meta} · ${event.raw}`;
 }
 
 function copyGatewayEvents() {
@@ -2217,7 +2238,7 @@ function copyGatewayEvents() {
     return;
   }
   const block = [
-    `gateway_events: ${gatewayEvents.value.length} live serial events captured`,
+    `gateway_events: ${gatewayEventsStatus.value}`,
     ...gatewayEvents.value.map(formatGatewayEvent)
   ].join('\n');
   copyToClipboard(block, 'gateway events');
@@ -2713,8 +2734,6 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     mqtt_remote_retry_timeout_ms: numberValue(cfg.mqtt_remote_retry_timeout_ms, 180000),
     tx_mqtt_remote_polling_enabled: boolValue(cfg.tx_mqtt_remote_polling_enabled, false),
     tx_mqtt_remote_default_poll_interval_ms: numberValue(cfg.tx_mqtt_remote_default_poll_interval_ms, 300000),
-    rx_push_on_change_enabled: boolValue(cfg.rx_push_on_change_enabled, false),
-    rx_push_min_interval_ms: numberValue(cfg.rx_push_min_interval_ms, 60000),
     input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, false),
     tx_command_retry_timeout_ms: numberValue(cfg.tx_command_retry_timeout_ms, 180000),
     rx_failsafe_mode: stringValue(cfg.rx_failsafe_mode, 'hold_last'),
@@ -4030,8 +4049,6 @@ function serialConfigPatch(): Record<string, any> {
     mqtt_remote_retry_timeout_ms: Number(cfg.mqtt_remote_retry_timeout_ms || 180000),
     tx_mqtt_remote_polling_enabled: !!cfg.tx_mqtt_remote_polling_enabled,
     tx_mqtt_remote_default_poll_interval_ms: Number(cfg.tx_mqtt_remote_default_poll_interval_ms || 300000),
-    rx_push_on_change_enabled: !!cfg.rx_push_on_change_enabled,
-    rx_push_min_interval_ms: Number(cfg.rx_push_min_interval_ms || 60000),
     input_control_paired_lora_enabled: !!cfg.input_control_paired_lora_enabled,
     tx_command_retry_timeout_ms: Number(cfg.tx_command_retry_timeout_ms || 180000),
     rx_failsafe_mode: cfg.rx_failsafe_mode || 'hold_last',

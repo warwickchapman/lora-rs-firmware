@@ -68,8 +68,6 @@ void writeSettingsJsonObject(JsonObject config, ConfigStore &store,
   config["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
   config["tx_mqtt_remote_default_poll_interval_ms"] =
       cfg.tx_mqtt_remote_default_poll_interval_ms;
-  config["rx_push_on_change_enabled"] = cfg.rx_push_on_change_enabled;
-  config["rx_push_min_interval_ms"] = cfg.rx_push_min_interval_ms;
   config["input_control_paired_lora_enabled"] =
       cfg.input_control_paired_lora_enabled;
   config["tx_command_retry_timeout_ms"] = cfg.tx_command_retry_timeout_ms;

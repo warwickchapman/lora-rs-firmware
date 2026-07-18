@@ -251,8 +251,6 @@ class NodeStateMachine {
     uint32_t mqtt_remote_retry_timeout_ms = 5000;
     bool tx_mqtt_remote_polling_enabled = false;
     uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
-    bool rx_push_on_change_enabled = false;
-    uint32_t rx_push_min_interval_ms = 60000;
     bool input_control_paired_lora_enabled = false;
     bool mqtt_control_enabled = false;
     RxFailsafeMode rx_failsafe_mode = RxFailsafeMode::HoldLast;
@@ -339,6 +337,7 @@ class NodeStateMachine {
   uint8_t rx_deferred_ack_input_ = 0;
   bool rx_push_pending_ = false;
   uint32_t rx_last_push_ms_ = 0;
+  uint32_t rx_next_sensor_push_ms_ = 0;
   uint32_t last_rx_control_ms_ = 0;
   bool maintenance_debug_pending_ = false;
   uint8_t maintenance_debug_dst_ = 0;
@@ -369,8 +368,6 @@ class NodeStateMachine {
   uint32_t fleet_scan_started_ms_ = 0;
   uint32_t fleet_scan_last_tx_ms_ = 0;
   uint32_t fleet_scan_sent_ = 0;
-  uint32_t next_peer_maintenance_ms_ = 0;
-  uint8_t peer_maintenance_cursor_ = 0;
 
   struct WifiProvisionRxTransfer {
     bool active = false;
@@ -526,10 +523,12 @@ class NodeStateMachine {
   void markRadioTxSentThisTick();
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
-  void tickPeerMaintenance(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
   void tickPendingOtaPullControl(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
+  bool localOperationalSensorsEnabled() const;
+  bool sendInputStatePush(uint32_t now);
+  bool sendSensorStatePush(uint32_t now);
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceRequest(uint8_t dstAddress, bool requestDiagnostics = false, uint32_t *sentCounter = nullptr);
   bool sendMaintenanceStatus(uint8_t dstAddress, bool requestDiagnostics = false);

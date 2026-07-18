@@ -79,7 +79,9 @@ The firmware no longer hosts an onboard Web UI, REST API, captive portal, or `ES
 
 Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
-- Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes.
+- Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes only when the operator explicitly asks.
+- The gateway does not run a perpetual round-robin maintenance sweep. Relay/input control owns LoRa airtime; Fleet/Monitor freshness is low-priority observability and must tolerate stale rows.
+- Remotes push operational state instead: debounced dry-contact input changes send an unsolicited compact `PollResponse`, and remotes with enabled sensors send periodic operational sensor maintenance pages at a conservative 60-second cadence.
 - ESP8266 provisioning supports up to 12 remotes per gateway, matching `Settings::kAddressListCap` and `LRS_MAX_PEERS`.
 - Discovery candidates and peer adoption:
   - Candidates are discovered volatilely (capped at 12 entries) using incoming same-key unconfigured telemetry.
@@ -235,10 +237,10 @@ MQTT remote retry control:
   - `tx_mqtt_remote_polling_enabled` (default `false`)
   - `tx_mqtt_remote_default_poll_interval_ms` (default `60000`, enforced range `60000..3600000`)
   - `poll_interval_s` MQTT command is clamped to `0` (disable) or `60..3600` seconds.
-- RX push-on-change controls:
-  - `rx_push_on_change_enabled` (default `false`)
-  - `rx_push_min_interval_ms` (default `60000`, enforced range `60000..3600000`)
-  - when enabled, RX sends unsolicited `PollResponse` on debounced local input change, rate-limited by `rx_push_min_interval_ms`.
+- RX operational pushes:
+  - Debounced local input changes send an unsolicited `PollResponse` immediately when radio budget is available.
+  - Enabled temperature/tank sensors send unsolicited sensor maintenance pages every 60 seconds.
+  - These pushes are operational state, not diagnostics; they exist so MQTT/Fleet can observe real relay/input/sensor state without the gateway continuously polling every remote.
 - Paired TX retry controls:
   - `tx_command_retry_timeout_ms` (default `180000`, enforced range `5000..3600000`)
   - retry spacing remains Fibonacci-like with added small jitter to reduce synchronization collisions.

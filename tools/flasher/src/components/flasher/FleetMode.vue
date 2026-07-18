@@ -68,6 +68,8 @@ export interface GatewayEventDisplayRecord {
   rssi: number;
   counter: number;
   state: number;
+  raw: string;
+  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'raw';
 }
 
 export interface GatewayEventsState {
@@ -239,6 +241,10 @@ function toggleNetworkUdpLogsExpanded() {
 }
 
 function eventLevelClass(event: GatewayEventDisplayRecord): string {
+  if (event.level === 'crash' || event.level === 'error') return 'text-rose-300';
+  if (event.level === 'reset') return 'text-orange-300';
+  if (event.level === 'warn') return 'text-amber-300';
+  if (event.level === 'raw') return 'text-slate-500';
   const name = event.event || '';
   if (name.includes('timeout') || name.includes('_fail') || name.includes('failed') || name.includes('_bad')) {
     return 'text-amber-300';
@@ -737,9 +743,9 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           </div>
         </div>
         <div class="max-h-36 overflow-auto custom-scrollbar rounded border border-slate-800 bg-slate-950/60 p-2 font-mono text-[10px] leading-tight">
-          <div v-for="(event, i) in gatewayEvents.events.slice(-32)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
+          <div v-for="(event, i) in gatewayEvents.events.slice(-64)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
             <span class="text-slate-500">{{ event.ms }}ms</span>
-            <span :class="['truncate', eventLevelClass(event)]">{{ event.event || '-' }}</span>
+            <span :class="['truncate', eventLevelClass(event)]" :title="event.raw">{{ event.event || '-' }}</span>
             <span class="text-slate-500">rssi {{ event.rssi }}</span>
             <span class="text-slate-500">ctr {{ event.counter }}</span>
             <span class="text-slate-500">st {{ event.state }}</span>

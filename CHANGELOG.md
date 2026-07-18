@@ -5,6 +5,9 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Changes
+- Removed obsolete `rx_push_on_change_enabled` and `rx_push_min_interval_ms` settings; input changes now use the fixed operational push path instead of misleading configurable knobs.
+- Relay state in Fleet now requires an actual state-carrying packet or ACK; group-command timeout bookkeeping no longer creates peer-cache entries that look like real `Off` relay reports.
+- Codified relay/input control as the top priority path: removed the gateway's always-on round-robin maintenance sweep, kept Fleet/Monitor inventory as explicit low-priority observability, and moved normal input/sensor reporting to remote-originated operational pushes.
 - Restored paired LoRa relay-state convergence as the highest-priority control path: startup sync is delayed briefly for rebooting remotes, and paired heartbeat now reasserts relay state unless MQTT control is explicitly the relay authority.
 - Removed the temporary gateway event ring/admin command in favor of the existing firmware serial log stream, keeping diagnostic history out of ESP8266 RAM.
 - Provisioning now treats **Max remotes** as a hard session-wide limit: additional new-device announces are rejected after the chosen capacity is reached, including after discovery completes.
@@ -23,6 +26,8 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway publishes `wifi_rssi_dbm` retained MQTT topic for peers when connected and available, publishing empty payloads when unknown, offline, or cleared.
 
 ### Flasher Features
+- Gateway Events now retains raw serial evidence lines as well as structured firmware `event=` logs, highlights crash/reset signatures, and includes exact raw text in Copy output for debugging.
+- Fleet no longer preserves stale relay values when the gateway inventory row omits `relay_state`, so unknown relay state is shown as unknown instead of a cached `Off`/`On`.
 - Fleet and Monitor now capture firmware event log lines emitted during serial-admin activity, keeping a host-side Gateway Events buffer with Copy/Clear controls while the serial monitor is unavailable.
 - Treat empty retained MQTT sensor telemetry as a delete/clear signal so cleared sensor topics no longer appear as enabled sensors in Fleet or remote settings.
 - Added a clear Fleet gateway unexpected reboot alert when gateway uptime rolls backward outside an expected gateway flash/reboot flow.

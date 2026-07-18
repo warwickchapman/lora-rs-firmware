@@ -27,8 +27,10 @@ void test_serializer_field_count_and_types() {
   ConfigStore store;
   writeSettingsJson(doc, store, false);
 
-  // 1. Verify exact 66 fields
-  TEST_ASSERT_EQUAL(66, doc.size());
+  // 1. Verify exact 64 fields
+  TEST_ASSERT_EQUAL(64, doc.size());
+  TEST_ASSERT_FALSE(doc["rx_push_on_change_enabled"].is<bool>());
+  TEST_ASSERT_FALSE(doc["rx_push_min_interval_ms"].is<uint32_t>());
 
   // 2. Booleans serialize as JSON booleans
   TEST_ASSERT_TRUE(doc["commissioned"].is<bool>());
@@ -126,7 +128,9 @@ void test_write_settings_json_object_nested() {
   TEST_ASSERT_EQUAL_STRING("paired", doc["config"]["mode"].as<const char*>());
   TEST_ASSERT_TRUE(doc["config"].containsKey("local_address"));
   TEST_ASSERT_EQUAL(1, doc["config"]["local_address"].as<int>());
-  TEST_ASSERT_EQUAL(66, doc["config"].size());
+  TEST_ASSERT_EQUAL(64, doc["config"].size());
+  TEST_ASSERT_FALSE(doc["config"]["rx_push_on_change_enabled"].is<bool>());
+  TEST_ASSERT_FALSE(doc["config"]["rx_push_min_interval_ms"].is<uint32_t>());
 }
 
 int main(int argc, char **argv) {

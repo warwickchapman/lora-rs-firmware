@@ -202,7 +202,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     const heapMaxBlock = row.heap_max_block || history.heap_max_block;
     const heapFragPct = row.heap_frag_pct || history.heap_frag_pct;
 
-    const relayState = (row.relay_state !== undefined && row.relay_state !== null) ? row.relay_state : history.relay_state;
+    const relayState = (row.relay_state !== undefined && row.relay_state !== null) ? row.relay_state : undefined;
     const inputStateKnown = row.input_state_known === true;
     const inputState = inputStateKnown ? row.input_state : undefined;
 

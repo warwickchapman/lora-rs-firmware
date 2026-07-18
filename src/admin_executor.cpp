@@ -203,11 +203,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   cfg.tx_mqtt_remote_default_poll_interval_ms =
       doc["tx_mqtt_remote_default_poll_interval_ms"] |
       cfg.tx_mqtt_remote_default_poll_interval_ms;
-  cfg.rx_push_on_change_enabled =
-      parseBoolField(doc["rx_push_on_change_enabled"],
-                     cfg.rx_push_on_change_enabled);
-  cfg.rx_push_min_interval_ms =
-      doc["rx_push_min_interval_ms"] | cfg.rx_push_min_interval_ms;
   cfg.input_control_paired_lora_enabled = parseBoolField(
       doc["input_control_paired_lora_enabled"],
       cfg.input_control_paired_lora_enabled);
@@ -357,10 +352,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       kMaxTxPollDefaultIntervalMs) {
     cfg.tx_mqtt_remote_default_poll_interval_ms = kMaxTxPollDefaultIntervalMs;
   }
-  if (cfg.rx_push_min_interval_ms < kMinRxPushIntervalMs)
-    cfg.rx_push_min_interval_ms = kMinRxPushIntervalMs;
-  if (cfg.rx_push_min_interval_ms > kMaxRxPushIntervalMs)
-    cfg.rx_push_min_interval_ms = kMaxRxPushIntervalMs;
   if (cfg.tx_command_retry_timeout_ms < 5000UL)
     cfg.tx_command_retry_timeout_ms = 5000UL;
   if (cfg.tx_command_retry_timeout_ms > 3600000UL)

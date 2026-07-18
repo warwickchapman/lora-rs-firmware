@@ -14,8 +14,6 @@ const uint32_t kMinMqttRemoteRetryTimeoutMs = 5 * 1000;
 const uint32_t kMaxMqttRemoteRetryTimeoutMs = 3600 * 1000;
 const uint32_t kMinTxPollDefaultIntervalMs = 60 * 1000;
 const uint32_t kMaxTxPollDefaultIntervalMs = 3600 * 1000;
-const uint32_t kMinRxPushIntervalMs = 60 * 1000;
-const uint32_t kMaxRxPushIntervalMs = 3600 * 1000;
 const size_t kMinDeploymentKeyLen = 16;
 
 #ifdef REGION_US

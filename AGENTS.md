@@ -6,6 +6,18 @@
 - Maintain documentation and human-readable changelog entries when behavior changes.
 - Do not discard uncommitted work. Inspect `git status --short` before editing.
 
+## Control Priority Rule
+
+Relay/input control is the product. Fleet, Monitor, inventory, diagnostics, firmware
+metadata, WiFi details, heap stats, and UI freshness are observability.
+
+- Observability must never create control-path load unless the operator explicitly asks for it.
+- Relay/input control outranks Fleet scans, Monitor refreshes, diagnostics, OTA convenience, MQTT telemetry enrichment, and UI freshness.
+- Firmware must not spend LoRa airtime on routine observability when there is no explicit consumer.
+- Operational state is limited to relay state, input state, enabled sensor readings, and command ACK/failure state.
+- Diagnostics/inventory includes firmware version, heap/free/frag, WiFi IP/RSSI, detailed uptime, and Fleet/Monitor freshness enrichment.
+- Diagnostics/inventory must be low priority, interruptible, stale-tolerant, and clearly displayed as stale/deferred by Flasher rather than pressuring firmware.
+
 ## Plan Review Discipline
 
 When reviewing an implementation plan against a defined boundary or constraint:

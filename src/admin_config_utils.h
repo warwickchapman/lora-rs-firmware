@@ -17,8 +17,6 @@ extern const uint32_t kMinMqttRemoteRetryTimeoutMs;
 extern const uint32_t kMaxMqttRemoteRetryTimeoutMs;
 extern const uint32_t kMinTxPollDefaultIntervalMs;
 extern const uint32_t kMaxTxPollDefaultIntervalMs;
-extern const uint32_t kMinRxPushIntervalMs;
-extern const uint32_t kMaxRxPushIntervalMs;
 extern const size_t kMinDeploymentKeyLen;
 extern const long kMinFrequencyHz;
 extern const long kMaxFrequencyHz;

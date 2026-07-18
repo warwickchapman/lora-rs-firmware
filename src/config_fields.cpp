@@ -22,8 +22,6 @@ const ConfigField kConfigFields[] = {
     {"mqtt_remote_retry_timeout_ms", ConfigFieldClass::RetainedConfig},
     {"tx_mqtt_remote_polling_enabled", ConfigFieldClass::RetainedConfig},
     {"tx_mqtt_remote_default_poll_interval_ms", ConfigFieldClass::RetainedConfig},
-    {"rx_push_on_change_enabled", ConfigFieldClass::RetainedConfig},
-    {"rx_push_min_interval_ms", ConfigFieldClass::RetainedConfig},
     {"input_control_paired_lora_enabled", ConfigFieldClass::RetainedConfig},
     {"tx_command_retry_timeout_ms", ConfigFieldClass::RetainedConfig},
     {"rx_failsafe_mode", ConfigFieldClass::RetainedConfig},

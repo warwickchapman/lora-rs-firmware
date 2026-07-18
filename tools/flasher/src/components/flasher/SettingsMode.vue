@@ -100,8 +100,6 @@ export interface LocalSerialAdminConfig {
   mqtt_remote_retry_timeout_ms?: number;
   tx_mqtt_remote_polling_enabled?: boolean;
   tx_mqtt_remote_default_poll_interval_ms?: number;
-  rx_push_on_change_enabled?: boolean;
-  rx_push_min_interval_ms?: number;
   input_control_paired_lora_enabled?: boolean;
   tx_command_retry_timeout_ms?: number;
   rx_failsafe_mode?: string;

@@ -14,7 +14,7 @@ commits: (uncommitted)
 
 Two fixes to prevent Fleet UI from getting permanently stuck after a scan or serial timeout:
 
-1. **Firmware scan watchdog**: A 60-second hard cap on `fleet_scan_active_` in `tickFleetScan()`. If a scan runs longer than 60 seconds, it auto-cancels and logs `fleet_scan_timeout`. This prevents the scan from suppressing normal peer maintenance indefinitely.
+1. **Firmware scan watchdog**: A 60-second hard cap on `fleet_scan_active_` in `tickFleetScan()`. If a scan runs longer than 60 seconds, it auto-cancels and logs `fleet_scan_timeout`. This prevents scan state from suppressing other low-priority observability work indefinitely.
 
 2. **Background timeout recovery**: When a background `lora_inventory_status` command times out on the serial link, the Flasher suppresses the error banner and keeps last good rows visible. Scan state is only cleared if the scan has been active for longer than the firmware watchdog window plus grace (75s), preventing a single missed serial response from hiding a genuinely active scan.
 
@@ -22,7 +22,7 @@ Two fixes to prevent Fleet UI from getting permanently stuck after a scan or ser
 
 ### Firmware side
 
-`src/state_machine.cpp` — `tickFleetScan()` now checks `now - fleet_scan_started_ms_` at the top of each tick. If the elapsed time exceeds 60 seconds, the scan is cancelled and `fleet_scan_active_` is cleared. This re-enables `tickPeerMaintenance()` which was suppressed while the scan was active.
+`src/state_machine.cpp` — `tickFleetScan()` now checks `now - fleet_scan_started_ms_` at the top of each tick. If the elapsed time exceeds 60 seconds, the scan is cancelled and `fleet_scan_active_` is cleared. The old perpetual `tickPeerMaintenance()` sweep has since been removed; normal operational state now comes from relay ACKs, immediate input pushes, and periodic sensor pushes from remotes.
 
 ### Flasher side
 
@@ -34,15 +34,15 @@ Two fixes to prevent Fleet UI from getting permanently stuck after a scan or ser
 
 ```
 Firmware scan starts → fleet_scan_active_ = true
-  → tickPeerMaintenance() suppressed
+  → lower-priority observability is deferred
   → tickFleetScan() probes each address
   → scan completes → fleet_scan_active_ = false
-  → tickPeerMaintenance() resumes
+  → cache polling may resume reading the gateway snapshot
 
 If scan runs > 60s:
   → watchdog cancels scan
   → fleet_scan_active_ = false
-  → maintenance resumes
+  → cache polling may resume reading the gateway snapshot
 
 If lora_inventory_status times out on serial:
   → Flasher catches timeout error
@@ -68,7 +68,7 @@ If lora_inventory_status times out on serial:
 
 ### Manual verification steps (per Colin's brief)
 
-1. **10 configured peers, heartbeat 60s**: Confirm one peer maintenance update roughly every 6s
+1. **12 configured peers, heartbeat 60s**: Confirm no perpetual gateway-owned maintenance sweep runs when no explicit Fleet/Monitor scan or diagnostic request is active
 2. **Start scan, let it complete**: UI must leave scan mode and resume cache polling
 3. **Force lora_inventory_status timeout**: UI must not stay permanently in "Stop scan"
 4. **OTA follow-up active**: Fleet refresh must not show persistent misleading timeout banners

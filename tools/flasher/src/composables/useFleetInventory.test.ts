@@ -110,6 +110,21 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].relay_state).toBe(1);
   });
 
+  it('clears stale serial relay state when inventory no longer reports it', () => {
+    const fleet = createFleet();
+
+    fleet.mergeInventoryRows([
+      { address: 1, chip_id: '00000001', relay_state: 0, age_ms: 1000 }
+    ]);
+    expect(fleet.loraInventory.value[0].relay_state).toBe(0);
+
+    fleet.mergeInventoryRows([
+      { address: 1, chip_id: '00000001', age_ms: 2000 }
+    ]);
+
+    expect(fleet.loraInventory.value[0].relay_state).toBeUndefined();
+  });
+
   it('rowFreshness correctly maps live, stale, offline, and unknown states', () => {
     const fleet = createFleet();
 
