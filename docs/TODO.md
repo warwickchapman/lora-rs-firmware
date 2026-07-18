@@ -21,6 +21,10 @@
 
 ## Sensors Roadmap (ESP8266 Track)
 - Add sensor type selection for dry-contact input semantics (`float switch`, `start/stop`, generic dry contact).
+- Test real float switch input behavior for contact bounce, cable noise, and tank/slosh chatter, including LoRa/MQTT status reporting and any relay side effects.
+- Add configurable float-switch confirmation/dwell delay separate from the existing fast electrical debounce used for paired dry-contact control.
+- Treat long values such as `5 minutes` as application-level state confirmation, not contact debounce; keep paired/start-stop dry-contact control latency-sensitive.
+- Suggested config surface: `float_switch_confirm_delay_s` or `sensor_digital0_confirm_delay_s`, with sane defaults and an upper bound around `300 s` for slow tank installations.
 - Add tank calibration UI and per-site alarm/status thresholds.
 - Define flow sensor model and units.
 - Decide whether future analog sensors should use `sensor_analog0` or additional maintenance telemetry pages.
