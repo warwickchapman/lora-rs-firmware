@@ -1,8 +1,55 @@
 #include "runtime_utils.h"
 
+#include <cstdlib>
 #include <cstring>
 
+#include "config_store.h"
+
 namespace runtime_utils {
+
+namespace {
+
+bool csvContainsAddress(const char *raw, uint8_t src) {
+  if (raw == nullptr) return false;
+  const char *cursor = raw;
+  while (*cursor != '\0') {
+    while (*cursor == ',' || *cursor == ' ' || *cursor == '\t' ||
+           *cursor == '\r' || *cursor == '\n') {
+      ++cursor;
+    }
+    if (*cursor == '\0') break;
+
+    char *tail = nullptr;
+    const long parsed = strtol(cursor, &tail, 0);
+    if (tail != cursor) {
+      while (*tail == ' ' || *tail == '\t' || *tail == '\r' || *tail == '\n') {
+        ++tail;
+      }
+      if ((*tail == ',' || *tail == '\0') && parsed > 0 && parsed < 255 &&
+          static_cast<uint8_t>(parsed) == src) {
+        return true;
+      }
+    }
+
+    while (*cursor != '\0' && *cursor != ',') {
+      ++cursor;
+    }
+    if (*cursor == ',') ++cursor;
+  }
+  return false;
+}
+
+bool fixedListContainsAddress(const uint8_t *values, uint8_t count,
+                              uint8_t src) {
+  if (values == nullptr || src == 0 || src == 255) return false;
+  if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
+  for (uint8_t i = 0; i < count; ++i) {
+    if (values[i] == src) return true;
+  }
+  return false;
+}
+
+}  // namespace
 
 #if !defined(UNIT_TEST)
 bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleTx) {
@@ -63,6 +110,17 @@ uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
   if (hasControllerAddress) return controllerAddress;
   if (hasLegacyRemoteAddress) return legacyRemoteAddress;
   return kGatewayAddress;
+}
+
+bool isAuthorizedMqttController(bool roleTx, uint8_t controllerAddress,
+                                const Settings *settings, uint8_t src) {
+  if (settings == nullptr || src == 0 || src == 255) return false;
+  if (!roleTx && src == controllerAddress) return true;
+  if (fixedListContainsAddress(settings->allowed_controller_addresses,
+                               settings->allowed_controller_count, src)) {
+    return true;
+  }
+  return csvContainsAddress(settings->mqtt_controller_addresses.c_str(), src);
 }
 
 int16_t decodeMaintenanceIdentityWifiRssi(uint8_t rawRssi, bool wifiConnected) {
