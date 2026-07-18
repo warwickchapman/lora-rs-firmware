@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-18
+
 ### Firmware Changes
 - Group-control traces now preserve and identify superseded commands, and every broadcast log records both its logical command ID and actual transport counter. A new gateway input state explicitly supersedes an unfinished command while preserving the gateway relay's last aggregate-confirmed state.
 - Paired group control now sends two replay-identical broadcast copies before its ACK window. Remote ACKs use an explicit 250 ms post-receipt lead, and a remote reserves LoRa airtime for that ACK by deferring one coalesced maintenance or poll response plus all pending low-priority pages/pushes. Direct recovery `Change` retries remain immediate-ACK, one-peer control traffic.
