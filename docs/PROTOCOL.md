@@ -85,11 +85,8 @@ Otherwise packet is dropped and logged.
   multi-target group command: first broadcast to destination `255`, then
   non-actuating `PollRequest` confirmations for missing ACKs.
 - When paired LoRa input control is enabled, periodic heartbeat sync uses the
-  same multi-target group command path rather than the legacy single
-  `remote_address`.
-- When paired LoRa input control is disabled, TX sends periodic `Heartbeat` to
-  the configured `remote_address`. Plain heartbeats carry `relay_state_` for
-  alive/link status but do not control the remote relay.
+  same multi-target group command path. Gateway targets always come from its
+  known-peer registry; an empty registry sends no fleet traffic.
 - RX applies relay state from `Change`, `Mqtt`, and `Heartbeat` only when the
   `kFlagPairedInputSlave` flag is set (input-control heartbeats).
 - RX sends `Ack` for `Change` and `Heartbeat`.

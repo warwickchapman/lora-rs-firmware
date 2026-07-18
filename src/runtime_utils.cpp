@@ -55,14 +55,20 @@ const char *wifiStatusText(wl_status_t st) {
   }
 }
 
+uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
+                                 uint8_t controllerAddress,
+                                 bool hasLegacyRemoteAddress,
+                                 uint8_t legacyRemoteAddress) {
+  if (roleTx) return 0;
+  if (hasControllerAddress) return controllerAddress;
+  if (hasLegacyRemoteAddress) return legacyRemoteAddress;
+  return kGatewayAddress;
+}
+
 uint8_t resolveGatewayTargets(
-    bool isPairedMode,
     uint8_t localAddress,
     uint8_t knownPeerCount,
     const uint8_t *knownPeerAddresses,
-    uint8_t pairedTargetCount,
-    const uint8_t *pairedTargetAddresses,
-    uint8_t remoteAddress,
     uint8_t *outTargets,
     uint8_t maxTargets
 ) {
@@ -79,25 +85,9 @@ uint8_t resolveGatewayTargets(
     }
   };
 
-  if (isPairedMode) {
-    if (knownPeerCount > 0 && knownPeerAddresses != nullptr) {
-      for (size_t i = 0; i < knownPeerCount && i < maxTargets; ++i) {
-        addTarget(knownPeerAddresses[i]);
-      }
-    }
-  } else {
-    if (knownPeerCount > 0 && knownPeerAddresses != nullptr) {
-      for (size_t i = 0; i < knownPeerCount && i < maxTargets; ++i) {
-        addTarget(knownPeerAddresses[i]);
-      }
-    }
-    if (targetCount == 0 && pairedTargetCount > 0 && pairedTargetAddresses != nullptr) {
-      for (size_t i = 0; i < pairedTargetCount && i < maxTargets; ++i) {
-        addTarget(pairedTargetAddresses[i]);
-      }
-    }
-    if (targetCount == 0 && remoteAddress != 0) {
-      addTarget(remoteAddress);
+  if (knownPeerCount > 0 && knownPeerAddresses != nullptr) {
+    for (size_t i = 0; i < knownPeerCount && i < maxTargets; ++i) {
+      addTarget(knownPeerAddresses[i]);
     }
   }
 

@@ -14,7 +14,7 @@ pub struct DeviceInfo {
     pub mac: String,
     pub password: String,
     pub local_addr: u8,
-    pub remote_addr: u8,
+    pub factory_peer_addr: u8,
     pub ssid: String,
 }
 
@@ -75,13 +75,13 @@ pub async fn get_device_info(
 }
 
 fn derive_device_info(chip_id: &str, mac: &str) -> DeviceInfo {
-    let (local_addr, remote_addr) = derive_addresses(chip_id);
+    let (local_addr, factory_peer_addr) = derive_addresses(chip_id);
     DeviceInfo {
         chip_id: chip_id.to_string(),
         mac: mac.to_string(),
         password: derive_password(chip_id),
         local_addr,
-        remote_addr,
+        factory_peer_addr,
         ssid: format!("lrs-{}", chip_id),
     }
 }
@@ -171,9 +171,9 @@ fn derive_password(chip_hex: &str) -> String {
 fn derive_addresses(chip_hex: &str) -> (u8, u8) {
     let chip = u32::from_str_radix(chip_hex, 16).unwrap_or(0);
     let local_addr = ((chip & 0xFF) % 254 + 1) as u8;
-    let mut remote_addr = (((chip >> 8) & 0xFF) % 254 + 1) as u8;
-    if remote_addr == local_addr {
-        remote_addr = (local_addr % 254) + 1;
+    let mut factory_peer_addr = (((chip >> 8) & 0xFF) % 254 + 1) as u8;
+    if factory_peer_addr == local_addr {
+        factory_peer_addr = (local_addr % 254) + 1;
     }
-    (local_addr, remote_addr)
+    (local_addr, factory_peer_addr)
 }

@@ -48,9 +48,7 @@ void writeSettingsJsonObject(JsonObject config, ConfigStore &store,
   config["role"] = cfg.role_tx ? "gateway" : "remote";
   config["role_tx"] = cfg.role_tx;
   config["local_address"] = cfg.local_address;
-  config["remote_address"] = cfg.remote_address;
-  writeAddressArrayImpl(config, "paired_target_addresses", cfg.paired_target_addresses,
-                        cfg.paired_target_count, Settings::kAddressListCap);
+  if (!cfg.role_tx) config["controller_address"] = cfg.controller_address;
   writeAddressArrayImpl(config, "allowed_controller_addresses",
                         cfg.allowed_controller_addresses,
                         cfg.allowed_controller_count, Settings::kAddressListCap);

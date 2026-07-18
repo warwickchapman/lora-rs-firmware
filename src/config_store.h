@@ -13,9 +13,8 @@ struct Settings {
 
   bool role_tx;
   uint8_t local_address;
-  uint8_t remote_address;
-  uint8_t paired_target_count;
-  uint8_t paired_target_addresses[kAddressListCap];
+  // Remote-only: the gateway/controller that receives pushes and controls it.
+  uint8_t controller_address;
   uint8_t allowed_controller_count;
   uint8_t allowed_controller_addresses[kAddressListCap];
   uint8_t known_peer_count;

@@ -113,7 +113,7 @@ function formatLabel(key: string): string {
   const mapping: Record<string, string> = {
     'chip_id': 'Chip ID',
     'local_addr': 'Local addr',
-    'remote_addr': 'Remote addr',
+    'factory_peer_addr': 'Factory peer reference',
     'ssid': 'Soft AP SSID',
     'mac': 'MAC',
     'password': 'Factory password'

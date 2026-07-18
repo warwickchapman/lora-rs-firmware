@@ -72,6 +72,18 @@ void test_wifi_status_text_unknown_value() {
   TEST_ASSERT_EQUAL_STRING("unknown", runtime_utils::wifiStatusText(12345));
 }
 
+void test_schema_four_remote_migrates_to_controller_address() {
+  TEST_ASSERT_EQUAL_UINT8(7, runtime_utils::migrateControllerAddress(
+      false, false, 0, true, 7));
+  TEST_ASSERT_EQUAL_UINT8(9, runtime_utils::migrateControllerAddress(
+      false, true, 9, true, 7));
+}
+
+void test_schema_four_gateway_drops_legacy_remote_address() {
+  TEST_ASSERT_EQUAL_UINT8(0, runtime_utils::migrateControllerAddress(
+      true, false, 0, true, 7));
+}
+
 void test_mqtt_config_write_authorization_boundary() {
   const ConfigField *retained = findConfigField("mqtt_control_enabled");
   TEST_ASSERT_NOT_NULL(retained);
@@ -96,16 +108,10 @@ void test_mqtt_config_write_authorization_boundary() {
 void test_resolve_gateway_targets_paired_empty() {
   uint8_t targets[12]{};
   uint8_t known_peers[12] = {0};
-  uint8_t paired_targets[12] = {1};
-  
   uint8_t count = runtime_utils::resolveGatewayTargets(
-      true, // isPairedMode
       runtime_utils::kGatewayAddress,  // localAddress
       0,    // knownPeerCount
       known_peers,
-      1,    // pairedTargetCount
-      paired_targets,
-      1,    // remoteAddress
       targets,
       12
   );
@@ -116,16 +122,10 @@ void test_resolve_gateway_targets_paired_empty() {
 void test_resolve_gateway_targets_paired_with_peers() {
   uint8_t targets[12]{};
   uint8_t known_peers[12] = {2, 3};
-  uint8_t paired_targets[12] = {1};
-  
   uint8_t count = runtime_utils::resolveGatewayTargets(
-      true, // isPairedMode
       runtime_utils::kGatewayAddress,  // localAddress
       2,    // knownPeerCount
       known_peers,
-      1,    // pairedTargetCount
-      paired_targets,
-      1,    // remoteAddress
       targets,
       12
   );
@@ -135,43 +135,18 @@ void test_resolve_gateway_targets_paired_with_peers() {
   TEST_ASSERT_EQUAL_UINT8(3, targets[1]);
 }
 
-void test_resolve_gateway_targets_standalone_fallback() {
+void test_resolve_gateway_targets_has_no_legacy_fallback() {
   uint8_t targets[12]{};
   uint8_t known_peers[12] = {0};
-  uint8_t paired_targets[12] = {1};
-  
   uint8_t count = runtime_utils::resolveGatewayTargets(
-      false, // isPairedMode
       runtime_utils::kGatewayAddress,   // localAddress
       0,     // knownPeerCount
       known_peers,
-      1,     // pairedTargetCount
-      paired_targets,
-      1,     // remoteAddress
       targets,
       12
   );
   
-  TEST_ASSERT_EQUAL_UINT8(1, count);
-  TEST_ASSERT_EQUAL_UINT8(1, targets[0]);
-
-  // Test remote_address fallback
-  uint8_t targets2[12]{};
-  uint8_t paired_targets2[12] = {0};
-  uint8_t count2 = runtime_utils::resolveGatewayTargets(
-      false, // isPairedMode
-      runtime_utils::kGatewayAddress,   // localAddress
-      0,     // knownPeerCount
-      known_peers,
-      0,     // pairedTargetCount
-      paired_targets2,
-      5,     // remoteAddress
-      targets2,
-      12
-  );
-  
-  TEST_ASSERT_EQUAL_UINT8(1, count2);
-  TEST_ASSERT_EQUAL_UINT8(5, targets2[0]);
+  TEST_ASSERT_EQUAL_UINT8(0, count);
 }
 
 void test_resolve_gateway_targets_filters_local_address() {
@@ -179,13 +154,9 @@ void test_resolve_gateway_targets_filters_local_address() {
   uint8_t known_peers[12] = {2, runtime_utils::kGatewayAddress, 3};
   
   uint8_t count = runtime_utils::resolveGatewayTargets(
-      true, // isPairedMode
       runtime_utils::kGatewayAddress,  // localAddress (gateway address)
       3,    // knownPeerCount
       known_peers,
-      0,
-      nullptr,
-      0,
       targets,
       12
   );
@@ -201,9 +172,6 @@ bool simulateIsConfiguredOperationalPeer(
     uint8_t localAddress,
     uint8_t knownPeerCount,
     const uint8_t *knownPeerAddresses,
-    uint8_t pairedTargetCount,
-    const uint8_t *pairedTargetAddresses,
-    uint8_t remoteAddress,
     uint8_t addressToCheck
 ) {
   if (!roleTx || strcmp(mode, "paired") != 0) return false;
@@ -211,13 +179,9 @@ bool simulateIsConfiguredOperationalPeer(
 
   uint8_t targets[12]{};
   uint8_t targetCount = runtime_utils::resolveGatewayTargets(
-      true, // isPairedMode
       localAddress,
       knownPeerCount,
       knownPeerAddresses,
-      pairedTargetCount,
-      pairedTargetAddresses,
-      remoteAddress,
       targets,
       12
   );
@@ -231,14 +195,14 @@ bool simulateIsConfiguredOperationalPeer(
 void test_operational_peer_admitted_when_configured() {
   uint8_t known_peers[12] = {5, 6};
   TEST_ASSERT_TRUE(simulateIsConfiguredOperationalPeer(
-      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 0, nullptr, 0, 5
+      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 5
   ));
 }
 
 void test_operational_peer_rejected_when_unconfigured() {
   uint8_t known_peers[12] = {5, 6};
   TEST_ASSERT_FALSE(simulateIsConfiguredOperationalPeer(
-      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 0, nullptr, 0, 7
+      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 7
   ));
 }
 
@@ -246,14 +210,14 @@ void test_operational_peer_rejected_when_out_of_range() {
   uint8_t known_peers[12] = {5, 16};
   // Address 16 is in configured known peers list, but exceeds limit 12, so must be rejected
   TEST_ASSERT_FALSE(simulateIsConfiguredOperationalPeer(
-      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 0, nullptr, 0, 16
+      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 16
   ));
 }
 
 void test_operational_peer_rejected_when_empty_fleet() {
   uint8_t known_peers[12] = {0};
   TEST_ASSERT_FALSE(simulateIsConfiguredOperationalPeer(
-      true, "paired", runtime_utils::kGatewayAddress, 0, known_peers, 0, nullptr, 0, 5
+      true, "paired", runtime_utils::kGatewayAddress, 0, known_peers, 5
   ));
 }
 
@@ -263,9 +227,6 @@ int simulateLoraInventoryStatusDevices(
     uint8_t localAddress,
     uint8_t knownPeerCount,
     const uint8_t *knownPeerAddresses,
-    uint8_t pairedTargetCount,
-    const uint8_t *pairedTargetAddresses,
-    uint8_t remoteAddress,
     uint8_t cachedPeerCount,
     const uint8_t *cachedPeerAddresses,
     uint8_t *outDevices,
@@ -275,15 +236,10 @@ int simulateLoraInventoryStatusDevices(
   uint8_t targetCount = 0;
 
   if (roleTx) {
-    bool isPairedMode = (strcmp(mode, "paired") == 0);
     targetCount = runtime_utils::resolveGatewayTargets(
-        isPairedMode,
         localAddress,
         knownPeerCount,
         knownPeerAddresses,
-        pairedTargetCount,
-        pairedTargetAddresses,
-        remoteAddress,
         targets,
         12
     );
@@ -316,7 +272,7 @@ void test_inventory_status_excludes_unconfigured_cached_peers() {
 
   uint8_t devices[12]{};
   int deviceCount = simulateLoraInventoryStatusDevices(
-      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers, 0, nullptr, 0,
+      true, "paired", runtime_utils::kGatewayAddress, 2, known_peers,
       3, cached_peers, devices, 12
   );
 
@@ -690,10 +646,12 @@ int main(int argc, char **argv) {
   RUN_TEST(test_invalid_inputs_are_rejected_without_changing_output);
   RUN_TEST(test_wifi_status_text_known_values);
   RUN_TEST(test_wifi_status_text_unknown_value);
+  RUN_TEST(test_schema_four_remote_migrates_to_controller_address);
+  RUN_TEST(test_schema_four_gateway_drops_legacy_remote_address);
   RUN_TEST(test_mqtt_config_write_authorization_boundary);
   RUN_TEST(test_resolve_gateway_targets_paired_empty);
   RUN_TEST(test_resolve_gateway_targets_paired_with_peers);
-  RUN_TEST(test_resolve_gateway_targets_standalone_fallback);
+  RUN_TEST(test_resolve_gateway_targets_has_no_legacy_fallback);
   RUN_TEST(test_resolve_gateway_targets_filters_local_address);
   RUN_TEST(test_operational_peer_admitted_when_configured);
   RUN_TEST(test_operational_peer_rejected_when_unconfigured);

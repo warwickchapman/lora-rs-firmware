@@ -444,7 +444,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
 void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.role_tx = cfg.role_tx;
   runtime_.local_address = cfg.local_address;
-  runtime_.remote_address = cfg.remote_address;
+  runtime_.controller_address = cfg.controller_address;
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
   runtime_.heartbeat_enabled = cfg.heartbeat_enabled;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
@@ -601,13 +601,9 @@ bool NodeStateMachine::isConfiguredOperationalPeer(uint8_t address) const {
 
   uint8_t targets[Settings::kAddressListCap]{};
   uint8_t targetCount = runtime_utils::resolveGatewayTargets(
-    true,
     runtime_.local_address,
     settings_->known_peer_count,
     settings_->known_peer_addresses,
-    settings_->paired_target_count,
-    settings_->paired_target_addresses,
-    settings_->remote_address,
     targets,
     Settings::kAddressListCap
   );
@@ -653,16 +649,10 @@ bool NodeStateMachine::isPairedTargetAddress(uint8_t addr) const {
   if (addr == 0 || addr == 255 || settings_ == nullptr) return false;
 
   uint8_t targets[Settings::kAddressListCap]{};
-  const bool isPairedMode = (settings_->mode == "paired");
-
   uint8_t targetCount = runtime_utils::resolveGatewayTargets(
-      isPairedMode,
       runtime_.local_address,
       settings_->known_peer_count,
       settings_->known_peer_addresses,
-      settings_->paired_target_count,
-      settings_->paired_target_addresses,
-      settings_->remote_address,
       targets,
       Settings::kAddressListCap
   );
@@ -682,16 +672,10 @@ bool NodeStateMachine::buildTxGroupTargets() {
 
   if (settings_ == nullptr) return false;
 
-  const bool isPairedMode = (settings_->mode == "paired");
-
   tx_group_target_count_ = runtime_utils::resolveGatewayTargets(
-      isPairedMode,
       runtime_.local_address,
       settings_->known_peer_count,
       settings_->known_peer_addresses,
-      settings_->paired_target_count,
-      settings_->paired_target_addresses,
-      settings_->remote_address,
       tx_group_targets,
       Settings::kAddressListCap
   );
@@ -905,13 +889,6 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint
 }
 
 uint8_t NodeStateMachine::pairedAckRankForLocalAddress() const {
-  if (settings_ != nullptr) {
-    uint8_t count = settings_->paired_target_count;
-    if (count > Settings::kAddressListCap) count = Settings::kAddressListCap;
-    for (uint8_t i = 0; i < count; ++i) {
-      if (settings_->paired_target_addresses[i] == runtime_.local_address) return i;
-    }
-  }
   if (runtime_.local_address > 0) return static_cast<uint8_t>(runtime_.local_address - 1);
   return 0;
 }
@@ -1684,10 +1661,7 @@ bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
 
 bool NodeStateMachine::isAuthorizedPairedSource(uint8_t src) const {
   if (settings_ == nullptr) return false;
-  if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
-    return true;
-  }
-  return src == runtime_.remote_address;
+  return !runtime_.role_tx && src == runtime_.controller_address;
 }
 
 bool NodeStateMachine::isDefaultFleetKey() const {
@@ -2077,16 +2051,10 @@ void NodeStateMachine::prePopulateGatewayPeerCache() {
   if (!runtime_.role_tx || settings_ == nullptr) return;
 
   uint8_t targets[Settings::kAddressListCap]{};
-  const bool isPairedMode = (settings_->mode == "paired");
-
   uint8_t targetCount = runtime_utils::resolveGatewayTargets(
-    isPairedMode,
     runtime_.local_address,
     settings_->known_peer_count,
     settings_->known_peer_addresses,
-    settings_->paired_target_count,
-    settings_->paired_target_addresses,
-    settings_->remote_address,
     targets,
     Settings::kAddressListCap
   );
@@ -2153,15 +2121,6 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
     used[runtime_.local_address] = true;
   }
   if (settings_ != nullptr) {
-    for (size_t i = 0; i < settings_->paired_target_count && i < Settings::kAddressListCap; ++i) {
-      const uint8_t addr = settings_->paired_target_addresses[i];
-      if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
-      if (addressBelongsToCurrentProvisioningDevice(addr)) continue;
-      if (getSettingsChipIdForAddress(addr) == 0 && hasUnassignedProvisioningDevices()) {
-        continue;
-      }
-      used[addr] = true;
-    }
     for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
       const uint8_t addr = settings_->known_peer_addresses[i];
       if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
@@ -2399,13 +2358,13 @@ bool NodeStateMachine::localOperationalSensorsEnabled() const {
 }
 
 bool NodeStateMachine::sendInputStatePush(uint32_t now) {
-  if (runtime_.remote_address == 0 || runtime_.remote_address == 255) return false;
+  if (runtime_.controller_address == 0 || runtime_.controller_address == 255) return false;
   if (!radioTxBudgetAvailable()) return false;
 
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
   if (!radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_,
-                    runtime_.local_address, runtime_.remote_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF,
+                    runtime_.local_address, runtime_.controller_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF,
                     unixTimeS)) {
     return false;
   }
@@ -2419,14 +2378,14 @@ bool NodeStateMachine::sendInputStatePush(uint32_t now) {
 
 bool NodeStateMachine::sendSensorStatePush(uint32_t now) {
   if (runtime_.role_tx) return false;
-  if (runtime_.remote_address == 0 || runtime_.remote_address == 255) return false;
+  if (runtime_.controller_address == 0 || runtime_.controller_address == 255) return false;
   if (!localOperationalSensorsEnabled()) return false;
   if (maintenance_version_pending_ || maintenance_sensor_pending_ || maintenance_debug_pending_) return false;
   if (static_cast<int32_t>(now - rx_next_sensor_push_ms_) < 0) return false;
-  if (!sendMaintenanceStatus(runtime_.remote_address, false)) return false;
+  if (!sendMaintenanceStatus(runtime_.controller_address, false)) return false;
 
   rx_next_sensor_push_ms_ = now + kOperationalSensorPushIntervalMs;
-  lrslog::event("rx_sensor_push", 0, last_counter_, runtime_.remote_address);
+  lrslog::event("rx_sensor_push", 0, last_counter_, runtime_.controller_address);
   return true;
 }
 
@@ -2995,20 +2954,6 @@ void NodeStateMachine::tickTransmitter() {
       } else {
         startTxGroupCommand(input_state_, input_state_, "tx_group_heartbeat_sync");
       }
-    } else {
-      if (radioTxBudgetAvailable()) {
-        last_counter_++;
-        const uint32_t unixTimeS = currentUnixTimeS(now);
-        if (radio_->send(MessageType::Heartbeat, relay_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
-                         runtime_.remote_address,
-                         localTempCodeToSend(), 0, 0xFF, 0xFFFF, unixTimeS)) {
-          last_tx_ms_ = now;
-          markRadioTxSentThisTick();
-          {
-            lrslog::event("tx_heartbeat", 0, last_counter_, input_state_);
-          }
-        }
-      }
     }
   }
 
@@ -3142,9 +3087,6 @@ void NodeStateMachine::tickReceive() {
       // Same-key remote sensor config.
     } else if (msg.type == MessageType::FleetKeyControl) {
       // Same-key targeted Fleet Key Control.
-    } else if ((msg.type == MessageType::Change || msg.type == MessageType::Heartbeat) && msg.src == runtime_utils::kGatewayAddress) {
-      // Same-key gateway fleet control remains valid even if an older or
-      // manually recovered receiver has stale controller-pairing metadata.
     } else if (!isAuthorizedPairedSource(msg.src)) {
       lrslog::event("rx_filtered_source", msg.rssi, msg.counter, msg.relay_state);
       return;

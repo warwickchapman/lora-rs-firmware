@@ -18,7 +18,7 @@ Firmware USB serial admin protocol:
 - The selected USB-connected device can be configured as the TX/gateway with `configure_gateway`.
 - The gateway can then run LoRa discovery/provisioning through `start_discovery`, `provisioning_status`, `provision_all`, and `cancel_provisioning`.
 - `max_remotes` is scan capacity only. `configure_gateway` must not leave speculative runtime targets behind.
-- After provisioning, Flasher should call `set_gateway_targets` with verified remote addresses to add to the gateway's paired/known target list. The command merges by default so follow-up batches cannot erase existing remotes; callers must pass `replace: true` only for an intentional full target-list replacement.
+- After provisioning, Flasher should call `set_gateway_targets` with verified remote addresses to update the gateway's sole `known_peer_addresses` list. The command merges by default so follow-up batches cannot erase existing remotes; callers must pass `replace: true` only for an intentional full fleet-list replacement.
 - Flasher can scan WiFi from the selected USB gateway with `wifi_scan`, save the gateway STA credentials with `configure_wifi`, and send the same credentials to remotes over LoRa with `provision_fleet_wifi`.
 - Flasher can call `identify` to flash the selected USB device LED with the same 3 fast flashes, pause, 3 fast flashes pattern shown in the desktop UI.
 - Mutating commands require the current admin password. If that password is lost, use physical erase-and-reflash recovery rather than resetting the password in place.
@@ -44,11 +44,17 @@ A CSV row with:
 - `region_env`
 - `date`
 
+`factory_remote_address` is factory/sticker reference metadata only. It is not
+copied into deployed runtime configuration and is never a gateway fleet target.
+
 ## Current Default Policy
 - Factory role: TX
 - Addresses:
-  - TX/GW defaults to local `254` with first remote target `1`
-  - RX units are assigned from `1` upwards during fleet provisioning (`1..32` address range; 12 remotes per ESP8266 gateway currently)
+  - Gateway defaults to local `254` with an empty `known_peer_addresses` list.
+  - Each remote receives an allocated fleet address during provisioning and
+    stores `controller_address=254` (or the provisioning gateway's address).
+  - Remote addresses are allocated from `1` upwards (`1..32` address range;
+    12 remotes per ESP8266 gateway currently).
 - AP/admin password: deterministic by chip ID + product secret
 - AP SSID: `lrs-<chipid>` (role-independent so TX/RX changes do not force AP SSID changes)
 - Deployment key: generated as readable three-word key per batch run unless explicitly provided
@@ -63,15 +69,16 @@ Notes:
 - `input_control_paired_lora_enabled` is valid only for paired TX.
 - Current LoRa provisioning apply path configures `mode=paired` with role `transmitter` or `receiver`.
 
-## Pair Provisioning (Flasher)
+## Fleet Provisioning (Flasher)
 For a TX/RX pair:
 1. Open Flasher > Provision.
 2. Select the USB gateway/TX device and provision it with the fleet key, gateway role, WiFi, and local address.
 3. Scan for powered factory remotes and provision selected remotes.
-4. Flasher assigns inverse addressing:
-- TX local=`A`, remote=`B`
-- RX local=`B`, remote=`A`
-5. Validate ACK behavior and relay mirror.
+4. Flasher assigns each remote a fleet address and writes its
+   `controller_address` to the gateway address.
+5. The gateway records verified remotes in `known_peer_addresses`; no
+   single-primary-remote setting exists on the gateway.
+6. Validate ACK behavior and relay mirror.
 
 ## Fleet Provisioning Over Serial Admin
 Flasher uses the selected USB TX/gateway and `LRS:` serial admin commands:
@@ -84,11 +91,11 @@ Flasher uses the selected USB TX/gateway and `LRS:` serial admin commands:
 
 Discovery is explicit and bounded to the supported ESP8266 remote count. The gateway owns peer truth; Flasher reads serial-admin status/cache data and triggers LoRa probes only when the operator asks.
 
-## Planned Improvement
-Add explicit pair mode in factory script:
-- Scan/flash first unit -> assign TX + address pair.
-- Scan/flash second unit -> assign RX + inverse addresses.
-- Output two linked sticker entries with same pair ID.
+## Factory Metadata Note
+Factory scripts may derive a reference peer address for stickers, but deployed
+pairing is commissioned later: gateway fleet membership belongs only in
+`known_peer_addresses`, and a remote's return/control path belongs only in
+`controller_address`.
 
 ## Briefing Template for New Developer/Codex
 When handing over, include:

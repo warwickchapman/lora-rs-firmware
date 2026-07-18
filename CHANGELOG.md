@@ -1,5 +1,7 @@
 # Changelog
 
+- Cleaned paired addressing before release: remotes now store a single `controller_address`; gateways use only `known_peer_addresses` for fleet targeting. Removed the ambiguous `remote_address` and duplicate paired-target configuration surfaces.
+
 All notable changes to this pre-release project are documented here in current operator-facing terms.
 
 ## [Unreleased]

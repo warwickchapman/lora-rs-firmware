@@ -366,7 +366,7 @@ void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
   runtime_.role_tx = cfg.role_tx;
   runtime_.local_address = cfg.local_address;
-  runtime_.remote_address = cfg.remote_address;
+  runtime_.controller_address = cfg.controller_address;
   runtime_.mqtt_port = cfg.mqtt_port;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
 }
@@ -1036,7 +1036,7 @@ void MqttBridge::publishDiscovery() {
   doc["chip_id"] = chip_id_hex_;
   doc["role"] = runtime_.role_tx ? "gateway" : "remote";
   doc["addr"] = runtime_.local_address;
-  doc["remote_addr"] = runtime_.remote_address;
+  if (!runtime_.role_tx) doc["controller_addr"] = runtime_.controller_address;
   doc["mac"] = WiFi.macAddress();
   doc["sta_ip"] = WiFi.localIP().toString();
   doc["ap_ip"] = WiFi.softAPIP().toString();

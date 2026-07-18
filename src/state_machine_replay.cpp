@@ -8,7 +8,7 @@ constexpr uint32_t kReplayEntryStaleMs = 15UL * 60UL * 1000UL;
 
 bool NodeStateMachine::isTrustedReplaySource(uint8_t src, bool commissioningTraffic) const {
   if (src == 0 || src == 255) return false;
-  if (src == runtime_.remote_address) return true;
+  if (!runtime_.role_tx && src == runtime_.controller_address) return true;
   if (commissioningTraffic) return true;
   if (peer_manager_.find(src) != nullptr) return true;
   return false;

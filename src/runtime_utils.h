@@ -80,14 +80,17 @@ bool parseRoleTxFromModeRole(const String &mode, const String &role, bool &roleT
 bool parseRoleTxFromModeRole(const char *mode, const char *role, bool &roleTx);
 const char *wifiStatusText(wl_status_t st);
 
+// Config schema 4 used remote_address for both roles. Schema 5 keeps it only
+// as a one-time remote migration input; gateways have no controller address.
+uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
+                                 uint8_t controllerAddress,
+                                 bool hasLegacyRemoteAddress,
+                                 uint8_t legacyRemoteAddress);
+
 uint8_t resolveGatewayTargets(
-    bool isPairedMode,
     uint8_t localAddress,
     uint8_t knownPeerCount,
     const uint8_t *knownPeerAddresses,
-    uint8_t pairedTargetCount,
-    const uint8_t *pairedTargetAddresses,
-    uint8_t remoteAddress,
     uint8_t *outTargets,
     uint8_t maxTargets
 );
@@ -152,4 +155,3 @@ bool isDefaultDeploymentKey(const String &v);
 #endif
 
 } // namespace runtime_utils
-

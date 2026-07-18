@@ -86,8 +86,7 @@ export interface LocalSerialAdminConfig {
   commissioned?: boolean;
   role_tx: boolean;
   local_address: number;
-  remote_address: number;
-  paired_target_addresses?: number[];
+  controller_address?: number;
   allowed_controller_addresses?: number[];
   known_peer_addresses?: number[];
   lora_tx_power?: number;
@@ -230,9 +229,9 @@ const configLocalAddress = computed({
   get: () => config.value?.local_address ?? 1,
   set: (val) => { if (config.value) config.value = { ...config.value, local_address: val }; }
 });
-const configRemoteAddress = computed({
-  get: () => config.value?.remote_address ?? 254,
-  set: (val) => { if (config.value) config.value = { ...config.value, remote_address: val }; }
+const configControllerAddress = computed({
+  get: () => config.value?.controller_address ?? 254,
+  set: (val) => { if (config.value) config.value = { ...config.value, controller_address: val }; }
 });
 const configFleetPassphrase = computed({
   get: () => config.value?.fleet_passphrase ?? '',
@@ -580,8 +579,10 @@ function handleManualMqttGatewayInput(val: string) {
             </select>
             <label class="self-center text-right font-semibold text-slate-300">Local addr</label>
             <input v-model.number="configLocalAddress" type="number" min="1" max="254" class="glass-input h-9" />
-            <label class="self-center text-right font-semibold text-slate-300">Remote addr</label>
-            <input v-model.number="configRemoteAddress" type="number" min="1" max="254" class="glass-input h-9" />
+            <template v-if="!config.role_tx">
+              <label class="self-center text-right font-semibold text-slate-300">Controller addr</label>
+              <input v-model.number="configControllerAddress" type="number" min="1" max="254" class="glass-input h-9" />
+            </template>
             <label class="self-center text-right font-semibold text-slate-300">Fleet key</label>
             <div class="flex flex-col gap-1">
               <div class="flex gap-2">

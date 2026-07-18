@@ -244,7 +244,7 @@ class NodeStateMachine {
   struct RuntimeCfg {
     bool role_tx = false;
     uint8_t local_address = 0;
-    uint8_t remote_address = 0;
+    uint8_t controller_address = 0;
     uint32_t heartbeat_ms = 60000;
     bool heartbeat_enabled = true;
     uint32_t ack_timeout_ms = 5000;

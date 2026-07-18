@@ -41,7 +41,7 @@ pub struct MqttGatewayPayload {
     pub uptime_ms: u64,
     pub fw_version: String,
     pub addr: u8,
-    pub remote_addr: u8,
+    pub controller_addr: Option<u8>,
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -19,7 +19,7 @@ constexpr char kPostOtaActionTmpPath[] = "/post_ota_action.tmp";
 constexpr char kPostOtaWifiFastMarkerPath[] = "/post_ota_wifi_fast";
 constexpr size_t kConfigMaxBytes = 8192;
 constexpr size_t kPostOtaActionMaxBytes = 256;
-constexpr uint16_t kConfigSchemaVersion = 4;
+constexpr uint16_t kConfigSchemaVersion = 5;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
@@ -36,8 +36,7 @@ constexpr const char *kAllowedFields[] = {
     "mode",
     "role_tx",
     "local_address",
-    "remote_address",
-    "paired_target_addresses",
+    "controller_address",
     "allowed_controller_addresses",
     "known_peer_addresses",
     "known_peer_chip_ids",
@@ -284,8 +283,14 @@ bool ConfigStore::begin() {
   }
 
   cfg_.local_address = root["local_address"] | 1;
-  cfg_.remote_address = root["remote_address"] | 2;
-  cfg_.paired_target_count = parseAddressList(root["paired_target_addresses"], cfg_.paired_target_addresses, Settings::kAddressListCap);
+  // Schema 4 used remote_address for two incompatible roles.  Retain it only
+  // for this one-time remote migration; gateways deliberately discard it.
+  cfg_.controller_address = runtime_utils::migrateControllerAddress(
+      cfg_.role_tx,
+      root.containsKey("controller_address"),
+      root["controller_address"] | 0,
+      root.containsKey("remote_address"),
+      root["remote_address"] | 0);
   cfg_.allowed_controller_count =
       parseAddressList(root["allowed_controller_addresses"], cfg_.allowed_controller_addresses, Settings::kAddressListCap);
   cfg_.known_peer_count = parseAddressList(root["known_peer_addresses"], cfg_.known_peer_addresses, Settings::kAddressListCap);
@@ -353,23 +358,16 @@ bool ConfigStore::begin() {
   cfg_.admin_password = root["admin_password"] | "";
 
   if (cfg_.local_address < runtime_utils::kMinAddress || cfg_.local_address > runtime_utils::kMaxAddress ||
-      cfg_.remote_address < runtime_utils::kMinAddress || cfg_.remote_address > runtime_utils::kMaxAddress ||
-      cfg_.local_address == cfg_.remote_address) {
+      (!cfg_.role_tx && (cfg_.controller_address < runtime_utils::kMinAddress ||
+                         cfg_.controller_address > runtime_utils::kMaxAddress ||
+                         cfg_.local_address == cfg_.controller_address))) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=address_range action=reset_defaults", kConfigPath);
     ensureProvisionedDefaults();
     return save();
   }
-  if (cfg_.paired_target_count == 0 && cfg_.remote_address >= runtime_utils::kMinAddress && cfg_.remote_address <= runtime_utils::kMaxAddress) {
-    cfg_.paired_target_count = 1;
-    cfg_.paired_target_addresses[0] = cfg_.remote_address;
-  } else if (cfg_.paired_target_count > 0) {
-    cfg_.remote_address = cfg_.paired_target_addresses[0];
-  }
-  if (cfg_.allowed_controller_count == 0 && cfg_.remote_address >= runtime_utils::kMinAddress && cfg_.remote_address <= runtime_utils::kMaxAddress) {
+  if (!cfg_.role_tx && cfg_.allowed_controller_count == 0) {
     cfg_.allowed_controller_count = 1;
-    cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
-  } else if (cfg_.allowed_controller_count > 0) {
-    cfg_.allowed_controller_addresses[0] = cfg_.remote_address;
+    cfg_.allowed_controller_addresses[0] = cfg_.controller_address;
   }
   if (cfg_.role_tx && cfg_.mqtt_control_enabled && !cfg_.mqtt_client_enabled) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=mqtt_control_requires_client action=reset_defaults", kConfigPath);
@@ -413,13 +411,13 @@ bool ConfigStore::begin() {
   char maskedKey[32];
   lrslog::maskSecret(maskedKey, sizeof(maskedKey), cfg_.fleet_passphrase.c_str());
   LRS_LOGI(FS,
-           "event=config_loaded path=%s schema_version=%u commissioned=%u role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
+           "event=config_loaded path=%s schema_version=%u commissioned=%u role=%s local=%u controller=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
            static_cast<unsigned>(cfg_.schema_version),
            cfg_.commissioned ? 1U : 0U,
            cfg_.role_tx ? "gateway" : "remote",
            static_cast<unsigned>(cfg_.local_address),
-           static_cast<unsigned>(cfg_.remote_address),
+           static_cast<unsigned>(cfg_.controller_address),
            cfg_.wifi_sta_ssid.c_str(),
            maskedKey);
   if (needs_save) {
@@ -439,8 +437,7 @@ bool ConfigStore::save() {
   doc["mode"] = cfg_.mode;
   doc["role_tx"] = cfg_.role_tx;
   doc["local_address"] = cfg_.local_address;
-  doc["remote_address"] = cfg_.remote_address;
-  writeAddressList(doc, "paired_target_addresses", cfg_.paired_target_addresses, cfg_.paired_target_count, Settings::kAddressListCap);
+  if (!cfg_.role_tx) doc["controller_address"] = cfg_.controller_address;
   writeAddressList(doc, "allowed_controller_addresses", cfg_.allowed_controller_addresses, cfg_.allowed_controller_count,
                    Settings::kAddressListCap);
   writeAddressList(doc, "known_peer_addresses", cfg_.known_peer_addresses, cfg_.known_peer_count, Settings::kAddressListCap);
@@ -541,12 +538,12 @@ bool ConfigStore::save() {
   char maskedKey[32];
   lrslog::maskSecret(maskedKey, sizeof(maskedKey), cfg_.fleet_passphrase.c_str());
   LRS_LOGI(FS,
-           "event=config_saved path=%s bytes=%lu role=%s local=%u remote=%u wifi_ssid=%s fleet_key=%s",
+           "event=config_saved path=%s bytes=%lu role=%s local=%u controller=%u wifi_ssid=%s fleet_key=%s",
            kConfigPath,
            static_cast<unsigned long>(bytes),
            cfg_.role_tx ? "gateway" : "remote",
            static_cast<unsigned>(cfg_.local_address),
-           static_cast<unsigned>(cfg_.remote_address),
+           static_cast<unsigned>(cfg_.controller_address),
            cfg_.wifi_sta_ssid.c_str(),
            maskedKey);
   return ok;
@@ -715,10 +712,7 @@ void ConfigStore::setDefaults() {
   cfg_.role_tx = true;
   cfg_.role = "gateway";
   cfg_.local_address = runtime_utils::kGatewayAddress;
-  cfg_.remote_address = runtime_utils::kFirstRemoteAddress;
-  cfg_.paired_target_count = 1;
-  memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = runtime_utils::kFirstRemoteAddress;
+  cfg_.controller_address = 0;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
   cfg_.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;
@@ -782,15 +776,12 @@ void ConfigStore::setDefaults() {
 void ConfigStore::ensureProvisionedDefaults() {
   if (cfg_.role_tx) {
     cfg_.local_address = runtime_utils::kGatewayAddress;
-    cfg_.remote_address = runtime_utils::kFirstRemoteAddress;
+    cfg_.controller_address = 0;
   } else {
     cfg_.local_address = runtime_utils::kFirstRemoteAddress;
-    cfg_.remote_address = runtime_utils::kGatewayAddress;
+    cfg_.controller_address = runtime_utils::kGatewayAddress;
     cfg_.input_control_paired_lora_enabled = false;
   }
-  cfg_.paired_target_count = 1;
-  memset(cfg_.paired_target_addresses, 0, sizeof(cfg_.paired_target_addresses));
-  cfg_.paired_target_addresses[0] = cfg_.role_tx ? runtime_utils::kFirstRemoteAddress : runtime_utils::kGatewayAddress;
   cfg_.allowed_controller_count = 1;
   memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
   cfg_.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;

@@ -108,7 +108,8 @@ interface DeviceInfo {
   mac: string;
   password: string;
   local_addr: number;
-  remote_addr: number;
+  // Factory-derived reference only; never runtime gateway fleet configuration.
+  factory_peer_addr: number;
   ssid: string;
 }
 
@@ -175,7 +176,7 @@ interface SerialAdminStatus {
   role: string;
   role_tx: boolean;
   local_address: number;
-  remote_address: number;
+  controller_address?: number;
   commissioned: boolean;
   fleet_passphrase_default?: boolean;
   wifi?: {
@@ -217,8 +218,7 @@ interface SerialAdminConfig {
   commissioned?: boolean;
   role_tx: boolean;
   local_address: number;
-  remote_address: number;
-  paired_target_addresses?: number[];
+  controller_address?: number;
   allowed_controller_addresses?: number[];
   known_peer_addresses?: number[];
   lora_tx_power?: number;
@@ -975,7 +975,7 @@ const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
   'ssid',
   'password',
   'local_addr',
-  'remote_addr',
+  'factory_peer_addr',
   'mac',
   'chip_id',
 ];
@@ -1275,17 +1275,17 @@ const serialStatusSummary = computed(() => {
   if (!st && serialAdminConfig.value) return 'Settings loaded. Refresh status to inspect live firmware health.';
   if (!st) return 'Fetch settings to edit configuration, or refresh status for live health.';
   if (!st.commissioned || st.fleet_passphrase_default) {
-    return `Factory default · awaiting commissioning · addr ${st.local_address}->${st.remote_address} · heap ${formatBytes(st.heap_free)} free`;
+    return `Factory default · awaiting commissioning · addr ${st.local_address} · heap ${formatBytes(st.heap_free)} free`;
   }
   const wifi = st.wifi?.sta_connected ? `WiFi ${st.wifi.ip || 'connected'}` : `WiFi ${st.wifi?.status || 'offline'}`;
-  return `${st.role || 'unknown'} ${st.local_address}->${st.remote_address} · ${wifi} · heap ${formatBytes(st.heap_free)} free`;
+  return `${st.role || 'unknown'} ${st.local_address}${st.controller_address ? ` -> controller ${st.controller_address}` : ''} · ${wifi} · heap ${formatBytes(st.heap_free)} free`;
 });
 const flashRunningFirmware = computed(() => serialDeviceState(flashSelectedPort.value)?.status?.fw_version || '');
 const flashRunningFirmwareSummary = computed(() => {
   const st = serialDeviceState(flashSelectedPort.value)?.status;
   if (!st) return 'Click Get device info to read running firmware.';
   const identity = serialDeviceState(flashSelectedPort.value)?.deviceInfo;
-  const addr = `${st.local_address}->${st.remote_address}`;
+  const addr = `${st.local_address}${st.controller_address ? ` -> controller ${st.controller_address}` : ''}`;
   return `${st.role || 'device'} ${addr}${identity?.chip_id ? ` · chip ${identity.chip_id}` : ''}`;
 });
 
@@ -1663,7 +1663,7 @@ const fleetGatewaySummary = computed(() => {
     return `${status.role || 'gateway'} addr ${status.local_address} · ${wifi} · heap ${formatBytes(status.heap_free)} free`;
   }
   if (fleetGatewayIdentity.value) {
-    return `Identity loaded · addr ${fleetGatewayIdentity.value.local_addr}->${fleetGatewayIdentity.value.remote_addr}`;
+    return `Identity loaded · addr ${fleetGatewayIdentity.value.local_addr}`;
   }
   return isMqtt ? 'Select or load the MQTT gateway to inspect and upgrade it.' : 'Select or load the USB gateway to inspect and flash it.';
 });
@@ -2794,7 +2794,7 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
   const cfg = raw || {};
   const roleTx = typeof cfg.role_tx === 'boolean' ? cfg.role_tx : !!status?.role_tx;
   const localAddress = numberValue(cfg.local_address, status?.local_address || (roleTx ? 254 : 1));
-  const remoteAddress = numberValue(cfg.remote_address, status?.remote_address || (roleTx ? 1 : 254));
+  const controllerAddress = numberValue(cfg.controller_address, status?.controller_address || 254);
   const wifi = status?.wifi;
   const mqtt = status?.mqtt;
 
@@ -2804,9 +2804,8 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     commissioned: typeof cfg.commissioned === 'boolean' ? cfg.commissioned : status?.commissioned,
     role_tx: roleTx,
     local_address: localAddress,
-    remote_address: remoteAddress,
-    paired_target_addresses: normalizeAddressArray(cfg.paired_target_addresses, [remoteAddress]),
-    allowed_controller_addresses: normalizeAddressArray(cfg.allowed_controller_addresses, [remoteAddress]),
+    controller_address: roleTx ? undefined : controllerAddress,
+    allowed_controller_addresses: normalizeAddressArray(cfg.allowed_controller_addresses, [controllerAddress]),
     known_peer_addresses: normalizeAddressArray(cfg.known_peer_addresses),
     lora_tx_power: numberValue(cfg.lora_tx_power, 17),
     lora_spreading_factor: numberValue(cfg.lora_spreading_factor, 7),
@@ -4145,9 +4144,9 @@ async function refreshSerialAdminStatus(port: unknown = selectedPort.value) {
     const out = await sendEasyPairCommandOnPort<SerialAdminStatus>(targetPort, 'status', {}, 5000, { label: 'Refresh status' });
     applySerialAdminStatus(out, targetPort);
     if (!out.commissioned || out.fleet_passphrase_default) {
-      pushSerialLog(`Status loaded: factory default, awaiting commissioning, addr ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
+      pushSerialLog(`Status loaded: factory default, awaiting commissioning, addr ${out.local_address}, heap ${formatBytes(out.heap_free)} free.`);
     } else {
-      pushSerialLog(`Status loaded: ${out.role || 'unknown'} ${out.local_address}->${out.remote_address}, heap ${formatBytes(out.heap_free)} free.`);
+      pushSerialLog(`Status loaded: ${out.role || 'unknown'} ${out.local_address}${out.controller_address ? ` -> controller ${out.controller_address}` : ''}, heap ${formatBytes(out.heap_free)} free.`);
     }
   } catch (e) {
     const msg = serialFeatureError('Status', e);
@@ -4242,9 +4241,8 @@ function serialConfigPatch(): Record<string, any> {
     mode: cfg.mode === 'standalone' ? 'standalone' : 'paired',
     role_tx: !!cfg.role_tx,
     local_address: Number(cfg.local_address || 1),
-    remote_address: Number(cfg.remote_address || 254),
-    paired_target_addresses: cfg.paired_target_addresses || [Number(cfg.remote_address || 254)],
-    allowed_controller_addresses: cfg.allowed_controller_addresses || [Number(cfg.remote_address || 254)],
+    ...(cfg.role_tx ? {} : { controller_address: Number(cfg.controller_address || 254) }),
+    allowed_controller_addresses: cfg.allowed_controller_addresses || [Number(cfg.controller_address || 254)],
     known_peer_addresses: cfg.known_peer_addresses || [],
     lora_tx_power: Number(cfg.lora_tx_power || 17),
     lora_spreading_factor: Number(cfg.lora_spreading_factor || 7),
@@ -4778,13 +4776,13 @@ async function loadGatewayTargetAddresses(password: string): Promise<number[]> {
       config = normalizeSerialAdminConfig(configState.buffer as Partial<SerialAdminConfig>, state?.status || null);
       if (state) state.config = config;
     }
-    return uniqueSortedAddresses(normalizeAddressArray(config?.paired_target_addresses));
+    return uniqueSortedAddresses(normalizeAddressArray(config?.known_peer_addresses));
   }
 
   const out = await sendPairCommand<{ ok: boolean; cmd: string; config: Partial<SerialAdminConfig> }>('get_config', {
     admin_password: password
   }, 15000);
-  return uniqueSortedAddresses(normalizeAddressArray(out.config?.paired_target_addresses));
+  return uniqueSortedAddresses(normalizeAddressArray(out.config?.known_peer_addresses));
 }
 
 async function saveEasyPairTargets() {
@@ -5188,7 +5186,7 @@ async function readSerialAdminDeviceInfoForPort(port: string): Promise<DeviceInf
     ...derived,
     chip_id: chipId.padStart(8, '0'),
     local_addr: Number(identity.local_address ?? derived.local_addr),
-    remote_addr: Number(identity.remote_address ?? derived.remote_addr),
+    factory_peer_addr: Number(derived.factory_peer_addr),
     ssid: String(identity.ap_ssid || derived.ssid)
   };
 }
@@ -5885,7 +5883,7 @@ onMounted(async () => {
         role: normalizeRole(payload.role),
         role_tx: normalizeRole(payload.role) === 'gateway',
         local_address: payload.addr || state.status?.local_address || 254,
-        remote_address: payload.remote_addr || state.status?.remote_address || 0,
+        controller_address: payload.controller_addr || state.status?.controller_address || undefined,
         commissioned: true,
         fleet_passphrase_default: state.status?.fleet_passphrase_default || false,
         wifi: {
@@ -6019,7 +6017,7 @@ function formatLabel(key: string) {
   const mapping: Record<string, string> = {
     'chip_id': 'Chip ID',
     'local_addr': 'Local addr',
-    'remote_addr': 'Remote addr',
+    'factory_peer_addr': 'Factory peer reference',
     'ssid': 'Soft AP SSID',
     'mac': 'MAC',
     'password': 'Factory password'
@@ -6159,9 +6157,9 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
     firmware: displayFirmwareVersion(fleetGatewayStatus.value?.fw_version),
     role: fleetGatewayStatus.value?.role || '-',
     addressLine: fleetGatewayStatus.value
-      ? `${fleetGatewayStatus.value.local_address}->${fleetGatewayStatus.value.remote_address}`
+      ? `${fleetGatewayStatus.value.local_address}`
       : fleetGatewayIdentity.value
-        ? `${fleetGatewayIdentity.value.local_addr}->${fleetGatewayIdentity.value.remote_addr}`
+        ? `${fleetGatewayIdentity.value.local_addr}`
         : '-',
     wifiLine: (() => {
       const wifi = fleetGatewayStatus.value?.wifi;

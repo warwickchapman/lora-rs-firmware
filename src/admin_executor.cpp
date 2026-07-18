@@ -143,8 +143,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       cfg.role_tx = role_parsed;
     }
   }
-  const bool hasRemoteAddressField = !doc["remote_address"].isNull();
-  const bool hasPairedTargetsField = !doc["paired_target_addresses"].isNull();
   const bool hasAllowedControllersField =
       !doc["allowed_controller_addresses"].isNull();
   if (cfg.mode == "paired") {
@@ -159,12 +157,8 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     return fail("mode_invalid");
   }
   cfg.local_address = parseAddressField(doc["local_address"], cfg.local_address);
-  cfg.remote_address =
-      parseAddressField(doc["remote_address"], cfg.remote_address);
-  if (hasPairedTargetsField) {
-    cfg.paired_target_count = parseAddressArrayField(
-        doc["paired_target_addresses"], cfg.paired_target_addresses,
-        Settings::kAddressListCap);
+  if (!cfg.role_tx && !doc["controller_address"].isNull()) {
+    cfg.controller_address = parseAddressField(doc["controller_address"], cfg.controller_address);
   }
   if (hasAllowedControllersField) {
     cfg.allowed_controller_count = parseAddressArrayField(
@@ -294,27 +288,13 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.local_address = runtime_utils::kMinAddress;
   if (cfg.local_address > runtime_utils::kMaxAddress)
     cfg.local_address = runtime_utils::kMaxAddress;
-  if (cfg.remote_address < runtime_utils::kMinAddress)
-    cfg.remote_address = runtime_utils::kMinAddress;
-  if (cfg.remote_address > runtime_utils::kMaxAddress)
-    cfg.remote_address = runtime_utils::kMaxAddress;
-  if (cfg.local_address == cfg.remote_address)
-    return fail("local_remote_address_conflict");
-  if (!hasRemoteAddressField) {
-    if (cfg.role_tx && hasPairedTargetsField && cfg.paired_target_count > 0) {
-      cfg.remote_address = cfg.paired_target_addresses[0];
-    } else if (!cfg.role_tx && hasAllowedControllersField &&
-               cfg.allowed_controller_count > 0) {
-      cfg.remote_address = cfg.allowed_controller_addresses[0];
-    }
-  }
-  if (cfg.paired_target_count == 0) {
-    cfg.paired_target_count = 1;
-    cfg.paired_target_addresses[0] = cfg.remote_address;
-  }
-  if (cfg.allowed_controller_count == 0) {
+  if (!cfg.role_tx && (cfg.controller_address < runtime_utils::kMinAddress ||
+                       cfg.controller_address > runtime_utils::kMaxAddress ||
+                       cfg.local_address == cfg.controller_address))
+    return fail("local_controller_address_conflict");
+  if (!cfg.role_tx && cfg.allowed_controller_count == 0) {
     cfg.allowed_controller_count = 1;
-    cfg.allowed_controller_addresses[0] = cfg.remote_address;
+    cfg.allowed_controller_addresses[0] = cfg.controller_address;
   }
 
   const bool allowDefaultDeploymentKey =
@@ -641,7 +621,7 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
   out["role"] = cfg.role_tx ? "gateway" : "remote";
   out["role_tx"] = cfg.role_tx;
   out["local_address"] = cfg.local_address;
-  out["remote_address"] = cfg.remote_address;
+  if (!cfg.role_tx) out["controller_address"] = cfg.controller_address;
   out["commissioned"] = cfg.commissioned;
   out["fleet_passphrase_default"] = runtime_utils::isDefaultDeploymentKey(cfg.fleet_passphrase.c_str());
 
@@ -821,7 +801,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
   }
   const bool preserveTargets = cfg.commissioned && cfg.role_tx &&
                                cfg.fleet_passphrase.equals(fleetKey) &&
-                               cfg.paired_target_count > 0;
+                               cfg.known_peer_count > 0;
   cfg.commissioned = true;
   cfg.mode = "paired";
   cfg.role = "gateway";
@@ -834,12 +814,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
     cfg.local_address = runtime_utils::kGatewayAddress;
   cfg.fleet_passphrase = fleetKey;
   cfg.fleet_setup_prompt_dismissed = true;
-  if (preserveTargets) {
-    cfg.remote_address = cfg.paired_target_addresses[0];
-  } else {
-    cfg.remote_address = runtime_utils::kFirstRemoteAddress;
-    clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
-  }
+  if (!preserveTargets) clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
   clearAddressList(cfg.allowed_controller_addresses,
                    cfg.allowed_controller_count);
 
@@ -857,7 +832,7 @@ void AdminExecutor::handleConfigureGateway(JsonDocument &doc, ResponseWriter wri
     out["id"] = id;
   out["local_address"] = cfg.local_address;
   out["max_remotes"] = maxRemotes;
-  out["paired_target_count"] = cfg.paired_target_count;
+  out["known_peer_count"] = cfg.known_peer_count;
   out["preserved_targets"] = preserveTargets;
   sendOk(out, writer);
 }
@@ -1188,9 +1163,6 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
         cfg.local_address,
         cfg.known_peer_count,
         cfg.known_peer_addresses,
-        cfg.paired_target_count,
-        cfg.paired_target_addresses,
-        cfg.remote_address,
         targets,
         Settings::kAddressListCap
       );
@@ -1877,12 +1849,6 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
     return true;
   };
   if (!replaceTargets) {
-    for (uint8_t i = 0; i < cfg.paired_target_count && i < Settings::kAddressListCap; ++i) {
-      if (!appendTarget(cfg.paired_target_addresses[i])) {
-        sendError(cmd, "too_many_targets", id, writer);
-        return;
-      }
-    }
     for (uint8_t i = 0; i < cfg.known_peer_count && i < Settings::kAddressListCap; ++i) {
       if (!appendTarget(cfg.known_peer_addresses[i])) {
         sendError(cmd, "too_many_targets", id, writer);
@@ -1914,12 +1880,10 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
   memcpy(prevAddresses, cfg.known_peer_addresses, sizeof(prevAddresses));
   memcpy(prevChipIds, cfg.known_peer_chip_ids, sizeof(prevChipIds));
 
-  clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
   clearAddressList(cfg.known_peer_addresses, cfg.known_peer_count);
   memset(cfg.known_peer_chip_ids, 0, sizeof(cfg.known_peer_chip_ids));
   for (uint8_t i = 0; i < targetCount; ++i) {
     const uint8_t addr = targetAddresses[i];
-    cfg.paired_target_addresses[cfg.paired_target_count++] = addr;
     cfg.known_peer_addresses[cfg.known_peer_count++] = addr;
 
     uint32_t chipId = sm_->resolveChipIdForAddress(addr);
@@ -1931,7 +1895,6 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
     }
     cfg.known_peer_chip_ids[cfg.known_peer_count - 1] = chipId;
   }
-  cfg.remote_address = cfg.paired_target_addresses[0];
   if (!config_->save()) {
     sendError(cmd, "save_failed", id, writer);
     return;
@@ -1942,7 +1905,7 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
   out["cmd"] = cmd;
   if (id[0] != '\0')
     out["id"] = id;
-  out["target_count"] = cfg.paired_target_count;
+  out["target_count"] = cfg.known_peer_count;
   out["replace"] = replaceTargets;
   sendOk(out, writer);
 }
@@ -1967,17 +1930,6 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
   auto &cfg = config_->settings();
   bool found = false;
 
-  for (uint8_t i = 0; i < cfg.paired_target_count; ++i) {
-    if (cfg.paired_target_addresses[i] == addr) {
-      for (uint8_t j = i; j + 1 < cfg.paired_target_count; ++j) {
-        cfg.paired_target_addresses[j] = cfg.paired_target_addresses[j + 1];
-      }
-      cfg.paired_target_addresses[--cfg.paired_target_count] = 0;
-      found = true;
-      break;
-    }
-  }
-
   uint32_t chipId = 0;
   for (uint8_t i = 0; i < cfg.known_peer_count; ++i) {
     if (cfg.known_peer_addresses[i] == addr) {
@@ -1996,12 +1948,6 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
   MqttBridge::clearPeerRetained(addr, chipId);
   sm_->mqttForgetPeer(addr);
 
-  if (cfg.paired_target_count > 0) {
-    cfg.remote_address = cfg.paired_target_addresses[0];
-  } else {
-    cfg.remote_address = 0;
-  }
-
   if (found) {
     if (!config_->save()) {
       sendError(cmd, "save_failed", id, writer);
@@ -2016,7 +1962,7 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
   if (id[0] != '\0')
     out["id"] = id;
   out["forgotten"] = found;
-  out["target_count"] = cfg.paired_target_count;
+  out["target_count"] = cfg.known_peer_count;
   sendOk(out, writer);
 }
 
@@ -2062,7 +2008,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     out["role"] = cfg.role_tx ? "gateway" : "remote";
     out["role_tx"] = cfg.role_tx;
     out["local_address"] = cfg.local_address;
-    out["remote_address"] = cfg.remote_address;
+    if (!cfg.role_tx) out["controller_address"] = cfg.controller_address;
     out["fw_version"] = LRS_FW_VERSION;
     sendOk(out, writer);
     return;
@@ -2356,33 +2302,14 @@ bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
     const uint8_t oldAddr = cfg.known_peer_addresses[existingIdx];
     if (oldAddr != address) {
       cfg.known_peer_addresses[existingIdx] = address;
-      for (size_t i = 0; i < cfg.paired_target_count; ++i) {
-        if (cfg.paired_target_addresses[i] == oldAddr) {
-          cfg.paired_target_addresses[i] = address;
-        }
-      }
-      if (cfg.remote_address == oldAddr) {
-        cfg.remote_address = address;
-      }
     }
   } else {
     if (cfg.known_peer_count >= Settings::kAddressListCap) {
       return false;
     }
-    const bool firstKnownPeer = (cfg.known_peer_count == 0);
-    if (firstKnownPeer) {
-      clearAddressList(cfg.paired_target_addresses, cfg.paired_target_count);
-    }
     cfg.known_peer_addresses[cfg.known_peer_count] = address;
     cfg.known_peer_chip_ids[cfg.known_peer_count] = chipId;
     cfg.known_peer_count++;
-    
-    if (cfg.paired_target_count < Settings::kAddressListCap) {
-      cfg.paired_target_addresses[cfg.paired_target_count++] = address;
-    }
-    if ((firstKnownPeer || cfg.remote_address == 0) && cfg.paired_target_count > 0) {
-      cfg.remote_address = cfg.paired_target_addresses[0];
-    }
   }
   
   if (config_->save()) {

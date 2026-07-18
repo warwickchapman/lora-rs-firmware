@@ -58,7 +58,7 @@ Flasher tabs:
 Minimum required settings:
 - Mode and role (mode-aware)
 - Local address
-- Remote address
+- Controller address (remote only)
 - LoRa Fleet Key (encryption passphrase)
 
 ## 6. Topologies
@@ -107,7 +107,7 @@ TX LoRa input-control gate:
 - Disabled: TX input is still available for telemetry/status, but TX does not send input-driven LoRa relay changes.
 
 MQTT deployment note:
-- If the gate is enabled, do not use MQTT `control` for RX units configured with the same address as TX `remote_address`, because heartbeat/input LoRa control can overwrite MQTT state.
+- If the gate is enabled, do not use MQTT `control` for RX units paired to the gateway input-control path, because LoRa input control can overwrite MQTT state.
 - If you must MQTT-control the TX-paired address, disable `Input drives LoRa relay control`.
 
 ## 10. Sensor Support (Current)

@@ -27,7 +27,7 @@ class MqttBridge {
     bool mqtt_control_enabled = false;
     bool role_tx = false;
     uint8_t local_address = 0;
-    uint8_t remote_address = 0;
+    uint8_t controller_address = 0;
     uint16_t mqtt_port = 1883;
     bool tx_mqtt_remote_polling_enabled = false;
   };

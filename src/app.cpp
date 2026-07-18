@@ -765,17 +765,15 @@ void App::handlePendingFleetProvision() {
       cfg.mode = "paired";
       cfg.role = provRoleTx ? "gateway" : "remote";
       if (provRoleTx) {
-        cfg.paired_target_count = 0;
-        memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
+        cfg.known_peer_count = 0;
+        memset(cfg.known_peer_addresses, 0, sizeof(cfg.known_peer_addresses));
+        memset(cfg.known_peer_chip_ids, 0, sizeof(cfg.known_peer_chip_ids));
       } else {
         cfg.input_control_paired_lora_enabled = false;
-        cfg.remote_address = runtime_utils::kGatewayAddress;
+        cfg.controller_address = provControllerAddr;
         cfg.allowed_controller_count = 1;
         memset(cfg.allowed_controller_addresses, 0, sizeof(cfg.allowed_controller_addresses));
-        cfg.allowed_controller_addresses[0] = runtime_utils::kGatewayAddress;
-        cfg.paired_target_count = 1;
-        memset(cfg.paired_target_addresses, 0, sizeof(cfg.paired_target_addresses));
-        cfg.paired_target_addresses[0] = runtime_utils::kGatewayAddress;
+        cfg.allowed_controller_addresses[0] = provControllerAddr;
       }
       cfg.fleet_passphrase = provFleetKey;
       cfg.fleet_setup_prompt_dismissed = (provFleetKey[0] != '\0');
