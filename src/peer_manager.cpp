@@ -186,6 +186,7 @@ bool PeerManager::buildStatusSnapshot(size_t index, PeerStatusSnapshot &out) con
   out = PeerStatusSnapshot{};
   out.address = p.address;
   out.relay_state = p.relay_state;
+  out.relay_state_known = p.relay_state_known;
   out.input_state = p.input_state;
   out.input_state_known = p.input_state_known;
   out.sensors = p.sensors;

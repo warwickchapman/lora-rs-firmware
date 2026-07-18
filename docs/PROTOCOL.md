@@ -82,30 +82,58 @@ Otherwise packet is dropped and logged.
 ## TX/RX Control Semantics
 - TX sends `Change` on debounced input transition.
 - When paired LoRa input control is enabled, TX sends `Change` as a paced
-  multi-target group command: first broadcast to destination `255`, then
-  non-actuating `PollRequest` confirmations for missing ACKs.
+  multi-target group command: two replay-identical broadcasts to destination `255`, then up
+  to two bounded direct `Change` retries for each missing ACK. Direct retries
+  are idempotent and use the same command ID; their ACKs are immediate rather
+  than broadcast-slotted.
+- Gateway relay safety is symmetric: the gateway relay changes only after every
+  configured remote confirms the same group command, for both `Off` and `On`.
+  The gateway relay is therefore an
+  all-remotes-confirmed indicator, not an independent command output.
 - When paired LoRa input control is enabled, periodic heartbeat sync uses the
   same multi-target group command path. Gateway targets always come from its
   known-peer registry; an empty registry sends no fleet traffic.
 - RX applies relay state from `Change`, `Mqtt`, and `Heartbeat` only when the
   `kFlagPairedInputSlave` flag is set (input-control heartbeats).
-- RX sends `Ack` for `Change` and `Heartbeat`.
+- RX sends `Ack` for `Change` and `Heartbeat`. For a broadcast paired `Change`,
+  RX waits 250 ms before its address-ranked slot so the duplicate broadcast has
+  completed; it reserves LoRa airtime until that ACK is sent, coalescing one
+  maintenance or poll response and deferring all other low-priority pages/pushes.
+  Its `input_state` is always the
+  remote's locally sampled dry-contact state; it never echoes the gateway input
+  carried by a control command.
 - `Ack` carries the acknowledged command counter in payload bytes `b8..b11` (`unix_time_s` slot reused for ACK correlation).
 - RX sends `MqttStatus` for `Mqtt` with applied relay/input/temp state.
 - TX may send `PollRequest` to RX.
 - RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
 - TX may send `MaintenanceRequest` to RX.
-- TX sends `MaintenanceRequest` carrying the request version (set to `kMaintenancePayloadVersion`, i.e., `2`) in payload byte `b0` and diagnostics flag in `b1`.
-- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `2`). 
-  - Page `0` (Identity) carries identity and connectivity.
+- TX sends `MaintenanceRequest` carrying the request version (set to `kMaintenancePayloadVersion`, i.e., `3`) in payload byte `b0` and diagnostics flag in `b1`.
+- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `3`). This is not compatible with maintenance-page version `2`; paired nodes must be upgraded together.
+  - Page `0` (Identity) carries identity, connectivity, IP address, signed WiFi RSSI in `b6` (0 means unavailable), and marked relay state in `b7` (`0xA0` = Off, `0xA1` = On).
   - Page `3` (Version) carries the firmware build number and uptime.
   - Page `2` (Sensors) carries page-indexed generic sensor readings from the local `SensorRegistry` (up to 2 readings per 4-byte slot per page; packs `kind`, `instance`, `state` (0=Disabled, 1=Missing, 2=Fault, 3=Ok, 4=Overrange, 5=Waiting), `scale`, and clamped `int16` values).
-  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, bytes 7..8 carry WiFi RSSI as int16_t LE, and uptime minutes).
+  - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, and uptime minutes).
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - RX nodes with enabled sensors may send unsolicited `MaintenanceStatus` sensor pages to the gateway at a conservative 60-second operational cadence. This is sensor-state reporting, not a gateway-owned diagnostic sweep.
 - TX/gateway firmware must not run perpetual maintenance sweeps for Fleet/Monitor freshness. Fleet scans, diagnostics, and inventory enrichment are explicit low-priority observability work and must yield to relay/input control.
-- TX applies ACK-confirmed relay state with 500 ms delay.
+- TX applies relay state from a command ACK immediately. A missed command ACK invalidates that relay state until a later ACK, normal status, or identity page confirms it; Fleet must show this as unknown rather than `Off`.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.
+
+### Control-state integrity
+
+Relay and dry-contact input are operational state, not diagnostics. A gateway records
+relay state only from a valid command ACK, an operational status response, or the
+marked identity-page relay field. It records input state only from a frame that
+explicitly supplies input state, such as `PollResponse`, `MqttStatus`, or the Input
+sensor reading. Omitted, timed-out, or old-format values are unknown; they do not mean
+`Off`, `On`, `Open`, or `Closed`.
+
+The command ACK is the fast relay-state repair path. Its staggered replies must include
+an initial gateway receive-turnaround guard before the first remote slot, so address
+`1` cannot reply before the gateway is receiving. Normal maintenance then repairs
+state at low priority without introducing extra observability frames. Gateway command
+input is control context, not peer telemetry, and must never overwrite a remote's local
+dry-contact state in firmware or Fleet cache.
 
 ## Provisioning and Reset LoRa Extensions
 - `WifiProvision` (`'W'`) carries segmented WiFi credentials (SSID + password) using custom payload bytes.

@@ -1157,9 +1157,7 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
   if (config_ != nullptr) {
     const auto &cfg = config_->settings();
     if (cfg.role_tx) {
-      const bool isPairedMode = (cfg.mode == "paired");
       targetCount = runtime_utils::resolveGatewayTargets(
-        isPairedMode,
         cfg.local_address,
         cfg.known_peer_count,
         cfg.known_peer_addresses,
@@ -1196,6 +1194,16 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
       char chipBuf[9];
       snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
       row["chip_id"] = chipBuf;
+    }
+    // Control state is compact, ACK-backed operational truth. Include it in
+    // the seed so Fleet reconciles all peers after a group command without
+    // waiting for the low-priority detail hydration loop.
+    if (hasCached && p.relay_state_known) {
+      row["relay_state"] = p.relay_state;
+    }
+    if (hasCached && p.input_state_known) {
+      row["input_state_known"] = true;
+      row["input_state"] = p.input_state;
     }
   }
 
@@ -1340,7 +1348,9 @@ void AdminExecutor::handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter wr
   if (p.uptime_ms > 0)
     row["uptime_ms"] = p.uptime_ms;
   if (p.last_seen_ms != 0) {
-    row["relay_state"] = p.relay_state;
+    if (p.relay_state_known) {
+      row["relay_state"] = p.relay_state;
+    }
     if (p.input_state_known) {
       row["input_state_known"] = true;
       row["input_state"] = p.input_state;
@@ -1413,9 +1423,8 @@ void AdminExecutor::handleRefreshLoraPeer(JsonDocument &doc, ResponseWriter writ
     return;
   }
 
-  uint32_t sentCounter = 0;
-  if (!sm_->sendMaintenanceRequest(address, false, &sentCounter)) {
-    sendError("refresh_lora_peer", "send_failed", id, writer);
+  if (!sm_->queueMaintenanceRequest(address, false, MaintenanceRequestSource::AdminPeerRefresh)) {
+    sendError("refresh_lora_peer", "queue_full", id, writer);
     return;
   }
 
@@ -1424,7 +1433,7 @@ void AdminExecutor::handleRefreshLoraPeer(JsonDocument &doc, ResponseWriter writ
   if (id[0] != '\0')
     out["id"] = id;
   out["address"] = address;
-  out["counter"] = sentCounter;
+  out["queued"] = true;
   sendOk(out, writer);
 }
 
@@ -1549,9 +1558,8 @@ void AdminExecutor::handlePollDiagnostics(JsonDocument &doc, ResponseWriter writ
     return;
   }
 
-  uint32_t sentCounter = 0;
-  if (!sm_->sendMaintenanceRequest(address, true, &sentCounter)) {
-    sendError("poll_diagnostics", "send_failed", id, writer);
+  if (!sm_->queueMaintenanceRequest(address, true, MaintenanceRequestSource::AdminDiagnostics)) {
+    sendError("poll_diagnostics", "queue_full", id, writer);
     return;
   }
 
@@ -1560,7 +1568,7 @@ void AdminExecutor::handlePollDiagnostics(JsonDocument &doc, ResponseWriter writ
   if (id[0] != '\0')
     out["id"] = id;
   out["address"] = address;
-  out["counter"] = sentCounter;
+  out["queued"] = true;
   sendOk(out, writer);
 }
 

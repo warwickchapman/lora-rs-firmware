@@ -81,7 +81,33 @@ Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
 - Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes only when the operator explicitly asks.
 - The gateway does not run a perpetual round-robin maintenance sweep. Relay/input control owns LoRa airtime; Fleet/Monitor freshness is low-priority observability and must tolerate stale rows.
+- Low-priority maintenance requests use a fixed, coalescing per-peer queue. They wait through control windows and send only when the radio is free; diagnostics upgrade a pending normal request for the same peer. Control broadcasts, ACKs, and control retries never enter this queue.
+- A paired group command sends two replay-identical broadcasts. A remote that accepts either copy applies relay state immediately, then reserves its radio until the 250 ms-plus-ranked-slot ACK is sent. During that reservation it may retain one coalesced maintenance or poll reply, but it must not transmit low-priority pages or operational pushes.
+- Maintenance payload version is `3`; the earlier version `2` identity layout is deliberately rejected because bytes `b6`/`b7` now represent WiFi RSSI and marked relay state. Upgrade a paired fleet together.
 - Remotes push operational state instead: debounced dry-contact input changes send an unsolicited compact `PollResponse`, and remotes with enabled sensors send periodic operational sensor maintenance pages at a conservative 60-second cadence.
+
+### Control-state contract
+
+Relay and input state are the operational core of an LRS installation. A relay state
+means the remote's commanded relay GPIO state; this low-cost board has no independent
+contact-feedback circuit, so the UI must not imply that it verified the physical relay
+contacts. Input state is the measured dry-contact state.
+
+The gateway may show either value as current only when a received frame explicitly
+provides it. A valid relay-command ACK is the fast confirmation path; normal
+operational status and maintenance pages repair the cache afterwards. A missing ACK,
+timeout, old payload, or omitted state is **unknown**, rendered as `-`, never inferred
+as `Off`, `On`, `Open`, or `Closed`. For paired input control, a missing ACK receives
+bounded direct idempotent `Change` retries; do not downgrade that recovery to a
+non-actuating status poll. The gateway relay changes only after the complete group
+command is confirmed, for both relay states. A gateway control frame's `input_state` is
+controller command context, never remote dry-contact telemetry. Remote ACKs and status
+frames must sample and report that remote's own input pin.
+
+When changing a normal maintenance/status page, preserve the compact control state
+needed to repair the peer cache. Do not rely on WiFi, version, heap, diagnostics, or
+Fleet UI history to infer relay/input state. ACK slotting must also leave a receive
+turnaround guard before the first remote reply, so address `1` is not a special case.
 - ESP8266 provisioning supports up to 12 remotes per gateway, matching `Settings::kAddressListCap` and `LRS_MAX_PEERS`.
 - Discovery candidates and peer adoption:
   - Candidates are discovered volatilely (capped at 12 entries) using incoming same-key unconfigured telemetry.

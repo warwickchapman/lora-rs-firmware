@@ -18,6 +18,15 @@ metadata, WiFi details, heap stats, and UI freshness are observability.
 - Diagnostics/inventory includes firmware version, heap/free/frag, WiFi IP/RSSI, detailed uptime, and Fleet/Monitor freshness enrichment.
 - Diagnostics/inventory must be low priority, interruptible, stale-tolerant, and clearly displayed as stale/deferred by Flasher rather than pressuring firmware.
 
+### Control-State Integrity
+
+- `relay_state` and `input_state` are control truth, not convenience telemetry. Their correctness outranks metadata, diagnostics, and UI freshness.
+- A gateway or host may treat a control value as current only after receiving a frame that explicitly carries it: a valid command ACK, operational status/PollResponse/MqttStatus, or its designated normal maintenance field.
+- Missing, timed-out, old-format, or unacknowledged control values are **unknown**. Hosts must render `-`; they must never coerce an absent value to `Off`, `On`, `Open`, or `Closed`.
+- Any normal maintenance response used to repair peer state must explicitly carry the compact control state it claims to refresh. Identity, version, WiFi, and diagnostic fields must never reset, replace, or imply relay/input state.
+- Command ACK staggering must reserve gateway receive-turnaround time before the first remote replies. Low-numbered nodes must not receive special control semantics or a shorter unsafe reply window.
+- A missing group-command ACK is an unconfirmed actuator command, not a diagnostic condition. Recover with bounded idempotent direct control retries, not a non-actuating status poll. The gateway relay is the all-remotes-confirmed indicator: change it only after every configured remote confirms the same requested state, for both `On` and `Off`.
+
 ## ESP8266 Data Movement Rule
 
 The ESP8266 gateway is memory-constrained. Host software is not. Design data

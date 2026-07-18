@@ -1,12 +1,15 @@
 # Changelog
 
-- Cleaned paired addressing before release: remotes now store a single `controller_address`; gateways use only `known_peer_addresses` for fleet targeting. Removed the ambiguous `remote_address` and duplicate paired-target configuration surfaces.
-
-All notable changes to this pre-release project are documented here in current operator-facing terms.
-
 ## [Unreleased]
 
 ### Firmware Changes
+- Group-control traces now preserve and identify superseded commands, and every broadcast log records both its logical command ID and actual transport counter. A new gateway input state explicitly supersedes an unfinished command while preserving the gateway relay's last aggregate-confirmed state.
+- Paired group control now sends two replay-identical broadcast copies before its ACK window. Remote ACKs use an explicit 250 ms post-receipt lead, and a remote reserves LoRa airtime for that ACK by deferring one coalesced maintenance or poll response plus all pending low-priority pages/pushes. Direct recovery `Change` retries remain immediate-ACK, one-peer control traffic.
+- Maintenance payload version is now `3`: identity-page bytes `b6`/`b7` carry WiFi RSSI and marked relay state. This is a deliberate pre-1.0 protocol break; upgrade paired nodes together.
+- Paired group-control windows now suppress all non-control LoRa work, including Fleet scans, candidate probes, MQTT polling, OTA convenience traffic, and explicit maintenance/diagnostic requests, so they cannot interrupt relay-command acknowledgements.
+- Low-priority Fleet, candidate, and explicit maintenance/diagnostic requests now enter a fixed coalescing queue instead of failing or competing with relay-control timing. The queue is bounded to the fleet capacity and never carries control traffic.
+- The gateway relay now changes only after every configured remote confirms the requested state. It is the all-remotes-confirmed fleet indicator for both `On` and `Off`.
+- Cleaned paired addressing before release: remotes now store a single `controller_address`; gateways use only `known_peer_addresses` for fleet targeting. Removed the ambiguous `remote_address` and duplicate paired-target configuration surfaces.
 - Reworked Fleet inventory admin responses for ESP8266 memory safety: `lora_inventory_status` now returns a compact configured-peer seed list plus scan/candidate metadata, while full cached details for a single remote are fetched with the new `lora_inventory_peer` command.
 - Added `refresh_lora_peer` so Flasher can request normal maintenance pages for one remote at a time before reading that peer's cached details, keeping Fleet/Monitor current without rebuilding a whole-fleet JSON payload.
 - Kept Fleet diagnostics out of the normal inventory hot path; heap/fragmentation/debug uptime remain explicit per-peer diagnostics instead of being serialized for the whole fleet on every refresh.
@@ -27,7 +30,13 @@ All notable changes to this pre-release project are documented here in current o
 - Deprecated the persisted `"role"` string field in favor of `"role_tx"` (boolean).
 - Modernized user/operator-facing role terminology in JSON output, status, and identity endpoints from legacy `"transmitter"`/`"receiver"` to `"gateway"`/`"remote"`.
 - Added transparent config migration on load to convert legacy `"role"` values and old transmitter/receiver labels to `"role_tx"`.
-- Incorporated remote WiFi STA RSSI tracking in debug maintenance page payload without packet format expansion, exposing it as `wifi_rssi_dbm` via `lora_inventory_status` when connected.
+- Remote WiFi STA RSSI now travels in the normal maintenance identity page, exposing `wifi_rssi_dbm` for every connected peer without a diagnostics poll; heap and fragmentation remain diagnostics-only.
+- Normal maintenance identity pages now carry a marked relay state, so Fleet corrects a missed command ACK without extra LoRa traffic; timed-out command state is exposed as unknown instead of a misleading `Off`.
+- Deferred group-command ACKs now reserve an initial receive guard before the first remote replies, preventing address `1` from answering before the gateway can receive it.
+- Matching group-command ACKs now make the commanded relay state authoritative in the gateway peer cache, so every acknowledging remote is updated immediately and an inconsistent echoed ACK bit cannot display a false `Off`.
+- Replaced missing-ACK group recovery polls with bounded direct idempotent relay-command retries. The gateway relay now changes only after every configured remote confirms the same command, for both `Off` and `On`.
+- Fixed remote dry-contact reporting after paired relay commands: receiving a gateway input-control frame no longer overwrites a remote's local input state, and delayed ACKs sample the remote input pin when sent.
+- Fleet's compact serial inventory seed now carries known relay and input state for every peer, so a broadcast control change refreshes all rows from the gateway cache without waiting for one-at-a-time detail hydration.
 - Gateway publishes `wifi_rssi_dbm` retained MQTT topic for peers when connected and available, publishing empty payloads when unknown, offline, or cleared.
 
 ### Flasher Features

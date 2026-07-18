@@ -84,6 +84,68 @@ void test_schema_four_gateway_drops_legacy_remote_address() {
       true, false, 0, true, 7));
 }
 
+void test_identity_wifi_rssi_decoding() {
+  TEST_ASSERT_EQUAL_INT(-65,
+                        runtime_utils::decodeMaintenanceIdentityWifiRssi(
+                            static_cast<uint8_t>(static_cast<int8_t>(-65)), true));
+  TEST_ASSERT_EQUAL_INT(0, runtime_utils::decodeMaintenanceIdentityWifiRssi(0, true));
+  TEST_ASSERT_EQUAL_INT(0, runtime_utils::decodeMaintenanceIdentityWifiRssi(7, true));
+  TEST_ASSERT_EQUAL_INT(0,
+                        runtime_utils::decodeMaintenanceIdentityWifiRssi(
+                            static_cast<uint8_t>(static_cast<int8_t>(-65)), false));
+}
+
+void test_identity_relay_state_decoding() {
+  uint8_t relayState = 0;
+  TEST_ASSERT_TRUE(runtime_utils::decodeMaintenanceIdentityRelayState(0xA1, relayState));
+  TEST_ASSERT_EQUAL_UINT8(1, relayState);
+  TEST_ASSERT_TRUE(runtime_utils::decodeMaintenanceIdentityRelayState(0xA0, relayState));
+  TEST_ASSERT_EQUAL_UINT8(0, relayState);
+  TEST_ASSERT_FALSE(runtime_utils::decodeMaintenanceIdentityRelayState(0, relayState));
+}
+
+void test_staggered_ack_delay_guards_first_peer() {
+  TEST_ASSERT_EQUAL_UINT32(120,
+      runtime_utils::staggeredAckDelayMs(0, 180, 0, 120));
+  TEST_ASSERT_EQUAL_UINT32(340,
+      runtime_utils::staggeredAckDelayMs(1, 180, 40, 120));
+}
+
+void test_group_broadcast_ack_lead_and_window() {
+  TEST_ASSERT_EQUAL_UINT8(3, runtime_utils::kMaintenancePayloadVersion);
+  TEST_ASSERT_EQUAL_UINT32(250, runtime_utils::kGroupAckLeadMs);
+  TEST_ASSERT_EQUAL_UINT32(250,
+      runtime_utils::staggeredAckDelayMs(0, runtime_utils::kGroupAckSlotMs, 0,
+                                         runtime_utils::kGroupAckLeadMs));
+  TEST_ASSERT_EQUAL_UINT32(2760, runtime_utils::groupInitialAckWindowMs(12));
+}
+
+void test_gateway_scheduler_queues_receive_observability_until_control_is_idle() {
+  const auto inputTransition = runtime_utils::gatewayControlSchedule(true, true, false);
+  TEST_ASSERT_TRUE(inputTransition.queue_received_observability);
+  TEST_ASSERT_TRUE(inputTransition.run_group_control);
+  TEST_ASSERT_FALSE(inputTransition.allow_observability);
+
+  const auto activeGroup = runtime_utils::gatewayControlSchedule(true, false, true);
+  TEST_ASSERT_TRUE(activeGroup.queue_received_observability);
+  TEST_ASSERT_TRUE(activeGroup.run_group_control);
+  TEST_ASSERT_FALSE(activeGroup.allow_observability);
+
+  const auto complete = runtime_utils::gatewayControlSchedule(true, false, false);
+  TEST_ASSERT_TRUE(complete.queue_received_observability);
+  TEST_ASSERT_FALSE(complete.run_group_control);
+  TEST_ASSERT_TRUE(complete.allow_observability);
+}
+
+void test_receive_side_poll_and_maintenance_observability_always_queue() {
+  TEST_ASSERT_EQUAL(static_cast<int>(runtime_utils::ReceiveObservabilityAction::Queue),
+                    static_cast<int>(runtime_utils::receiveObservabilityAction(
+                        runtime_utils::ReceiveObservabilityKind::PollResponse)));
+  TEST_ASSERT_EQUAL(static_cast<int>(runtime_utils::ReceiveObservabilityAction::Queue),
+                    static_cast<int>(runtime_utils::receiveObservabilityAction(
+                        runtime_utils::ReceiveObservabilityKind::MaintenanceStatus)));
+}
+
 void test_mqtt_config_write_authorization_boundary() {
   const ConfigField *retained = findConfigField("mqtt_control_enabled");
   TEST_ASSERT_NOT_NULL(retained);
@@ -648,6 +710,12 @@ int main(int argc, char **argv) {
   RUN_TEST(test_wifi_status_text_unknown_value);
   RUN_TEST(test_schema_four_remote_migrates_to_controller_address);
   RUN_TEST(test_schema_four_gateway_drops_legacy_remote_address);
+  RUN_TEST(test_identity_wifi_rssi_decoding);
+  RUN_TEST(test_identity_relay_state_decoding);
+  RUN_TEST(test_staggered_ack_delay_guards_first_peer);
+  RUN_TEST(test_group_broadcast_ack_lead_and_window);
+  RUN_TEST(test_gateway_scheduler_queues_receive_observability_until_control_is_idle);
+  RUN_TEST(test_receive_side_poll_and_maintenance_observability_always_queue);
   RUN_TEST(test_mqtt_config_write_authorization_boundary);
   RUN_TEST(test_resolve_gateway_targets_paired_empty);
   RUN_TEST(test_resolve_gateway_targets_paired_with_peers);

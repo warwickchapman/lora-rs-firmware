@@ -47,8 +47,21 @@ enum class RxFailsafeMode : uint8_t {
 enum class PairedGroupPhase : uint8_t {
   Idle,
   AwaitInitialAcks,
-  PollMissingSequential,
+  RetryMissingSequential,
   Complete,
+};
+
+enum class MaintenanceRequestSource : uint8_t {
+  FleetScan,
+  CandidateProbe,
+  AdminPeerRefresh,
+  AdminDiagnostics,
+};
+
+enum class DeferredObservabilityKind : uint8_t {
+  None,
+  Maintenance,
+  PollResponse,
 };
 
 #include "peer_manager.h"
@@ -323,8 +336,11 @@ class NodeStateMachine {
   uint8_t tx_group_targets[Settings::kAddressListCap]{};
   uint8_t tx_group_target_count_ = 0;
   uint32_t tx_group_window_deadline_ms_ = 0;
+  uint32_t tx_group_copy_two_completed_ms_ = 0;
   uint8_t tx_group_initial_send_cursor_ = 0;
+  uint32_t tx_group_transport_counter_ = 0;
   uint8_t tx_group_retry_cursor_ = 0;
+  uint8_t tx_group_retry_round_ = 0;
   uint8_t tx_group_retry_addr_ = 0;
   uint32_t tx_group_retry_deadline_ms_ = 0;
   uint8_t tx_group_desired_relay_state_ = 0;
@@ -334,7 +350,10 @@ class NodeStateMachine {
   uint32_t rx_deferred_ack_command_id_ = 0;
   uint8_t rx_deferred_ack_dst_ = 0;
   uint8_t rx_deferred_ack_relay_ = 0;
-  uint8_t rx_deferred_ack_input_ = 0;
+  DeferredObservabilityKind rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+  uint8_t rx_deferred_observability_dst_ = 0;
+  bool rx_deferred_observability_diagnostics_ = false;
+  int rx_deferred_observability_rssi_ = -127;
   bool rx_push_pending_ = false;
   uint32_t rx_last_push_ms_ = 0;
   uint32_t rx_next_sensor_push_ms_ = 0;
@@ -347,6 +366,15 @@ class NodeStateMachine {
   bool maintenance_version_pending_ = false;
   uint8_t maintenance_version_dst_ = 0;
   uint32_t last_maint_page_tx_ms_ = 0;
+
+  struct PendingMaintenanceRequest {
+    bool pending = false;
+    uint8_t address = 0;
+    bool diagnostics = false;
+    MaintenanceRequestSource source = MaintenanceRequestSource::FleetScan;
+  };
+  PendingMaintenanceRequest maintenance_requests_[Settings::kAddressListCap]{};
+  uint8_t maintenance_request_cursor_ = 0;
 
   PeerManager peer_manager_;
   DiscoveryCandidate discovery_candidates_[Settings::kAddressListCap]{};
@@ -502,6 +530,8 @@ class NodeStateMachine {
   ProvTargetRxState prov_rx_{};
 
   void tickTransmitter();
+  // Gateway-only control work that must run before observability transmitters.
+  bool tickGatewayControlPriority(uint32_t now);
   void tickReceiver();
   void tickReceive();
   void tickFleetScan(uint32_t now);
@@ -523,14 +553,24 @@ class NodeStateMachine {
   void markRadioTxSentThisTick();
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
+  void tickMaintenanceRequestQueue(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
   void tickPendingOtaPullControl(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
   bool localOperationalSensorsEnabled() const;
   bool sendInputStatePush(uint32_t now);
   bool sendSensorStatePush(uint32_t now);
+  bool sendPollResponse(uint8_t dstAddress, int downlinkRssi);
+  void queueDeferredObservability(DeferredObservabilityKind kind, uint8_t dstAddress,
+                                  bool diagnostics = false, int downlinkRssi = -127);
+  bool tickDeferredObservability();
   bool sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter = nullptr);
-  bool sendMaintenanceRequest(uint8_t dstAddress, bool requestDiagnostics = false, uint32_t *sentCounter = nullptr);
+  bool queueMaintenanceRequest(uint8_t dstAddress, bool requestDiagnostics,
+                               MaintenanceRequestSource source);
+  bool sendMaintenanceRequestNow(uint8_t dstAddress, bool requestDiagnostics,
+                                 uint32_t *sentCounter = nullptr);
+  void noteMaintenanceRequestSent(MaintenanceRequestSource source, uint8_t address,
+                                  uint32_t counter, uint32_t now);
   bool sendMaintenanceStatus(uint8_t dstAddress, bool requestDiagnostics = false);
   bool sendMaintenanceVersionStatus(uint8_t dstAddress);
   bool sendMaintenanceSensorStatus(uint8_t dstAddress);
@@ -578,13 +618,14 @@ class NodeStateMachine {
   void resetTxGroupState();
   void startTxGroupCommand(uint8_t relayState, uint8_t inputState, const char *reasonEvent = nullptr);
   void tickTxGroupCommand(uint32_t now);
-  bool sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase);
-  bool sendTxGroupPollToAddress(uint8_t addr, const char *eventName, const char *phase);
+  bool sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase,
+                                  uint32_t transportCounter = 0);
   void finishTxGroupSuccess();
   void finishTxGroupPartial();
-  void updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi = -127);
+  void updatePeerAckStatus(uint8_t src, uint8_t relayState, PeerAckState ackState, int rssi = -127);
   uint8_t pairedAckRankForLocalAddress() const;
-  void scheduleDeferredAck(uint8_t dst, uint8_t relayState, uint8_t inputState, uint32_t commandId);
+  void scheduleDeferredAck(uint8_t dst, uint8_t relayState, uint32_t commandId,
+                           bool immediate = false, bool groupBroadcast = false);
   void tickDeferredAck(uint32_t now);
   void applyReceiverFailsafe(uint32_t now);
   uint32_t tick_watchdog_last_log_ms_ = 0;

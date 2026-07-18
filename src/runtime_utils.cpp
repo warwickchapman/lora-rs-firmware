@@ -65,6 +65,54 @@ uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
   return kGatewayAddress;
 }
 
+int16_t decodeMaintenanceIdentityWifiRssi(uint8_t rawRssi, bool wifiConnected) {
+  const int8_t rssi = static_cast<int8_t>(rawRssi);
+  return wifiConnected && rssi < 0 ? rssi : 0;
+}
+
+bool decodeMaintenanceIdentityRelayState(uint8_t rawRelay, uint8_t &relayState) {
+  constexpr uint8_t kRelayMarkerMask = 0xFE;
+  constexpr uint8_t kRelayMarker = 0xA0;
+  if ((rawRelay & kRelayMarkerMask) != kRelayMarker) return false;
+  relayState = rawRelay & 0x01U;
+  return true;
+}
+
+uint32_t staggeredAckDelayMs(uint8_t rank, uint32_t slotMs,
+                             uint32_t jitterMs, uint32_t initialGuardMs) {
+  return initialGuardMs + static_cast<uint32_t>(rank) * slotMs + jitterMs;
+}
+
+uint32_t groupInitialAckWindowMs(uint8_t targetCount) {
+  if (targetCount == 0) return 0;
+  const uint32_t minimum = kGroupAckLeadMs +
+      static_cast<uint32_t>(targetCount - 1U) * kGroupAckSlotMs +
+      kGroupAckSlotJitterMaxMs + kGroupAckAirtimeBudgetMs +
+      kGroupAckWindowMarginMs;
+  const uint32_t established = static_cast<uint32_t>(targetCount) *
+      (kGroupAckSlotMs + kGroupAckSlotJitterMaxMs) + 120U;
+  return minimum > established ? minimum : established;
+}
+
+GatewayControlSchedule gatewayControlSchedule(bool pairedInputControlEnabled,
+                                              bool debouncedInputTransition,
+                                              bool groupActive) {
+  GatewayControlSchedule schedule{};
+  schedule.run_group_control = pairedInputControlEnabled &&
+      (debouncedInputTransition || groupActive);
+  schedule.allow_observability = !schedule.run_group_control;
+  return schedule;
+}
+
+ReceiveObservabilityAction receiveObservabilityAction(ReceiveObservabilityKind kind) {
+  switch (kind) {
+  case ReceiveObservabilityKind::PollResponse:
+  case ReceiveObservabilityKind::MaintenanceStatus:
+    return ReceiveObservabilityAction::Queue;
+  }
+  return ReceiveObservabilityAction::Queue;
+}
+
 uint8_t resolveGatewayTargets(
     uint8_t localAddress,
     uint8_t knownPeerCount,

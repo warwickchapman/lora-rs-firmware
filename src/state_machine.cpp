@@ -18,11 +18,11 @@ constexpr uint32_t kDebounceMs = 50;
 constexpr uint32_t kTxRelayEchoDelayMs = 500;
 // Paired dry-contact control is latency-sensitive; retry quickly first, then
 // back off to limit sustained airtime when a peer is unavailable.
-constexpr uint32_t kAckRetryScheduleMs[] = {350, 650, 1000, 1500, 2500, 4000, 6500, 10000, 16000, 25000, 40000, 55000};
-constexpr uint8_t kAckRetryJitterPct = 15;
-constexpr uint32_t kAckSlotBaseMs = 180;
-constexpr uint32_t kAckSlotJitterMaxMs = 40;
+constexpr uint32_t kAckSlotBaseMs = runtime_utils::kGroupAckSlotMs;
+constexpr uint32_t kAckSlotJitterMaxMs = runtime_utils::kGroupAckSlotJitterMaxMs;
 constexpr uint32_t kAckWindowGuardMs = 120;
+constexpr uint8_t kGroupDirectRetryRounds = 2;
+constexpr uint8_t kMaintenanceIdentityRelayMarker = 0xA0;
 constexpr uint32_t kAckRetryOneShotTimeoutMs = 350;
 constexpr uint32_t kAckRetryInterNodeGapMs = 20;
 constexpr uint32_t kMqttRetryScheduleMs[] = {1000, 2000, 3000, 5000, 8000, 13000, 21000, 34000, 55000};
@@ -31,7 +31,6 @@ constexpr uint32_t kMinRemotePollIntervalMs = 60000;
 constexpr uint32_t kMaxRemotePollIntervalMs = 3600000;
 constexpr uint8_t kFlagTimeAuthoritative = 0x01;
 constexpr uint8_t kFlagPairedInputSlave = 0x02;
-constexpr uint8_t kFlagGroupPollCorrelation = 0x04;
 constexpr uint32_t kMinRetryTimeoutMs = 5000U;
 constexpr uint32_t kMaxRetryTimeoutMs = 3600000U;
 constexpr uint32_t kMinRxFailsafeTimeoutMs = 5000U;
@@ -44,7 +43,9 @@ constexpr uint8_t kWifiProvisionBroadcastAddress = 255;
 constexpr uint8_t kWifiControlBroadcastAddress = 255;
 constexpr uint8_t kWifiControlOpSet = 1;
 constexpr uint8_t kWifiControlOpStatus = 2;
-constexpr uint8_t kMaintenancePayloadVersion = 2;
+// Identity b6/b7 now carry WiFi RSSI and marked relay state. This is a
+// pre-1.0 clean protocol break, so old maintenance pages are rejected.
+constexpr uint8_t kMaintenancePayloadVersion = runtime_utils::kMaintenancePayloadVersion;
 constexpr uint8_t kMaintenancePageIdentity = 0;
 constexpr uint8_t kMaintenancePageDebug = 1;
 constexpr uint8_t kMaintenancePageSensors = 2;
@@ -312,7 +313,10 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   rx_deferred_ack_command_id_ = 0;
   rx_deferred_ack_dst_ = 0;
   rx_deferred_ack_relay_ = 0;
-  rx_deferred_ack_input_ = 0;
+  rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+  rx_deferred_observability_dst_ = 0;
+  rx_deferred_observability_diagnostics_ = false;
+  rx_deferred_observability_rssi_ = -127;
   paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
@@ -407,7 +411,10 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   rx_deferred_ack_command_id_ = 0;
   rx_deferred_ack_dst_ = 0;
   rx_deferred_ack_relay_ = 0;
-  rx_deferred_ack_input_ = 0;
+  rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+  rx_deferred_observability_dst_ = 0;
+  rx_deferred_observability_diagnostics_ = false;
+  rx_deferred_observability_rssi_ = -127;
   paired_input_slave_mode_ = false;
   rx_push_pending_ = false;
   rx_last_push_ms_ = 0;
@@ -523,11 +530,21 @@ void NodeStateMachine::tick(bool powerSaveActive) {
 
   resetRadioTxBudgetForTick();
   tickReceive();
-  tickPendingMaintenancePages();
 
   if (runtime_.role_tx) {
+    // A physical gateway input is relay control, not telemetry. Give a
+    // resulting group command the radio before maintenance pages can take the
+    // current tick's transmit budget.
+    if (tickGatewayControlPriority(now)) {
+      // Receive-side poll and maintenance replies are queued, never sent from
+      // tickReceive(). Drain one only after the control step left no active
+      // group window, then allow ordinary maintenance pages.
+      tickDeferredObservability();
+      tickPendingMaintenancePages();
+    }
     tickTransmitter();
   } else {
+    tickPendingMaintenancePages();
     tickReceiver();
   }
   tickProvisioningTarget(now);
@@ -702,7 +719,7 @@ bool NodeStateMachine::txGroupHasMissingTargets() const { return txGroupMissingB
 bool NodeStateMachine::isGroupActive() const {
   return runtime_.input_control_paired_lora_enabled &&
          (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks ||
-          tx_group_phase_ == PairedGroupPhase::PollMissingSequential);
+          tx_group_phase_ == PairedGroupPhase::RetryMissingSequential);
 }
 
 void NodeStateMachine::resetTxGroupState() {
@@ -719,19 +736,26 @@ void NodeStateMachine::resetTxGroupState() {
   tx_group_target_count_ = 0;
   memset(tx_group_targets, 0, sizeof(tx_group_targets));
   tx_group_window_deadline_ms_ = 0;
+  tx_group_copy_two_completed_ms_ = 0;
   tx_group_initial_send_cursor_ = 0;
+  tx_group_transport_counter_ = 0;
   tx_group_retry_cursor_ = 0;
+  tx_group_retry_round_ = 0;
   tx_group_retry_addr_ = 0;
   tx_group_retry_deadline_ms_ = 0;
   tx_group_desired_relay_state_ = 0;
   tx_group_desired_input_state_ = 0;
 }
 
-bool NodeStateMachine::sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase) {
+bool NodeStateMachine::sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase,
+                                                   uint32_t transportCounter) {
   if (!radioTxBudgetAvailable() || radio_ == nullptr) return false;
   const uint32_t now = millis();
-  last_counter_++;
-  if (!radio_->send(MessageType::Change, tx_group_desired_relay_state_, tx_group_desired_input_state_, txFlags(), last_counter_,
+  if (transportCounter == 0) {
+    last_counter_++;
+    transportCounter = last_counter_;
+  }
+  if (!radio_->send(MessageType::Change, tx_group_desired_relay_state_, tx_group_desired_input_state_, txFlags(), transportCounter,
                     runtime_.local_address, addr, localTempCodeToSend(), 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
     return false;
   }
@@ -745,42 +769,16 @@ bool NodeStateMachine::sendTxGroupChangeToAddress(uint8_t addr, const char *even
   tx_pending_relay_state_ = tx_group_desired_relay_state_;
   tx_pending_input_state_ = tx_group_desired_input_state_;
   if (eventName != nullptr) {
-    lrslog::event(eventName, 0, tx_group_command_id_, addr);
+    lrslog::event(eventName, 0, transportCounter, addr);
   }
   LRS_LOGI(LORA,
-           "event=%s phase=%s command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
+           "event=%s phase=%s command_id=%lu transport_counter=%lu relay_state=%u input_state=%u target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
            eventName ? eventName : "tx_alln_send",
            phase ? phase : "unknown",
            static_cast<unsigned long>(tx_group_command_id_),
-           static_cast<unsigned>(tx_group_target_count_),
-           static_cast<unsigned long>(tx_group_expected_bitmap_),
-           static_cast<unsigned long>(tx_group_acked_bitmap_),
-           static_cast<unsigned long>(txGroupMissingBitmap()),
-           static_cast<unsigned>(addr));
-  return true;
-}
-
-bool NodeStateMachine::sendTxGroupPollToAddress(uint8_t addr, const char *eventName, const char *phase) {
-  if (!radioTxBudgetAvailable() || radio_ == nullptr) return false;
-  const uint32_t now = millis();
-  last_counter_++;
-  if (!radio_->send(MessageType::PollRequest, 0, input_state_, txFlags() | kFlagGroupPollCorrelation, last_counter_,
-                    runtime_.local_address, addr, localTempCodeToSend(), 0, 0xFF, 0xFFFF, tx_group_command_id_)) {
-    return false;
-  }
-  last_tx_ms_ = now;
-  markRadioTxSentThisTick();
-  // Don't modify link_state_ or tx_command_pending_ because this is a non-actuating poll.
-  tx_group_retry_addr_ = addr;
-  tx_group_retry_deadline_ms_ = now + kAckRetryOneShotTimeoutMs;
-  if (eventName != nullptr) {
-    lrslog::event(eventName, 0, tx_group_command_id_, addr);
-  }
-  LRS_LOGI(LORA,
-           "event=%s phase=%s command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
-           eventName ? eventName : "tx_alln_poll_send",
-           phase ? phase : "unknown",
-           static_cast<unsigned long>(tx_group_command_id_),
+           static_cast<unsigned long>(transportCounter),
+           static_cast<unsigned>(tx_group_desired_relay_state_),
+           static_cast<unsigned>(tx_group_desired_input_state_),
            static_cast<unsigned>(tx_group_target_count_),
            static_cast<unsigned long>(tx_group_expected_bitmap_),
            static_cast<unsigned long>(tx_group_acked_bitmap_),
@@ -790,6 +788,15 @@ bool NodeStateMachine::sendTxGroupPollToAddress(uint8_t addr, const char *eventN
 }
 
 void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputState, const char *reasonEvent) {
+  const bool superseding = isGroupActive();
+  const uint32_t supersededCommandId = tx_group_command_id_;
+  const uint8_t supersededRelayState = tx_group_desired_relay_state_;
+  const uint8_t supersededInputState = tx_group_desired_input_state_;
+
+  // A newer physical input state supersedes an unfinished command. The gateway
+  // relay stays at its last aggregate-confirmed state until the replacement
+  // command is fully acknowledged.
+  tx_ack_pending_ = false;
   if (!buildTxGroupTargets()) {
     resetTxGroupState();
     return;
@@ -800,10 +807,34 @@ void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputStat
       static_cast<uint32_t>((millis() ^ last_counter_ ^ (static_cast<uint32_t>(runtime_.local_address) << 24) ^ random(1, 0x7FFFFFFF)) &
                             0xFFFFFFFFUL);
   if (tx_group_command_id_ == 0) tx_group_command_id_ = 1;
+  if (superseding) {
+    lrslog::event("tx_group_superseded", 0, supersededCommandId, inputState ? 1 : 0);
+    LRS_LOGI(LORA,
+             "event=tx_group_superseded old_command_id=%lu command_id=%lu reason=%s old_relay_state=%u old_input_state=%u relay_state=%u input_state=%u",
+             static_cast<unsigned long>(supersededCommandId),
+             static_cast<unsigned long>(tx_group_command_id_),
+             reasonEvent ? reasonEvent : "unknown",
+             static_cast<unsigned>(supersededRelayState),
+             static_cast<unsigned>(supersededInputState),
+             static_cast<unsigned>(relayState ? 1 : 0),
+             static_cast<unsigned>(inputState ? 1 : 0));
+  }
+  if (reasonEvent != nullptr && strcmp(reasonEvent, "tx_group_input_change") == 0) {
+    lrslog::event("tx_gateway_input_debounced", 0, tx_group_command_id_, inputState ? 1 : 0);
+    LRS_LOGI(LORA,
+             "event=tx_gateway_input_debounced command_id=%lu relay_state=%u input_state=%u addr=%u",
+             static_cast<unsigned long>(tx_group_command_id_),
+             static_cast<unsigned>(relayState ? 1 : 0),
+             static_cast<unsigned>(inputState ? 1 : 0),
+             static_cast<unsigned>(runtime_.local_address));
+  }
   tx_group_phase_ = PairedGroupPhase::AwaitInitialAcks;
   tx_group_initial_send_cursor_ = 0;
+  tx_group_transport_counter_ = 0;
   tx_group_window_deadline_ms_ = 0;
+  tx_group_copy_two_completed_ms_ = 0;
   tx_group_retry_cursor_ = 0;
+  tx_group_retry_round_ = 0;
   tx_group_retry_addr_ = 0;
   tx_group_retry_deadline_ms_ = 0;
   tx_command_pending_ = true;
@@ -815,8 +846,10 @@ void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputStat
   }
   lrslog::event("tx_alln_start", 0, tx_group_command_id_, tx_group_target_count_);
   LRS_LOGI(LORA,
-           "event=tx_alln_start phase=initial_window command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=0",
+           "event=tx_alln_start phase=initial_window command_id=%lu reason=%s group_active_before=%u target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=0",
            static_cast<unsigned long>(tx_group_command_id_),
+           reasonEvent ? reasonEvent : "unknown",
+           superseding ? 1U : 0U,
            static_cast<unsigned>(tx_group_target_count_),
            static_cast<unsigned long>(tx_group_expected_bitmap_),
            static_cast<unsigned long>(tx_group_acked_bitmap_),
@@ -824,11 +857,14 @@ void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputStat
 }
 
 void NodeStateMachine::finishTxGroupSuccess() {
-  const uint32_t now = millis();
   const uint32_t commandId = tx_group_command_id_;
-  tx_ack_pending_ = true;
-  tx_ack_apply_ms_ = now + kTxRelayEchoDelayMs;
-  tx_ack_relay_state_ = tx_group_desired_relay_state_;
+  // The gateway relay is the aggregate-confirmation indicator. Once the last
+  // remote ACK arrives, reflect that confirmed result immediately.
+  relay_state_ = tx_group_desired_relay_state_;
+  digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
+  tx_ack_pending_ = false;
+  tx_ack_apply_ms_ = 0;
+  tx_ack_relay_state_ = relay_state_;
   tx_command_pending_ = false;
   tx_pending_command_counter_ = 0;
   tx_retry_step_ = 0;
@@ -851,7 +887,7 @@ void NodeStateMachine::finishTxGroupPartial() {
   const uint32_t missing = txGroupMissingBitmap();
   for (uint8_t i = 0; i < tx_group_target_count_; ++i) {
     if ((missing & (1UL << i)) == 0) continue;
-    updatePeerAckStatus(tx_group_targets[i], tx_group_desired_relay_state_, tx_group_desired_input_state_, PeerAckState::Timeout);
+    updatePeerAckStatus(tx_group_targets[i], tx_group_desired_relay_state_, PeerAckState::Timeout);
   }
   tx_command_pending_ = false;
   tx_pending_command_counter_ = 0;
@@ -870,19 +906,21 @@ void NodeStateMachine::finishTxGroupPartial() {
   resetTxGroupState();
 }
 
-void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, uint8_t inputState, PeerAckState ackState, int rssi) {
+void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, PeerAckState ackState, int rssi) {
   if (runtime_.role_tx && settings_ != nullptr && settings_->mode == "paired") {
     if (!isConfiguredOperationalPeer(src)) return;
   }
   PeerRuntime *node = (ackState == PeerAckState::Ok) ? findOrCreatePeer(src) : peer_manager_.find(src);
   if (node == nullptr) return;
-  (void)inputState;
   if (ackState == PeerAckState::Ok) {
     node->relay_state = relayState ? 1 : 0;
+    node->relay_state_known = true;
     node->last_seen_ms = millis();
     if (rssi != -127) {
       node->uplink_rssi = rssi;
     }
+  } else if (ackState == PeerAckState::Timeout) {
+    node->relay_state_known = false;
   }
   node->last_cmd_counter = tx_group_command_id_;
   node->ack_state = ackState;
@@ -893,19 +931,21 @@ uint8_t NodeStateMachine::pairedAckRankForLocalAddress() const {
   return 0;
 }
 
-void NodeStateMachine::scheduleDeferredAck(uint8_t dst, uint8_t relayState, uint8_t inputState, uint32_t commandId) {
+void NodeStateMachine::scheduleDeferredAck(uint8_t dst, uint8_t relayState, uint32_t commandId,
+                                           bool immediate, bool groupBroadcast) {
   const uint8_t rank = pairedAckRankForLocalAddress();
   const uint32_t span = kAckSlotJitterMaxMs + 1U;
   const uint32_t seed = fnv1a32(reinterpret_cast<const uint8_t *>(&commandId), sizeof(commandId)) ^
                         static_cast<uint32_t>(runtime_.local_address);
   const uint32_t jitter = (span == 0) ? 0U : (seed % span);
-  const uint32_t delayMs = static_cast<uint32_t>(rank) * kAckSlotBaseMs + jitter;
+  const uint32_t leadMs = groupBroadcast ? runtime_utils::kGroupAckLeadMs : kAckWindowGuardMs;
+  const uint32_t delayMs = immediate ? 0U : runtime_utils::staggeredAckDelayMs(
+      rank, kAckSlotBaseMs, jitter, leadMs);
   rx_deferred_ack_pending_ = true;
   rx_deferred_ack_due_ms_ = millis() + delayMs;
   rx_deferred_ack_command_id_ = commandId;
   rx_deferred_ack_dst_ = dst;
   rx_deferred_ack_relay_ = relayState ? 1 : 0;
-  rx_deferred_ack_input_ = inputState ? 1 : 0;
   lrslog::event("rx_alln_ack_sched", 0, commandId, rank);
   LRS_LOGI(LORA,
            "event=rx_alln_ack_sched phase=initial_window command_id=%lu target_count=0 expected_bitmap=0x00000000 acked_bitmap=0x00000000 missing_bitmap=0x00000000 addr=%u",
@@ -917,7 +957,9 @@ void NodeStateMachine::tickDeferredAck(uint32_t now) {
   if (static_cast<int32_t>(now - rx_deferred_ack_due_ms_) < 0) return;
   if (!radioTxBudgetAvailable()) return;
   last_counter_++;
-  if (!radio_->send(MessageType::Ack, rx_deferred_ack_relay_, rx_deferred_ack_input_, txFlags(), last_counter_, runtime_.local_address,
+  // Input in an ACK is always this remote's live dry-contact reading. A gateway
+  // Change frame carries controller input for command semantics, never peer state.
+  if (!radio_->send(MessageType::Ack, rx_deferred_ack_relay_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
                     rx_deferred_ack_dst_, localTempCodeToSend(), 0, 0xFF, 0xFFFF, rx_deferred_ack_command_id_)) {
     return;
   }
@@ -939,20 +981,24 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
   }
 
   if (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks) {
-    if (tx_group_initial_send_cursor_ < tx_group_target_count_) {
+    if (tx_group_initial_send_cursor_ < 2U) {
       if (tx_group_initial_send_cursor_ == 0) {
-        if (!sendTxGroupChangeToAddress(255, "tx_alln_bcast", "initial_window")) {
+        if (!sendTxGroupChangeToAddress(255, "tx_alln_bcast_1", "initial_window")) {
           return;
         }
+        tx_group_transport_counter_ = last_counter_;
+      } else if (!sendTxGroupChangeToAddress(255, "tx_alln_bcast_2", "initial_window",
+                                              tx_group_transport_counter_)) {
+        return;
+      } else {
+        // RadioProtocol::send is synchronous: this timestamp is copy two's
+        // actual completed transmit time, not a later scheduler tick.
+        tx_group_copy_two_completed_ms_ = millis();
+        tx_group_window_deadline_ms_ = tx_group_copy_two_completed_ms_ +
+            runtime_utils::groupInitialAckWindowMs(tx_group_target_count_);
       }
-      tx_group_initial_send_cursor_ = tx_group_target_count_;
+      tx_group_initial_send_cursor_++;
       return;
-    }
-
-    if (tx_group_window_deadline_ms_ == 0) {
-      const uint32_t windowMs =
-          static_cast<uint32_t>(tx_group_target_count_) * (kAckSlotBaseMs + kAckSlotJitterMaxMs) + kAckWindowGuardMs;
-      tx_group_window_deadline_ms_ = now + windowMs;
     }
 
     if (!txGroupHasMissingTargets()) {
@@ -971,14 +1017,15 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
              static_cast<unsigned long>(tx_group_expected_bitmap_),
              static_cast<unsigned long>(tx_group_acked_bitmap_),
              static_cast<unsigned long>(txGroupMissingBitmap()));
-    tx_group_phase_ = PairedGroupPhase::PollMissingSequential;
+    tx_group_phase_ = PairedGroupPhase::RetryMissingSequential;
     tx_group_retry_cursor_ = 0;
+    tx_group_retry_round_ = 0;
     tx_group_retry_addr_ = 0;
     tx_group_retry_deadline_ms_ = now;
     return;
   }
 
-  if (tx_group_phase_ != PairedGroupPhase::PollMissingSequential) return;
+  if (tx_group_phase_ != PairedGroupPhase::RetryMissingSequential) return;
 
   if (!txGroupHasMissingTargets()) {
     finishTxGroupSuccess();
@@ -993,9 +1040,9 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
       return;
     }
     if (static_cast<int32_t>(now - tx_group_retry_deadline_ms_) < 0) return;
-    lrslog::event("tx_alln_poll_timeout", 0, tx_group_command_id_, tx_group_retry_addr_);
+    lrslog::event("tx_alln_retry_timeout", 0, tx_group_command_id_, tx_group_retry_addr_);
     LRS_LOGI(LORA,
-             "event=tx_alln_poll_timeout phase=poll_once command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
+             "event=tx_alln_retry_timeout phase=retry_change command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
              static_cast<unsigned long>(tx_group_command_id_),
              static_cast<unsigned>(tx_group_target_count_),
              static_cast<unsigned long>(tx_group_expected_bitmap_),
@@ -1015,13 +1062,18 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
     if ((tx_group_retry_bitmap_ & bit) == 0U) continue;
     if ((tx_group_acked_bitmap_ & bit) != 0U) continue;
     const uint8_t addr = tx_group_targets[idx];
-    if (!sendTxGroupPollToAddress(addr, "tx_alln_poll_send", "poll_once")) return;
-    // sendTxGroupPollToAddress sets tx_group_retry_addr_ and tx_group_retry_deadline_ms_
+    if (!sendTxGroupChangeToAddress(addr, "tx_alln_retry_send", "retry_change")) return;
+    tx_group_retry_addr_ = addr;
+    tx_group_retry_deadline_ms_ = now + kAckRetryOneShotTimeoutMs;
     return;
   }
 
   if (!txGroupHasMissingTargets()) {
     finishTxGroupSuccess();
+  } else if (++tx_group_retry_round_ < kGroupDirectRetryRounds) {
+    tx_group_retry_cursor_ = 0;
+    tx_group_retry_deadline_ms_ = now + kAckRetryInterNodeGapMs;
+    lrslog::event("tx_alln_retry_round", 0, tx_group_command_id_, tx_group_retry_round_);
   } else {
     finishTxGroupPartial();
   }
@@ -2389,6 +2441,55 @@ bool NodeStateMachine::sendSensorStatePush(uint32_t now) {
   return true;
 }
 
+bool NodeStateMachine::sendPollResponse(uint8_t dstAddress, int downlinkRssi) {
+  if (!radioTxBudgetAvailable()) return false;
+  const uint8_t sensorMask = 0x0C;  // downlink RSSI + WiFi enabled state
+  const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(downlinkRssi));
+  const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
+  last_counter_++;
+  if (!radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
+                    dstAddress, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, currentUnixTimeS(millis()))) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("rx_poll_response_tx", downlinkRssi, last_counter_, relay_state_);
+  return true;
+}
+
+void NodeStateMachine::queueDeferredObservability(DeferredObservabilityKind kind, uint8_t dstAddress,
+                                                   bool diagnostics, int downlinkRssi) {
+  if (kind == DeferredObservabilityKind::Maintenance &&
+      rx_deferred_observability_kind_ == DeferredObservabilityKind::Maintenance) {
+    rx_deferred_observability_diagnostics_ = rx_deferred_observability_diagnostics_ || diagnostics;
+  } else if (kind == DeferredObservabilityKind::Maintenance ||
+             rx_deferred_observability_kind_ == DeferredObservabilityKind::None) {
+    rx_deferred_observability_kind_ = kind;
+    rx_deferred_observability_dst_ = dstAddress;
+    rx_deferred_observability_diagnostics_ = diagnostics;
+    rx_deferred_observability_rssi_ = downlinkRssi;
+  }
+  lrslog::event("rx_observability_deferred", 0, dstAddress, static_cast<uint8_t>(kind));
+}
+
+bool NodeStateMachine::tickDeferredObservability() {
+  if (rx_deferred_ack_pending_ || isGroupActive() ||
+      rx_deferred_observability_kind_ == DeferredObservabilityKind::None) return false;
+  bool sent = false;
+  if (rx_deferred_observability_kind_ == DeferredObservabilityKind::Maintenance) {
+    sent = sendMaintenanceStatus(rx_deferred_observability_dst_, rx_deferred_observability_diagnostics_);
+  } else if (rx_deferred_observability_kind_ == DeferredObservabilityKind::PollResponse) {
+    sent = sendPollResponse(rx_deferred_observability_dst_, rx_deferred_observability_rssi_);
+  }
+  if (sent) {
+    rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+    rx_deferred_observability_dst_ = 0;
+    rx_deferred_observability_diagnostics_ = false;
+    rx_deferred_observability_rssi_ = -127;
+  }
+  return sent;
+}
+
 bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter) {
   if (!radioTxBudgetAvailable()) return false;
   last_counter_++;
@@ -2409,7 +2510,51 @@ bool NodeStateMachine::sendPollRequest(uint8_t dstAddress, uint32_t *sentCounter
   return true;
 }
 
-bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, bool requestDiagnostics, uint32_t *sentCounter) {
+namespace {
+const char *maintenanceRequestSourceName(MaintenanceRequestSource source) {
+  switch (source) {
+    case MaintenanceRequestSource::FleetScan: return "fleet_scan";
+    case MaintenanceRequestSource::CandidateProbe: return "candidate_probe";
+    case MaintenanceRequestSource::AdminPeerRefresh: return "admin_peer_refresh";
+    case MaintenanceRequestSource::AdminDiagnostics: return "admin_diagnostics";
+  }
+  return "unknown";
+}
+}  // namespace
+
+bool NodeStateMachine::queueMaintenanceRequest(uint8_t dstAddress, bool requestDiagnostics,
+                                               MaintenanceRequestSource source) {
+  if (dstAddress == 0 || dstAddress == 255) return false;
+
+  for (PendingMaintenanceRequest &request : maintenance_requests_) {
+    if (!request.pending || request.address != dstAddress) continue;
+    if (requestDiagnostics && !request.diagnostics) {
+      request.diagnostics = true;
+      request.source = source;
+    }
+    LRS_LOGI(SYS, "event=maint_request_coalesced source=%s diagnostics=%u addr=%u",
+             maintenanceRequestSourceName(source), request.diagnostics ? 1U : 0U, dstAddress);
+    return true;
+  }
+
+  for (PendingMaintenanceRequest &request : maintenance_requests_) {
+    if (request.pending) continue;
+    request.pending = true;
+    request.address = dstAddress;
+    request.diagnostics = requestDiagnostics;
+    request.source = source;
+    LRS_LOGI(SYS, "event=maint_request_queued source=%s diagnostics=%u addr=%u",
+             maintenanceRequestSourceName(source), requestDiagnostics ? 1U : 0U, dstAddress);
+    return true;
+  }
+
+  LRS_LOGI(SYS, "event=maint_request_queue_full source=%s diagnostics=%u addr=%u",
+           maintenanceRequestSourceName(source), requestDiagnostics ? 1U : 0U, dstAddress);
+  return false;
+}
+
+bool NodeStateMachine::sendMaintenanceRequestNow(uint8_t dstAddress, bool requestDiagnostics,
+                                                 uint32_t *sentCounter) {
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
   uint8_t payload[12]{};
@@ -2427,14 +2572,41 @@ bool NodeStateMachine::sendMaintenanceRequest(uint8_t dstAddress, bool requestDi
   return true;
 }
 
+void NodeStateMachine::noteMaintenanceRequestSent(MaintenanceRequestSource source, uint8_t address,
+                                                  uint32_t counter, uint32_t now) {
+  LRS_LOGI(SYS, "event=maint_request_tx source=%s counter=%lu addr=%u",
+           maintenanceRequestSourceName(source), static_cast<unsigned long>(counter), address);
+  if (source == MaintenanceRequestSource::FleetScan) {
+    fleet_scan_sent_++;
+    fleet_scan_last_tx_ms_ = now;
+    lrslog::event("fleet_scan_probe", 0, counter, address);
+  } else if (source == MaintenanceRequestSource::CandidateProbe) {
+    lrslog::event("candidate_maint_probe", 0, counter, address);
+  }
+}
+
+void NodeStateMachine::tickMaintenanceRequestQueue(uint32_t now) {
+  if (isGroupActive() || !radioTxBudgetAvailable()) return;
+  for (size_t offset = 0; offset < Settings::kAddressListCap; ++offset) {
+    const size_t index = (maintenance_request_cursor_ + offset) % Settings::kAddressListCap;
+    PendingMaintenanceRequest &request = maintenance_requests_[index];
+    if (!request.pending) continue;
+
+    uint32_t sentCounter = 0;
+    if (!sendMaintenanceRequestNow(request.address, request.diagnostics, &sentCounter)) return;
+    const MaintenanceRequestSource source = request.source;
+    const uint8_t address = request.address;
+    request = PendingMaintenanceRequest{};
+    maintenance_request_cursor_ = static_cast<uint8_t>((index + 1U) % Settings::kAddressListCap);
+    noteMaintenanceRequestSent(source, address, sentCounter, now);
+    return;
+  }
+}
+
 bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDiagnostics) {
   if (ota_pull_active_ || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 || settings_ == nullptr) return false;
-  uint8_t major = 0;
-  uint8_t minor = 0;
-  uint8_t patch = 0;
-  parseFwVersionPacked(major, minor, patch);
   const bool wifiConnected = WiFi.isConnected();
   const IPAddress ip = wifiConnected ? WiFi.localIP() : IPAddress(0, 0, 0, 0);
   const bool hasValidIp = (ip != IPAddress(0, 0, 0, 0));
@@ -2455,8 +2627,9 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDia
   payload[3] = static_cast<uint8_t>(chipId & 0xFFU);
   payload[4] = static_cast<uint8_t>((chipId >> 8) & 0xFFU);
   payload[5] = static_cast<uint8_t>((chipId >> 16) & 0xFFU);
-  payload[6] = static_cast<uint8_t>(((major & 0x0FU) << 4) | (minor & 0x0FU));
-  payload[7] = patch;
+  payload[6] = wifiConnected ? static_cast<uint8_t>(static_cast<int8_t>(WiFi.RSSI())) : 0;
+  payload[7] = static_cast<uint8_t>(kMaintenanceIdentityRelayMarker |
+                                    (relay_state_ ? 1U : 0U));
   payload[8] = ip[0];
   payload[9] = ip[1];
   payload[10] = ip[2];
@@ -2581,13 +2754,8 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
   payload[5] = static_cast<uint8_t>((heapMaxBlock >> 8) & 0xFFU);
   payload[6] = lrslog::heapFragPercent();
 
-  // WiFi RSSI on debug page payload[7..8] (LE int16_t)
-  int16_t wifiRssi = 0;
-  if (WiFi.isConnected()) {
-    wifiRssi = static_cast<int16_t>(WiFi.RSSI());
-  }
-  payload[7] = static_cast<uint8_t>(wifiRssi & 0xFFU);
-  payload[8] = static_cast<uint8_t>((wifiRssi >> 8) & 0xFFU);
+  payload[7] = 0;
+  payload[8] = 0;
 
   uint32_t uptimeMinutes = millis() / 60000UL;
   if (uptimeMinutes > 0xFFFFUL) uptimeMinutes = 0xFFFFUL;
@@ -2608,6 +2776,8 @@ bool NodeStateMachine::sendMaintenanceDebugStatus(uint8_t dstAddress) {
 }
 
 void NodeStateMachine::tickPendingMaintenancePages() {
+  if (rx_deferred_ack_pending_) return;
+  if (isGroupActive()) return;
   if (prov_.active || prov_.pause_normal_tx) return;
   if (ota_pull_active_ || (ota_silence_until_ms_ != 0 && millis() < ota_silence_until_ms_)) return;
   if (maintenance_version_pending_) {
@@ -2678,19 +2848,17 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
       rememberProvisionedAddress(reportedChipId, msg.src);
     }
     node->chip_id = reportedChipId;
-    const uint8_t nextMajor = static_cast<uint8_t>((p[6] >> 4) & 0x0FU);
-    const uint8_t nextMinor = static_cast<uint8_t>(p[6] & 0x0FU);
-    const uint8_t nextPatch = p[7];
-    if (node->fw_major != nextMajor || node->fw_minor != nextMinor || node->fw_patch != nextPatch) {
-      node->fw_build = 0;
-    }
-    node->fw_major = nextMajor;
-    node->fw_minor = nextMinor;
-    node->fw_patch = nextPatch;
     node->wifi_state_known = true;
     node->wifi_enabled = (flags & 0x01U) != 0U;
     node->wifi_connected_known = true;
     node->wifi_connected = (flags & 0x02U) != 0U;
+    node->wifi_rssi_dbm = runtime_utils::decodeMaintenanceIdentityWifiRssi(
+        p[6], node->wifi_connected);
+    uint8_t reportedRelayState = 0;
+    if (runtime_utils::decodeMaintenanceIdentityRelayState(p[7], reportedRelayState)) {
+      node->relay_state = reportedRelayState;
+      node->relay_state_known = true;
+    }
     node->mqtt_state_known = true;
     node->mqtt_enabled = (flags & 0x04U) != 0U;
     node->mqtt_connected = (flags & 0x08U) != 0U;
@@ -2752,9 +2920,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->heap_max_block = static_cast<uint32_t>(p[4]) |
                            (static_cast<uint32_t>(p[5]) << 8);
     node->heap_frag_pct = p[6];
-    // Parse WiFi RSSI
-    node->wifi_rssi_dbm = static_cast<int16_t>(p[7] | (static_cast<uint16_t>(p[8]) << 8));
-
     node->debug_uptime_ms = (static_cast<uint32_t>(p[9]) |
                              (static_cast<uint32_t>(p[10]) << 8)) * 60000UL;
   } else {
@@ -2771,6 +2936,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
 void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
   if (!runtime_.role_tx) return;
   if (fleet_scan_active_) return;
+  if (isGroupActive()) return;
   for (size_t i = 0; i < peer_manager_.count(); ++i) {
     PeerRuntime *node = peer_manager_.findByIndex(i);
     if (!node || !node->pending) continue;
@@ -2815,6 +2981,7 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
 void NodeStateMachine::tickPeerPolling(uint32_t now) {
   if (!runtime_.role_tx) return;
   if (fleet_scan_active_) return;
+  if (isGroupActive()) return;
   if (!runtime_.tx_mqtt_remote_polling_enabled) return;
   if (!peer_manager_.ensurePollStorage()) return;
 
@@ -2874,7 +3041,6 @@ void NodeStateMachine::tickFleetScan(uint32_t now) {
   }
   if (static_cast<int32_t>(now - fleet_scan_next_ms_) < 0) return;
   if (isGroupActive()) return;
-  if (!radioTxBudgetAvailable()) return;
   if (fleet_scan_next_address_ < fleet_scan_start_address_ || fleet_scan_next_address_ > fleet_scan_end_address_) {
     fleet_scan_active_ = false;
     fleet_scan_next_ms_ = 0;
@@ -2882,15 +3048,11 @@ void NodeStateMachine::tickFleetScan(uint32_t now) {
     return;
   }
 
-  uint32_t sentCounter = 0;
-  if (!sendMaintenanceRequest(fleet_scan_next_address_, false, &sentCounter)) {
+  if (!queueMaintenanceRequest(fleet_scan_next_address_, false, MaintenanceRequestSource::FleetScan)) {
     fleet_scan_next_ms_ = now + 250U;
     return;
   }
 
-  fleet_scan_sent_++;
-  fleet_scan_last_tx_ms_ = now;
-  lrslog::event("fleet_scan_probe", 0, sentCounter, fleet_scan_next_address_);
   fleet_scan_next_address_++;
   if (fleet_scan_next_address_ > fleet_scan_end_address_) {
     fleet_scan_active_ = false;
@@ -2916,22 +3078,6 @@ void NodeStateMachine::tickTransmitter() {
     tx_ack_pending_ = false;
   }
 
-  int inputLogical = static_cast<int>(localInputState());
-  if (inputLogical != last_input_raw_) {
-    last_debounce_ms_ = now;
-    last_input_raw_ = inputLogical;
-  }
-
-  if ((now - last_debounce_ms_) > kDebounceMs && inputLogical != input_state_) {
-    input_state_ = static_cast<uint8_t>(inputLogical);
-    if (runtime_.input_control_paired_lora_enabled) {
-      tx_state_sync_pending_ = false;
-      tx_state_sync_due_ms_ = 0;
-      resetTxGroupState();
-      startTxGroupCommand(input_state_, input_state_, "tx_group_input_change");
-    }
-  }
-
   if (runtime_.input_control_paired_lora_enabled && tx_state_sync_pending_ &&
       static_cast<int32_t>(now - tx_state_sync_due_ms_) >= 0 &&
       (tx_group_phase_ == PairedGroupPhase::Idle || tx_group_phase_ == PairedGroupPhase::Complete)) {
@@ -2940,24 +3086,25 @@ void NodeStateMachine::tickTransmitter() {
     startTxGroupCommand(input_state_, input_state_, "tx_group_startup_sync");
   }
 
-  const bool groupActive = isGroupActive();
+  // tickGatewayControlPriority() has already serviced group control before
+  // observability transmitters. Keep every lower-priority sender blocked for
+  // the remainder of an active group window.
+  if (isGroupActive()) return;
 
-  if (groupActive) {
-    tickTxGroupCommand(now);
-  }
-
-  if (!groupActive && runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
+  if (runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
     last_heartbeat_ms_ = now;
     if (runtime_.input_control_paired_lora_enabled) {
       if (runtime_.mqtt_control_enabled) {
         lrslog::event("tx_group_heartbeat_mqtt_skip", 0, last_counter_, input_state_);
       } else {
         startTxGroupCommand(input_state_, input_state_, "tx_group_heartbeat_sync");
+        return;
       }
     }
   }
 
   tickPendingOtaPullControl(now);
+  tickMaintenanceRequestQueue(now);
   tickFleetScan(now);
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
@@ -2975,10 +3122,46 @@ void NodeStateMachine::tickTransmitter() {
   }
 }
 
+bool NodeStateMachine::tickGatewayControlPriority(uint32_t now) {
+  if (prov_.active) return false;
+
+  const int inputLogical = static_cast<int>(localInputState());
+  bool debouncedPairedInputTransition = false;
+  if (inputLogical != last_input_raw_) {
+    last_debounce_ms_ = now;
+    last_input_raw_ = inputLogical;
+  }
+
+  if ((now - last_debounce_ms_) > kDebounceMs && inputLogical != input_state_) {
+    input_state_ = static_cast<uint8_t>(inputLogical);
+    if (runtime_.input_control_paired_lora_enabled) {
+      tx_state_sync_pending_ = false;
+      tx_state_sync_due_ms_ = 0;
+      startTxGroupCommand(input_state_, input_state_, "tx_group_input_change");
+      debouncedPairedInputTransition = true;
+    }
+  }
+
+  const auto schedule = runtime_utils::gatewayControlSchedule(
+      runtime_.input_control_paired_lora_enabled,
+      debouncedPairedInputTransition,
+      isGroupActive());
+  if (schedule.run_group_control) {
+    // A newly debounced transition can send copy one in this same tick when
+    // the radio is available. This path also services copy two, the ACK
+    // window, and bounded direct retries before any observability sender.
+    tickTxGroupCommand(now);
+  }
+  return schedule.allow_observability && !isGroupActive();
+}
+
 void NodeStateMachine::tickReceiver() {
   const uint32_t now = millis();
   applyReceiverFailsafe(now);
-  tickDeferredAck(now);
+
+  // A control ACK reserves LoRa transmission, never local dry-contact
+  // sampling. Capture a physical change now and send its operational push as
+  // soon as the ACK clears.
   int inputLogical = static_cast<int>(localInputState());
   if (inputLogical != last_input_raw_) {
     last_debounce_ms_ = now;
@@ -2990,7 +3173,10 @@ void NodeStateMachine::tickReceiver() {
     rx_push_pending_ = true;
   }
 
+  tickDeferredAck(now);
+  if (rx_deferred_ack_pending_) return;
   if (rx_push_pending_ && sendInputStatePush(now)) return;
+  if (tickDeferredObservability()) return;
   sendSensorStatePush(now);
 }
 
@@ -3169,6 +3355,7 @@ void NodeStateMachine::tickReceive() {
                                        msg.type == MessageType::MqttStatus);
       if (statusCarriesState) {
         node->relay_state = msg.relay_state ? 1 : 0;
+        node->relay_state_known = true;
         // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
         const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
         if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
@@ -3218,14 +3405,24 @@ void NodeStateMachine::tickReceive() {
         }
         return;
       }
-      updatePeerAckStatus(msg.src, msg.relay_state, msg.input_state, PeerAckState::Ok, msg.rssi);
       const uint8_t idx = txGroupTargetIndexForAddress(msg.src);
+      const bool groupAck = idx != 0xFF &&
+                            (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks ||
+                             tx_group_phase_ == PairedGroupPhase::RetryMissingSequential);
+      const uint8_t confirmedRelayState = groupAck ? tx_group_desired_relay_state_ : msg.relay_state;
+      if (groupAck && msg.relay_state != confirmedRelayState) {
+        lrslog::event("tx_alln_ack_state_mismatch", msg.rssi, tx_group_command_id_, msg.src);
+      }
+      // A matching group ACK confirms that this peer applied the broadcast command.
+      // The command is authoritative for the cached relay state; the ACK relay byte
+      // remains diagnostic only, so a malformed/stale echo cannot display false Off.
+      updatePeerAckStatus(msg.src, confirmedRelayState, PeerAckState::Ok, msg.rssi);
       if (idx != 0xFF) {
         tx_group_acked_bitmap_ |= (1UL << idx);
         lrslog::event("tx_alln_ack_rx", msg.rssi, tx_group_command_id_, msg.src);
         LRS_LOGI(LORA,
                  "event=tx_alln_ack_rx phase=%s command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
-                 (tx_group_phase_ == PairedGroupPhase::PollMissingSequential) ? "poll_once" : "initial_window",
+                 (tx_group_phase_ == PairedGroupPhase::RetryMissingSequential) ? "retry_change" : "initial_window",
                  static_cast<unsigned long>(tx_group_command_id_),
                  static_cast<unsigned>(tx_group_target_count_),
                  static_cast<unsigned long>(tx_group_expected_bitmap_),
@@ -3233,7 +3430,7 @@ void NodeStateMachine::tickReceive() {
                  static_cast<unsigned long>(txGroupMissingBitmap()),
                  static_cast<unsigned>(msg.src));
       }
-      if (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::PollMissingSequential) {
+      if (tx_group_phase_ == PairedGroupPhase::AwaitInitialAcks || tx_group_phase_ == PairedGroupPhase::RetryMissingSequential) {
         if (!txGroupHasMissingTargets()) {
           finishTxGroupSuccess();
         }
@@ -3265,6 +3462,7 @@ void NodeStateMachine::tickReceive() {
         return;
       }
       node->relay_state = msg.relay_state ? 1 : 0;
+      node->relay_state_known = true;
       // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
       const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
       if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
@@ -3312,68 +3510,29 @@ void NodeStateMachine::tickReceive() {
         }
         lrslog::event("tx_poll_response", msg.rssi, msg.counter, msg.relay_state);
         
-        // Non-actuating confirmation for PollMissingSequential phase
-        if (tx_group_phase_ == PairedGroupPhase::PollMissingSequential && msg.unix_time_s == tx_group_command_id_) {
-          if (msg.relay_state == tx_group_desired_relay_state_) {
-            const uint8_t idx = txGroupTargetIndexForAddress(msg.src);
-            if (idx != 0xFF) {
-              tx_group_acked_bitmap_ |= (1UL << idx);
-              lrslog::event("tx_alln_poll_ok", msg.rssi, tx_group_command_id_, msg.src);
-              LRS_LOGI(LORA,
-                       "event=tx_alln_poll_ok phase=poll_once command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=%u",
-                       static_cast<unsigned long>(tx_group_command_id_),
-                       static_cast<unsigned>(tx_group_target_count_),
-                       static_cast<unsigned long>(tx_group_expected_bitmap_),
-                       static_cast<unsigned long>(tx_group_acked_bitmap_),
-                       static_cast<unsigned long>(txGroupMissingBitmap()),
-                       static_cast<unsigned>(msg.src));
-              if (!txGroupHasMissingTargets()) {
-                finishTxGroupSuccess();
-              }
-            }
-          }
-        }
       }
     }
     return;
   }
 
   if (msg.type == MessageType::PollRequest) {
-    if (!radioTxBudgetAvailable()) {
-      return;
-    }
-    const uint8_t sensorMask = 0x0C;  // downlink RSSI + WiFi enabled state
-    const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(msg.rssi));
-    const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
-    
-    const bool isGroupPoll = (msg.flags & kFlagGroupPollCorrelation) != 0U;
-    uint32_t replyUnixTime;
-    uint8_t replyFlags = txFlags();
-    if (isGroupPoll) {
-      // Correlated echo path for group poll: echo command ID and clear authoritative flag to prevent feeding random IDs to time sync
-      replyUnixTime = msg.unix_time_s;
-      replyFlags &= ~kFlagTimeAuthoritative;
-    } else {
-      replyUnixTime = currentUnixTimeS(millis());
-    }
-
-    last_counter_++;
-    if (radio_->send(MessageType::PollResponse, relay_state_, localInputState(), replyFlags, last_counter_, runtime_.local_address,
-                     msg.src,
-                     localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, replyUnixTime)) {
-      last_tx_ms_ = millis();
-      markRadioTxSentThisTick();
-      {
-        lrslog::event("rx_poll_response_tx", msg.rssi, last_counter_, relay_state_);
-      }
+    // Receive handling updates state and queues observability only. The
+    // scheduler drains this after gateway control has had its radio turn.
+    if (runtime_utils::receiveObservabilityAction(
+            runtime_utils::ReceiveObservabilityKind::PollResponse) ==
+        runtime_utils::ReceiveObservabilityAction::Queue) {
+      queueDeferredObservability(DeferredObservabilityKind::PollResponse, msg.src, false, msg.rssi);
     }
     return;
   }
   if (msg.type == MessageType::MaintenanceRequest) {
     if (msg.dst == runtime_.local_address) {
-      if (!maintenance_version_pending_ && !maintenance_sensor_pending_ && !maintenance_debug_pending_) {
-        const bool requestDiag = (msg.raw_payload[0] == kMaintenancePayloadVersion && (msg.raw_payload[1] & 0x01U) != 0U);
-        sendMaintenanceStatus(msg.src, requestDiag);
+      const bool requestDiag = (msg.raw_payload[0] == kMaintenancePayloadVersion &&
+                                (msg.raw_payload[1] & 0x01U) != 0U);
+      if (runtime_utils::receiveObservabilityAction(
+              runtime_utils::ReceiveObservabilityKind::MaintenanceStatus) ==
+          runtime_utils::ReceiveObservabilityAction::Queue) {
+        queueDeferredObservability(DeferredObservabilityKind::Maintenance, msg.src, requestDiag);
       }
     }
     return;
@@ -3395,17 +3554,18 @@ void NodeStateMachine::tickReceive() {
       }
     }
     if (!heartbeatControlsRelay) {
-      scheduleDeferredAck(msg.src, relay_state_, input_state_, msg.counter);
+      scheduleDeferredAck(msg.src, relay_state_, msg.counter);
       return;
     }
     relay_state_ = msg.relay_state;
-    input_state_ = msg.input_state;
     last_rx_control_ms_ = millis();
     last_rx_control_source_ = (msg.type == MessageType::Mqtt) ? RxControlSource::Mqtt : RxControlSource::LoRa;
     digitalWrite(kRelayPin, relay_state_ ? HIGH : LOW);
     if (msg.type != MessageType::Mqtt) {
       const uint32_t commandId = (msg.type == MessageType::Change) ? msg.unix_time_s : msg.counter;
-      scheduleDeferredAck(msg.src, relay_state_, input_state_, commandId);
+      scheduleDeferredAck(msg.src, relay_state_, commandId,
+                          msg.type == MessageType::Change && msg.dst == runtime_.local_address,
+                          msg.type == MessageType::Change && msg.dst == 255);
     } else {
       if (!radioTxBudgetAvailable()) {
         lrslog::event("rx_apply_no_status_budget", msg.rssi, msg.counter, msg.relay_state);
@@ -4556,6 +4716,7 @@ bool NodeStateMachine::consumePendingReaddress(uint8_t &outNewAddress, uint8_t &
 
 
 void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
+  if (isGroupActive()) return;
   if (adoption_active_) {
     if (static_cast<int32_t>(now - adoption_sent_ms_) >= static_cast<int32_t>(kAdoptionRetryIntervalMs)) {
       if (adoption_retry_count_ < kAdoptionMaxRetries) {
@@ -4582,10 +4743,7 @@ void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
     bool outSendProbe = false;
     if (runtime_utils::tickCandidateProbe(c, now, last_global_probe_ms, outSendProbe)) {
       if (outSendProbe) {
-        uint32_t sentCounter = 0;
-        if (sendMaintenanceRequest(c.address, false, &sentCounter)) {
-          lrslog::event("candidate_maint_probe", 0, sentCounter, c.address);
-        } else {
+        if (!queueMaintenanceRequest(c.address, false, MaintenanceRequestSource::CandidateProbe)) {
           if (c.probe_attempt_count > 0) c.probe_attempt_count--;
           c.last_probe_ms = 0;
           last_global_probe_ms = 0;

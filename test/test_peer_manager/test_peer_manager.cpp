@@ -111,6 +111,7 @@ void test_peer_manager_snapshot_consistency() {
   PeerRuntime* p = pm.findOrCreate(2, 1002, 60000, true, 500);
   TEST_ASSERT_NOT_NULL(p);
   p->relay_state = 1;
+  p->relay_state_known = true;
   p->input_state = 0;
   p->input_state_known = true;
   p->uplink_rssi = -70;
@@ -120,6 +121,7 @@ void test_peer_manager_snapshot_consistency() {
   TEST_ASSERT_TRUE(pm.buildStatusSnapshot(0, snap));
   TEST_ASSERT_EQUAL_UINT8(2, snap.address);
   TEST_ASSERT_EQUAL_UINT8(1, snap.relay_state);
+  TEST_ASSERT_TRUE(snap.relay_state_known);
   TEST_ASSERT_EQUAL_UINT8(0, snap.input_state);
   TEST_ASSERT_TRUE(snap.input_state_known);
   TEST_ASSERT_EQUAL_INT(-70, snap.uplink_rssi);

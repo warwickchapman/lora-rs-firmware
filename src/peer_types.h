@@ -19,6 +19,7 @@ enum class PeerAckState : uint8_t {
 struct PeerStatusSnapshot {
   uint8_t address = 0;
   uint8_t relay_state = 0;
+  bool relay_state_known = false;
   uint8_t input_state = 0;
   bool input_state_known = false;
   SensorRegistry sensors;
@@ -60,6 +61,7 @@ struct PeerRuntime {
   bool in_use = false;
   uint8_t address = 0;
   uint8_t relay_state = 0;
+  bool relay_state_known = false;
   uint8_t input_state = 0;
   bool input_state_known = false;
   SensorRegistry sensors;

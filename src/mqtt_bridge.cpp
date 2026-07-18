@@ -852,7 +852,9 @@ bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYie
     }
     if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi")) publishRetainedTopic(topic, "");
   } else {
-    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) publishRetainedTopic(topic, node.relay_state ? "1" : "0");
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) {
+      publishRetainedTopic(topic, node.relay_state_known ? (node.relay_state ? "1" : "0") : "");
+    }
     const uint8_t inputValue = node.input_state ? 1 : 0;
     if (!peerCache->input_published || peerCache->input_value != inputValue) {
       if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
@@ -888,7 +890,7 @@ bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYie
     }
   }
 
-  if (!timedOut && node.wifi_state_known && node.wifi_connected && node.maintenance_debug_known && node.wifi_rssi_dbm != 0) {
+  if (!timedOut && node.wifi_state_known && node.wifi_connected && node.wifi_rssi_dbm != 0) {
     snprintf(numBuf, sizeof(numBuf), "%d", static_cast<int>(node.wifi_rssi_dbm));
     if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi_rssi_dbm")) publishRetainedTopic(topic, numBuf);
   } else {

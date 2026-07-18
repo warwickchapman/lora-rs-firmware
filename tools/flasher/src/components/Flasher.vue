@@ -1660,10 +1660,13 @@ const fleetGatewaySummary = computed(() => {
   const status = fleetGatewayStatus.value;
   if (status) {
     const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
-    return `${status.role || 'gateway'} addr ${status.local_address} · ${wifi} · heap ${formatBytes(status.heap_free)} free`;
+    const transport = isMqtt
+      ? `MQTT lrs-${selectedMqttGatewayChipId.value || 'not selected'}`
+      : `USB ${gatewaySelectedPort.value || 'not selected'}`;
+    return `${status.role || 'gateway'} · ${transport} · ${wifi} · heap ${formatBytes(status.heap_free)} free`;
   }
   if (fleetGatewayIdentity.value) {
-    return `Identity loaded · addr ${fleetGatewayIdentity.value.local_addr}`;
+    return 'Identity loaded';
   }
   return isMqtt ? 'Select or load the MQTT gateway to inspect and upgrade it.' : 'Select or load the USB gateway to inspect and flash it.';
 });
@@ -2385,6 +2388,82 @@ function handleFleetRemoteForget(address: number) {
 function handleFleetRemoteFactoryReset(address: number) {
   const d = loraInventory.value.find(x => x.address === address);
   if (d) openFactoryResetModal(d);
+}
+
+function handleFleetGatewaySettings() {
+  activeDropdownAddress.value = null;
+  if (fleetTransport.value === 'serial') {
+    settingsSelectedPort.value = gatewaySelectedPort.value;
+  }
+  settingsTab.value = 'general';
+  activeMode.value = 'settings';
+}
+
+function handleFleetGatewayViewLogs() {
+  activeDropdownAddress.value = null;
+  fleetGatewayEventsExpanded.value = true;
+}
+
+async function handleFleetGatewayReboot() {
+  activeDropdownAddress.value = null;
+  const { port, password, isMqtt } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(isMqtt ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  if (!await confirmOperatorAction('Reboot the selected gateway now?', { confirmText: 'Reboot gateway', danger: true })) return;
+
+  try {
+    await sendEasyPairCommandOnPort(port, 'reboot', { admin_password: password }, 5000, { label: 'Reboot gateway' });
+    const state = serialDeviceState(port);
+    if (state) state.status = null;
+    clearFleetGatewayCache();
+    networkStatusMessage.value = 'Gateway reboot command accepted; waiting for the gateway to return.';
+    notify('Gateway reboot command accepted');
+  } catch (e) {
+    notify(serialFeatureError('Gateway reboot', e));
+  }
+}
+
+async function handleFleetGatewayFactoryReset() {
+  activeDropdownAddress.value = null;
+  const { port, password, isMqtt } = fleetGatewayCommandTarget();
+  if (!port) {
+    notify(isMqtt ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
+    return;
+  }
+  if (!password) {
+    notify('Enter the gateway admin password');
+    return;
+  }
+  const confirmed = await confirmOperatorAction(
+    'Factory reset the selected gateway? This clears its fleet membership and WiFi credentials.',
+    { confirmText: 'Factory reset gateway', danger: true }
+  );
+  if (!confirmed) return;
+
+  try {
+    await sendEasyPairCommandOnPort(port, 'factory_reset', {
+      admin_password: password,
+      keep_shared_fleet_key: false,
+      keep_wifi_credentials: false
+    }, 6000, { label: 'Factory reset gateway' });
+    const state = serialDeviceState(port);
+    if (state) {
+      state.status = null;
+      state.config = null;
+      state.wifiNetworks = [];
+    }
+    clearFleetGatewayCache();
+    networkStatusMessage.value = 'Gateway factory reset accepted; waiting for the gateway to restart.';
+    notify('Gateway factory reset accepted');
+  } catch (e) {
+    notify(serialFeatureError('Gateway factory reset', e));
+  }
 }
 
 function randomIndex(max: number): number {
@@ -3146,7 +3225,7 @@ function remoteInputLabel(row: LoraInventoryDevice): string {
 
 function remoteRelayLabel(row: LoraInventoryDevice): string {
   const value = row.relay_state;
-  if (value === undefined || value === null) return 'waiting';
+  if (value === undefined || value === null) return '-';
   return Number(value) === 1 ? 'On' : 'Off';
 }
 
@@ -6152,7 +6231,6 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
     isFlashing: isFlashing.value,
     flashDisabled: fleetGatewayFlashDisabled.value,
     flashUnavailableReason: fleetGatewayFlashUnavailableReason(),
-    port: selectedPort.value,
     name: lrsDeviceName(fleetGatewayStatus.value?.chip_id || fleetGatewayIdentity.value?.chip_id),
     firmware: displayFirmwareVersion(fleetGatewayStatus.value?.fw_version),
     role: fleetGatewayStatus.value?.role || '-',
@@ -6177,6 +6255,12 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
     wifiIp: fleetGatewayStatus.value?.wifi?.ip || '',
     wifiRssi: (fleetGatewayStatus.value?.wifi?.sta_connected && fleetGatewayStatus.value?.wifi?.rssi) ? fleetGatewayStatus.value.wifi.rssi : undefined,
     wifiConnected: !!fleetGatewayStatus.value?.wifi?.sta_connected,
+    relayLabel: fleetGatewayStatus.value?.relay_state === undefined
+      ? '-'
+      : Number(fleetGatewayStatus.value.relay_state) === 1 ? 'On' : 'Off',
+    inputLabel: fleetGatewayStatus.value?.input_state === undefined
+      ? '-'
+      : Number(fleetGatewayStatus.value.input_state) === 1 ? 'Closed' : 'Open',
     uptimeLine: rebootAlert
       ? `${formatUptime(rebootAlert.currentUptimeMs)} (reboot)`
       : fleetGatewayStatus.value?.uptime_ms ? formatUptime(fleetGatewayStatus.value.uptime_ms) : '-',
@@ -6598,6 +6682,10 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @gateway-load="loadNetworkGateway"
         @gateway-identify="triggerIdentify"
         @gateway-flash="flashFleetGateway"
+        @gateway-settings="handleFleetGatewaySettings"
+        @gateway-reboot="handleFleetGatewayReboot"
+        @gateway-view-logs="handleFleetGatewayViewLogs"
+        @gateway-factory-reset="handleFleetGatewayFactoryReset"
         @remote-flash="handleFleetRemoteFlash"
         @remote-settings="handleFleetRemoteSettings"
         @remote-reboot="handleFleetRemoteReboot"

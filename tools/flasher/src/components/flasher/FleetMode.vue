@@ -26,7 +26,6 @@ export interface FleetGatewayStatus {
   isFlashing: boolean;
   flashDisabled: boolean;
   flashUnavailableReason: string;
-  port: string;
   name: string;
   firmware: string;
   role: string;
@@ -35,6 +34,8 @@ export interface FleetGatewayStatus {
   wifiIp?: string;
   wifiRssi?: number;
   wifiConnected?: boolean;
+  relayLabel: string;
+  inputLabel: string;
   uptimeLine: string;
   uptimeClass: string;
   uptimeTitle: string;
@@ -188,6 +189,10 @@ const emit = defineEmits<{
   (e: 'gateway-load'): void;
   (e: 'gateway-identify'): void;
   (e: 'gateway-flash'): void;
+  (e: 'gateway-settings'): void;
+  (e: 'gateway-reboot'): void;
+  (e: 'gateway-view-logs'): void;
+  (e: 'gateway-factory-reset'): void;
   (e: 'remote-flash', address: number | string): void;
   (e: 'remote-settings', address: number | string): void;
   (e: 'remote-reboot', address: number | string): void;
@@ -434,66 +439,91 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
             <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
           </button>
 
-          <button
-            v-if="gateway.isUpgradeAvailable || gateway.isFlashing"
-            @click="emit('gateway-flash')"
-            :disabled="gateway.flashDisabled"
-            :title="gateway.flashUnavailableReason"
-            class="primary-btn m-0 h-9 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-          >
-            {{ gateway.isFlashing ? 'Flashing...' : 'Upgrade gateway' }}
-          </button>
         </div>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 text-xs">
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">Port</div>
-          <div class="mt-1 truncate font-mono text-slate-300">{{ gateway.port || '-' }}</div>
-        </div>
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">Name</div>
-          <div class="mt-1 truncate font-mono text-slate-300">{{ gateway.name }}</div>
-        </div>
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">Firmware</div>
-          <div class="mt-1 truncate font-mono text-slate-300">{{ gateway.firmware }}</div>
-        </div>
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">Role</div>
-          <div class="mt-1 truncate text-slate-300">{{ gateway.role }}</div>
-        </div>
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">Address</div>
-          <div class="mt-1 truncate font-mono text-slate-300">{{ gateway.addressLine }}</div>
-        </div>
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">WiFi</div>
-          <div class="mt-1 flex items-center gap-1.5 truncate">
-            <span class="text-slate-300">{{ gateway.wifiConnected ? gateway.wifiIp : gateway.wifiLine }}</span>
-            <span
-              v-if="gateway.wifiConnected && gateway.wifiRssi"
-              :class="[
-                'rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono inline-flex items-center gap-1 leading-none',
-                gateway.wifiRssi >= -60 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
-                gateway.wifiRssi >= -70 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
-                gateway.wifiRssi >= -80 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
-                'border-rose-500/30 bg-rose-500/10 text-rose-300'
-              ]"
-              :title="`Gateway WiFi RSSI: ${gateway.wifiRssi} dBm`"
-            >
-              <span class="inline-flex items-end gap-[1px] h-2.5 w-3 mb-[0.5px]">
-                <span class="w-[2.5px] h-[3px] rounded-t-[0.5px] bg-current"></span>
-                <span :class="['w-[2.5px] rounded-t-[0.5px]', gateway.wifiRssi >= -80 ? 'h-[6px] bg-current' : 'h-[6px] bg-current/20']"></span>
-                <span :class="['w-[2.5px] rounded-t-[0.5px]', gateway.wifiRssi >= -60 ? 'h-[9px] bg-current' : gateway.wifiRssi >= -70 ? 'h-[7.5px] bg-current' : 'h-[9px] bg-current/20']"></span>
-              </span>
-              <span>{{ gateway.wifiRssi }}</span>
-            </span>
-          </div>
-        </div>
-        <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
-          <div class="text-[10px] uppercase tracking-wide text-slate-600">Uptime</div>
-          <div :class="['mt-1 truncate font-mono', gateway.uptimeClass]" :title="gateway.uptimeTitle || undefined">{{ gateway.uptimeLine }}</div>
-        </div>
+      <div class="overflow-x-auto rounded-md border border-slate-800">
+        <table class="w-full min-w-[1180px] border-collapse text-xs">
+          <thead class="bg-slate-950/95 text-slate-500">
+            <tr class="border-b border-slate-800">
+              <th class="w-10 px-2 py-1.5 text-left"></th>
+              <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Device</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Role</th>
+              <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Power Save</th>
+              <th class="px-2 py-1.5 text-left font-semibold">IP</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
+              <th class="px-2 py-1.5 text-left font-semibold">LoRa RSSI</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Age</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-slate-900/80 hover:bg-white/5 transition-colors">
+              <td class="px-2 py-1.5"></td>
+              <td class="px-2 py-1.5 font-mono">
+                <span class="inline-flex min-w-8 items-center justify-center rounded border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-200">{{ gateway.addressLine }}</span>
+              </td>
+              <td class="px-2 py-1.5 font-mono text-slate-300">{{ gateway.name }}</td>
+              <td class="px-2 py-1.5 font-mono text-slate-400">{{ gateway.firmware }}</td>
+              <td class="px-2 py-1.5 text-slate-300">{{ gateway.role }}</td>
+              <td class="px-2 py-1.5">
+                <template v-if="gateway.wifiConnected">
+                  <span
+                    v-if="gateway.wifiRssi !== undefined && gateway.wifiRssi !== null && gateway.wifiRssi !== 0"
+                    :class="[
+                      'rounded border px-2 py-1 text-[10px] font-bold font-mono inline-flex items-center gap-1.5',
+                      gateway.wifiRssi >= -70 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+                      gateway.wifiRssi >= -80 ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
+                      'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                    ]"
+                    :title="`Gateway WiFi RSSI: ${gateway.wifiRssi} dBm`"
+                  >
+                    <span class="inline-flex items-end gap-[1px] h-3 w-3.5 mb-[1px]">
+                      <span class="w-[3px] h-[4px] rounded-t-[1px] bg-current"></span>
+                      <span :class="['w-[3px] rounded-t-[1px]', gateway.wifiRssi >= -80 ? 'h-[8px] bg-current' : 'h-[8px] bg-current/20']"></span>
+                      <span :class="['w-[3px] rounded-t-[1px]', gateway.wifiRssi >= -60 ? 'h-[12px] bg-current' : gateway.wifiRssi >= -70 ? 'h-[10px] bg-current' : 'h-[12px] bg-current/20']"></span>
+                    </span>
+                    <span>{{ gateway.wifiRssi }}</span>
+                  </span>
+                  <span v-else class="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">OK</span>
+                </template>
+                <span v-else class="rounded border border-slate-800 bg-slate-900/50 px-2 py-1 text-[10px] font-bold text-slate-500">{{ gateway.wifiLine }}</span>
+              </td>
+              <td class="px-2 py-1.5 text-slate-500">-</td>
+              <td class="px-2 py-1.5 font-mono text-slate-400">{{ gateway.wifiIp || '-' }}</td>
+              <td class="px-2 py-1.5">
+                <span :class="['rounded border px-2 py-1 text-[10px] font-bold', gateway.relayLabel === 'On' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : gateway.relayLabel === 'Off' ? 'border-slate-600 bg-slate-800/50 text-slate-300' : 'border-slate-800 bg-slate-900/50 text-slate-500']">{{ gateway.relayLabel }}</span>
+              </td>
+              <td class="px-2 py-1.5 text-slate-300">in <span :class="gateway.inputLabel === 'Closed' ? 'text-emerald-400 font-semibold' : gateway.inputLabel === 'Open' ? 'text-orange-400 font-semibold' : 'text-slate-400'">{{ gateway.inputLabel }}</span></td>
+              <td class="px-2 py-1.5 font-mono"><span :class="gateway.uptimeClass" :title="gateway.uptimeTitle || undefined">{{ gateway.uptimeLine }}</span></td>
+              <td class="px-2 py-1.5 text-slate-500">-</td>
+              <td class="px-2 py-1.5 text-slate-500">-</td>
+              <td class="px-2 py-1.5 overflow-visible">
+                <div class="relative inline-block text-left">
+                  <button
+                    @click.stop="activeDropdownAddress = (activeDropdownAddress === 'gateway' ? null : 'gateway')"
+                    class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center gap-1 select-none"
+                  >
+                    Actions
+                    <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  <div v-if="activeDropdownAddress === 'gateway'" class="absolute right-0 mt-1 w-40 z-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium">
+                    <button @click="emit('gateway-flash'); activeDropdownAddress = null" :disabled="gateway.flashDisabled || !gateway.isUpgradeAvailable" :title="gateway.flashUnavailableReason" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none">⚡ Upgrade</button>
+                    <button @click="emit('gateway-settings'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">🛠️ Commands</button>
+                    <button @click="emit('gateway-reboot'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">🔄 Reboot</button>
+                    <button @click="emit('gateway-view-logs'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">📋 View Logs</button>
+                    <div class="h-[1px] bg-slate-800/80 my-1"></div>
+                    <button @click="emit('gateway-factory-reset'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none">⚠️ Factory Reset</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 

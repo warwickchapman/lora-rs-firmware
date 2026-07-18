@@ -125,6 +125,27 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].relay_state).toBeUndefined();
   });
 
+  it('applies compact inventory control state to every previously hydrated peer', () => {
+    const fleet = createFleet();
+
+    fleet.mergeInventoryRows([
+      { address: 1, chip_id: '00000001', relay_state: 0, input_state_known: true, input_state: 0 },
+      { address: 2, chip_id: '00000002', relay_state: 0, input_state_known: true, input_state: 0 }
+    ]);
+
+    // The compact seed follows a group command. It must replace the old
+    // hydrated control state without requiring either peer to be refreshed.
+    fleet.mergeInventoryRows([
+      { address: 1, chip_id: '00000001', relay_state: 1, input_state_known: true, input_state: 1 },
+      { address: 2, chip_id: '00000002', relay_state: 1, input_state_known: true, input_state: 1 }
+    ]);
+
+    expect(fleet.loraInventory.value.find(row => row.address === 1)?.relay_state).toBe(1);
+    expect(fleet.loraInventory.value.find(row => row.address === 1)?.input_state).toBe(1);
+    expect(fleet.loraInventory.value.find(row => row.address === 2)?.relay_state).toBe(1);
+    expect(fleet.loraInventory.value.find(row => row.address === 2)?.input_state).toBe(1);
+  });
+
   it('rowFreshness correctly maps live, stale, offline, and unknown states', () => {
     const fleet = createFleet();
 
