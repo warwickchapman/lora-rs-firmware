@@ -30,4 +30,5 @@ tools/flasher/venv/
 tools/venv/
 venv/
 .mimocode/
+.qoder/
 opencode.json

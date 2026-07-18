@@ -69,7 +69,7 @@ export interface GatewayEventDisplayRecord {
   counter: number;
   state: number;
   raw: string;
-  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'raw';
+  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'log_line' | 'raw';
 }
 
 export interface GatewayEventsState {
@@ -244,6 +244,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
   if (event.level === 'crash' || event.level === 'error') return 'text-rose-300';
   if (event.level === 'reset') return 'text-orange-300';
   if (event.level === 'warn') return 'text-amber-300';
+  if (event.level === 'log_line') return 'text-slate-300';
   if (event.level === 'raw') return 'text-slate-500';
   const name = event.event || '';
   if (name.includes('timeout') || name.includes('_fail') || name.includes('failed') || name.includes('_bad')) {

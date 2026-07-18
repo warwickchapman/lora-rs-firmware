@@ -209,7 +209,7 @@ interface GatewayEventRecord {
   counter: number;
   state: number;
   raw: string;
-  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'raw';
+  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'log_line' | 'raw';
 }
 
 interface SerialAdminConfig {
@@ -1826,13 +1826,15 @@ function gatewayEventLevel(line: string, event: string): GatewayEventRecord['lev
   if (event === 'boot_banner' || event === 'boot' || event === 'gateway_log_timestamp_reset') return 'reset';
   if (line.includes('[ERROR]') || event.includes('_fail') || event.includes('failed')) return 'error';
   if (line.includes('[WARN]') || event.includes('timeout') || event.includes('_bad')) return 'warn';
+  if (event === 'log_line') return 'log_line';
   if (!event || event === 'serial_raw') return 'raw';
   return 'info';
 }
 
 function parseGatewayEventLogLine(port: string, line: string): GatewayEventRecord {
   const eventMatch = line.match(/\bevent=([^\s]+)/);
-  const eventName = eventMatch?.[1] || (isCrashStart(line) ? 'crash_signature' : 'serial_raw');
+  const hasLogPrefix = /\[(INFO|WARN|ERROR)\]/.test(line);
+  const eventName = eventMatch?.[1] || (isCrashStart(line) ? 'crash_signature' : (hasLogPrefix ? 'log_line' : 'serial_raw'));
   return {
     port,
     ms: parseLogNumberField(line, 't') ?? 0,
@@ -2226,7 +2228,7 @@ function copyNetworkUdpLog() {
 
 function formatGatewayEvent(event: GatewayEventRecord): string {
   const meta = `${event.ms}ms ${event.level} ${event.event || '-'} port=${event.port} rssi=${event.rssi} ctr=${event.counter} st=${event.state}`;
-  if (event.level === 'raw' || event.level === 'crash' || event.event === 'serial_raw') {
+  if (event.level === 'raw' || event.level === 'log_line' || event.level === 'crash' || event.event === 'serial_raw') {
     return `${meta}\n${event.raw}`;
   }
   return `${meta} · ${event.raw}`;
