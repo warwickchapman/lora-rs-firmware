@@ -5,10 +5,6 @@
 #include "runtime_utils.h"
 #include "state_machine.h"
 
-size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
-size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
-size_t NodeStateMachine::replaySourceStateSize() { return sizeof(NodeStateMachine::ReplaySourceState); }
-
 void test_paired_transmitter_is_tx() {
   bool roleTx = false;
   TEST_ASSERT_TRUE(runtime_utils::parseRoleTxFromModeRole("paired", "transmitter", roleTx));

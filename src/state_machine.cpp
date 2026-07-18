@@ -1698,12 +1698,9 @@ bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, bool
 }
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
-  if (settings_ == nullptr) return false;
-  if (src == 0 || src == 255) return false;
+  if (settings_ == nullptr || src == 0 || src == 255) return false;
+  if (!runtime_.role_tx && src == runtime_.controller_address) return true;
   if (fixedListContainsAddress(settings_->allowed_controller_addresses, settings_->allowed_controller_count, src)) {
-    return true;
-  }
-  if (isPairedTargetAddress(src)) {
     return true;
   }
   const String raw(settings_->mqtt_controller_addresses.c_str());

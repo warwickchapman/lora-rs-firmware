@@ -135,6 +135,9 @@ struct ProvisioningDeviceSnapshot {
 class NodeStateMachine {
  public:
   friend class AdminExecutor;
+#ifdef UNIT_TEST
+  friend class NodeStateMachineTestHelper;
+#endif
   static constexpr uint32_t kIdentifyLedDurationMs = 6000;
   static constexpr uint32_t kMaintenancePageGapMs = 200;
   static constexpr uint32_t kAdoptionRetryIntervalMs = 1000;

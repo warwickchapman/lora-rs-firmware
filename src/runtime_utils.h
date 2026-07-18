@@ -2,6 +2,8 @@
 #include <cstdint>
 
 
+struct Settings;
+
 #if defined(UNIT_TEST)
 using wl_status_t = int;
 constexpr wl_status_t WL_IDLE_STATUS = 0;
@@ -93,6 +95,13 @@ uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
                                  uint8_t controllerAddress,
                                  bool hasLegacyRemoteAddress,
                                  uint8_t legacyRemoteAddress);
+
+// Authorize an MQTT control packet source for this device.
+// Remotes accept their configured controller_address; gateways never receive
+// remote-style controller authority. Explicit allowed_controller_addresses and
+// mqtt_controller_addresses entries are still honored when configured.
+bool isAuthorizedMqttController(bool roleTx, uint8_t controllerAddress,
+                                const Settings *settings, uint8_t src);
 
 // Identity page byte b6 carries normal operational WiFi RSSI as signed dBm.
 // A non-negative value is unavailable, including identity pages from older
