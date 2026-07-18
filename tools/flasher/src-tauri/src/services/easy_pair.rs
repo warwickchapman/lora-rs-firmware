@@ -9,6 +9,7 @@ pub fn send_serial_admin_command(
     port_name: &str,
     mut request: Value,
     timeout_ms: u64,
+    mut on_log_line: impl FnMut(&str),
 ) -> Result<Value, String> {
     let id = ensure_request_id(&mut request);
     let cmd = request
@@ -68,6 +69,8 @@ pub fn send_serial_admin_command(
                                 return Err(error.to_string());
                             }
                             return Ok(parsed);
+                        } else {
+                            emit_non_admin_line(&line, &mut on_log_line);
                         }
                         line.clear();
                     } else {
@@ -84,6 +87,23 @@ pub fn send_serial_admin_command(
     }
 
     Err(format!("timed out waiting for {} response", cmd))
+}
+
+fn emit_non_admin_line(line: &[u8], on_log_line: &mut impl FnMut(&str)) {
+    if line.is_empty() {
+        return;
+    }
+    if line
+        .windows(SERIAL_ADMIN_PREFIX.len())
+        .any(|w| w == SERIAL_ADMIN_PREFIX.as_bytes())
+    {
+        return;
+    }
+    let text = String::from_utf8_lossy(line);
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        on_log_line(trimmed);
+    }
 }
 
 fn parse_serial_admin_line(line: &[u8]) -> Option<Value> {

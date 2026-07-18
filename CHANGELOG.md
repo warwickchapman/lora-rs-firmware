@@ -5,6 +5,10 @@ All notable changes to this pre-release project are documented here in current o
 ## [Unreleased]
 
 ### Firmware Changes
+- Restored paired LoRa relay-state convergence as the highest-priority control path: startup sync is delayed briefly for rebooting remotes, and paired heartbeat now reasserts relay state unless MQTT control is explicitly the relay authority.
+- Removed the temporary gateway event ring/admin command in favor of the existing firmware serial log stream, keeping diagnostic history out of ESP8266 RAM.
+- Provisioning now treats **Max remotes** as a hard session-wide limit: additional new-device announces are rejected after the chosen capacity is reached, including after discovery completes.
+- Fleet scans now take radio-scheduler priority over background peer polling, and paired input-control heartbeats no longer start full relay group commands unless the input state actually changes.
 - MQTT retained peer cleanup now clears only canonical `peers/<NN_lrs-chip>/...` topics and actual known sensor leaves, avoiding legacy `peers/<NN>/...` cleanup trees and fake sensor slots in MQTT browsers.
 - Fixed heartbeat relay control: plain heartbeats no longer leak input state as relay commands when paired input control is disabled.
 - MQTT config completion sentinel now publishes `false` on partial failure instead of staying stuck.
@@ -19,7 +23,9 @@ All notable changes to this pre-release project are documented here in current o
 - Gateway publishes `wifi_rssi_dbm` retained MQTT topic for peers when connected and available, publishing empty payloads when unknown, offline, or cleared.
 
 ### Flasher Features
+- Fleet and Monitor now capture firmware event log lines emitted during serial-admin activity, keeping a host-side Gateway Events buffer with Copy/Clear controls while the serial monitor is unavailable.
 - Treat empty retained MQTT sensor telemetry as a delete/clear signal so cleared sensor topics no longer appear as enabled sensors in Fleet or remote settings.
+- Added a clear Fleet gateway unexpected reboot alert when gateway uptime rolls backward outside an expected gateway flash/reboot flow.
 - Repurposed the existing WiFi column in the Fleet table to display compact signal bars and dBm (e.g., `▂▄▆ -67`) for connected remote devices when the RSSI is known, coloring it by signal strength.
 - Renamed the existing Fleet RSSI column to "LoRa RSSI" with a detailed tooltip.
 - Integrated safety checks at the frontend boundary to ignore and filter out `wifi_rssi_dbm` values of 0 (sentinels for unknown/disconnected states).

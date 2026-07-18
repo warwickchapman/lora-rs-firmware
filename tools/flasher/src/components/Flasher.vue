@@ -201,6 +201,16 @@ interface SerialAdminStatus {
   sensors?: SensorReading[];
 }
 
+interface GatewayEventRecord {
+  port: string;
+  ms: number;
+  event: string;
+  rssi: number;
+  counter: number;
+  state: number;
+  raw: string;
+}
+
 interface SerialAdminConfig {
   mode: string;
   commissioned?: boolean;
@@ -608,6 +618,9 @@ const lastPortSnapshot = ref<string[]>([]);
 const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
 const networkUdpLogsExpanded = ref(false);
+const gatewayEvents = ref<GatewayEventRecord[]>([]);
+const gatewayEventsStatus = ref('Waiting for firmware log events.');
+const gatewayEventLastMsByPort = ref<Record<string, number>>({});
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
 const networkStatusMessage = ref('Select a USB gateway to read its fleet cache.');
@@ -791,6 +804,14 @@ const activeRemoteUdpAddress = ref<number | null>(null);
 const fleetClockMs = ref(Date.now());
 const isLoraInventoryScanning = ref(false);
 const fleetScanActiveSinceMs = ref(0);
+const GATEWAY_REBOOT_ALERT_MS = 120000;
+const GATEWAY_UPTIME_ROLLBACK_GRACE_MS = 30000;
+
+interface GatewayUnexpectedRebootAlert {
+  detectedAtMs: number;
+  previousUptimeMs: number;
+  currentUptimeMs: number;
+}
 
 const {
   loraInventory,
@@ -828,6 +849,8 @@ const candidateTotal = ref(0);
 const candidateTruncated = ref(false);
 const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
 const activeGatewaySessionKey = ref('');
+const gatewayUptimeHistory = ref<Record<string, number>>({});
+const gatewayUnexpectedReboots = ref<Record<string, GatewayUnexpectedRebootAlert>>({});
 const processedEasyPairLogLines = ref<Set<string>>(new Set());
 const isNetworkGatewayLoading = ref(false);
 const {
@@ -1508,6 +1531,51 @@ const serialAdminIsFactoryDefault = computed(() => {
   const st = serialAdminStatus.value;
   return !!st && (!st.commissioned || !!st.fleet_passphrase_default);
 });
+function gatewayStatusAlertKey(port: string, status?: Pick<SerialAdminStatus, 'chip_id'> | null): string {
+  return `${port || 'unknown'}:${status?.chip_id || 'unknown'}`;
+}
+
+function isExpectedGatewayRebootPhase(): boolean {
+  return ['rebooting', 'waiting', 'updated'].includes(fleetGatewayFlashPhase.value);
+}
+
+function noteGatewayStatusForRebootDetection(out: SerialAdminStatus, port: string) {
+  if (!port) return;
+  const uptimeMs = Number(out.uptime_ms || 0);
+  if (!Number.isFinite(uptimeMs) || uptimeMs <= 0) return;
+
+  const key = gatewayStatusAlertKey(port, out);
+  const previousUptimeMs = gatewayUptimeHistory.value[key];
+  if (
+    previousUptimeMs !== undefined &&
+    uptimeMs + GATEWAY_UPTIME_ROLLBACK_GRACE_MS < previousUptimeMs &&
+    !isExpectedGatewayRebootPhase()
+  ) {
+    gatewayUnexpectedReboots.value = {
+      ...gatewayUnexpectedReboots.value,
+      [key]: {
+        detectedAtMs: Date.now(),
+        previousUptimeMs,
+        currentUptimeMs: uptimeMs
+      }
+    };
+  }
+
+  gatewayUptimeHistory.value = {
+    ...gatewayUptimeHistory.value,
+    [key]: uptimeMs
+  };
+}
+
+const fleetGatewayUnexpectedReboot = computed<GatewayUnexpectedRebootAlert | null>(() => {
+  const status = fleetGatewayStatus.value;
+  const key = gatewayStatusAlertKey(targetGatewayKey.value, status);
+  const alert = gatewayUnexpectedReboots.value[key];
+  if (!alert) return null;
+  if (fleetClockMs.value - alert.detectedAtMs > GATEWAY_REBOOT_ALERT_MS) return null;
+  return alert;
+});
+
 const settingsEmptyMessage = computed(() => {
   if (settingsTab.value === 'remote') {
     return '';
@@ -1536,6 +1604,7 @@ const fleetGatewayStatusLabel = computed(() => {
   if (fleetGatewayFlashPhase.value === 'updated') return 'gateway updated';
   if (fleetGatewayFlashPhase.value === 'failed') return 'gateway flash failed';
   if (fleetGatewayFlashPhase.value === 'unknown') return 'network status unknown';
+  if (fleetGatewayUnexpectedReboot.value) return 'gateway unexpected reboot';
   if (fleetGatewayIsFactoryDefault.value) return 'gateway factory default';
   if (fleetGatewayReady.value) return 'gateway ready';
   return 'gateway not loaded';
@@ -1547,6 +1616,7 @@ const fleetGatewayBadgeLabel = computed(() => {
   if (fleetGatewayFlashPhase.value === 'updated') return 'updated';
   if (fleetGatewayFlashPhase.value === 'failed') return 'flash failed';
   if (fleetGatewayFlashPhase.value === 'unknown') return 'status unknown';
+  if (fleetGatewayUnexpectedReboot.value) return 'unexpected reboot';
   if (fleetGatewayStatus.value) return 'status loaded';
   if (fleetGatewayIdentity.value) return 'identity loaded';
   return 'not loaded';
@@ -1558,6 +1628,7 @@ const fleetGatewayBadgeClass = computed(() => {
   if (fleetGatewayFlashPhase.value === 'updated') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (fleetGatewayFlashPhase.value === 'failed') return 'border-rose-500/40 bg-rose-500/10 text-rose-300';
   if (fleetGatewayFlashPhase.value === 'unknown') return 'border-amber-500/40 bg-amber-500/15 text-amber-200';
+  if (fleetGatewayUnexpectedReboot.value) return 'border-rose-500/40 bg-rose-500/10 text-rose-300';
   if (fleetGatewayStatus.value) return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (fleetGatewayIdentity.value) return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
   return 'border-slate-700 bg-slate-800/50 text-slate-400';
@@ -1570,6 +1641,10 @@ const fleetGatewaySummary = computed(() => {
   if (fleetGatewayFlashPhase.value === 'updated') return isMqtt ? 'Gateway upgraded and reconnected over MQTT.' : 'Gateway responded after flash; status refreshed.';
   if (fleetGatewayFlashPhase.value === 'failed') return isMqtt ? 'Gateway OTA upgrade did not complete; check activity log.' : 'Gateway flash did not complete; check activity log.';
   if (fleetGatewayFlashPhase.value === 'unknown') return 'Gateway rebooted, but network reconnect timed out; upgrade status unknown.';
+  const rebootAlert = fleetGatewayUnexpectedReboot.value;
+  if (rebootAlert) {
+    return `Unexpected gateway reboot detected: uptime rolled back from ${formatUptime(rebootAlert.previousUptimeMs)} to ${formatUptime(rebootAlert.currentUptimeMs)}.`;
+  }
   const status = fleetGatewayStatus.value;
   if (status) {
     const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
@@ -1727,6 +1802,7 @@ function pushSerialLogForPort(port: string, line: string) {
 
 function pushMonitorLogForPort(port: string, line: string) {
   if (!line || !port) return;
+  pushGatewayEventFromLog(port, line);
   const state = serialDeviceState(port);
   if (state) {
     state.monitorLogs.push(line);
@@ -1737,6 +1813,58 @@ function pushMonitorLogForPort(port: string, line: string) {
   if (port === selectedPort.value) {
     pushSerialLog(line);
   }
+}
+
+function parseLogNumberField(line: string, field: string): number | undefined {
+  const match = line.match(new RegExp(`\\b${field}=(-?\\d+)\\b`));
+  if (!match) return undefined;
+  const parsed = Number(match[1]);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function parseGatewayEventLogLine(port: string, line: string): GatewayEventRecord | null {
+  const eventMatch = line.match(/\bevent=([^\s]+)/);
+  if (!eventMatch) return null;
+  return {
+    port,
+    ms: parseLogNumberField(line, 't') ?? 0,
+    event: eventMatch[1],
+    rssi: parseLogNumberField(line, 'rssi') ?? 0,
+    counter: parseLogNumberField(line, 'counter') ?? 0,
+    state: parseLogNumberField(line, 'state') ?? 0,
+    raw: line
+  };
+}
+
+function appendGatewayEvent(event: GatewayEventRecord) {
+  gatewayEvents.value.push(event);
+  if (gatewayEvents.value.length > 2000) {
+    gatewayEvents.value = gatewayEvents.value.slice(-2000);
+  }
+  gatewayEventsStatus.value = `${gatewayEvents.value.length} live serial event${gatewayEvents.value.length === 1 ? '' : 's'} captured.`;
+}
+
+function pushGatewayEventFromLog(port: string, line: string) {
+  const event = parseGatewayEventLogLine(port, line);
+  if (!event) return;
+
+  const lastMs = gatewayEventLastMsByPort.value[port];
+  if (lastMs !== undefined && event.ms + GATEWAY_UPTIME_ROLLBACK_GRACE_MS < lastMs) {
+    appendGatewayEvent({
+      port,
+      ms: event.ms,
+      event: 'gateway_log_timestamp_reset',
+      rssi: 0,
+      counter: 0,
+      state: 0,
+      raw: `Gateway log timestamp rolled back from ${lastMs}ms to ${event.ms}ms.`
+    });
+  }
+  gatewayEventLastMsByPort.value = {
+    ...gatewayEventLastMsByPort.value,
+    [port]: event.ms
+  };
+  appendGatewayEvent(event);
 }
 
 function pushNetworkLog(line: string) {
@@ -2077,6 +2205,28 @@ function copyNetworkUdpLog() {
     return;
   }
   copyToClipboard(filteredNetworkLogs.value.join('\n'), 'UDP log');
+}
+
+function formatGatewayEvent(event: GatewayEventRecord): string {
+  return `${event.ms}ms ${event.event || '-'} port=${event.port} rssi=${event.rssi} ctr=${event.counter} st=${event.state} · ${event.raw}`;
+}
+
+function copyGatewayEvents() {
+  if (gatewayEvents.value.length === 0) {
+    notify('No gateway events to copy');
+    return;
+  }
+  const block = [
+    `gateway_events: ${gatewayEvents.value.length} live serial events captured`,
+    ...gatewayEvents.value.map(formatGatewayEvent)
+  ].join('\n');
+  copyToClipboard(block, 'gateway events');
+}
+
+function clearGatewayEvents() {
+  gatewayEvents.value = [];
+  gatewayEventLastMsByPort.value = {};
+  gatewayEventsStatus.value = 'Gateway events cleared. Waiting for firmware log events.';
 }
 
 function copyActivePassword() {
@@ -3106,8 +3256,6 @@ async function cancelLoraInventoryScan() {
     notify(serialFeatureError('Cancel LoRa inventory', e));
   }
 }
-
-
 
 const flasherInterfaces = ref<NetworkInterface[]>([]);
 
@@ -4599,6 +4747,7 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
   if (out && out.role) {
     out.role = normalizeRole(out.role);
   }
+  noteGatewayStatusForRebootDetection(out, port);
   state.status = out;
   if (port === selectedPort.value) {
     serialUptimeMs.value = Number(out.uptime_ms || 0);
@@ -5737,8 +5886,14 @@ const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
 
 const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
   const info = gatewaySelectedPort.value ? serialDeviceState(gatewaySelectedPort.value) : null;
+  const rebootAlert = fleetGatewayUnexpectedReboot.value;
+  const rebootAlertLine = rebootAlert
+    ? `Uptime rolled back from ${formatUptime(rebootAlert.previousUptimeMs)} to ${formatUptime(rebootAlert.currentUptimeMs)}.`
+    : '';
   return {
     hasGatewayDeviceWarning: !!(gatewaySelectedPort.value && info?.status && !info.status.role_tx),
+    hasUnexpectedReboot: !!rebootAlert,
+    rebootAlertLine,
     badgeClass: fleetGatewayBadgeClass.value,
     badgeLabel: fleetGatewayBadgeLabel.value,
     statusLabel: fleetGatewayStatusLabel.value,
@@ -5775,7 +5930,11 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
     wifiIp: fleetGatewayStatus.value?.wifi?.ip || '',
     wifiRssi: (fleetGatewayStatus.value?.wifi?.sta_connected && fleetGatewayStatus.value?.wifi?.rssi) ? fleetGatewayStatus.value.wifi.rssi : undefined,
     wifiConnected: !!fleetGatewayStatus.value?.wifi?.sta_connected,
-    uptimeLine: fleetGatewayStatus.value?.uptime_ms ? formatUptime(fleetGatewayStatus.value.uptime_ms) : '-'
+    uptimeLine: rebootAlert
+      ? `${formatUptime(rebootAlert.currentUptimeMs)} (reboot)`
+      : fleetGatewayStatus.value?.uptime_ms ? formatUptime(fleetGatewayStatus.value.uptime_ms) : '-',
+    uptimeClass: rebootAlert ? 'text-rose-300' : 'text-slate-300',
+    uptimeTitle: rebootAlert ? rebootAlertLine : ''
   };
 });
 
@@ -5799,6 +5958,12 @@ const fleetUdpLogsComputed = computed<FleetUdpLogs>(() => ({
   isMonitoring: isNetworkUdpMonitoring.value,
   target: networkUdpTarget.value,
   logs: filteredNetworkLogs.value
+}));
+
+const gatewayEventsComputed = computed(() => ({
+  events: gatewayEvents.value,
+  status: gatewayEventsStatus.value,
+  isLoading: false
 }));
 
 const mqttGatewayOptionsComputed = computed<MqttGatewayOption[]>(() =>
@@ -6134,11 +6299,14 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         :gateway-summary-state="monitorGatewaySummaryStateComputed"
         :fleet-summary-state="monitorFleetSummaryStateComputed"
         :rows="monitorDisplayRowsComputed"
+        :gateway-events="gatewayEventsComputed"
         @trigger-identify="triggerIdentify"
         @toggle-monitor-loop="toggleMonitorLoop"
         @open-mqtt-settings="openMonitorMqttSettings"
         @poll-selected-diagnostics="executeSelectedMonitorPollDiagnostics"
         @poll-device-diagnostics="handleMonitorPollDeviceDiagnostics"
+        @gateway-events-clear="clearGatewayEvents"
+        @gateway-events-copy="copyGatewayEvents"
       />
 
       <MonitorMqttSettingsModal
@@ -6159,6 +6327,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         :gateway="fleetGatewayStatusComputed"
         :server="fleetServerStatusComputed"
         :udp-logs="fleetUdpLogsComputed"
+        :gateway-events="gatewayEventsComputed"
         :transport-state="fleetTransportStateComputed"
         :inventory-summary="fleetInventorySummaryComputed"
         :candidate-summary="fleetCandidateSummaryComputed"
@@ -6170,6 +6339,8 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @udp-logging-start="triggerGatewayUdpLogging"
         @udp-logging-stop="stopNetworkUdpMonitor"
         @udp-logs-copy="copyNetworkUdpLog"
+        @gateway-events-clear="clearGatewayEvents"
+        @gateway-events-copy="copyGatewayEvents"
         @manual-chip-input="handleManualMqttGatewayInput"
         @firmware-fetch="fetchFirmware"
         @gateway-load="loadNetworkGateway"

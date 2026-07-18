@@ -309,6 +309,7 @@ class NodeStateMachine {
   bool radio_tx_budget_active_ = false;
   bool radio_tx_used_this_tick_ = false;
   bool tx_state_sync_pending_ = false;
+  uint32_t tx_state_sync_due_ms_ = 0;
   bool tx_command_pending_ = false;
   uint8_t tx_pending_relay_state_ = 0;
   uint8_t tx_pending_input_state_ = 0;
@@ -576,7 +577,7 @@ class NodeStateMachine {
   bool txGroupHasMissingTargets() const;
   bool isGroupActive() const;
   void resetTxGroupState();
-  void startTxGroupCommand(uint8_t relayState, uint8_t inputState);
+  void startTxGroupCommand(uint8_t relayState, uint8_t inputState, const char *reasonEvent = nullptr);
   void tickTxGroupCommand(uint32_t now);
   bool sendTxGroupChangeToAddress(uint8_t addr, const char *eventName, const char *phase);
   bool sendTxGroupPollToAddress(uint8_t addr, const char *eventName, const char *phase);

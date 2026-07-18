@@ -97,6 +97,7 @@ constexpr uint8_t kProvAddressMax = Settings::kAddressListCap;
 constexpr uint32_t kStateMachineLivenessLogIntervalMs = 60000;
 constexpr uint32_t kProvWatchdogLogIntervalMs = 2000;
 constexpr uint32_t kStartupPhaseTraceWindowMs = 15000;
+constexpr uint32_t kStartupRelaySyncDelayMs = 10000;
 
 inline void startupTxPhaseTrace(const char *phase) {
   const uint32_t now = millis();
@@ -296,7 +297,8 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   last_packet_ms_ = 0;
   last_packet_rssi_ = -127;
   last_wifi_prov_tx_ms_ = 0;
-  tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled;
+  tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled && !runtime_.mqtt_control_enabled;
+  tx_state_sync_due_ms_ = tx_state_sync_pending_ ? (millis() + kStartupRelaySyncDelayMs) : 0;
   tx_command_pending_ = false;
   tx_pending_command_counter_ = 0;
   tx_retry_step_ = 0;
@@ -389,7 +391,8 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   wait_ack_since_ms_ = millis();
   last_heartbeat_ms_ = millis();
   tx_ack_pending_ = false;
-  tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled;
+  tx_state_sync_pending_ = runtime_.role_tx && runtime_.input_control_paired_lora_enabled && !runtime_.mqtt_control_enabled;
+  tx_state_sync_due_ms_ = tx_state_sync_pending_ ? (millis() + kStartupRelaySyncDelayMs) : 0;
   tx_command_pending_ = false;
   tx_pending_command_counter_ = 0;
   tx_retry_step_ = 0;
@@ -800,7 +803,7 @@ bool NodeStateMachine::sendTxGroupPollToAddress(uint8_t addr, const char *eventN
   return true;
 }
 
-void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputState) {
+void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputState, const char *reasonEvent) {
   if (!buildTxGroupTargets()) {
     resetTxGroupState();
     return;
@@ -821,6 +824,9 @@ void NodeStateMachine::startTxGroupCommand(uint8_t relayState, uint8_t inputStat
   tx_pending_command_counter_ = tx_group_command_id_;
   tx_command_retry_deadline_ms_ = millis() + runtime_.tx_command_retry_timeout_ms;
   link_state_ = LinkState::WaitAck;
+  if (reasonEvent != nullptr) {
+    lrslog::event(reasonEvent, 0, tx_group_command_id_, tx_group_target_count_);
+  }
   lrslog::event("tx_alln_start", 0, tx_group_command_id_, tx_group_target_count_);
   LRS_LOGI(LORA,
            "event=tx_alln_start phase=initial_window command_id=%lu target_count=%u expected_bitmap=0x%08lx acked_bitmap=0x%08lx missing_bitmap=0x%08lx addr=0",
@@ -1738,6 +1744,7 @@ void NodeStateMachine::enterProvisioningQuietMode() {
   // 4. Clear other transient/pending TX flags in state machine
   tx_ack_pending_ = false;
   tx_state_sync_pending_ = false;
+  tx_state_sync_due_ms_ = 0;
   rx_deferred_ack_pending_ = false;
   rx_push_pending_ = false;
 
@@ -1990,6 +1997,10 @@ NodeStateMachine::ProvisioningDevice *NodeStateMachine::upsertProvisioningDevice
   if (chipId == 0) return nullptr;
   if (prov_devices_ == nullptr) return nullptr;
   if (ProvisioningDevice *d = findProvisioningDeviceByChip(chipId)) return d;
+  if (prov_.max_remotes > 0 &&
+      prov_device_count_ >= static_cast<size_t>(prov_.max_remotes)) {
+    return nullptr;
+  }
   if (prov_device_count_ >= prov_device_capacity_) return nullptr;
   ProvisioningDevice &d = prov_devices_[prov_device_count_++];
   d = ProvisioningDevice{};
@@ -2756,6 +2767,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
 
 void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
   if (!runtime_.role_tx) return;
+  if (fleet_scan_active_) return;
   for (size_t i = 0; i < peer_manager_.count(); ++i) {
     PeerRuntime *node = peer_manager_.findByIndex(i);
     if (!node || !node->pending) continue;
@@ -2799,6 +2811,7 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
 
 void NodeStateMachine::tickPeerPolling(uint32_t now) {
   if (!runtime_.role_tx) return;
+  if (fleet_scan_active_) return;
   if (!runtime_.tx_mqtt_remote_polling_enabled) return;
   if (!peer_manager_.ensurePollStorage()) return;
 
@@ -2952,15 +2965,18 @@ void NodeStateMachine::tickTransmitter() {
     input_state_ = static_cast<uint8_t>(inputLogical);
     if (runtime_.input_control_paired_lora_enabled) {
       tx_state_sync_pending_ = false;
+      tx_state_sync_due_ms_ = 0;
       resetTxGroupState();
-      startTxGroupCommand(input_state_, input_state_);
+      startTxGroupCommand(input_state_, input_state_, "tx_group_input_change");
     }
   }
 
   if (runtime_.input_control_paired_lora_enabled && tx_state_sync_pending_ &&
+      static_cast<int32_t>(now - tx_state_sync_due_ms_) >= 0 &&
       (tx_group_phase_ == PairedGroupPhase::Idle || tx_group_phase_ == PairedGroupPhase::Complete)) {
     tx_state_sync_pending_ = false;
-    startTxGroupCommand(input_state_, input_state_);
+    tx_state_sync_due_ms_ = 0;
+    startTxGroupCommand(input_state_, input_state_, "tx_group_startup_sync");
   }
 
   const bool groupActive = isGroupActive();
@@ -2972,9 +2988,11 @@ void NodeStateMachine::tickTransmitter() {
   if (!groupActive && runtime_.heartbeat_enabled && (now - last_heartbeat_ms_) >= runtime_.heartbeat_ms) {
     last_heartbeat_ms_ = now;
     if (runtime_.input_control_paired_lora_enabled) {
-      resetTxGroupState();
-      startTxGroupCommand(input_state_, input_state_);
-      tickTxGroupCommand(now);
+      if (runtime_.mqtt_control_enabled) {
+        lrslog::event("tx_group_heartbeat_mqtt_skip", 0, last_counter_, input_state_);
+      } else {
+        startTxGroupCommand(input_state_, input_state_, "tx_group_heartbeat_sync");
+      }
     } else {
       if (radioTxBudgetAvailable()) {
         last_counter_++;
@@ -2993,10 +3011,10 @@ void NodeStateMachine::tickTransmitter() {
   }
 
   tickPendingOtaPullControl(now);
+  tickFleetScan(now);
   tickPeerMqttCommands(now);
   tickPeerPolling(now);
   tickPeerMaintenance(now);
-  tickFleetScan(now);
   tickCandidatesAndAdoption(now);
   startupTxPhaseTrace("after_peer_polling");
 
@@ -4188,6 +4206,13 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       const uint32_t chipId = decodeU32LE(payload + 3);
       ProvisioningDevice *d = upsertProvisioningDevice(chipId);
       if (d == nullptr) {
+        if (prov_.max_remotes > 0 &&
+            prov_device_count_ >= static_cast<size_t>(prov_.max_remotes)) {
+          addProvLog("Announce rejected: session capacity reached (max_remotes=%u chip=0x%08lx)",
+                     static_cast<unsigned>(prov_.max_remotes),
+                     static_cast<unsigned long>(chipId));
+          return false;
+        }
         addProvLog("Announce rejected: out of storage slots for chip=0x%08lx", static_cast<unsigned long>(chipId));
         return false;
       }

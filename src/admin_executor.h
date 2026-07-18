@@ -68,5 +68,3 @@ private:
   void handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter writer);
   void handleAdoptCandidate(JsonDocument &doc, ResponseWriter writer);
 };
-
-

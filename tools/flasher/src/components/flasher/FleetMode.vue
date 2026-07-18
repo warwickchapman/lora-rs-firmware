@@ -13,6 +13,8 @@ export interface FleetConfig {
 
 export interface FleetGatewayStatus {
   hasGatewayDeviceWarning: boolean;
+  hasUnexpectedReboot: boolean;
+  rebootAlertLine: string;
   badgeClass: string;
   badgeLabel: string;
   statusLabel: string;
@@ -34,6 +36,8 @@ export interface FleetGatewayStatus {
   wifiRssi?: number;
   wifiConnected?: boolean;
   uptimeLine: string;
+  uptimeClass: string;
+  uptimeTitle: string;
 }
 
 export interface FleetServerStatus {
@@ -56,6 +60,20 @@ export interface FleetUdpLogs {
   isMonitoring: boolean;
   target: string | null;
   logs: string[];
+}
+
+export interface GatewayEventDisplayRecord {
+  ms: number;
+  event: string;
+  rssi: number;
+  counter: number;
+  state: number;
+}
+
+export interface GatewayEventsState {
+  events: GatewayEventDisplayRecord[];
+  status: string;
+  isLoading: boolean;
 }
 
 export interface MqttGatewayOption {
@@ -143,6 +161,7 @@ const props = defineProps<{
   gateway: FleetGatewayStatus;
   server: FleetServerStatus;
   udpLogs: FleetUdpLogs;
+  gatewayEvents: GatewayEventsState;
   transportState: FleetTransportState;
   inventorySummary: FleetInventorySummary;
   candidateSummary: FleetCandidateSummary;
@@ -157,6 +176,8 @@ const emit = defineEmits<{
   (e: 'udp-logging-start'): void;
   (e: 'udp-logging-stop'): void;
   (e: 'udp-logs-copy'): void;
+  (e: 'gateway-events-clear'): void;
+  (e: 'gateway-events-copy'): void;
   (e: 'manual-chip-input', val: string): void;
   (e: 'firmware-fetch'): void;
   (e: 'gateway-load'): void;
@@ -216,6 +237,17 @@ function toggleNetworkUdpLogsExpanded() {
   networkUdpLogsExpanded.value = !networkUdpLogsExpanded.value;
   nextTick(() => scrollNetworkUdpToBottom());
 }
+
+function eventLevelClass(event: GatewayEventDisplayRecord): string {
+  const name = event.event || '';
+  if (name.includes('timeout') || name.includes('_fail') || name.includes('failed') || name.includes('_bad')) {
+    return 'text-amber-300';
+  }
+  if (name.includes('maint_') || name.includes('fleet_scan') || name.includes('ota_')) {
+    return 'text-cyan-300';
+  }
+  return 'text-slate-300';
+}
 </script>
 
 <template>
@@ -229,6 +261,17 @@ function toggleNetworkUdpLogsExpanded() {
       </svg>
       <div>
         <span class="font-bold">Gateway Device Required:</span> Fleet requires a TX/gateway USB device. The selected serial port is a remote; choose the gateway port.
+      </div>
+    </div>
+
+    <div v-if="gateway.hasUnexpectedReboot" class="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-300 text-xs flex items-center gap-2.5 shrink-0 select-text">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-3-6.7"></path>
+        <path d="M21 3v6h-6"></path>
+        <path d="M12 7v5l3 2"></path>
+      </svg>
+      <div>
+        <span class="font-bold">Unexpected Gateway Reboot:</span> {{ gateway.rebootAlertLine }}
       </div>
     </div>
 
@@ -428,7 +471,7 @@ function toggleNetworkUdpLogsExpanded() {
         </div>
         <div class="rounded border border-slate-800 bg-slate-950/30 p-2">
           <div class="text-[10px] uppercase tracking-wide text-slate-600">Uptime</div>
-          <div class="mt-1 truncate font-mono text-slate-300">{{ gateway.uptimeLine }}</div>
+          <div :class="['mt-1 truncate font-mono', gateway.uptimeClass]" :title="gateway.uptimeTitle || undefined">{{ gateway.uptimeLine }}</div>
         </div>
       </div>
     </div>
@@ -669,6 +712,40 @@ function toggleNetworkUdpLogsExpanded() {
             </tr>
           </tbody>
         </table>
+      </div>
+      <div class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="truncate text-xs font-bold text-slate-300">Gateway events</div>
+            <div class="mt-0.5 text-[10px] text-slate-600">{{ gatewayEvents.status }}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="emit('gateway-events-copy')"
+              :disabled="gatewayEvents.events.length === 0"
+              class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
+            >
+              Copy
+            </button>
+            <button
+              @click="emit('gateway-events-clear')"
+              :disabled="gatewayEvents.events.length === 0"
+              class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        <div class="max-h-36 overflow-auto custom-scrollbar rounded border border-slate-800 bg-slate-950/60 p-2 font-mono text-[10px] leading-tight">
+          <div v-for="(event, i) in gatewayEvents.events.slice(-32)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
+            <span class="text-slate-500">{{ event.ms }}ms</span>
+            <span :class="['truncate', eventLevelClass(event)]">{{ event.event || '-' }}</span>
+            <span class="text-slate-500">rssi {{ event.rssi }}</span>
+            <span class="text-slate-500">ctr {{ event.counter }}</span>
+            <span class="text-slate-500">st {{ event.state }}</span>
+          </div>
+          <div v-if="gatewayEvents.events.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
+        </div>
       </div>
       <div
         v-if="udpLogs.isMonitoring"

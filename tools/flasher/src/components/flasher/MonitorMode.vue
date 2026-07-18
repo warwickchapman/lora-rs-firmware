@@ -91,6 +91,20 @@ export interface MonitorDisplayRow {
   poll_pending: boolean;
 }
 
+export interface GatewayEventDisplayRecord {
+  ms: number;
+  event: string;
+  rssi: number;
+  counter: number;
+  state: number;
+}
+
+export interface GatewayEventsState {
+  events: GatewayEventDisplayRecord[];
+  status: string;
+  isLoading: boolean;
+}
+
 const form = defineModel<MonitorForm>('form', { required: true });
 
 defineProps<{
@@ -100,6 +114,7 @@ defineProps<{
   gatewaySummaryState: MonitorGatewaySummaryState;
   fleetSummaryState: MonitorFleetSummaryState;
   rows: MonitorDisplayRow[];
+  gatewayEvents: GatewayEventsState;
 }>();
 
 const emit = defineEmits<{
@@ -108,6 +123,8 @@ const emit = defineEmits<{
   (e: 'open-mqtt-settings'): void;
   (e: 'poll-selected-diagnostics'): void;
   (e: 'poll-device-diagnostics', address: number): void;
+  (e: 'gateway-events-clear'): void;
+  (e: 'gateway-events-copy'): void;
 }>();
 
 // Computed bridges to avoid direct mutations in the child
@@ -127,6 +144,17 @@ const computedSelectedMonitorDeviceAddress = computed({
   get: () => form.value.selectedMonitorDeviceAddress,
   set: (val) => { form.value = { ...form.value, selectedMonitorDeviceAddress: val }; }
 });
+
+function eventLevelClass(event: GatewayEventDisplayRecord): string {
+  const name = event.event || '';
+  if (name.includes('timeout') || name.includes('_fail') || name.includes('failed') || name.includes('_bad')) {
+    return 'text-amber-300';
+  }
+  if (name.includes('maint_') || name.includes('fleet_scan') || name.includes('ota_')) {
+    return 'text-cyan-300';
+  }
+  return 'text-slate-300';
+}
 </script>
 
 <template>
@@ -308,12 +336,39 @@ const computedSelectedMonitorDeviceAddress = computed({
         </div>
         <div class="flex items-center gap-2">
           <button
+            @click="emit('gateway-events-copy')"
+            :disabled="gatewayEvents.events.length === 0"
+            class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
+          >
+            Copy Events
+          </button>
+          <button
+            @click="emit('gateway-events-clear')"
+            :disabled="gatewayEvents.events.length === 0"
+            class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
+          >
+            Clear Events
+          </button>
+          <button
             @click="emit('poll-selected-diagnostics')"
             :disabled="!computedSelectedMonitorDeviceAddress"
             class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold flex items-center gap-1 select-none disabled:opacity-40"
           >
             📊 Poll Diagnostics
           </button>
+        </div>
+      </div>
+      <div class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-2">
+        <div class="mb-1.5 text-[10px] text-slate-600">{{ gatewayEvents.status }}</div>
+        <div class="max-h-32 overflow-auto custom-scrollbar rounded border border-slate-800 bg-slate-950/60 p-2 font-mono text-[10px] leading-tight">
+          <div v-for="(event, i) in gatewayEvents.events.slice(-32)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
+            <span class="text-slate-500">{{ event.ms }}ms</span>
+            <span :class="['truncate', eventLevelClass(event)]">{{ event.event || '-' }}</span>
+            <span class="text-slate-500">rssi {{ event.rssi }}</span>
+            <span class="text-slate-500">ctr {{ event.counter }}</span>
+            <span class="text-slate-500">st {{ event.state }}</span>
+          </div>
+          <div v-if="gatewayEvents.events.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
         </div>
       </div>
       <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded border border-slate-800">
