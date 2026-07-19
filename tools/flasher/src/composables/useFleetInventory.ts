@@ -677,14 +677,17 @@ export function fleetDeviceWithDisplayState(device: LoraInventoryDevice, nowMs: 
 }
 
 export function applySeedWhitelist(existing: Partial<LoraInventoryDevice>, seed: LoraInventoryDevice): LoraInventoryDevice {
+  const { age_ms: _existingAge, ...existingRest } = existing;
+  const { age_ms: _seedAge, ...seedRest } = seed;
+
   return {
-    ...existing,
-    address: seed.address,
-    chip_id: seed.chip_id !== undefined ? seed.chip_id : existing.chip_id,
-    role: seed.role !== undefined ? seed.role : existing.role,
-    mode: seed.mode !== undefined ? seed.mode : existing.mode,
-    relay_state: seed.relay_state !== undefined ? seed.relay_state : existing.relay_state,
-    input_state_known: seed.input_state_known !== undefined ? seed.input_state_known : existing.input_state_known,
-    input_state: seed.input_state !== undefined ? seed.input_state : existing.input_state,
+    ...existingRest,
+    address: seedRest.address,
+    chip_id: seedRest.chip_id !== undefined ? seedRest.chip_id : existingRest.chip_id,
+    role: seedRest.role !== undefined ? seedRest.role : existingRest.role,
+    mode: seedRest.mode !== undefined ? seedRest.mode : existingRest.mode,
+    relay_state: seedRest.relay_state !== undefined ? seedRest.relay_state : existingRest.relay_state,
+    input_state_known: seedRest.input_state_known !== undefined ? seedRest.input_state_known : existingRest.input_state_known,
+    input_state: seedRest.input_state !== undefined ? seedRest.input_state : existingRest.input_state,
   } as LoraInventoryDevice;
 }

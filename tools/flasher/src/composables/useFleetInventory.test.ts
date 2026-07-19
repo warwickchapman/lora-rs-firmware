@@ -554,7 +554,52 @@ describe('useFleetInventory', () => {
     expect(result.role).toBe('gateway'); // from seed
     expect(result.relay_state).toBe(1); // from seed
     expect(result.fw_version).toBe('1.2.3'); // preserved, ignored from seed
-    expect(result.age_ms).toBe(5000); // preserved, ignored from seed
+    expect(result.age_ms).toBeUndefined(); // stripped from both to prevent host age reset
     expect(result.rssi).toBe(-50); // preserved
+  });
+
+  it('compact seed merges do not reset host freshness timestamp, letting Age increase', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+
+    // Time T: Detail row received with age_ms = 1000
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 1000 }]);
+    let row = fleet.loraInventory.value[0];
+    expect(row.age_ms).toBe(1000); // T = 10000, age = 1000 -> lastTelemetryTimestamp = 9000
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(9000);
+
+    // Time T+5s (15000): Compact seed received
+    fleetClockMs.value = 15000;
+    // mergeLoraInventorySeedRows simulates compact seed merge via applySeedWhitelist
+    const seed1 = { address: 1, chip_id: 'abcde123', role: 'remote', age_ms: 0 };
+    const merged1 = applySeedWhitelist(fleet.loraInventory.value[0], seed1 as any);
+    fleet.mergeInventoryRows([merged1]);
+
+    row = fleet.loraInventory.value[0];
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(9000); // Host timestamp remains T = 9000
+    expect(row.age_ms).toBe(6000); // Age correctly increases (15000 - 9000)
+
+    // Time T+10s (20000): Another compact seed received with age_ms: 0
+    fleetClockMs.value = 20000;
+    const seed2 = { address: 1, chip_id: 'abcde123', role: 'remote', age_ms: 0 };
+    const merged2 = applySeedWhitelist(fleet.loraInventory.value[0], seed2 as any);
+    fleet.mergeInventoryRows([merged2]);
+
+    row = fleet.loraInventory.value[0];
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(9000); // Still 9000
+    expect(row.age_ms).toBe(11000); // Age increases to 11s (20000 - 9000)
+  });
+
+  it('compact-seed-only row has unknown Age', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+
+    const seed = { address: 1, chip_id: 'abcde123', role: 'remote', age_ms: 0 };
+    const merged = applySeedWhitelist({}, seed as any);
+    fleet.mergeInventoryRows([merged]);
+
+    const row = fleet.loraInventory.value[0];
+    expect(row.age_ms).toBeUndefined(); // Unknown age
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
   });
 });
