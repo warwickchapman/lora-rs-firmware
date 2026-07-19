@@ -17,6 +17,7 @@ During changes:
 - avoid hidden `String` churn
 - preserve `runtime_` cache usage
 - preserve replay/provisioning semantics exactly
+- observe fixed-payload field-ownership rule: `sensor_mask` is authoritative; `b5` is multiplexed; no encoder may infer or silently add a meaning
 
 After changes:
 - run runtime memory checks (`max_free_block` primary)

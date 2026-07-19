@@ -44,11 +44,13 @@ Packed fields:
   - `0xFF` = not present
   - otherwise signed int8 Celsius (`int8_t`)
 - `b4`: `sensor_mask`
-  - bit0: digital input/status present
-  - bit1: temperature present
+  - bit0 (0x01): digital input/status present in `b5`
+  - bit1 (0x02): temperature present in `b3`
+  - bit2 (0x04): downlink RSSI present in `b6` (`sensor_analog0_lsb`)
+  - bit3 (0x08): WiFi enabled state present in `b5`
   - other bits reserved
-- `b5`: `sensor_digital0` (currently dry-contact state mirror)
-- `b6`: `sensor_analog0_lsb` (reserved)
+- `b5`: `sensor_digital0` (multiplexed: carries digital input if bit0 set, or WiFi state if bit3 set)
+- `b6`: `sensor_analog0_lsb` (multiplexed: carries downlink RSSI if bit2 set)
 - `b7`: `sensor_analog0_msb` (reserved)
 - `b8..b11`: `unix_time_s` (little-endian UTC epoch seconds; `0` means unavailable)
 

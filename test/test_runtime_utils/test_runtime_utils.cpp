@@ -886,6 +886,16 @@ void test_radio_protocol_encode_input_fields(void) {
   TEST_ASSERT_EQUAL(10, out_digital0);
 }
 
+void test_radio_protocol_resolve_input_state(void) {
+  // input=0, mask=0x0C, digital0=1 resolves input=0
+  uint8_t resolved = radio_protocol_helpers::resolveInputState(0, 0x0C, 1);
+  TEST_ASSERT_EQUAL(0, resolved);
+
+  // input=0, mask=0x01, digital0=1 resolves input=1
+  resolved = radio_protocol_helpers::resolveInputState(0, 0x01, 1);
+  TEST_ASSERT_EQUAL(1, resolved);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_isValidRemotePeerIdentity);
@@ -938,6 +948,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_mqtt_controller_authorization_mqtt_csv_extra_controller);
   RUN_TEST(test_evaluate_maint_block_transition);
   RUN_TEST(test_radio_protocol_encode_input_fields);
+  RUN_TEST(test_radio_protocol_resolve_input_state);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

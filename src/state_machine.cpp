@@ -3173,13 +3173,7 @@ void NodeStateMachine::tickReceiver() {
 static void updatePeerOperationalState(PeerRuntime& node, const ProtocolMessage& msg) {
   node.relay_state = msg.relay_state ? 1 : 0;
   node.relay_state_known = true;
-  // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
-  const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
-  if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
-    node.input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
-  } else {
-    node.input_state = msg.input_state ? 1 : 0;
-  }
+  node.input_state = radio_protocol_helpers::resolveInputState(msg.input_state, msg.sensor_mask, msg.sensor_digital0);
   node.input_state_known = true;
   LRS_LOGI(LORA, "event=temp_gateway_peer_input_update addr=%u type=%u relay=%u input=%u sensor_mask=%u digital0=%u resolved_input=%u",
            msg.src,

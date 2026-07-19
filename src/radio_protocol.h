@@ -55,6 +55,14 @@ inline void encodeInputFields(uint8_t legacy_input, uint8_t sensor_mask, uint8_t
     out_mask |= 0x01;
   }
 }
+
+inline uint8_t resolveInputState(uint8_t legacy_input, uint8_t sensor_mask, uint8_t sensor_digital0) {
+  const bool digitalPresent = (sensor_mask & 0x01U) != 0U;
+  if (digitalPresent && sensor_digital0 != 0xFFU) {
+    return (sensor_digital0 != 0U) ? 1 : 0;
+  }
+  return legacy_input ? 1 : 0;
+}
 } // namespace radio_protocol_helpers
 
 class RadioProtocol {
