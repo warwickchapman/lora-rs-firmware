@@ -4,6 +4,7 @@
 #include "config_fields.h"
 #include "runtime_utils.h"
 #include "state_machine.h"
+#include "radio_protocol.h"
 
 size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
 size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
@@ -865,6 +866,26 @@ void test_evaluate_maint_block_transition(void) {
   TEST_ASSERT_FALSE(t9.should_emit_event);
 }
 
+void test_radio_protocol_encode_input_fields(void) {
+  uint8_t out_mask = 0;
+  uint8_t out_digital0 = 0;
+
+  // input=0, mask=0x0C, digital0=1 produces mask=0x0C and digital0=1
+  radio_protocol_helpers::encodeInputFields(0, 0x0C, 1, out_mask, out_digital0);
+  TEST_ASSERT_EQUAL(0x0C, out_mask);
+  TEST_ASSERT_EQUAL(1, out_digital0);
+
+  // input=0, mask=0, digital0=0xFF produces mask=0x01 and digital0=0
+  radio_protocol_helpers::encodeInputFields(0, 0x00, 0xFF, out_mask, out_digital0);
+  TEST_ASSERT_EQUAL(0x01, out_mask);
+  TEST_ASSERT_EQUAL(0, out_digital0);
+
+  // no caller-provided digital0 may implicitly declare physical-input bit 0
+  radio_protocol_helpers::encodeInputFields(1, 0x00, 10, out_mask, out_digital0);
+  TEST_ASSERT_EQUAL(0x00, out_mask);
+  TEST_ASSERT_EQUAL(10, out_digital0);
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_isValidRemotePeerIdentity);
@@ -916,6 +937,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_mqtt_controller_authorization_allowed_list_extra_controller);
   RUN_TEST(test_mqtt_controller_authorization_mqtt_csv_extra_controller);
   RUN_TEST(test_evaluate_maint_block_transition);
+  RUN_TEST(test_radio_protocol_encode_input_fields);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

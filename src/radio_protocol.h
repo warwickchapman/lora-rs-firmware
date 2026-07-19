@@ -46,6 +46,17 @@ struct ProtocolMessage {
   bool via_factory_key = false;
 };
 
+namespace radio_protocol_helpers {
+inline void encodeInputFields(uint8_t legacy_input, uint8_t sensor_mask, uint8_t sensor_digital0, uint8_t& out_mask, uint8_t& out_digital0) {
+  out_mask = sensor_mask;
+  out_digital0 = sensor_digital0;
+  if (sensor_digital0 == 0xFF) {
+    out_digital0 = legacy_input;
+    out_mask |= 0x01;
+  }
+}
+} // namespace radio_protocol_helpers
+
 class RadioProtocol {
  public:
   bool begin(const Settings &cfg);

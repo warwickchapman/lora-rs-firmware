@@ -88,7 +88,10 @@ void RadioProtocol::applyConfig(const Settings &cfg) {
 bool RadioProtocol::send(MessageType type, uint8_t relay, uint8_t input, uint8_t flags, uint32_t counter, uint8_t src, uint8_t dst,
                          uint8_t temp_code, uint8_t sensor_mask, uint8_t sensor_digital0, uint16_t sensor_analog0,
                          uint32_t unix_time_s) {
-  uint8_t effectiveMask = sensor_mask | 0x01;  // digital input/status present
+  uint8_t effectiveMask;
+  uint8_t effectiveDigital0;
+  radio_protocol_helpers::encodeInputFields(input, sensor_mask, sensor_digital0, effectiveMask, effectiveDigital0);
+
   if (temp_code != 0xFF) effectiveMask |= 0x02;  // temperature present
   uint8_t plain[kPayloadSize] = {
       relay,
@@ -96,7 +99,7 @@ bool RadioProtocol::send(MessageType type, uint8_t relay, uint8_t input, uint8_t
       flags,
       temp_code,
       effectiveMask,
-      (sensor_digital0 == 0xFF ? input : sensor_digital0),
+      effectiveDigital0,
       static_cast<uint8_t>(sensor_analog0 & 0xFF),
       static_cast<uint8_t>((sensor_analog0 >> 8) & 0xFF),
       static_cast<uint8_t>(unix_time_s & 0xFF),
