@@ -1651,13 +1651,9 @@ bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedF
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
-  if (!keepSharedFleetKey) {
-    for (size_t i = 0; i < kMaxPeers; ++i) {
-      if (provisioned_addrs_[i].in_use && provisioned_addrs_[i].assigned_address == dstAddress) {
-        provisioned_addrs_[i] = ProvisionedAddressEntry{};
-      }
-    }
-  }
+  // A LoRa send only confirms that the gateway transmitted the frame. Keep the
+  // peer record until the operator explicitly removes it, so a missed reset
+  // command can be retried or recovered without physical access to the remote.
   lrslog::event(keepSharedFleetKey ? "factory_reset_peer_tx_keep" : "factory_reset_peer_tx_full", 0, last_counter_, dstAddress);
   return true;
 }

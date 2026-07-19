@@ -154,6 +154,7 @@ dry-contact state in firmware or Fleet cache.
 - The HTTP firmware stream is hashed while being written to the inactive OTA slot. The update is finalized only if the final SHA256 matches the authenticated digest. On any hash validation failure or download error, the remote node explicitly clears its active OTA state to lift silence blocks.
 - `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
 - `FactoryReset` supports an option to preserve the current shared fleet key during reset.
+- Transmitting a remote factory-reset frame is not delivery confirmation. The gateway retains the remote's configured address/chip record after either reset variant; remove that record only through the explicit gateway forget action once the reset has been verified.
 - `Reboot` (`'B'`) carries a compact magic-value command payload for a targeted remote reboot.
 - `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
 - `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.

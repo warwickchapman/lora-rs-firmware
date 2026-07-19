@@ -3807,7 +3807,7 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
       keep_shared_fleet_key: keepFleet,
       keep_wifi_credentials: keepWifi
     }, 8000);
-    notify(`Factory reset triggered on remote ${device.address}. Device is rebooting.`);
+    notify(`Factory reset command sent to remote ${device.address}. Its gateway record has been retained for recovery.`);
 
     // Track known reboot to prevent unexpected reboot status
     const now = Date.now();
@@ -3816,20 +3816,6 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
       knownRebootUntilMs: now + 60000,
       rebootExpectedUntilMs: now + 240000
     };
-
-    if (!keepFleet) {
-      const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
-      notify(`Forgetting remote ${deviceName} from gateway settings...`);
-      try {
-        await sendEasyPairCommandOnPort(port, 'forget_gateway_target', {
-          admin_password: password,
-          address: device.address
-        });
-        notify(`Successfully forgot remote ${deviceName} from gateway`);
-      } catch (forgetErr) {
-        console.error('Failed to forget gateway target:', forgetErr);
-      }
-    }
 
     factoryResetTargetModal.value = null;
     refreshLoraInventoryStatus(false);

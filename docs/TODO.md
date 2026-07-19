@@ -37,6 +37,7 @@
 ## Protocol
 - Introduce explicit protocol version field in packet.
 - Define the update policy for future payload changes.
+- Add a confirmed remote factory-reset protocol: remote validates the request, saves the reset state, sends an explicit confirmation while its current fleet key is still active, then reboots. Gateway/Flasher should show `sent`, `confirmed`, or `unconfirmed` and must never auto-forget the peer on a transmit-only result; retain manual forget as a deliberate cleanup/recovery action.
 
 ## Radio Configuration Change Protocol
 - Implement a safe gateway-controlled staged protocol for changing shared LoRa radio parameters across paired devices.

@@ -40,7 +40,7 @@ const computedKeepWifiCredentials = computed({
         </div>
 
         <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
-          💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it stays in this fleet. Unchecking it performs a full factory reset and removes the device from this fleet.
+          💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it can reconnect to this fleet. A full reset clears the remote's fleet key, but retains its gateway record so you can retry or recover it if the LoRa command is missed. Remove the record separately only after you have confirmed the reset.
         </div>
 
         <div class="flex flex-col gap-3 py-1">
