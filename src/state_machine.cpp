@@ -1046,9 +1046,14 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
 bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter) {
   if (!radioTxBudgetAvailable()) return false;
   const uint8_t targetRelay = relayState ? 1 : 0;
+
+  // Remote MQTT command handling must ignore the input field. We send a reserved
+  // value so we never broadcast our own input state in a peer command.
+  const uint8_t kMqttCommandInputReserved = 0xFFU;
+
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(millis());
-  if (!radio_->send(MessageType::Mqtt, targetRelay, input_state_, txFlags(), last_counter_, runtime_.local_address, dstAddress,
+  if (!radio_->send(MessageType::Mqtt, targetRelay, kMqttCommandInputReserved, txFlags(), last_counter_, runtime_.local_address, dstAddress,
                     localTempCodeToSend(),
                     0, 0xFF, 0xFFFF, unixTimeS)) {
     return false;

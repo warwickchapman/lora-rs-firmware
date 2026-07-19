@@ -110,6 +110,71 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].relay_state).toBe(1);
   });
 
+  it('treats empty input telemetry as unknown, clearing previous state, but keeps 0 as valid', () => {
+    const fleet = createFleet();
+    fleet.loraInventory.value = [
+      { address: 1, chip_id: '00000001' }
+    ];
+
+    // Seed state via telemetry
+    fleet.applyTelemetryUpdate({
+      address: 1,
+      field: 'input',
+      value: '1'
+    });
+    expect(fleet.loraInventory.value[0].input_state).toBe(1);
+    expect(fleet.loraInventory.value[0].input_state_known).toBe(true);
+
+    // Empty telemetry clears it to unknown
+    fleet.applyTelemetryUpdate({
+      address: 1,
+      field: 'input',
+      value: ''
+    });
+    expect(fleet.loraInventory.value[0].input_state).toBeUndefined();
+    expect(fleet.loraInventory.value[0].input_state_known).toBe(false);
+
+    // 0 is valid Off/Open state
+    fleet.applyTelemetryUpdate({
+      address: 1,
+      field: 'input',
+      value: '0'
+    });
+    expect(fleet.loraInventory.value[0].input_state).toBe(0);
+    expect(fleet.loraInventory.value[0].input_state_known).toBe(true);
+  });
+
+  it('treats empty relay telemetry as unknown, clearing previous state, but keeps 0 as valid', () => {
+    const fleet = createFleet();
+    fleet.loraInventory.value = [
+      { address: 1, chip_id: '00000001' }
+    ];
+
+    // Seed state via telemetry
+    fleet.applyTelemetryUpdate({
+      address: 1,
+      field: 'relay',
+      value: '1'
+    });
+    expect(fleet.loraInventory.value[0].relay_state).toBe(1);
+
+    // Empty telemetry clears it
+    fleet.applyTelemetryUpdate({
+      address: 1,
+      field: 'relay',
+      value: ''
+    });
+    expect(fleet.loraInventory.value[0].relay_state).toBeUndefined();
+
+    // 0 is valid Off
+    fleet.applyTelemetryUpdate({
+      address: 1,
+      field: 'relay',
+      value: '0'
+    });
+    expect(fleet.loraInventory.value[0].relay_state).toBe(0);
+  });
+
   it('clears stale serial relay state when inventory no longer reports it', () => {
     const fleet = createFleet();
 

@@ -876,9 +876,11 @@ bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYie
     if (buildPeerTopic(topic, sizeof(topic), addrSeg, "relay")) {
       publishRetainedTopic(topic, node.relay_state_known ? (node.relay_state ? "1" : "0") : "");
     }
-    const uint8_t inputValue = node.input_state ? 1 : 0;
+    const uint8_t inputValue = node.input_state_known ? (node.input_state ? 1 : 0) : 0xFF;
     if (!peerCache->input_published || peerCache->input_value != inputValue) {
-      if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) publishRetainedTopic(topic, inputValue ? "1" : "0");
+      if (buildPeerTopic(topic, sizeof(topic), addrSeg, "input")) {
+        publishRetainedTopic(topic, (inputValue == 0xFF) ? "" : (inputValue ? "1" : "0"));
+      }
       peerCache->input_published = true;
       peerCache->input_value = inputValue;
     }

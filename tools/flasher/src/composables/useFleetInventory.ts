@@ -472,10 +472,21 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       return;
     }
 
-    if (f === 'relay') cacheEntry.device.relay_state = (val === '1' || val === 1) ? 1 : 0;
+    if (f === 'relay') {
+      if (val === '' || val === null || val === undefined) {
+        cacheEntry.device.relay_state = undefined;
+      } else {
+        cacheEntry.device.relay_state = (val === '1' || val === 1) ? 1 : 0;
+      }
+    }
     else if (f === 'input') {
-      cacheEntry.device.input_state = (val === '1' || val === 1) ? 1 : 0;
-      cacheEntry.device.input_state_known = true;
+      if (val === '' || val === null || val === undefined) {
+        cacheEntry.device.input_state_known = false;
+        cacheEntry.device.input_state = undefined;
+      } else {
+        cacheEntry.device.input_state = (val === '1' || val === 1) ? 1 : 0;
+        cacheEntry.device.input_state_known = true;
+      }
     }
     else if (f === 'rssi' || f === 'uplink_rssi_dbm') cacheEntry.device.rssi = Number(val);
     else if (f === 'wifi_rssi_dbm') {
