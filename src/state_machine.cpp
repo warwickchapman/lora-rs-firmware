@@ -2901,14 +2901,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
       node->sensors.upsert(rB);
     }
     node->sensors_updated_ms = millis();
-
-    SensorReading dc{};
-    if (node->sensors.find(SensorKind::Input, 0, dc)) {
-      if (dc.state == SensorState::Ok) {
-        node->input_state = dc.value ? 1 : 0;
-        node->input_state_known = true;
-      }
-    }
   } else if (p[1] == kMaintenancePageDebug) {
     node->maintenance_debug_known = true;
     node->heap_free = static_cast<uint32_t>(p[2]) |
@@ -3129,6 +3121,7 @@ bool NodeStateMachine::tickGatewayControlPriority(uint32_t now) {
   }
 
   if ((now - last_debounce_ms_) > kDebounceMs && inputLogical != input_state_) {
+    LRS_LOGI(LORA, "event=temp_remote_debounce_transition role=gateway from=%u to=%u", static_cast<unsigned>(input_state_), static_cast<unsigned>(inputLogical));
     input_state_ = static_cast<uint8_t>(inputLogical);
     if (runtime_.input_control_paired_lora_enabled) {
       tx_state_sync_pending_ = false;
@@ -3165,6 +3158,7 @@ void NodeStateMachine::tickReceiver() {
   }
 
   if ((now - last_debounce_ms_) > kDebounceMs && inputLogical != input_state_) {
+    LRS_LOGI(LORA, "event=temp_remote_debounce_transition role=receiver from=%u to=%u", static_cast<unsigned>(input_state_), static_cast<unsigned>(inputLogical));
     input_state_ = static_cast<uint8_t>(inputLogical);
     rx_push_pending_ = true;
   }
@@ -3174,6 +3168,27 @@ void NodeStateMachine::tickReceiver() {
   if (rx_push_pending_ && sendInputStatePush(now)) return;
   if (tickDeferredObservability()) return;
   sendSensorStatePush(now);
+}
+
+static void updatePeerOperationalState(PeerRuntime& node, const ProtocolMessage& msg) {
+  node.relay_state = msg.relay_state ? 1 : 0;
+  node.relay_state_known = true;
+  // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
+  const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
+  if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
+    node.input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
+  } else {
+    node.input_state = msg.input_state ? 1 : 0;
+  }
+  node.input_state_known = true;
+  LRS_LOGI(LORA, "event=temp_gateway_peer_input_update addr=%u type=%u relay=%u input=%u sensor_mask=%u digital0=%u resolved_input=%u",
+           msg.src,
+           static_cast<unsigned>(msg.type),
+           msg.relay_state,
+           msg.input_state,
+           msg.sensor_mask,
+           msg.sensor_digital0,
+           static_cast<unsigned>(node.input_state));
 }
 
 void NodeStateMachine::tickReceive() {
@@ -3350,16 +3365,9 @@ void NodeStateMachine::tickReceive() {
                                        msg.type == MessageType::PollResponse ||
                                        msg.type == MessageType::MqttStatus);
       if (statusCarriesState) {
-        node->relay_state = msg.relay_state ? 1 : 0;
-        node->relay_state_known = true;
-        // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
-        const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
-        if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
-          node->input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
-        } else {
-          node->input_state = msg.input_state ? 1 : 0;
+        if (msg.type == MessageType::Heartbeat) {
+          updatePeerOperationalState(*node, msg);
         }
-        node->input_state_known = true;
 
         if (msg.temp_code != 0xFF) {
           SensorReading tempReading{};
@@ -3457,16 +3465,7 @@ void NodeStateMachine::tickReceive() {
         lrslog::event("mqtt_remote_node_limit", msg.rssi, msg.counter, msg.relay_state);
         return;
       }
-      node->relay_state = msg.relay_state ? 1 : 0;
-      node->relay_state_known = true;
-      // Prefer explicit digital sensor payload when present; fallback to legacy input byte.
-      const bool digitalPresent = (msg.sensor_mask & 0x01U) != 0U;
-      if (digitalPresent && msg.sensor_digital0 != 0xFFU) {
-        node->input_state = (msg.sensor_digital0 != 0U) ? 1 : 0;
-      } else {
-        node->input_state = msg.input_state ? 1 : 0;
-      }
-      node->input_state_known = true;
+      updatePeerOperationalState(*node, msg);
       node->uplink_rssi = msg.rssi;
       node->last_seen_ms = millis();
       node->last_cmd_counter = msg.counter;
