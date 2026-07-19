@@ -755,7 +755,7 @@ void MqttBridge::publishLocalStatus() {
   };
 
   char topic[kMqttTopicBufBytes];
-  const bool localInput = sm_->localInputState() != 0;
+  const bool localInput = sm_->inputState() != 0;
   if (buildLocalTopic(topic, sizeof(topic), "input")) publishRetained(topic, localInput ? "1" : "0");
   if (buildLocalTopic(topic, sizeof(topic), "relay")) publishRetained(topic, sm_->relayState() ? "1" : "0");
   if (buildLocalTopic(topic, sizeof(topic), "type")) publishRetained(topic, runtime_.role_tx ? "gateway" : "remote");

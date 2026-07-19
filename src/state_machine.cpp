@@ -923,7 +923,7 @@ void NodeStateMachine::tickDeferredAck(uint32_t now) {
   last_counter_++;
   // Input in an ACK is always this remote's live dry-contact reading. A gateway
   // Change frame carries controller input for command semantics, never peer state.
-  if (!radio_->send(MessageType::Ack, rx_deferred_ack_relay_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
+  if (!radio_->send(MessageType::Ack, rx_deferred_ack_relay_, input_state_, txFlags(), last_counter_, runtime_.local_address,
                     rx_deferred_ack_dst_, localTempCodeToSend(), 0, 0xFF, 0xFFFF, rx_deferred_ack_command_id_)) {
     return;
   }
@@ -2375,7 +2375,7 @@ bool NodeStateMachine::sendInputStatePush(uint32_t now) {
 
   last_counter_++;
   const uint32_t unixTimeS = currentUnixTimeS(now);
-  if (!radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_,
+  if (!radio_->send(MessageType::PollResponse, relay_state_, input_state_, txFlags(), last_counter_,
                     runtime_.local_address, runtime_.controller_address, localTempCodeToSend(), 0, 0xFF, 0xFFFF,
                     unixTimeS)) {
     return false;
@@ -2407,7 +2407,7 @@ bool NodeStateMachine::sendPollResponse(uint8_t dstAddress, int downlinkRssi) {
   const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(downlinkRssi));
   const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
   last_counter_++;
-  if (!radio_->send(MessageType::PollResponse, relay_state_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
+  if (!radio_->send(MessageType::PollResponse, relay_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
                     dstAddress, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, currentUnixTimeS(millis()))) {
     return false;
   }
@@ -3536,7 +3536,7 @@ void NodeStateMachine::tickReceive() {
       const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
       const uint32_t unixTimeS = currentUnixTimeS(millis());
       last_counter_++;
-      if (radio_->send(MessageType::MqttStatus, relay_state_, localInputState(), txFlags(), last_counter_, runtime_.local_address,
+      if (radio_->send(MessageType::MqttStatus, relay_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
                        msg.src, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, unixTimeS)) {
         last_tx_ms_ = millis();
         markRadioTxSentThisTick();
