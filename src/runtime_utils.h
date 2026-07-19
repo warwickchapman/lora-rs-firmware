@@ -57,6 +57,49 @@ enum class RemoteReaddressState : uint8_t {
   Failed
 };
 
+enum class MaintenanceRequestSource : uint8_t {
+  FleetScan,
+  CandidateProbe,
+  AdminPeerRefresh,
+  AdminDiagnostics,
+};
+
+enum class MaintAttemptResult : uint8_t {
+  Empty = 0,
+  GroupActive = 1,
+  RadioBudget = 2,
+  SendFailed = 3,
+  Success = 4
+};
+
+enum class MaintBlockReason : uint8_t {
+  None = 0,
+  GroupActive = 1,
+  RadioBudget = 2,
+  SendFailed = 3
+};
+
+struct MaintBlockState {
+  MaintBlockReason reason = MaintBlockReason::None;
+  uint8_t address = 0;
+  MaintenanceRequestSource source = MaintenanceRequestSource::FleetScan; // Ignored if reason is None
+};
+
+struct MaintBlockTransition {
+  MaintBlockState next_state;
+  bool should_emit_event;
+};
+
+MaintBlockTransition evaluateMaintBlockTransition(
+  MaintAttemptResult attempt_result,
+  uint8_t pending_address,
+  MaintenanceRequestSource pending_source,
+  const MaintBlockState& prev_state
+);
+
+const char* maintBlockReasonName(MaintBlockReason reason);
+
+
 namespace runtime_utils {
 
 constexpr uint8_t kMinAddress = 1;

@@ -1154,6 +1154,11 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
   s["sent"] = scan.sent;
   s["now_ms"] = now;
 
+  MaintBlockReason blockedReason = sm_->lastMaintBlockedReason();
+  if (blockedReason != MaintBlockReason::None) {
+    out["maint_deferred_reason"] = maintBlockReasonName(blockedReason);
+  }
+
   JsonArray devices = out["devices"].to<JsonArray>();
 
   uint8_t targets[Settings::kAddressListCap]{};

@@ -28,6 +28,7 @@ pub struct MqttTelemetryPayload {
     pub chip_id: Option<String>,
     pub field: String,
     pub value: serde_json::Value,
+    pub retain: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -166,7 +167,7 @@ impl MqttService {
                                 }
                             }
 
-                            Self::handle_publish(&app_clone, &topic_root, publish.topic, publish.payload.to_vec());
+                            Self::handle_publish(&app_clone, &topic_root, publish.topic, publish.payload.to_vec(), publish.retain);
                         }
                     }
                     Err(e) => {
@@ -195,13 +196,13 @@ impl MqttService {
         }
     }
 
-    fn handle_publish(app: &AppHandle, topic_root: &str, topic: String, payload_bytes: Vec<u8>) {
+    fn handle_publish(app: &AppHandle, topic_root: &str, topic: String, payload_bytes: Vec<u8>, retain: bool) {
         let payload_str = match String::from_utf8(payload_bytes) {
             Ok(s) => s,
             Err(_) => return,
         };
 
-        if let Some(msg) = parse_mqtt_message(topic_root, &topic, &payload_str) {
+        if let Some(msg) = parse_mqtt_message(topic_root, &topic, &payload_str, retain) {
             match msg {
                 ParsedMqttMessage::Discovery(gw_payload) => {
                     let _ = app.emit("mqtt-gateway-update", gw_payload);
@@ -252,7 +253,7 @@ pub enum ParsedMqttMessage {
     Telemetry(MqttTelemetryPayload),
 }
 
-pub fn parse_mqtt_message(topic_root: &str, topic: &str, payload_str: &str) -> Option<ParsedMqttMessage> {
+pub fn parse_mqtt_message(topic_root: &str, topic: &str, payload_str: &str, retain: bool) -> Option<ParsedMqttMessage> {
     // 1. Check discovery topic: <topic_root>/discovery/lrs-<chip_id>
     let discovery_prefix = format!("{}/discovery/", topic_root);
     if topic.starts_with(&discovery_prefix) {
@@ -338,6 +339,7 @@ pub fn parse_mqtt_message(topic_root: &str, topic: &str, payload_str: &str) -> O
             chip_id,
             field,
             value: json_value,
+            retain,
         }));
     }
 
@@ -353,21 +355,21 @@ mod tests {
         let root = "lora";
 
         // Admin Response
-        let msg = parse_mqtt_message(root, "lora/lrs-123456/admin_response", "{\"cmd\":\"ok\"}");
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/admin_response", "{\"cmd\":\"ok\"}", false);
         assert_eq!(msg, Some(ParsedMqttMessage::AdminResponse {
             chip_id: "123456".to_string(),
             response: serde_json::json!({"cmd":"ok"}),
         }));
 
         // OTA Status
-        let msg = parse_mqtt_message(root, "lora/lrs-123456/ota_status", "downloading");
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/ota_status", "downloading", false);
         assert_eq!(msg, Some(ParsedMqttMessage::OtaStatus {
             chip_id: "123456".to_string(),
             status: "downloading".to_string(),
         }));
 
         // Config Update
-        let msg = parse_mqtt_message(root, "lora/lrs-123456/config/wifi_sta_ssid", "MySSID");
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/config/wifi_sta_ssid", "MySSID", false);
         assert_eq!(msg, Some(ParsedMqttMessage::ConfigUpdate {
             chip_id: "123456".to_string(),
             field: "wifi_sta_ssid".to_string(),
@@ -375,13 +377,14 @@ mod tests {
         }));
 
         // Telemetry
-        let msg = parse_mqtt_message(root, "lora/lrs-123456/peers/1_lrs-abcdef/relay", "1");
+        let msg = parse_mqtt_message(root, "lora/lrs-123456/peers/1_lrs-abcdef/relay", "1", true);
         assert_eq!(msg, Some(ParsedMqttMessage::Telemetry(MqttTelemetryPayload {
             gateway_id: "123456".to_string(),
             address: 1,
             chip_id: Some("abcdef".to_string()),
             field: "relay".to_string(),
             value: serde_json::json!(1),
+            retain: true,
         })));
     }
 
@@ -390,21 +393,21 @@ mod tests {
         let root = "site/home/lora";
 
         // Admin Response
-        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/admin_response", "{\"cmd\":\"ok\"}");
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/admin_response", "{\"cmd\":\"ok\"}", false);
         assert_eq!(msg, Some(ParsedMqttMessage::AdminResponse {
             chip_id: "123456".to_string(),
             response: serde_json::json!({"cmd":"ok"}),
         }));
 
         // OTA Status
-        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/ota_status", "downloading");
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/ota_status", "downloading", false);
         assert_eq!(msg, Some(ParsedMqttMessage::OtaStatus {
             chip_id: "123456".to_string(),
             status: "downloading".to_string(),
         }));
 
         // Config Update
-        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/config/wifi_sta_ssid", "MySSID");
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/config/wifi_sta_ssid", "MySSID", false);
         assert_eq!(msg, Some(ParsedMqttMessage::ConfigUpdate {
             chip_id: "123456".to_string(),
             field: "wifi_sta_ssid".to_string(),
@@ -412,13 +415,14 @@ mod tests {
         }));
 
         // Telemetry
-        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/peers/1_lrs-abcdef/relay", "1");
+        let msg = parse_mqtt_message(root, "site/home/lora/lrs-123456/peers/1_lrs-abcdef/relay", "1", false);
         assert_eq!(msg, Some(ParsedMqttMessage::Telemetry(MqttTelemetryPayload {
             gateway_id: "123456".to_string(),
             address: 1,
             chip_id: Some("abcdef".to_string()),
             field: "relay".to_string(),
             value: serde_json::json!(1),
+            retain: false,
         })));
     }
 }

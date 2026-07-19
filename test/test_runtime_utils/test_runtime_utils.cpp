@@ -803,6 +803,67 @@ void test_struct_sizes() {
 
   TEST_ASSERT_TRUE(peerSize <= 256);
 }
+void test_evaluate_maint_block_transition(void) {
+  MaintBlockState prev_state;
+  prev_state.reason = MaintBlockReason::None;
+
+  // Transition: Empty -> GroupActive
+  MaintBlockTransition t1 = evaluateMaintBlockTransition(MaintAttemptResult::GroupActive, 5, MaintenanceRequestSource::FleetScan, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::GroupActive), static_cast<uint8_t>(t1.next_state.reason));
+  TEST_ASSERT_EQUAL(5, t1.next_state.address);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintenanceRequestSource::FleetScan), static_cast<uint8_t>(t1.next_state.source));
+  TEST_ASSERT_TRUE(t1.should_emit_event);
+
+  // Transition: GroupActive -> GroupActive (same address/source)
+  prev_state = t1.next_state;
+  MaintBlockTransition t2 = evaluateMaintBlockTransition(MaintAttemptResult::GroupActive, 5, MaintenanceRequestSource::FleetScan, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::GroupActive), static_cast<uint8_t>(t2.next_state.reason));
+  TEST_ASSERT_FALSE(t2.should_emit_event);
+
+  // Transition: GroupActive -> RadioBudget (new reason)
+  MaintBlockTransition t3 = evaluateMaintBlockTransition(MaintAttemptResult::RadioBudget, 5, MaintenanceRequestSource::FleetScan, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::RadioBudget), static_cast<uint8_t>(t3.next_state.reason));
+  TEST_ASSERT_TRUE(t3.should_emit_event);
+
+  // Transition: GroupActive -> Empty (queue empty)
+  MaintBlockTransition t4 = evaluateMaintBlockTransition(MaintAttemptResult::Empty, 0, MaintenanceRequestSource::FleetScan, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::None), static_cast<uint8_t>(t4.next_state.reason));
+  TEST_ASSERT_FALSE(t4.should_emit_event); // Silent clear
+
+  // Transition: GroupActive -> Success
+  MaintBlockTransition t5 = evaluateMaintBlockTransition(MaintAttemptResult::Success, 0, MaintenanceRequestSource::FleetScan, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::None), static_cast<uint8_t>(t5.next_state.reason));
+  TEST_ASSERT_FALSE(t5.should_emit_event); // Silent clear
+
+  // Transition: None -> SendFailed
+  prev_state.reason = MaintBlockReason::None;
+  MaintBlockTransition t6 = evaluateMaintBlockTransition(MaintAttemptResult::SendFailed, 3, MaintenanceRequestSource::AdminPeerRefresh, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::SendFailed), static_cast<uint8_t>(t6.next_state.reason));
+  TEST_ASSERT_EQUAL(3, t6.next_state.address);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintenanceRequestSource::AdminPeerRefresh), static_cast<uint8_t>(t6.next_state.source));
+  TEST_ASSERT_TRUE(t6.should_emit_event);
+
+  // Same reason, changed pending address
+  prev_state = t6.next_state;
+  MaintBlockTransition t7 = evaluateMaintBlockTransition(MaintAttemptResult::SendFailed, 4, MaintenanceRequestSource::AdminPeerRefresh, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::SendFailed), static_cast<uint8_t>(t7.next_state.reason));
+  TEST_ASSERT_EQUAL(4, t7.next_state.address);
+  TEST_ASSERT_TRUE(t7.should_emit_event);
+
+  // Same reason/address, changed source
+  prev_state = t7.next_state;
+  MaintBlockTransition t8 = evaluateMaintBlockTransition(MaintAttemptResult::SendFailed, 4, MaintenanceRequestSource::AdminDiagnostics, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::SendFailed), static_cast<uint8_t>(t8.next_state.reason));
+  TEST_ASSERT_EQUAL(4, t8.next_state.address);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintenanceRequestSource::AdminDiagnostics), static_cast<uint8_t>(t8.next_state.source));
+  TEST_ASSERT_TRUE(t8.should_emit_event);
+
+  // Unchanged reason/address/source remains silent
+  prev_state = t8.next_state;
+  MaintBlockTransition t9 = evaluateMaintBlockTransition(MaintAttemptResult::SendFailed, 4, MaintenanceRequestSource::AdminDiagnostics, prev_state);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MaintBlockReason::SendFailed), static_cast<uint8_t>(t9.next_state.reason));
+  TEST_ASSERT_FALSE(t9.should_emit_event);
+}
 
 int main(int argc, char **argv) {
   UNITY_BEGIN();
@@ -854,6 +915,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_mqtt_controller_authorization_rejects_reserved_addresses);
   RUN_TEST(test_mqtt_controller_authorization_allowed_list_extra_controller);
   RUN_TEST(test_mqtt_controller_authorization_mqtt_csv_extra_controller);
+  RUN_TEST(test_evaluate_maint_block_transition);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

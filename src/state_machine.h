@@ -51,12 +51,7 @@ enum class PairedGroupPhase : uint8_t {
   Complete,
 };
 
-enum class MaintenanceRequestSource : uint8_t {
-  FleetScan,
-  CandidateProbe,
-  AdminPeerRefresh,
-  AdminDiagnostics,
-};
+
 
 enum class DeferredObservabilityKind : uint8_t {
   None,
@@ -160,6 +155,7 @@ class NodeStateMachine {
   bool sharedUnixTimeValid() const;
   uint32_t sharedUnixTime() const;
   RxControlSource lastRxControlSource() const;
+  MaintBlockReason lastMaintBlockedReason() const { return last_maint_block_state_.reason; }
   size_t peerCount() const;
   bool peerByIndex(size_t index, PeerStatusSnapshot &out) const;
   bool peerByAddress(uint8_t address, PeerStatusSnapshot &out) const;
@@ -248,6 +244,8 @@ class NodeStateMachine {
 
  private:
   static constexpr size_t kMaxPeers = LRS_MAX_PEERS;
+
+  MaintBlockState last_maint_block_state_;
   static constexpr size_t kReplayTrackedSources = LRS_REPLAY_TRACKED_SOURCES;
   static_assert(kMaxPeers > 0, "LRS_MAX_PEERS must be > 0");
   static_assert(kMaxPeers <= 32, "LRS_MAX_PEERS must be <= 32 on ESP8266");

@@ -82,6 +82,7 @@ export interface LoraInventoryStatus {
   candidate_total?: number;
   candidate_truncated?: boolean;
   adoption?: LoraAdoptionStatus | null;
+  maint_deferred_reason?: string;
 }
 
 export interface LoraInventoryPeerStatus {

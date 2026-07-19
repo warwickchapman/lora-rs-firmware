@@ -36,6 +36,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   const fleetRowHistory = ref<Record<number, any>>({});
   const fleetForceScanCooldownUntilMs = ref(0);
   const telemetryCache = ref<Record<string, TelemetryCacheEntry>>({});
+  const maintDeferredReason = ref<string | null>(null);
 
   function normalizeGatewayId(id: string | undefined | null): string {
     if (!id) return '';
@@ -58,7 +59,12 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
 
-    Object.assign(row, cacheEntry.device);
+    const {
+      age_ms: _cacheAgeMs,
+      ...cacheFields
+    } = cacheEntry.device;
+
+    Object.assign(row, cacheFields);
     const sensorList = Object.values(cacheEntry.sensors);
     if (sensorList.length > 0) {
       if (!row.sensors) row.sensors = [];
@@ -381,12 +387,14 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     
     const total = loraCandidates.value.length;
     if (total === 0) {
-      return `${remotesLabel} · 0 candidates`;
+      const baseStr = `${remotesLabel} · 0 candidates`;
+      return maintDeferredReason.value ? `${baseStr} · refresh deferred by ${maintDeferredReason.value}` : baseStr;
     }
     
     if (total === 1) {
       const c = loraCandidates.value[0];
-      return `${remotesLabel} · 1 candidate ${candidateStateText(c)}`;
+      const baseStr = `${remotesLabel} · 1 candidate ${candidateStateText(c)}`;
+      return maintDeferredReason.value ? `${baseStr} · refresh deferred by ${maintDeferredReason.value}` : baseStr;
     }
     
     const identifying = loraCandidates.value.filter(c =>
@@ -410,9 +418,11 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (failed > 0) parts.push(`${failed} failed`);
     
     if (parts.length === 0) {
-      return `${remotesLabel} · ${total} candidates`;
+      const baseStr = `${remotesLabel} · ${total} candidates`;
+      return maintDeferredReason.value ? `${baseStr} · refresh deferred by ${maintDeferredReason.value}` : baseStr;
     }
-    return `${remotesLabel} · ${total} candidates: ${parts.join(', ')}`;
+    const finalStr = `${remotesLabel} · ${total} candidates: ${parts.join(', ')}`;
+    return maintDeferredReason.value ? `${finalStr} · refresh deferred by ${maintDeferredReason.value}` : finalStr;
   });
 
   function mergeInventoryRows(rows: LoraInventoryDevice[]): LoraInventoryDevice[] {
@@ -472,7 +482,10 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       return;
     }
 
+    let recognizedUpdate = false;
+
     if (f === 'relay') {
+      recognizedUpdate = true;
       if (val === '' || val === null || val === undefined) {
         cacheEntry.device.relay_state = undefined;
       } else {
@@ -480,6 +493,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
     else if (f === 'input') {
+      recognizedUpdate = true;
       if (val === '' || val === null || val === undefined) {
         cacheEntry.device.input_state_known = false;
         cacheEntry.device.input_state = undefined;
@@ -488,35 +502,41 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
         cacheEntry.device.input_state_known = true;
       }
     }
-    else if (f === 'rssi' || f === 'uplink_rssi_dbm') cacheEntry.device.rssi = Number(val);
+    else if (f === 'rssi' || f === 'uplink_rssi_dbm') { recognizedUpdate = true; cacheEntry.device.rssi = Number(val); }
     else if (f === 'wifi_rssi_dbm') {
+      recognizedUpdate = true;
       cacheEntry.device.wifi_rssi_dbm = (val === '' || val === null || val === undefined || val === '0' || val === 0)
         ? undefined
         : Number(val);
     }
-    else if (f === 'fw_version') cacheEntry.device.fw_version = String(val);
+    else if (f === 'fw_version') { recognizedUpdate = true; cacheEntry.device.fw_version = String(val); }
     else if (f === 'chip_id') {
+      recognizedUpdate = true;
       const canonicalVal = options.canonicalChipId(String(val));
       cacheEntry.device.chip_id = canonicalVal;
       cacheEntry.chip_id = canonicalVal;
     }
-    else if (f === 'uptime_ms') cacheEntry.device.uptime_ms = Number(val);
-    else if (f === 'role') cacheEntry.device.role = options.normalizeRole(String(val));
-    else if (f === 'mode') cacheEntry.device.mode = String(val);
+    else if (f === 'uptime_ms') { recognizedUpdate = true; cacheEntry.device.uptime_ms = Number(val); }
+    else if (f === 'role') { recognizedUpdate = true; cacheEntry.device.role = options.normalizeRole(String(val)); }
+    else if (f === 'mode') { recognizedUpdate = true; cacheEntry.device.mode = String(val); }
     else if (f === 'ip') {
+      recognizedUpdate = true;
       cacheEntry.device.ip = String(val);
       cacheEntry.device.wifi_connected = !!val && val !== '0.0.0.0';
       cacheEntry.device.wifi_connected_known = true;
     }
     else if (f === 'power_save_listen_only') {
+      recognizedUpdate = true;
       cacheEntry.device.power_save_listen_only = val === '1' || val === 1 || val === true;
     }
     else if (f === 'power_save_active') {
+      recognizedUpdate = true;
       cacheEntry.device.power_save_active = val === '1' || val === 1 || val === true;
     }
     else if (f.startsWith('sensor/')) {
       const sensorParts = f.split('/');
       if (sensorParts.length >= 4) {
+        recognizedUpdate = true;
         const kind = sensorParts[1] as any;
         const instance = Number(sensorParts[2]) || 0;
         const prop = sensorParts[3];
@@ -533,6 +553,10 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
               return row;
             });
           }
+          if (!payload.retain) {
+            if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
+            fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
+          }
           return;
         }
         if (!cacheEntry.sensors[sKey]) {
@@ -546,7 +570,11 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
         }
       }
     }
-    cacheEntry.device.age_ms = 0;
+
+    if (recognizedUpdate && !payload.retain) {
+      if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
+      fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
+    }
 
     let dev = findInventoryRow(address, cacheEntry);
 
@@ -584,6 +612,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     fleetRowHistory.value = {};
     fleetForceScanCooldownUntilMs.value = 0;
     telemetryCache.value = {};
+    maintDeferredReason.value = null;
   }
 
   return {
@@ -608,7 +637,8 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     mergeMonitorRows,
     applyTelemetryUpdate,
     updateRowHistory,
-    clearFleetGatewayCache
+    clearFleetGatewayCache,
+    maintDeferredReason
   };
 }
 
@@ -644,4 +674,17 @@ export function fleetDeviceWithDisplayState(device: LoraInventoryDevice, nowMs: 
     };
   }
   return device;
+}
+
+export function applySeedWhitelist(existing: Partial<LoraInventoryDevice>, seed: LoraInventoryDevice): LoraInventoryDevice {
+  return {
+    ...existing,
+    address: seed.address,
+    chip_id: seed.chip_id !== undefined ? seed.chip_id : existing.chip_id,
+    role: seed.role !== undefined ? seed.role : existing.role,
+    mode: seed.mode !== undefined ? seed.mode : existing.mode,
+    relay_state: seed.relay_state !== undefined ? seed.relay_state : existing.relay_state,
+    input_state_known: seed.input_state_known !== undefined ? seed.input_state_known : existing.input_state_known,
+    input_state: seed.input_state !== undefined ? seed.input_state : existing.input_state,
+  } as LoraInventoryDevice;
 }

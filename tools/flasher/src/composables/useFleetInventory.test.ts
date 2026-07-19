@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ref } from 'vue';
-import { useFleetInventory } from './useFleetInventory';
+import { useFleetInventory, applySeedWhitelist } from './useFleetInventory';
 import { LoraInventoryDevice, LoraAdoptionCandidate } from '../types/fleet';
 
 describe('useFleetInventory', () => {
@@ -444,5 +444,117 @@ describe('useFleetInventory', () => {
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: -67 }]);
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', wifi_rssi_dbm: 0 }]); // explicit zero
     expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined(); // history cleared
+  });
+
+  it('applyCacheToRow strips cache age_ms', () => {
+    const fleet = createFleet();
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 1000 }]);
+    // Push an MQTT update to generate a cache entry with age_ms = 0
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'rssi',
+      value: '-50'
+    });
+    // Trigger merge which invokes applyCacheToRow
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 1500 }]);
+    const row = fleet.loraInventory.value[0];
+    expect(row.age_ms).toBe(1500); // from row, not 0 from cache
+    expect(row.rssi).toBe(-50); // cache applied
+  });
+
+  it('applyTelemetryUpdate updates lastTelemetryTimestamp for non-retained updates', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'relay',
+      value: '1',
+      retain: false
+    });
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(10000);
+  });
+
+  it('applyTelemetryUpdate does not update lastTelemetryTimestamp for retained updates', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'relay',
+      value: '1',
+      retain: true
+    });
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
+  });
+
+  it('applyTelemetryUpdate updates lastTelemetryTimestamp for non-retained sensor clears', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'sensor/temperature/0/value',
+      value: '22',
+      retain: false
+    });
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(10000);
+
+    fleetClockMs.value = 20000;
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'sensor/temperature/0/value',
+      value: '', // clear
+      retain: false
+    });
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(20000);
+  });
+
+  it('remotesAndCandidatesStatusLine reflects maintDeferredReason', () => {
+    const fleet = createFleet();
+    fleet.maintDeferredReason.value = 'control recovery';
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
+    expect(fleet.remotesAndCandidatesStatusLine.value).toBe('1 remote configured · 0 candidates · refresh deferred by control recovery');
+
+    fleet.maintDeferredReason.value = null;
+    expect(fleet.remotesAndCandidatesStatusLine.value).toBe('1 remote configured · 0 candidates');
+  });
+
+  it('applySeedWhitelist preserves existing fields and whitelists incoming', () => {
+    const existing = {
+      address: 1,
+      chip_id: 'abcde123',
+      fw_version: '1.2.3',
+      age_ms: 5000,
+      rssi: -50,
+      role: 'remote'
+    };
+
+    const seed = {
+      address: 1,
+      chip_id: 'new123',
+      role: 'gateway',
+      relay_state: 1,
+      age_ms: 0,
+      fw_version: '9.9.9'
+    };
+
+    // @ts-ignore
+    const result = applySeedWhitelist(existing, seed);
+
+    expect(result.address).toBe(1);
+    expect(result.chip_id).toBe('new123'); // from seed
+    expect(result.role).toBe('gateway'); // from seed
+    expect(result.relay_state).toBe(1); // from seed
+    expect(result.fw_version).toBe('1.2.3'); // preserved, ignored from seed
+    expect(result.age_ms).toBe(5000); // preserved, ignored from seed
+    expect(result.rssi).toBe(-50); // preserved
   });
 });

@@ -6,7 +6,7 @@ import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
-import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState } from '../composables/useFleetInventory';
+import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState, applySeedWhitelist } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
 import { useMqttConnection } from '../composables/useMqttConnection';
@@ -840,7 +840,8 @@ const {
   mergeInventoryRows,
   mergeMonitorRows,
   applyTelemetryUpdate,
-  clearFleetGatewayCache: clearFleetGatewayCacheComposable
+  clearFleetGatewayCache: clearFleetGatewayCacheComposable,
+  maintDeferredReason
 } = useFleetInventory({
   otaQueue,
   selectedFirmwareCandidateVersion: selectedFirmwareCandidateVersion,
@@ -3079,10 +3080,10 @@ function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
 
 function mergeLoraInventorySeedRows(rows: LoraInventoryDevice[]) {
   const existingByAddress = new Map(loraInventory.value.map(row => [row.address, row]));
-  mergeLoraInventoryRows(rows.map(row => ({
-    ...(existingByAddress.get(row.address) || {}),
-    ...row,
-  })));
+  mergeLoraInventoryRows(rows.map(row => {
+    const existing = existingByAddress.get(row.address) || {};
+    return applySeedWhitelist(existing, row);
+  }));
 }
 
 function mergeLoraInventoryRow(row: LoraInventoryDevice) {
@@ -3327,6 +3328,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       const scanActive = !!inventory.scan?.active;
       const inventoryAddresses = (inventory.devices || []).map(device => device.address);
       loraInventoryScan.value = inventory.scan || null;
+      maintDeferredReason.value = inventory.maint_deferred_reason || null;
       mergeLoraInventorySeedRows(inventory.devices || []);
       const hydrateAddress = fleetTransport.value === 'serial' ? nextFleetHydrateAddress(inventoryAddresses) : null;
       if (hydrateAddress !== null) {

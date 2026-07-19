@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Firmware Changes
+- Fixed contradictory MQTT/Fleet peer input state reports by consolidating operational state updates to a single authoritative helper and removing conflicting assignments from diagnostic maintenance frames.
 - A gateway factory reset now clears its canonical retained MQTT peer trees from the broker before erasing its configuration. If the broker is disconnected, the reset proceeds normally but logs `retained_cleanup_skipped`.
 
 ## [0.10.1] - 2026-07-18

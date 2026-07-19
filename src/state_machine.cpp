@@ -2545,22 +2545,58 @@ void NodeStateMachine::noteMaintenanceRequestSent(MaintenanceRequestSource sourc
   }
 }
 
+
 void NodeStateMachine::tickMaintenanceRequestQueue(uint32_t now) {
-  if (isGroupActive() || !radioTxBudgetAvailable()) return;
+  MaintAttemptResult attempt_result = MaintAttemptResult::Empty;
+  uint8_t address = 0;
+  MaintenanceRequestSource source = MaintenanceRequestSource::FleetScan;
+
+  size_t selected_index = 0;
+  bool found = false;
+
   for (size_t offset = 0; offset < Settings::kAddressListCap; ++offset) {
     const size_t index = (maintenance_request_cursor_ + offset) % Settings::kAddressListCap;
-    PendingMaintenanceRequest &request = maintenance_requests_[index];
-    if (!request.pending) continue;
-
-    uint32_t sentCounter = 0;
-    if (!sendMaintenanceRequestNow(request.address, request.diagnostics, &sentCounter)) return;
-    const MaintenanceRequestSource source = request.source;
-    const uint8_t address = request.address;
-    request = PendingMaintenanceRequest{};
-    maintenance_request_cursor_ = static_cast<uint8_t>((index + 1U) % Settings::kAddressListCap);
-    noteMaintenanceRequestSent(source, address, sentCounter, now);
-    return;
+    if (maintenance_requests_[index].pending) {
+      address = maintenance_requests_[index].address;
+      source = maintenance_requests_[index].source;
+      selected_index = index;
+      found = true;
+      break;
+    }
   }
+
+  if (!found) {
+    attempt_result = MaintAttemptResult::Empty;
+  } else if (isGroupActive()) {
+    attempt_result = MaintAttemptResult::GroupActive;
+  } else if (!radioTxBudgetAvailable()) {
+    attempt_result = MaintAttemptResult::RadioBudget;
+  } else {
+    uint32_t sentCounter = 0;
+    bool requestDiagnostics = maintenance_requests_[selected_index].diagnostics;
+    if (sendMaintenanceRequestNow(address, requestDiagnostics, &sentCounter)) {
+      attempt_result = MaintAttemptResult::Success;
+      maintenance_requests_[selected_index] = PendingMaintenanceRequest{};
+      maintenance_request_cursor_ = static_cast<uint8_t>((selected_index + 1U) % Settings::kAddressListCap);
+      noteMaintenanceRequestSent(source, address, sentCounter, now);
+    } else {
+      attempt_result = MaintAttemptResult::SendFailed;
+    }
+  }
+
+  MaintBlockTransition transition = evaluateMaintBlockTransition(
+    attempt_result, address, source, last_maint_block_state_
+  );
+
+  if (transition.should_emit_event) {
+    lrslog::event("maint_request_blocked", 0, static_cast<uint8_t>(transition.next_state.reason), transition.next_state.address);
+    LRS_LOGI(SYS, "event=maint_request_blocked reason=\"%s\" source=%d address=%d",
+             maintBlockReasonName(transition.next_state.reason),
+             static_cast<int>(transition.next_state.source),
+             transition.next_state.address);
+  }
+
+  last_maint_block_state_ = transition.next_state;
 }
 
 bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDiagnostics) {

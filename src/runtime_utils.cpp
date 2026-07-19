@@ -390,3 +390,56 @@ bool isDefaultDeploymentKey(const String &v) {
 #endif
 
 } // namespace runtime_utils
+
+MaintBlockTransition evaluateMaintBlockTransition(
+  MaintAttemptResult attempt_result,
+  uint8_t pending_address,
+  MaintenanceRequestSource pending_source,
+  const MaintBlockState& prev_state
+) {
+  MaintBlockState next_state = prev_state;
+  bool should_emit = false;
+
+  MaintBlockReason new_reason = MaintBlockReason::None;
+  switch (attempt_result) {
+    case MaintAttemptResult::Empty:
+    case MaintAttemptResult::Success:
+      new_reason = MaintBlockReason::None;
+      break;
+    case MaintAttemptResult::GroupActive:
+      new_reason = MaintBlockReason::GroupActive;
+      break;
+    case MaintAttemptResult::RadioBudget:
+      new_reason = MaintBlockReason::RadioBudget;
+      break;
+    case MaintAttemptResult::SendFailed:
+      new_reason = MaintBlockReason::SendFailed;
+      break;
+  }
+
+  if (new_reason == MaintBlockReason::None) {
+    if (prev_state.reason != MaintBlockReason::None) {
+      next_state.reason = MaintBlockReason::None;
+      should_emit = false;
+    }
+  } else {
+    if (prev_state.reason != new_reason || prev_state.address != pending_address || prev_state.source != pending_source) {
+      next_state.reason = new_reason;
+      next_state.address = pending_address;
+      next_state.source = pending_source;
+      should_emit = true;
+    }
+  }
+
+  return { next_state, should_emit };
+}
+
+const char* maintBlockReasonName(MaintBlockReason reason) {
+  switch (reason) {
+    case MaintBlockReason::None: return "none";
+    case MaintBlockReason::GroupActive: return "control recovery";
+    case MaintBlockReason::RadioBudget: return "radio budget";
+    case MaintBlockReason::SendFailed: return "send failed";
+    default: return "unknown";
+  }
+}
