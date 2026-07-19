@@ -63,6 +63,14 @@ inline uint8_t resolveInputState(uint8_t legacy_input, uint8_t sensor_mask, uint
   }
   return legacy_input ? 1 : 0;
 }
+
+inline bool validateInputFields(uint8_t sensor_mask) {
+  // b5 cannot simultaneously mean physical input (0x01) and WiFi state (0x08)
+  if ((sensor_mask & 0x01U) != 0 && (sensor_mask & 0x08U) != 0) {
+    return false;
+  }
+  return true;
+}
 } // namespace radio_protocol_helpers
 
 class RadioProtocol {

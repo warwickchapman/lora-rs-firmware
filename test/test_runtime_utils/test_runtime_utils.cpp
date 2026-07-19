@@ -896,6 +896,17 @@ void test_radio_protocol_resolve_input_state(void) {
   TEST_ASSERT_EQUAL(1, resolved);
 }
 
+void test_radio_protocol_validate_input_fields(void) {
+  // 0x09 (0x01 | 0x08) is invalid because b5 cannot be both physical input and WiFi state
+  TEST_ASSERT_FALSE(radio_protocol_helpers::validateInputFields(0x09));
+
+  // Valid masks
+  TEST_ASSERT_TRUE(radio_protocol_helpers::validateInputFields(0x01)); // Only physical input
+  TEST_ASSERT_TRUE(radio_protocol_helpers::validateInputFields(0x08)); // Only WiFi state
+  TEST_ASSERT_TRUE(radio_protocol_helpers::validateInputFields(0x0C)); // WiFi state + downlink RSSI
+  TEST_ASSERT_TRUE(radio_protocol_helpers::validateInputFields(0x00)); // Neither
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_isValidRemotePeerIdentity);
@@ -949,6 +960,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_evaluate_maint_block_transition);
   RUN_TEST(test_radio_protocol_encode_input_fields);
   RUN_TEST(test_radio_protocol_resolve_input_state);
+  RUN_TEST(test_radio_protocol_validate_input_fields);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

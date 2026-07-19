@@ -93,6 +93,11 @@ bool RadioProtocol::send(MessageType type, uint8_t relay, uint8_t input, uint8_t
   radio_protocol_helpers::encodeInputFields(input, sensor_mask, sensor_digital0, effectiveMask, effectiveDigital0);
 
   if (temp_code != 0xFF) effectiveMask |= 0x02;  // temperature present
+
+  if (!radio_protocol_helpers::validateInputFields(effectiveMask)) {
+    return false;
+  }
+
   uint8_t plain[kPayloadSize] = {
       relay,
       input,
@@ -229,6 +234,11 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
   ctr.setKey(viaFactoryKey ? factory_enc_key_ : enc_key_, sizeof(enc_key_));
   ctr.setIV(iv, sizeof(iv));
   ctr.decrypt(plain, p.encrypted, sizeof(plain));
+
+  if (!radio_protocol_helpers::validateInputFields(plain[4])) {
+    lrslog::event("rx_invalid_mask", LoRa.packetRssi(), p.counter, plain[4]);
+    return false;
+  }
 
   msg.type = static_cast<MessageType>(p.type);
   msg.relay_state = plain[0];

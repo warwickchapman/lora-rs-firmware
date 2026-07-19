@@ -48,6 +48,7 @@ Packed fields:
   - bit1 (0x02): temperature present in `b3`
   - bit2 (0x04): downlink RSSI present in `b6` (`sensor_analog0_lsb`)
   - bit3 (0x08): WiFi enabled state present in `b5`
+  - *Note: `0x01` and `0x08` are mutually exclusive. A packet declaring both is invalid.*
   - other bits reserved
 - `b5`: `sensor_digital0` (multiplexed: carries digital input if bit0 set, or WiFi state if bit3 set)
 - `b6`: `sensor_analog0_lsb` (multiplexed: carries downlink RSSI if bit2 set)

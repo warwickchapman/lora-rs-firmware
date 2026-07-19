@@ -141,6 +141,7 @@ To prevent heap exhaustion and fragmentation on the ESP8266:
 Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.
 
 **Fixed-payload field-ownership rule:** `sensor_mask` is authoritative; `b5` (`sensor_digital0`) is multiplexed. No encoder may infer or silently add a meaning (e.g. unconditionally setting bit 0 just because `b5` is present).
+Furthermore, sensor-mask bit `0x01` (physical input) and bit `0x08` (WiFi-enabled state) are mutually exclusive. A packet declaring both is invalid.
 
 Current message types include control/status (`A/C/H/M/S/P/R`) plus provisioning/reset extensions (`W`/`X`).
 `W` (WiFi provisioning) and `X` (factory reset) reuse the same encrypted 12-byte payload slot with custom byte layouts via the radio layer raw-payload send path.
