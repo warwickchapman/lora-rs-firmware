@@ -2611,6 +2611,7 @@ bool NodeStateMachine::sendMaintenanceStatus(uint8_t dstAddress, bool requestDia
   if (runtime_.role_tx) flags |= 0x10;
   if (settings_->power_save_listen_only) flags |= 0x20;
   if (power_save_active_) flags |= 0x40;
+  if (input_state_) flags |= runtime_utils::kMaintenanceIdentityInputStateMask;
   uint8_t payload[12]{};
   const uint32_t chipId = runtime_utils::canonicalEspChipId();
   payload[0] = kMaintenancePayloadVersion;
@@ -2844,6 +2845,8 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->wifi_enabled = (flags & 0x01U) != 0U;
     node->wifi_connected_known = true;
     node->wifi_connected = (flags & 0x02U) != 0U;
+    node->input_state = (flags & runtime_utils::kMaintenanceIdentityInputStateMask) != 0U ? 1U : 0U;
+    node->input_state_known = true;
     node->wifi_rssi_dbm = runtime_utils::decodeMaintenanceIdentityWifiRssi(
         p[6], node->wifi_connected);
     uint8_t reportedRelayState = 0;

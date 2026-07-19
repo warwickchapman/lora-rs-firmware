@@ -110,9 +110,9 @@ Otherwise packet is dropped and logged.
 - TX may send `PollRequest` to RX.
 - RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
 - TX may send `MaintenanceRequest` to RX.
-- TX sends `MaintenanceRequest` carrying the request version (set to `kMaintenancePayloadVersion`, i.e., `3`) in payload byte `b0` and diagnostics flag in `b1`.
-- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `3`). This is not compatible with maintenance-page version `2`; paired nodes must be upgraded together.
-  - Page `0` (Identity) carries identity, connectivity, IP address, signed WiFi RSSI in `b6` (0 means unavailable), and marked relay state in `b7` (`0xA0` = Off, `0xA1` = On).
+- TX sends `MaintenanceRequest` carrying the request version (set to `kMaintenancePayloadVersion`, i.e., `4`) in payload byte `b0` and diagnostics flag in `b1`.
+- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `4`). This is not compatible with maintenance-page versions `2` or `3`; paired nodes must be upgraded together.
+  - Page `0` (Identity) carries identity, connectivity, IP address, signed WiFi RSSI in `b6` (0 means unavailable), marked relay state in `b7` (`0xA0` = Off, `0xA1` = On), and the sampled dry-contact input state in flag bit `b2.7` (`0` = Open, `1` = Closed). A valid identity page makes both relay and input state known.
   - Page `3` (Version) carries the firmware build number and uptime.
   - Page `2` (Sensors) carries page-indexed generic sensor readings from the local `SensorRegistry` (up to 2 readings per 4-byte slot per page; packs `kind`, `instance`, `state` (0=Disabled, 1=Missing, 2=Fault, 3=Ok, 4=Overrange, 5=Waiting), `scale`, and clamped `int16` values).
   - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, and uptime minutes).

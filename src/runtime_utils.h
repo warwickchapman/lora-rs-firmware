@@ -106,8 +106,8 @@ constexpr uint8_t kMinAddress = 1;
 constexpr uint8_t kMaxAddress = 254;
 constexpr uint8_t kGatewayAddress = 254;
 constexpr uint8_t kFirstRemoteAddress = 1;
-// Maintenance identity b6/b7 semantics are a protocol-generation boundary.
-constexpr uint8_t kMaintenancePayloadVersion = 3;
+// Maintenance identity b2.7/b6/b7 semantics are a protocol-generation boundary.
+constexpr uint8_t kMaintenancePayloadVersion = 4;
 constexpr uint32_t kGroupAckLeadMs = 250;
 constexpr uint32_t kGroupAckSlotMs = 180;
 constexpr uint32_t kGroupAckSlotJitterMaxMs = 40;
@@ -153,6 +153,9 @@ bool isAuthorizedMqttController(bool roleTx, uint8_t controllerAddress,
 // A non-negative value is unavailable, including identity pages from older
 // firmware that used b6 for packed firmware version information.
 int16_t decodeMaintenanceIdentityWifiRssi(uint8_t rawRssi, bool wifiConnected);
+
+// A valid identity page always carries the remote's sampled dry-contact state.
+constexpr uint8_t kMaintenanceIdentityInputStateMask = 0x80;
 
 // Identity page byte b7 uses 0xA0/0xA1 for a confirmed relay state. Other
 // values, including pages from older firmware, are deliberately unknown.

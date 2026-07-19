@@ -235,12 +235,13 @@ bool RadioProtocol::receive(ProtocolMessage &msg) {
   ctr.setIV(iv, sizeof(iv));
   ctr.decrypt(plain, p.encrypted, sizeof(plain));
 
-  if (!radio_protocol_helpers::validateInputFields(plain[4])) {
+  msg.type = static_cast<MessageType>(p.type);
+  if (radio_protocol_helpers::usesOperationalInputFields(msg.type) &&
+      !radio_protocol_helpers::validateInputFields(plain[4])) {
     lrslog::event("rx_invalid_mask", LoRa.packetRssi(), p.counter, plain[4]);
     return false;
   }
 
-  msg.type = static_cast<MessageType>(p.type);
   msg.relay_state = plain[0];
   msg.input_state = plain[1];
   msg.flags = plain[2];

@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+### Firmware Fixes
+- Normal maintenance identity responses now carry the remote dry-contact input state, so Fleet hydration repairs `Open`/`Closed` state without waiting for MQTT, a command ACK, or a generic sensor page.
+- Maintenance payload version is now `4` so older identity pages without an explicit input-state bit are rejected as unknown rather than misreported as `Open`.
+
 ### Firmware Changes
+- Fixed provisioning and other custom-payload LoRa frames being incorrectly rejected as malformed operational sensor/input payloads.
 - Fixed contradictory MQTT/Fleet peer input state reports by consolidating operational state updates to a single authoritative helper and removing conflicting assignments from diagnostic maintenance frames.
 - A gateway factory reset now clears its canonical retained MQTT peer trees from the broker before erasing its configuration. If the broker is disconnected, the reset proceeds normally but logs `retained_cleanup_skipped`.
 

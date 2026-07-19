@@ -119,6 +119,13 @@ void test_identity_relay_state_decoding() {
   TEST_ASSERT_FALSE(runtime_utils::decodeMaintenanceIdentityRelayState(0, relayState));
 }
 
+void test_identity_input_state_flag() {
+  TEST_ASSERT_EQUAL_UINT8(0, 0x00U & runtime_utils::kMaintenanceIdentityInputStateMask);
+  TEST_ASSERT_EQUAL_UINT8(runtime_utils::kMaintenanceIdentityInputStateMask,
+                          runtime_utils::kMaintenanceIdentityInputStateMask &
+                              runtime_utils::kMaintenanceIdentityInputStateMask);
+}
+
 void test_staggered_ack_delay_guards_first_peer() {
   TEST_ASSERT_EQUAL_UINT32(120,
       runtime_utils::staggeredAckDelayMs(0, 180, 0, 120));
@@ -127,7 +134,7 @@ void test_staggered_ack_delay_guards_first_peer() {
 }
 
 void test_group_broadcast_ack_lead_and_window() {
-  TEST_ASSERT_EQUAL_UINT8(3, runtime_utils::kMaintenancePayloadVersion);
+  TEST_ASSERT_EQUAL_UINT8(4, runtime_utils::kMaintenancePayloadVersion);
   TEST_ASSERT_EQUAL_UINT32(250, runtime_utils::kGroupAckLeadMs);
   TEST_ASSERT_EQUAL_UINT32(250,
       runtime_utils::staggeredAckDelayMs(0, runtime_utils::kGroupAckSlotMs, 0,
@@ -907,6 +914,17 @@ void test_radio_protocol_validate_input_fields(void) {
   TEST_ASSERT_TRUE(radio_protocol_helpers::validateInputFields(0x00)); // Neither
 }
 
+void test_radio_protocol_input_field_validation_scope(void) {
+  TEST_ASSERT_TRUE(radio_protocol_helpers::usesOperationalInputFields(MessageType::Change));
+  TEST_ASSERT_TRUE(radio_protocol_helpers::usesOperationalInputFields(MessageType::PollResponse));
+
+  // Raw protocols reuse payload byte 4 for protocol-specific data.
+  TEST_ASSERT_FALSE(radio_protocol_helpers::usesOperationalInputFields(MessageType::Provisioning));
+  TEST_ASSERT_FALSE(radio_protocol_helpers::usesOperationalInputFields(MessageType::MaintenanceStatus));
+  TEST_ASSERT_FALSE(radio_protocol_helpers::usesOperationalInputFields(MessageType::WifiProvision));
+  TEST_ASSERT_FALSE(radio_protocol_helpers::usesOperationalInputFields(MessageType::OtaPullControl));
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_isValidRemotePeerIdentity);
@@ -923,6 +941,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_schema_four_gateway_drops_legacy_remote_address);
   RUN_TEST(test_identity_wifi_rssi_decoding);
   RUN_TEST(test_identity_relay_state_decoding);
+  RUN_TEST(test_identity_input_state_flag);
   RUN_TEST(test_staggered_ack_delay_guards_first_peer);
   RUN_TEST(test_group_broadcast_ack_lead_and_window);
   RUN_TEST(test_gateway_scheduler_queues_receive_observability_until_control_is_idle);
@@ -961,6 +980,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_radio_protocol_encode_input_fields);
   RUN_TEST(test_radio_protocol_resolve_input_state);
   RUN_TEST(test_radio_protocol_validate_input_fields);
+  RUN_TEST(test_radio_protocol_input_field_validation_scope);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

@@ -71,6 +71,22 @@ inline bool validateInputFields(uint8_t sensor_mask) {
   }
   return true;
 }
+
+inline bool usesOperationalInputFields(MessageType type) {
+  switch (type) {
+    case MessageType::Ack:
+    case MessageType::Change:
+    case MessageType::Heartbeat:
+    case MessageType::Mqtt:
+    case MessageType::MqttStatus:
+    case MessageType::PollRequest:
+    case MessageType::PollResponse:
+    case MessageType::WifiControl:
+      return true;
+    default:
+      return false;
+  }
+}
 } // namespace radio_protocol_helpers
 
 class RadioProtocol {
