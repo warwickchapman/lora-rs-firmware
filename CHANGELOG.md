@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-19
+
 ### Firmware Fixes
 - Normal maintenance identity responses now carry the remote dry-contact input state, so Fleet hydration repairs `Open`/`Closed` state without waiting for MQTT, a command ACK, or a generic sensor page.
 - Maintenance payload version is now `4` so older identity pages without an explicit input-state bit are rejected as unknown rather than misreported as `Open`.
