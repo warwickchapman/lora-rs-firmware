@@ -110,6 +110,10 @@ void App::begin() {
   admin_executor_.begin(&config_, &sm_, [](void *ctx, bool restartNetwork, bool restartOtaAuth) {
     static_cast<App *>(ctx)->applyUpdatedConfig(restartNetwork, restartOtaAuth);
   }, this);
+  admin_executor_.setPreFactoryResetCallback([](void *ctx) {
+    static_cast<App *>(ctx)->clearGatewayRetainedPeersBeforeFactoryReset();
+  }, this);
+
   mqtt_.begin(&config_, config_.chipIdHex(), &sm_, &admin_executor_);
   serial_admin_.begin(&admin_executor_);
 
@@ -640,6 +644,8 @@ bool App::handlePendingFactoryReset() {
     lrslog::event(keepFleetKey ? "factory_reset_exec_keep"
                                : "factory_reset_exec_full",
                   0, resetSrc, 0);
+    clearGatewayRetainedPeersBeforeFactoryReset();
+
     if (config_.factoryReset(keepFleetKey, keepWifi)) {
       delay(100);
       ESP.restart();
@@ -648,6 +654,16 @@ bool App::handlePendingFactoryReset() {
     lrslog::event("factory_reset_exec_save_fail", 0, resetSrc, 0);
   }
   return false;
+}
+
+void App::clearGatewayRetainedPeersBeforeFactoryReset() {
+  if (config_.settings().role_tx) {
+    if (mqtt_.connected()) {
+      MqttBridge::clearAllConfiguredPeerRetainedTopics(config_.settings());
+    } else {
+      LRS_LOGW(API, "event=retained_cleanup_skipped reason=mqtt_disconnected");
+    }
+  }
 }
 
 bool App::handlePendingReboot() {

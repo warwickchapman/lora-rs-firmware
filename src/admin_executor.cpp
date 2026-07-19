@@ -758,6 +758,11 @@ void AdminExecutor::handleFactoryReset(JsonDocument &doc, ResponseWriter writer)
   const bool keepFleetKey =
       parseBoolField(doc["keep_shared_fleet_key"], false);
   const bool keepWifi = parseBoolField(doc["keep_wifi_credentials"], false);
+
+  if (pre_factory_reset_cb_) {
+    pre_factory_reset_cb_(pre_factory_reset_ctx_);
+  }
+
   if (!config_->factoryReset(keepFleetKey, keepWifi)) {
     sendError("factory_reset", "save_failed", id, writer);
     return;

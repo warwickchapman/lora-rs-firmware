@@ -18,6 +18,12 @@ public:
     ota_status_publisher_ctx_ = context;
   }
 
+  using PreFactoryResetCallback = void (*)(void *context);
+  void setPreFactoryResetCallback(PreFactoryResetCallback cb, void *context) {
+    pre_factory_reset_cb_ = cb;
+    pre_factory_reset_ctx_ = context;
+  }
+
   bool begin(ConfigStore *config, NodeStateMachine *sm,
              ConfigApplyCallback onApply, void *context);
   void execute(const char *jsonCommand, size_t length, ResponseWriter writer, bool isMqtt = false);
@@ -31,6 +37,9 @@ private:
   NodeStateMachine *sm_ = nullptr;
   ConfigApplyCallback on_apply_ = nullptr;
   void *on_apply_ctx_ = nullptr;
+  PreFactoryResetCallback pre_factory_reset_cb_ = nullptr;
+  void *pre_factory_reset_ctx_ = nullptr;
+
 
   AdminSession mqtt_session_;
 

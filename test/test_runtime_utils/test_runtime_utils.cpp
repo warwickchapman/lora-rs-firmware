@@ -9,6 +9,20 @@ size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
 size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
 size_t NodeStateMachine::replaySourceStateSize() { return sizeof(NodeStateMachine::ReplaySourceState); }
 
+void test_isValidRemotePeerIdentity() {
+  // Valid remote identities
+  TEST_ASSERT_TRUE(runtime_utils::isValidRemotePeerIdentity(1, 12345));
+  TEST_ASSERT_TRUE(runtime_utils::isValidRemotePeerIdentity(253, 12345));
+
+  // Invalid chip ID
+  TEST_ASSERT_FALSE(runtime_utils::isValidRemotePeerIdentity(1, 0));
+
+  // Invalid addresses
+  TEST_ASSERT_FALSE(runtime_utils::isValidRemotePeerIdentity(0, 12345));
+  TEST_ASSERT_FALSE(runtime_utils::isValidRemotePeerIdentity(254, 12345)); // kGatewayAddress
+  TEST_ASSERT_FALSE(runtime_utils::isValidRemotePeerIdentity(255, 12345));
+}
+
 void test_paired_transmitter_is_tx() {
   bool roleTx = false;
   TEST_ASSERT_TRUE(runtime_utils::parseRoleTxFromModeRole("paired", "transmitter", roleTx));
@@ -792,6 +806,7 @@ void test_struct_sizes() {
 
 int main(int argc, char **argv) {
   UNITY_BEGIN();
+  RUN_TEST(test_isValidRemotePeerIdentity);
   RUN_TEST(test_paired_transmitter_is_tx);
   RUN_TEST(test_paired_receiver_is_rx);
   RUN_TEST(test_paired_gateway_is_tx);

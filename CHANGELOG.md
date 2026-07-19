@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Firmware Changes
+- A gateway factory reset now clears its canonical retained MQTT peer trees from the broker before erasing its configuration. If the broker is disconnected, the reset proceeds normally but logs `retained_cleanup_skipped`.
+
 ## [0.10.1] - 2026-07-18
 
 ### Firmware Changes

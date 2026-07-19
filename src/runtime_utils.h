@@ -81,6 +81,9 @@ inline uint32_t canonicalEspChipId() {
 #endif
 }
 
+inline bool isValidRemotePeerIdentity(uint8_t addr, uint32_t chipId) {
+  return addr >= kMinAddress && addr <= kMaxAddress && addr != kGatewayAddress && chipId != 0;
+}
 
 
 #if !defined(UNIT_TEST)

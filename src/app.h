@@ -100,6 +100,8 @@ class App {
   void handlePendingFleetProvision();
   bool handlePendingFleetKeyChange();
 
+  void clearGatewayRetainedPeersBeforeFactoryReset();
+
   PowerSaveRuntimeState power_save_state_ = PowerSaveRuntimeState::FullPower;
 
   void enterPowerSave(const char *reason);

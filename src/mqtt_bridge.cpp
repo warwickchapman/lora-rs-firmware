@@ -263,10 +263,11 @@ bool MqttBridge::begin(ConfigStore *config, const String &chipIdHex, NodeStateMa
   return true;
 }
 
-void MqttBridge::clearPeerRetained(uint8_t addr, uint32_t chipId) {
+bool MqttBridge::clearPeerRetained(uint8_t addr, uint32_t chipId) {
   if (instance_ != nullptr) {
-    instance_->clearPeerRetainedTopics(addr, chipId);
+    return instance_->clearPeerRetainedTopics(addr, chipId);
   }
+  return false;
 }
 
 void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
@@ -583,8 +584,8 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
   }
 }
 
-void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
-  if (!mqtt_client_.connected()) return;
+bool MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
+  if (!mqtt_client_.connected()) return false;
 
   // Read chip_id from cache/SM/Settings before clearing
   const PeerPublishCacheEntry *entry = findPeerPublishCache(addr);
@@ -610,7 +611,10 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
     }
   }
   clearPeerPublishCache(addr);
-  if (chipId == 0) return;
+  if (chipId == 0) {
+    LRS_LOGW(API, "event=retained_cleanup_fail reason=chip_id_unknown addr=%u", addr);
+    return false;
+  }
 
   const char *leaves[] = {
       "relay",           "input",              "ack_state",
@@ -623,12 +627,15 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
   };
 
   char canonicalSeg[24];
-  if (!formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId)) return;
+  if (!formatCanonicalPeerAddrSegment(canonicalSeg, sizeof(canonicalSeg), addr, chipId)) return false;
 
   char topic[kMqttTopicBufBytes];
+  bool allSuccess = true;
   for (const char *leaf : leaves) {
     if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, leaf)) {
-      mqtt_client_.publish(topic, "", true);
+      if (!mqtt_client_.publish(topic, "", true)) {
+        allSuccess = false;
+      }
     }
   }
   if (hasSnapshot) {
@@ -638,11 +645,25 @@ void MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
       char suffix[64];
       snprintf(suffix, sizeof(suffix), "sensor/%s/%u/value", sensorKindToString(reading.kind), reading.instance);
       if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, suffix)) {
-        mqtt_client_.publish(topic, "", true);
+        if (!mqtt_client_.publish(topic, "", true)) allSuccess = false;
       }
       snprintf(suffix, sizeof(suffix), "sensor/%s/%u/state", sensorKindToString(reading.kind), reading.instance);
       if (buildPeerTopic(topic, sizeof(topic), canonicalSeg, suffix)) {
-        mqtt_client_.publish(topic, "", true);
+        if (!mqtt_client_.publish(topic, "", true)) allSuccess = false;
+      }
+    }
+  }
+  return allSuccess;
+}
+
+void MqttBridge::clearAllConfiguredPeerRetainedTopics(const Settings &cfg) {
+  if (instance_ == nullptr || !instance_->mqtt_client_.connected()) return;
+  for (uint8_t i = 0; i < cfg.known_peer_count && i < Settings::kAddressListCap; ++i) {
+    uint8_t addr = cfg.known_peer_addresses[i];
+    uint32_t chipId = cfg.known_peer_chip_ids[i];
+    if (runtime_utils::isValidRemotePeerIdentity(addr, chipId)) {
+      if (!instance_->clearPeerRetainedTopics(addr, chipId)) {
+        LRS_LOGW(API, "event=retained_cleanup_fail addr=%u chip_id=%08X", addr, chipId);
       }
     }
   }
