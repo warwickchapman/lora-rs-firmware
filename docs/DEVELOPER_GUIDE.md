@@ -337,6 +337,12 @@ Release alignment policy:
 
 Local non-release flasher version policy:
 - Do not label local one-off test builds with the last shipped release version.
+- For normal local Flasher development, run the live application from source; do not package an app bundle:
+  ```sh
+  cd /Users/warwick/Code/LoRa/lora_rs/tools/flasher
+  npm run tauri dev
+  ```
+- `npm run tauri build` is for a distributable or release-verification artifact only. It is not a routine implementation or test step.
 - Release builds use the exact root `VERSION`.
 - After successful release publish to both repos, `tools/release_manager.py` auto-bumps `VERSION` to the next patch `-dev`, commits it, and pushes to `main` (default behavior).
 - Example: release `0.6.1-alpha` -> automatic `VERSION` bump to `0.6.2-dev`.

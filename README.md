@@ -74,6 +74,12 @@ Main project:
 
 Local non-release flasher build policy:
 - Do not reuse the last released version string for one-off local test builds.
+- For normal local Flasher development, run it from source rather than packaging an app bundle:
+  ```sh
+  cd /Users/warwick/Code/LoRa/lora_rs/tools/flasher
+  npm run tauri dev
+  ```
+- `npm run tauri build` is only for a distributable or release-verification artifact, not routine development.
 - Release builds use the exact value from `VERSION`.
 - After a successful release, the release script auto-advances `VERSION` to the next patch `-dev`, commits it, and pushes it to `main` (default behavior).
 - Example: releasing `0.10.0-beta` auto-bumps `VERSION` to `0.10.1-dev`.
