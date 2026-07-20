@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-20
+
 ### Firmware Changes
 - MQTT remote polling now follows a compact relay/input response with the existing bounded sensor pages when a remote has enabled temperature or tank sensors. Headless MQTT therefore refreshes operational sensor readings without a second sensor packet format or diagnostics traffic.
 - Enforced gateway-only MQTT clients: remotes no longer connect to brokers or retain an MQTT-control configuration. All remote MQTT control and telemetry is mediated by the paired gateway over LoRa.
