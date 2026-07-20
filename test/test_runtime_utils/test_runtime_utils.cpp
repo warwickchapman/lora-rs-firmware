@@ -99,6 +99,36 @@ void test_schema_four_gateway_drops_legacy_remote_address() {
       true, false, 0, true, 7));
 }
 
+void test_provisioning_config_reservation_rules() {
+  const uint32_t discovered[] = {0x00000101UL, 0x00000102UL};
+
+  // A persisted address for a device in this session is reclaimed.
+  TEST_ASSERT_FALSE(runtime_utils::isProvisioningConfiguredAddressReserved(
+      0x00000101UL, discovered, 2));
+
+  // Other persisted devices, including legacy address-only entries, remain reserved.
+  TEST_ASSERT_TRUE(runtime_utils::isProvisioningConfiguredAddressReserved(
+      0x00000103UL, discovered, 2));
+  TEST_ASSERT_TRUE(runtime_utils::isProvisioningConfiguredAddressReserved(
+      0, discovered, 2));
+
+}
+
+void test_provisioning_chip_order_is_deterministic() {
+  uint32_t firstAnnounceOrder[] = {0x0048D1BBUL, 0x000AF8CEUL, 0x004A89FDUL};
+  uint32_t secondAnnounceOrder[] = {0x004A89FDUL, 0x0048D1BBUL, 0x000AF8CEUL};
+
+  runtime_utils::sortProvisioningChipIds(firstAnnounceOrder, 3);
+  runtime_utils::sortProvisioningChipIds(secondAnnounceOrder, 3);
+
+  for (size_t i = 0; i < 3; ++i) {
+    TEST_ASSERT_EQUAL_UINT32(firstAnnounceOrder[i], secondAnnounceOrder[i]);
+  }
+  TEST_ASSERT_EQUAL_UINT32(0x000AF8CEUL, firstAnnounceOrder[0]);
+  TEST_ASSERT_EQUAL_UINT32(0x0048D1BBUL, firstAnnounceOrder[1]);
+  TEST_ASSERT_EQUAL_UINT32(0x004A89FDUL, firstAnnounceOrder[2]);
+}
+
 void test_identity_wifi_rssi_decoding() {
   TEST_ASSERT_EQUAL_INT(-65,
                         runtime_utils::decodeMaintenanceIdentityWifiRssi(
@@ -939,6 +969,8 @@ int main(int argc, char **argv) {
   RUN_TEST(test_wifi_status_text_unknown_value);
   RUN_TEST(test_schema_four_remote_migrates_to_controller_address);
   RUN_TEST(test_schema_four_gateway_drops_legacy_remote_address);
+  RUN_TEST(test_provisioning_config_reservation_rules);
+  RUN_TEST(test_provisioning_chip_order_is_deterministic);
   RUN_TEST(test_identity_wifi_rssi_decoding);
   RUN_TEST(test_identity_relay_state_decoding);
   RUN_TEST(test_identity_input_state_flag);

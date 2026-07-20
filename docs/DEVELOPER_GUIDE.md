@@ -79,6 +79,7 @@ The firmware no longer hosts an onboard Web UI, REST API, captive portal, or `ES
 
 Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
+- EasyPair discovery collects chip IDs before allocation. At discovery completion, new devices are sorted by chip ID and assigned the lowest free addresses; a known chip reclaims its persisted address.
 - Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes only when the operator explicitly asks.
 - The gateway does not run a perpetual round-robin maintenance sweep. Relay/input control owns LoRa airtime; Fleet/Monitor freshness is low-priority observability and must tolerate stale rows.
 - Low-priority maintenance requests use a fixed, coalescing per-peer queue. They wait through control windows and send only when the radio is free; diagnostics upgrade a pending normal request for the same peer. Control broadcasts, ACKs, and control retries never enter this queue.

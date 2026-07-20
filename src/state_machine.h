@@ -504,6 +504,7 @@ class NodeStateMachine {
     uint32_t discover_reply_window_ms = 0;
     uint32_t next_discover_broadcast_ms = 0;
     uint32_t watchdog_last_log_ms = 0;
+    uint16_t configured_reservation_mask = 0;
   };
   ProvisioningSessionRuntime prov_{};
 
@@ -600,6 +601,7 @@ class NodeStateMachine {
   bool ensureProvisioningStorage();
   void resetProvisioningStorage();
   void freeProvisioningStorage();
+  void sortProvisioningDevicesByChipId();
   void recomputeProvisioningConflictsAndAssignments();
   bool sendProvisioningCoordinatorPacketFactory(const uint8_t payload[12], uint8_t dst);
   bool sendProvisioningDiscoverStart(uint16_t sessionNonce, uint32_t replyWindowMs, uint32_t broadcastWindowMs);

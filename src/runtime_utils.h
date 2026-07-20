@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 
@@ -141,6 +142,15 @@ uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
                                  uint8_t controllerAddress,
                                  bool hasLegacyRemoteAddress,
                                  uint8_t legacyRemoteAddress);
+
+// A configured address stays reserved unless its persisted chip ID belongs to
+// a device discovered in this provisioning session. Runtime peer cache entries
+// are deliberately outside this decision.
+bool isProvisioningConfiguredAddressReserved(
+    uint32_t configuredChipId, const uint32_t *discoveredChipIds,
+    size_t discoveredChipCount);
+
+void sortProvisioningChipIds(uint32_t *chipIds, size_t chipCount);
 
 // Authorize an MQTT control packet source for this device.
 // Remotes accept their configured controller_address; gateways never receive

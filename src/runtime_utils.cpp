@@ -112,6 +112,30 @@ uint8_t migrateControllerAddress(bool roleTx, bool hasControllerAddress,
   return kGatewayAddress;
 }
 
+bool isProvisioningConfiguredAddressReserved(
+    uint32_t configuredChipId, const uint32_t *discoveredChipIds,
+    size_t discoveredChipCount) {
+  if (configuredChipId == 0) return true;
+  if (discoveredChipIds == nullptr) return true;
+  for (size_t i = 0; i < discoveredChipCount; ++i) {
+    if (discoveredChipIds[i] == configuredChipId) return false;
+  }
+  return true;
+}
+
+void sortProvisioningChipIds(uint32_t *chipIds, size_t chipCount) {
+  if (chipIds == nullptr || chipCount < 2) return;
+  for (size_t i = 1; i < chipCount; ++i) {
+    const uint32_t current = chipIds[i];
+    size_t insertAt = i;
+    while (insertAt > 0 && chipIds[insertAt - 1] > current) {
+      chipIds[insertAt] = chipIds[insertAt - 1];
+      --insertAt;
+    }
+    chipIds[insertAt] = current;
+  }
+}
+
 bool isAuthorizedMqttController(bool roleTx, uint8_t controllerAddress,
                                 const Settings *settings, uint8_t src) {
   if (settings == nullptr || src == 0 || src == 255) return false;

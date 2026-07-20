@@ -2072,7 +2072,31 @@ void NodeStateMachine::prePopulateGatewayPeerCache() {
   }
 }
 
+void NodeStateMachine::sortProvisioningDevicesByChipId() {
+  if (prov_devices_ == nullptr || prov_device_count_ < 2) return;
+  uint32_t orderedChipIds[kMaxProvisioningDevices]{};
+  for (size_t i = 0; i < prov_device_count_; ++i) {
+    orderedChipIds[i] = prov_devices_[i].chip_id;
+  }
+  runtime_utils::sortProvisioningChipIds(orderedChipIds, prov_device_count_);
+
+  for (size_t i = 0; i < prov_device_count_; ++i) {
+    for (size_t j = i; j < prov_device_count_; ++j) {
+      if (prov_devices_[j].chip_id != orderedChipIds[i]) continue;
+      if (i != j) {
+        const ProvisioningDevice current = prov_devices_[i];
+        prov_devices_[i] = prov_devices_[j];
+        prov_devices_[j] = current;
+      }
+      break;
+    }
+  }
+}
+
 void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
+  // This is called only at session boundaries, so RF arrival order never
+  // determines either the selected address or provisioning order.
+  sortProvisioningDevicesByChipId();
   uint8_t prev_assigned[kMaxProvisioningDevices]{};
   bool prev_conflict[kMaxProvisioningDevices]{};
   for (size_t i = 0; i < prov_device_count_ && i < kMaxProvisioningDevices; ++i) {
@@ -2083,39 +2107,6 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   bool used[256]{};
   used[0] = true;
   used[255] = true;
-  auto addressBelongsToCurrentProvisioningDevice = [this](uint8_t address) {
-    if (address < kProvAddressMin || address > kProvAddressMax) return false;
-    for (size_t i = 0; i < prov_device_count_; ++i) {
-      const ProvisioningDevice &d = prov_devices_[i];
-      if (!d.in_use) continue;
-      if (d.current_address == address) return true;
-      if (d.assigned_address == address) return true;
-    }
-    // Check persistent chip→address mapping: if this address's stored
-    // chip_id matches a discovered provisioning device, the address
-    // belongs to that device (e.g. factory-reset device reclaiming its
-    // old slot).
-    if (settings_ != nullptr) {
-      for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
-        if (settings_->known_peer_addresses[i] != address) continue;
-        const uint32_t chipId = settings_->known_peer_chip_ids[i];
-        if (chipId == 0) continue;
-        for (size_t j = 0; j < prov_device_count_; ++j) {
-          if (prov_devices_[j].in_use && prov_devices_[j].chip_id == chipId) return true;
-        }
-      }
-    }
-    return false;
-  };
-  auto getSettingsChipIdForAddress = [this](uint8_t address) -> uint32_t {
-    if (settings_ == nullptr) return 0;
-    for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
-      if (settings_->known_peer_addresses[i] == address) {
-        return settings_->known_peer_chip_ids[i];
-      }
-    }
-    return 0;
-  };
   auto hasUnassignedProvisioningDevices = [this]() -> bool {
     if (prov_devices_ == nullptr) return false;
     for (size_t i = 0; i < prov_device_count_; ++i) {
@@ -2128,24 +2119,36 @@ void NodeStateMachine::recomputeProvisioningConflictsAndAssignments() {
   if (runtime_.local_address >= kProvAddressMin && runtime_.local_address <= kProvAddressMax) {
     used[runtime_.local_address] = true;
   }
+  uint32_t discoveredChipIds[kMaxProvisioningDevices]{};
+  size_t discoveredChipCount = 0;
+  for (size_t i = 0; i < prov_device_count_ && discoveredChipCount < kMaxProvisioningDevices; ++i) {
+    const ProvisioningDevice &d = prov_devices_[i];
+    if (d.in_use && d.chip_id != 0) discoveredChipIds[discoveredChipCount++] = d.chip_id;
+  }
+
+  uint16_t configuredReservationMask = 0;
   if (settings_ != nullptr) {
     for (size_t i = 0; i < settings_->known_peer_count && i < Settings::kAddressListCap; ++i) {
       const uint8_t addr = settings_->known_peer_addresses[i];
       if (addr < kProvAddressMin || addr > kProvAddressMax) continue;
-      if (addressBelongsToCurrentProvisioningDevice(addr)) continue;
-      if (getSettingsChipIdForAddress(addr) == 0 && hasUnassignedProvisioningDevices()) {
-        continue;
-      }
+      if (!runtime_utils::isProvisioningConfiguredAddressReserved(
+              settings_->known_peer_chip_ids[i], discoveredChipIds, discoveredChipCount)) continue;
       used[addr] = true;
+      configuredReservationMask |= static_cast<uint16_t>(1U << (addr - kProvAddressMin));
     }
   }
-  for (size_t i = 0; i < peer_manager_.count(); ++i) {
-    const PeerRuntime *peer = peer_manager_.findByIndex(i);
-    if (!peer || !peer->in_use) continue;
-    if (peer->address >= kProvAddressMin && peer->address <= kProvAddressMax) {
-      if (addressBelongsToCurrentProvisioningDevice(peer->address)) continue;
-      used[peer->address] = true;
+  if (configuredReservationMask != prov_.configured_reservation_mask) {
+    prov_.configured_reservation_mask = configuredReservationMask;
+    char addresses[40]{};
+    size_t offset = 0;
+    for (uint8_t addr = kProvAddressMin; addr <= kProvAddressMax; ++addr) {
+      if ((configuredReservationMask & static_cast<uint16_t>(1U << (addr - kProvAddressMin))) == 0) continue;
+      const int written = snprintf(addresses + offset, sizeof(addresses) - offset,
+                                   offset == 0 ? "%u" : ",%u", static_cast<unsigned>(addr));
+      if (written < 0 || static_cast<size_t>(written) >= sizeof(addresses) - offset) break;
+      offset += static_cast<size_t>(written);
     }
+    addProvLog("Reserved configured addresses: %s", offset > 0 ? addresses : "none");
   }
   for (size_t i = 0; i < kMaxPeers; ++i) {
     const ProvisionedAddressEntry &e = provisioned_addrs_[i];
@@ -2312,7 +2315,9 @@ bool NodeStateMachine::confirmProvisioningByFleetResponse(const ProtocolMessage 
     if (prov_.current_index == i) {
       prov_.current_index++;
     }
-    recomputeProvisioningConflictsAndAssignments();
+    addProvLog("Verify RX (late poll): chip=0x%08lx assigned=%u",
+               static_cast<unsigned long>(d.chip_id),
+               static_cast<unsigned>(d.assigned_address));
     lrslog::event("prov_verify_late", msg.rssi, static_cast<uint32_t>(d.chip_id & 0xFFFFU), msg.src);
     return true;
   }
@@ -4295,7 +4300,6 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
       if (d->first_seen_ms == 0) d->first_seen_ms = now;
       d->last_seen_ms = now;
       if (d->state == ProvisioningDeviceState::Failed) d->state = ProvisioningDeviceState::Discovered;
-      recomputeProvisioningConflictsAndAssignments();
       addProvLog("Announce RX: chip=0x%08lx address=%u", static_cast<unsigned long>(chipId), d->current_address);
       lrslog::event("prov_announce_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), d->current_address);
       return true;
@@ -4329,7 +4333,6 @@ bool NodeStateMachine::handleProvisioningFrame(const ProtocolMessage &msg) {
           prov_devices_[prov_.current_index].chip_id == chipId) {
         prov_.current_index++;
       }
-      recomputeProvisioningConflictsAndAssignments();
       addProvLog("Verify RX: chip=0x%08lx assigned=%u", static_cast<unsigned long>(chipId), payload[7]);
       lrslog::event("prov_verify_rx", msg.rssi, static_cast<uint32_t>(chipId & 0xFFFFU), payload[7]);
       return true;

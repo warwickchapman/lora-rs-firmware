@@ -6442,11 +6442,12 @@ const provisionSessionSummaryComputed = computed<ProvisionSessionSummary | null>
 
 const provisionDiscoveredDeviceRowComputed = computed<ProvisionDiscoveredDeviceRow[]>(() => {
   const devices = pairStatus.value?.devices || [];
+  const discoveryActive = pairStatus.value?.session?.state === 'discovering';
   return devices.map(device => ({
     chip_id_hex: device.chip_id_hex,
     rssi: device.rssi,
     current_address: device.current_address > 0 && device.current_address < 255 ? device.current_address : '-',
-    assigned_address: device.assigned_address || '-',
+    assigned_address: device.assigned_address || (discoveryActive ? 'Pending' : '-'),
     firmware: compactFirmwareVersion(device.fw_major, device.fw_minor, device.fw_patch, device.fw_build),
     isConflict: !!device.address_conflict,
     state: device.state,
