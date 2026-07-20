@@ -21,6 +21,9 @@ export interface UseMqttAdminOptions {
   invokeMqttPublish?: (topic: string, payload: string) => Promise<void>;
 }
 
+// PubSubClient's 1024-byte receive buffer also holds the MQTT topic/header.
+const MAX_MQTT_ADMIN_COMMAND_BYTES = 900;
+
 export function useMqttAdmin(options: UseMqttAdminOptions) {
   const pendingMqttRequests = new Map<string, PendingMqttRequest>();
   const mqttGatewaySessions = new Map<string, MqttGatewaySession>();
@@ -53,6 +56,10 @@ export function useMqttAdmin(options: UseMqttAdminOptions) {
       cmd,
       ...payload
     };
+    const serializedPayload = JSON.stringify(requestPayload);
+    if (new TextEncoder().encode(serializedPayload).length > MAX_MQTT_ADMIN_COMMAND_BYTES) {
+      throw new Error('MQTT admin command is too large.');
+    }
 
     return new Promise<T>(async (resolve, reject) => {
       const timer = setTimeout(() => {
@@ -64,11 +71,11 @@ export function useMqttAdmin(options: UseMqttAdminOptions) {
 
       try {
         if (options.invokeMqttPublish) {
-          await options.invokeMqttPublish(topic, JSON.stringify(requestPayload));
+          await options.invokeMqttPublish(topic, serializedPayload);
         } else {
           await invoke('publish_mqtt_command', {
             topic,
-            payload: JSON.stringify(requestPayload)
+            payload: serializedPayload
           });
         }
       } catch (e) {

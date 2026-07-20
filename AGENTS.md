@@ -42,6 +42,17 @@ serialization work.
 - Prefer stale-but-clear UI state over firmware load that competes with relay/input control or LoRa scheduler timing.
 - If a future plan adds whole-fleet telemetry, broad debug fields, or always-on observability traffic, reject it unless it proves why the incremental design cannot work.
 
+## MQTT Settings Patch Rule
+
+MQTT Settings is a partial-update protocol, never a whole-config transport.
+
+- Read the retained `config/#` snapshot first and treat it as the save baseline.
+- Compute a field-level diff in Flasher. Do not resend unchanged fields just because the UI form has them.
+- Keep each authenticated `set_config` command within a conservative budget below the ESP8266 MQTT packet ceiling. Split a large diff into sequential bounded patches.
+- Send ordinary settings first. Put WiFi, MQTT connection/topic-root, and reboot-triggering changes in one final patch because applying any of them can end the current admin transport.
+- Blank secret inputs mean preserve the device value and must be omitted. Typed replacement secrets are sent only through the authenticated admin command path and are never retained.
+- Do not replace this with a full settings JSON payload. It wastes ESP8266 heap/flash work, can exceed the broker packet budget, and makes a small operator change able to fail or disrupt unrelated settings.
+
 ## Plan Review Discipline
 
 When reviewing an implementation plan against a defined boundary or constraint:

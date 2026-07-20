@@ -78,6 +78,17 @@ describe('useMqttAdmin', () => {
     expect(admin.pendingMqttRequests.has(sentReqId)).toBe(false);
   });
 
+  it('rejects an oversized MQTT command before publishing', async () => {
+    const admin = createAdmin();
+    const sess = admin.getOrCreateMqttSession('123456');
+    sess.sessionId = 42;
+
+    await expect(admin.sendMqttAdminCommand('123456', 'set_config', {
+      config: { value: 'x'.repeat(1000) }
+    })).rejects.toThrow('MQTT admin command is too large');
+    expect(publishCalls).toHaveLength(0);
+  });
+
   it('expired/invalid session refreshes and retries once', async () => {
     let mockPublishCalls: any[] = [];
     const admin = useMqttAdmin({

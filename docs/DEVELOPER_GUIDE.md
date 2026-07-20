@@ -136,7 +136,7 @@ To prevent heap exhaustion and fragmentation on the ESP8266:
 1. **No Long-Lived Dynamic `String` Objects**: Long-lived runtime state (e.g. `NodeStateMachine`, `MqttBridge`, `SensorManager`) must not store dynamic C++ `String` fields. Instead, use the fixed-size buffer helper `FixedSettingString`.
 2. **Stack-Allocated Topic Buffers**: Do not use class-level or global `String` or static array buffers for MQTT topics. Construct topics dynamically on the stack using `snprintf` or local arrays.
 3. **1024-Byte MQTT Ceiling**: The PubSubClient network buffer is budgeted at **1024 bytes**. Inbound and outbound MQTT packets must fit entirely within this budget.
-4. **Compact Operational Configurations**: Over MQTT, `get_config` and `set_config` only support a subset of operational settings (excluding keys, secrets, and large tables) to maintain a small payload profile. Full config changes remain serial-only.
+4. **MQTT Settings Are Bounded Patches, Never Full Documents**: Retained `config/#` topics provide the non-secret Settings read snapshot. Flasher diffs the edited form against that snapshot and sends only changed fields in authenticated `set_config` patches. A patch is budgeted conservatively below the 1024-byte packet ceiling; large edits are split into ordered patches. WiFi, MQTT connection/topic-root, and reboot-triggering changes are sent together last because they can end the current MQTT admin connection. Blank secrets are omitted to preserve their device values; typed replacements use the authenticated command path and are never retained. Do not add a full-settings MQTT payload as a convenience path.
 
 ## 8. Packet Format
 Current payload is 12 encrypted bytes with relay/input/flags/temp/sensor/time fields.

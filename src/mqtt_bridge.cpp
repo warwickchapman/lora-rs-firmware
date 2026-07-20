@@ -278,11 +278,8 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
   const bool root_changed = (cached_mqtt_topic_root_ != cfg.mqtt_topic_root);
   const bool client_enabled_changed = (runtime_.mqtt_client_enabled != cfg.mqtt_client_enabled);
   const bool control_enabled_changed = (runtime_.mqtt_control_enabled != cfg.mqtt_control_enabled);
-  const bool polling_changed = (runtime_.tx_mqtt_remote_polling_enabled != cfg.tx_mqtt_remote_polling_enabled);
-
   const bool mqtt_connection_settings_changed = host_changed || port_changed || user_changed || pass_changed ||
-                                                root_changed || client_enabled_changed || control_enabled_changed ||
-                                                polling_changed;
+                                                root_changed || client_enabled_changed || control_enabled_changed;
 
   settings_ = &cfg;
   refreshRuntimeCfg(cfg);

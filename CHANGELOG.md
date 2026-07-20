@@ -4,9 +4,14 @@
 
 ### Firmware Changes
 - Enforced gateway-only MQTT clients: remotes no longer connect to brokers or retain an MQTT-control configuration. All remote MQTT control and telemetry is mediated by the paired gateway over LoRa.
+- EasyPair now collects the full discovery set before allocating addresses. New devices are assigned and provisioned in ascending chip-ID order, while known chips retain their saved address.
+- EasyPair allocation ignores transient peer-cache rows; only configured targets and the current session reserve addresses. Late-poll verification and configured reservations are now visible in the provisioning log.
+- Saving the gateway's MQTT remote-refresh preference no longer disconnects its MQTT client.
 
 ### Flasher Features
 - Reorganised Settings into General, Control, and MQTT responsibilities. Gateway operators now choose one relay-control source, MQTT or gateway input; MQTT remote refresh settings are available on the MQTT tab.
+- Discovered EasyPair devices show `Pending` until discovery completes and the gateway has allocated addresses.
+- Settings saves over MQTT now send only changed fields and split large changes into bounded, ordered commands so they fit the ESP8266 MQTT receive limit.
 
 ## [0.10.2] - 2026-07-19
 

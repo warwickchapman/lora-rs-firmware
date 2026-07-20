@@ -3,6 +3,7 @@ import { ref, Ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useMqttAdmin } from '../composables/useMqttAdmin';
+import { buildChangedSettingsConfigPatch, buildSettingsConfigPatch, splitMqttSettingsConfigPatches } from '../composables/settingsConfigPatch';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
@@ -4307,60 +4308,17 @@ async function fetchSerialDeviceSettings() {
 function serialConfigPatch(): Record<string, any> {
   const cfg = serialAdminConfig.value;
   if (!cfg) return {};
-  const patch: Record<string, any> = {
-    mode: cfg.mode === 'standalone' ? 'standalone' : 'paired',
-    role_tx: !!cfg.role_tx,
-    local_address: Number(cfg.local_address || 1),
-    ...(cfg.role_tx ? {} : { controller_address: Number(cfg.controller_address || 254) }),
-    allowed_controller_addresses: cfg.allowed_controller_addresses || [Number(cfg.controller_address || 254)],
-    known_peer_addresses: cfg.known_peer_addresses || [],
-    lora_tx_power: Number(cfg.lora_tx_power || 17),
-    lora_spreading_factor: Number(cfg.lora_spreading_factor || 7),
-    lora_bandwidth_hz: Number(cfg.lora_bandwidth_hz || 125000),
-    lora_coding_rate: Number(cfg.lora_coding_rate || 5),
-    heartbeat_ms: Number(cfg.heartbeat_ms || 60000),
-    heartbeat_enabled: cfg.heartbeat_enabled !== false,
-    ack_timeout_ms: Number(cfg.ack_timeout_ms || 3000),
-    mqtt_remote_retry_timeout_ms: Number(cfg.mqtt_remote_retry_timeout_ms || 180000),
-    tx_mqtt_remote_polling_enabled: !!cfg.tx_mqtt_remote_polling_enabled,
-    tx_mqtt_remote_default_poll_interval_ms: Number(cfg.tx_mqtt_remote_default_poll_interval_ms || 300000),
-    input_control_paired_lora_enabled: !!cfg.input_control_paired_lora_enabled,
-    tx_command_retry_timeout_ms: Number(cfg.tx_command_retry_timeout_ms || 180000),
-    rx_failsafe_mode: cfg.rx_failsafe_mode || 'hold_last',
-    rx_failsafe_timeout_ms: Number(cfg.rx_failsafe_timeout_ms || 180000),
-    wifi_sta_ssid: cfg.wifi_sta_ssid || '',
-    lan_hostname: cfg.lan_hostname || '',
-    ap_always_on: !!cfg.ap_always_on,
-    wifi_tx_power_dbm: Number(cfg.wifi_tx_power_dbm ?? 20.5),
-    wifi_sleep_enabled: !!cfg.wifi_sleep_enabled,
-    wifi_static_ip_enabled: !!cfg.wifi_static_ip_enabled,
-    wifi_static_ip: cfg.wifi_static_ip || '',
-    wifi_static_gateway: cfg.wifi_static_gateway || '',
-    wifi_static_subnet: cfg.wifi_static_subnet || '',
-    wifi_channel_override: Number(cfg.wifi_channel_override || 0),
-    wifi_ap_fallback_policy: cfg.wifi_ap_fallback_policy || 'fallback_on_disconnect',
-    wifi_admin_enabled: !!cfg.wifi_admin_enabled,
-    mqtt_client_enabled: !!cfg.mqtt_client_enabled,
-    mqtt_control_enabled: !!cfg.mqtt_control_enabled,
-    mqtt_controller_addresses: cfg.mqtt_controller_addresses || '',
-    mqtt_host: cfg.mqtt_host || '',
-    mqtt_port: Number(cfg.mqtt_port || 1883),
-    mqtt_user: cfg.mqtt_user || '',
-    mqtt_topic_root: cfg.mqtt_topic_root || 'lora',
-    sensor_temp_enabled: !!cfg.sensor_temp_enabled,
-    sensor_temp_pin: Number(cfg.sensor_temp_pin || 0),
-    sensor_temp_interval_s: Number(cfg.sensor_temp_interval_s || 10),
-    sensor_tank_enabled: !!cfg.sensor_tank_enabled,
-    sensor_tank_range_mm: Number(cfg.sensor_tank_range_mm || 5000),
-    sensor_tank_vref_mv: Number(cfg.sensor_tank_vref_mv || 3553),
-    sensor_tank_sense_ohms: Number(cfg.sensor_tank_sense_ohms || 120),
-    sensor_tank_interval_s: Number(cfg.sensor_tank_interval_s || 5)
-  };
-  if (cfg.wifi_sta_password) patch.wifi_sta_password = cfg.wifi_sta_password;
-  if (cfg.mqtt_password) patch.mqtt_password = cfg.mqtt_password;
-  if (cfg.fleet_passphrase) patch.fleet_passphrase = cfg.fleet_passphrase;
-  if (cfg.admin_password) patch.admin_password = cfg.admin_password;
-  return patch;
+  if (settingsTransport.value !== 'mqtt') return buildSettingsConfigPatch(cfg);
+
+  const deviceConfig = mqttConfigBuffers.value[canonicalChipId(selectedPort.value)];
+  if (!deviceConfig?.complete) {
+    throw new Error('Retained MQTT settings are not ready. Fetch settings and try again.');
+  }
+  const baseline = normalizeSerialAdminConfig(
+    deviceConfig.buffer as Partial<SerialAdminConfig>,
+    serialDeviceState(selectedPort.value)?.status || null
+  );
+  return buildChangedSettingsConfigPatch(cfg, baseline);
 }
 
 async function saveSerialAdminConfig() {
@@ -4394,10 +4352,28 @@ async function saveSerialAdminConfig() {
   isSerialAdminSaving.value = true;
   pushSerialLog(settingsTransport.value === 'mqtt' ? 'Saving remote configuration...' : 'Saving local device configuration...');
   try {
-    const out = await sendEasyPairCommandOnPort<any>(port, 'set_config', {
-      admin_password: password,
-      config: serialConfigPatch()
-    }, 12000, { label: 'Save settings' });
+    const configPatch = serialConfigPatch();
+    if (settingsTransport.value === 'mqtt' && Object.keys(configPatch).length === 0) {
+      notify('No settings changes to save');
+      return;
+    }
+    const configPatches = settingsTransport.value === 'mqtt'
+      ? splitMqttSettingsConfigPatches(configPatch)
+      : [configPatch];
+    let out: any = null;
+    for (let index = 0; index < configPatches.length; index++) {
+      if (configPatches.length > 1) {
+        pushSerialLog(`Saving remote settings ${index + 1} of ${configPatches.length}...`);
+      }
+      out = await sendEasyPairCommandOnPort<any>(port, 'set_config', {
+        admin_password: password,
+        config: configPatches[index]
+      }, 12000, { label: 'Save settings' });
+      if (settingsTransport.value === 'mqtt') {
+        const deviceConfig = mqttConfigBuffers.value[canonicalChipId(port)];
+        if (deviceConfig?.complete) Object.assign(deviceConfig.buffer, configPatches[index]);
+      }
+    }
     const rebooting = !!(out.rebooting || out.ota_auth_changed);
     const effects = [
       out.network_restarted ? 'networking restarted' : '',
