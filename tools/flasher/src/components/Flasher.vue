@@ -3349,7 +3349,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       loraInventoryScan.value = inventory.scan || null;
       maintDeferredReason.value = inventory.maint_deferred_reason || null;
       mergeLoraInventorySeedRows(inventory.devices || []);
-      const hydrateAddress = fleetTransport.value === 'serial' ? nextFleetHydrateAddress(inventoryAddresses) : null;
+      const hydrateAddress = nextFleetHydrateAddress(inventoryAddresses);
       if (hydrateAddress !== null) {
         await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'fleet');
       }
