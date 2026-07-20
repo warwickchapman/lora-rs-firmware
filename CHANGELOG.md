@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Firmware Changes
+- Enforced gateway-only MQTT clients: remotes no longer connect to brokers or retain an MQTT-control configuration. All remote MQTT control and telemetry is mediated by the paired gateway over LoRa.
+
+### Flasher Features
+- Reorganised Settings into General, Control, and MQTT responsibilities. Gateway operators now choose one relay-control source, MQTT or gateway input; MQTT remote refresh settings are available on the MQTT tab.
+
 ## [0.10.2] - 2026-07-19
 
 ### Firmware Fixes

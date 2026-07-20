@@ -72,7 +72,7 @@ type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 const sessionConnectionState = defineModel<'active' | 'partial' | 'offline'>('sessionConnectionState', { default: 'offline' });
 
-type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
+type SettingsTab = 'general' | 'control' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed' | 'unknown';
 
 interface ConfirmDialogState {
@@ -1597,13 +1597,16 @@ const settingsEmptyMessage = computed(() => {
     return 'Select a USB device, then read identity or fetch settings.';
   }
   if (settingsTab.value === 'general') {
-    return 'Fetch settings to edit role, addresses, timing, and failsafe values. Refresh status for live firmware health.';
+    return 'Fetch settings to edit role, addresses, and fleet identity. Refresh status for live firmware health.';
+  }
+  if (settingsTab.value === 'control') {
+    return 'Fetch settings to choose MQTT or gateway-input control and configure the selected control path.';
   }
   if (settingsTab.value === 'network') {
     return 'Fetch settings to edit WiFi, hostname, Soft AP, and static IP values.';
   }
   if (settingsTab.value === 'mqtt') {
-    return 'Fetch settings to edit MQTT broker, topic, control, and controller values.';
+    return 'Fetch settings to edit the gateway MQTT broker and optional remote-state refresh.';
   }
   if (settingsTab.value === 'sensors') {
     return 'Fetch settings to edit DS18B20 sensor enablement.';

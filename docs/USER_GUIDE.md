@@ -46,9 +46,10 @@ Recommended defaults:
 ## Settings
 Use `Settings` in Flasher with a USB-connected device.
 
-- `General`: role/address and LoRa timing/fail-safe controls.
+- `General`: role, addresses, and fleet identity.
+- `Control`: choose the gateway's single relay-control source: MQTT or gateway dry-contact input. Remote devices expose only their controller-loss failsafe here.
 - `Network`: WiFi SSID/password, hostname, TX power, static IP, fallback AP policy, and optional listen-only power save.
-- `MQTT`: broker, topic root, MQTT client/control, controller addresses.
+- `MQTT`: gateway broker connection, topic root, credentials, and optional low-priority remote-state refresh.
 - `Sensors`: DS18B20 reporting and 4-20 mA tank level enablement.
 - `System`: save config, reboot, guarded factory reset.
 
@@ -87,10 +88,13 @@ Transport communication across Fleet, Monitor, and Settings is unified under the
 > **MQTT Explorer Troubleshooting**:
 > If you are using MQTT Explorer to connect to the local `rumqttd` broker, do not subscribe to wildcard topic patterns containing `$SYS` (e.g., remove `$SYS/#` from the default subscription list). Instead, subscribe explicitly to the root topic, e.g., `lora/#`.
 
-Configure MQTT parameters under settings:
-- Enable MQTT client.
+Configure MQTT parameters on a gateway under Settings:
+- Select **MQTT** on the Control tab. This enables the MQTT client and MQTT relay control, and disables gateway-input control.
+- Select **Gateway input** on the Control tab to disable MQTT relay control while leaving the MQTT client available for retained status telemetry.
 - Set broker host, port, topic root, and credentials as needed.
-- Enable MQTT control only when the broker and ACLs are trusted for control traffic.
+- Optionally enable Remote refresh and choose its interval when confirmed remote relay/input state is needed without an explicit control command. This polling is low priority and does not compete with relay control.
+
+Only gateways run MQTT clients. Remote nodes report and receive control through their paired gateway over LoRa.
 
 Discovery topic:
 - `<root>/discovery/lrs-<chipid>`

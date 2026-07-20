@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-export type SettingsTab = 'general' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
+export type SettingsTab = 'general' | 'control' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 export type RemoteSubTab = 'serial' | 'mqtt' | 'lora';
 
 export interface SettingsForm {
@@ -297,14 +297,6 @@ const configWifiStaticSubnet = computed({
   get: () => config.value?.wifi_static_subnet ?? '',
   set: (val) => { if (config.value) config.value = { ...config.value, wifi_static_subnet: val }; }
 });
-const configMqttControlEnabled = computed({
-  get: () => config.value?.mqtt_control_enabled ?? false,
-  set: (val) => { if (config.value) config.value = { ...config.value, mqtt_control_enabled: val }; }
-});
-const configMqttControllerAddresses = computed({
-  get: () => config.value?.mqtt_controller_addresses ?? '',
-  set: (val) => { if (config.value) config.value = { ...config.value, mqtt_controller_addresses: val }; }
-});
 const configMqttHost = computed({
   get: () => config.value?.mqtt_host ?? '',
   set: (val) => { if (config.value) config.value = { ...config.value, mqtt_host: val }; }
@@ -337,13 +329,39 @@ const configSensorTankEnabled = computed({
   get: () => config.value?.sensor_tank_enabled ?? false,
   set: (val) => { if (config.value) config.value = { ...config.value, sensor_tank_enabled: val }; }
 });
-const configInputControlPairedLoraEnabled = computed({
-  get: () => config.value?.input_control_paired_lora_enabled ?? false,
-  set: (val) => { if (config.value) config.value = { ...config.value, input_control_paired_lora_enabled: val }; }
+const configGatewayControlMode = computed<'mqtt' | 'input' | null>({
+  get: () => {
+    if (!config.value) return null;
+    if (config.value.input_control_paired_lora_enabled) return 'input';
+    if (config.value.mqtt_control_enabled) return 'mqtt';
+    return null;
+  },
+  set: (mode) => {
+    if (!config.value) return;
+    if (mode === 'mqtt') {
+      config.value = {
+        ...config.value,
+        mqtt_client_enabled: true,
+        mqtt_control_enabled: true,
+        input_control_paired_lora_enabled: false
+      };
+      return;
+    }
+    config.value = {
+      ...config.value,
+      mqtt_control_enabled: false,
+      input_control_paired_lora_enabled: true
+    };
+  }
+});
+const configMqttRemotePollingEnabled = computed({
+  get: () => config.value?.tx_mqtt_remote_polling_enabled ?? false,
+  set: (val) => { if (config.value) config.value = { ...config.value, tx_mqtt_remote_polling_enabled: val }; }
 });
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'general', label: 'General' },
+  { key: 'control', label: 'Control' },
   { key: 'network', label: 'Network' },
   { key: 'mqtt', label: 'MQTT' },
   { key: 'sensors', label: 'Sensors' },
@@ -595,30 +613,63 @@ function handleManualMqttGatewayInput(val: string) {
                 ✓ Currently configured on device {{ secretState.isMqttFleetPassphraseDefault ? '(using default passphrase)' : '' }}
               </span>
             </div>
-            <label class="self-center text-right font-semibold text-slate-300">Heartbeat sec</label>
-            <div class="flex items-center gap-2">
-              <input :value="Math.round((config.heartbeat_ms || 60000) / 1000)" @input="config.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9 flex-1" :disabled="!config.heartbeat_enabled" />
-              <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap">
-                <input v-model="configHeartbeatEnabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
-                Enabled
-              </label>
-            </div>
-            <label class="self-center text-right font-semibold text-slate-300">Retry sec</label>
-            <input :value="Math.round((config.tx_command_retry_timeout_ms || 180000) / 1000)" @input="config.tx_command_retry_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
-            <label class="self-center text-right font-semibold text-slate-300">Remote failsafe</label>
-            <select v-model="configRxFailsafeMode" class="glass-input h-9 appearance-none">
-              <option value="hold_last">Hold last</option>
-              <option value="force_off">Force off</option>
-              <option value="force_on">Force on</option>
-            </select>
-            <label class="self-center text-right font-semibold text-slate-300">Failsafe sec</label>
-            <input :value="Math.round((config.rx_failsafe_timeout_ms || 180000) / 1000)" @input="config.rx_failsafe_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" />
-            <label class="self-center text-right font-semibold text-slate-300">Input control</label>
-            <label class="flex items-center gap-2 text-slate-300" title="When enabled, closing the gateway's input terminals will command paired remotes to close their relays">
-              <input v-model="configInputControlPairedLoraEnabled" type="checkbox" />
-              Enabled via gateway input
-            </label>
           </div>
+        </div>
+
+        <div v-if="computedSettingsTab === 'control'" class="flex flex-col gap-3 text-xs">
+          <template v-if="config">
+            <div v-if="config.role_tx" class="flex flex-col gap-4">
+              <fieldset class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
+                <legend class="self-center text-right font-semibold text-slate-300">Control source</legend>
+                <div class="flex h-9 items-center gap-5">
+                  <label class="flex cursor-pointer items-center gap-2 text-slate-200" title="Accept relay commands from MQTT and forward them to paired remotes.">
+                    <input v-model="configGatewayControlMode" type="radio" name="gateway-control-source" value="mqtt" class="accent-cyan-500" />
+                    MQTT
+                  </label>
+                  <label class="flex cursor-pointer items-center gap-2 text-slate-200" title="Use the gateway dry-contact input to control paired remote relays.">
+                    <input v-model="configGatewayControlMode" type="radio" name="gateway-control-source" value="input" class="accent-cyan-500" />
+                    Gateway input
+                  </label>
+                </div>
+              </fieldset>
+
+              <div v-if="configGatewayControlMode === null" class="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
+                Select MQTT or Gateway input, then save the configuration. This gateway has no active relay-control source yet.
+              </div>
+
+              <div v-if="configGatewayControlMode === 'mqtt'" class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-slate-300">
+                MQTT commands control the gateway and paired remotes. Broker connection and remote-state refresh are configured on the MQTT tab.
+              </div>
+
+              <div v-else-if="configGatewayControlMode === 'input'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded border border-slate-800 bg-slate-950/20 p-3">
+                <div class="col-span-2 font-semibold text-slate-100">Input control</div>
+                <label class="self-center text-right font-semibold text-slate-300">Control remotes</label>
+                <div class="text-slate-300">The gateway dry-contact input controls paired remote relays.</div>
+                <label class="self-center text-right font-semibold text-slate-300">Input sync sec</label>
+                <div class="flex items-center gap-2">
+                  <input :value="Math.round((config.heartbeat_ms || 60000) / 1000)" @input="config.heartbeat_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9 flex-1" :disabled="!config.heartbeat_enabled" title="How often the gateway repeats its current input command to paired remotes." />
+                  <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none whitespace-nowrap" title="Enable periodic input synchronisation.">
+                    <input v-model="configHeartbeatEnabled" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0" />
+                    Enabled
+                  </label>
+                </div>
+                <label class="self-center text-right font-semibold text-slate-300">Retry window sec</label>
+                <input :value="Math.round((config.tx_command_retry_timeout_ms || 180000) / 1000)" @input="config.tx_command_retry_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" title="How long the gateway retries an unconfirmed input-control command." />
+              </div>
+            </div>
+
+            <div v-else class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded border border-slate-800 bg-slate-950/20 p-3">
+              <div class="col-span-2 font-semibold text-slate-100">Remote failsafe</div>
+              <label class="self-center text-right font-semibold text-slate-300">Action</label>
+              <select v-model="configRxFailsafeMode" class="glass-input h-9 appearance-none" title="What this remote does after its controller has been silent for the failsafe timeout.">
+                <option value="hold_last">Hold last</option>
+                <option value="force_off">Force off</option>
+                <option value="force_on">Force on</option>
+              </select>
+              <label class="self-center text-right font-semibold text-slate-300">Timeout sec</label>
+              <input :value="Math.round((config.rx_failsafe_timeout_ms || 180000) / 1000)" @input="config.rx_failsafe_timeout_ms = Number(($event.target as HTMLInputElement).value || 180) * 1000" type="number" min="5" max="3600" class="glass-input h-9" title="How long this remote waits for its controller before applying its failsafe action." />
+            </div>
+          </template>
         </div>
 
         <div v-if="computedSettingsTab === 'network'" class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
@@ -693,7 +744,7 @@ function handleManualMqttGatewayInput(val: string) {
 
         <div v-if="computedSettingsTab === 'mqtt'" class="flex flex-col gap-3 text-xs">
           <template v-if="config">
-            <!-- If it's a remote device -->
+            <!-- Remote devices never connect directly to an MQTT broker. -->
             <div v-if="!config.role_tx" class="flex flex-col gap-3">
               <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
                 <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
@@ -712,34 +763,12 @@ function handleManualMqttGatewayInput(val: string) {
                 </p>
               </div>
 
-              <!-- Configuration for Remote devices -->
-              <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2 mt-2 pt-3 border-t border-slate-800">
-                <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
-                <div class="flex flex-col gap-1">
-                  <label class="flex items-center gap-2 text-slate-300">
-                    <input v-model="configMqttControlEnabled" type="checkbox" />
-                    Accept gateway MQTT commands
-                  </label>
-                  <div class="text-[10px] text-slate-500 leading-normal">
-                    Must be enabled for this remote to execute relay commands forwarded by the gateway over LoRa.
-                  </div>
-                </div>
-
-                <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
-                <div class="flex flex-col gap-1">
-                  <input v-model="configMqttControllerAddresses" class="glass-input h-9" placeholder="1" />
-                  <div class="text-[10px] text-slate-500 leading-normal">
-                    Comma-separated list of Gateway local addresses (typically <code>1</code>) authorized to command this remote over LoRa.
-                  </div>
-                </div>
-              </div>
             </div>
 
             <!-- If it's a gateway device -->
             <div v-else class="flex flex-col gap-3">
-              <!-- Warning banner for input control override conflict -->
-              <div v-if="config.input_control_paired_lora_enabled" class="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 select-text mb-2">
-                ⚠️ <strong>MQTT Control Blocked:</strong> "Input control via gateway input" is enabled on the General tab. Physical input-control overrides and blocks local and remote MQTT relay command processing to prevent conflicting state loops. To use MQTT relay commands, disable "Input control" on the General tab first.
+              <div v-if="configGatewayControlMode === 'input'" class="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-amber-200 select-text mb-2">
+                MQTT relay commands are disabled because Gateway input is the selected control source. Change the selection on the Control tab to use MQTT commands.
               </div>
 
               <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-3 gap-y-2">
@@ -751,22 +780,21 @@ function handleManualMqttGatewayInput(val: string) {
                 <input v-model="configMqttTopicRoot" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">MQTT client</label>
                 <label class="flex items-center gap-2 text-slate-300">
-                  <input v-model="configMqttClientEnabled" type="checkbox" />
+                  <input v-model="configMqttClientEnabled" type="checkbox" :disabled="configGatewayControlMode === 'mqtt'" />
                   Enabled
                 </label>
                 <label class="self-center text-right font-semibold text-slate-300">MQTT control</label>
+                <div class="text-slate-300">{{ configGatewayControlMode === 'mqtt' ? 'Enabled by the Control tab' : 'Disabled by the Control tab' }}</div>
+                <label class="self-center text-right font-semibold text-slate-300">Remote refresh</label>
                 <div class="flex flex-col gap-1">
                   <label class="flex items-center gap-2 text-slate-300">
-                    <input v-model="configMqttControlEnabled" type="checkbox" />
-                    Enabled
+                    <input v-model="configMqttRemotePollingEnabled" type="checkbox" />
+                    Refresh remote operational state
                   </label>
-                  <div v-if="config.input_control_paired_lora_enabled" class="text-[10px] text-amber-400 font-semibold leading-normal">
-                    ⚠️ Currently overridden and blocked by Input Control (General tab).
-                  </div>
-                  <div v-else class="text-[10px] text-slate-500 leading-normal">
-                    Enables processing incoming MQTT commands on local and remote topics.
-                  </div>
+                  <div class="text-[10px] text-slate-500 leading-normal">Low-priority LoRa polling for confirmed remote relay and input state. Paused while control is active.</div>
                 </div>
+                <label class="self-center text-right font-semibold text-slate-300">Refresh sec</label>
+                <input :value="Math.round((config.tx_mqtt_remote_default_poll_interval_ms || 60000) / 1000)" @input="config.tx_mqtt_remote_default_poll_interval_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9" :disabled="!configMqttRemotePollingEnabled" title="Default interval between low-priority remote state refreshes." />
                 <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
                 <input v-model="configMqttUser" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
@@ -778,13 +806,6 @@ function handleManualMqttGatewayInput(val: string) {
                     </button>
                   </div>
                   <span v-if="secretState.isMqttPasswordConfigured" class="text-[10px] text-cyan-400 font-medium">✓ Currently configured on device</span>
-                </div>
-                <label class="self-center text-right font-semibold text-slate-300">Controllers</label>
-                <div class="flex flex-col gap-1">
-                  <input v-model="configMqttControllerAddresses" class="glass-input h-9" placeholder="1,84" />
-                  <div class="text-[10px] text-slate-500 leading-normal">
-                    Allowed controller addresses (comma-separated). Remote devices will only execute LoRa-forwarded MQTT commands if this Gateway's address (typically <code>1</code>) is in their Controllers list.
-                  </div>
                 </div>
               </div>
             </div>

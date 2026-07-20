@@ -165,7 +165,7 @@ dry-contact state in firmware or Fleet cache.
 
 ## MQTT-to-LoRa Semantics
 - MQTT `relay` topic is **read-only status** — retained, published by the gateway. Do not publish to it.
-- MQTT `set/relay` topic accepts `1` or `0` payloads to set the local relay state immediately. Publish **non-retained**.
+- A gateway MQTT `set/relay` topic accepts `1` or `0` payloads to set the local relay state immediately. Publish **non-retained**. Remote devices never connect directly to MQTT; their commands are forwarded by the gateway over LoRa.
 - MQTT `control` topic has been removed.
 - TX publishes local `addr` topic value as `0xNN`.
 - TX publishes peer node trees under canonical MQTT path `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/...` (where `NN` is the two-digit decimal address, and `peer_chipid` is the hexadecimal chip ID of the remote peer).

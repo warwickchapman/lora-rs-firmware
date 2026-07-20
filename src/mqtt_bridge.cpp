@@ -308,7 +308,15 @@ void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {
 }
 
 void MqttBridge::tick(bool wifiConnected) {
-  if (!settings_ || !runtime_.mqtt_client_enabled || settings_->mqtt_host.length() == 0) {
+  // MQTT is a gateway service. Remotes report through their paired gateway over LoRa.
+  if (!settings_ || !runtime_.role_tx) {
+    if (mqtt_client_.connected()) mqtt_client_.disconnect();
+    status_publish_in_progress_ = false;
+    status_publish_locals_done_ = false;
+    status_publish_peer_index_ = 0;
+    return;
+  }
+  if (!runtime_.mqtt_client_enabled || settings_->mqtt_host.length() == 0) {
     status_publish_in_progress_ = false;
     status_publish_locals_done_ = false;
     status_publish_peer_index_ = 0;

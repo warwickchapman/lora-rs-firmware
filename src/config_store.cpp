@@ -374,6 +374,12 @@ bool ConfigStore::begin() {
     ensureProvisionedDefaults();
     return save();
   }
+  if (!cfg_.role_tx && (cfg_.mqtt_client_enabled || cfg_.mqtt_control_enabled)) {
+    LRS_LOGW(FS, "event=config_invalid path=%s reason=remote_mqtt_disabled action=disable_remote_mqtt", kConfigPath);
+    cfg_.mqtt_client_enabled = false;
+    cfg_.mqtt_control_enabled = false;
+    return save();
+  }
   if (cfg_.input_control_paired_lora_enabled && (cfg_.mode != kModePaired || !cfg_.role_tx)) {
     LRS_LOGW(FS, "event=config_invalid path=%s reason=paired_input_requires_paired_tx action=disable_input_control", kConfigPath);
     cfg_.input_control_paired_lora_enabled = false;

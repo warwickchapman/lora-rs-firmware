@@ -374,6 +374,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   if (cfg.role_tx && cfg.mqtt_control_enabled && !cfg.mqtt_client_enabled) {
     return fail("mqtt_control_requires_client");
   }
+  if (!cfg.role_tx) {
+    cfg.mqtt_client_enabled = false;
+    cfg.mqtt_control_enabled = false;
+  }
   if (cfg.mqtt_port == 0)
     cfg.mqtt_port = 1883;
   if (cfg.mqtt_topic_root.length() == 0)

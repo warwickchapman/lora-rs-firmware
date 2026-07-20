@@ -240,7 +240,7 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 ### Subscribed command topics
 
-- `set/relay`: sets local relay directly on that node (payload `1` or `0`, **non-retained**).
+- Gateway `set/relay`: sets the gateway relay directly (payload `1` or `0`, **non-retained**).
 - TX can be commanded to control peers via:
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/set/relay` (payload `1` or `0`)
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/poll_interval_s`
@@ -250,8 +250,9 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 > **Peer status topics are read-only.** Publishing to `relay`, `input`, or other status leaves has no effect on the gateway or remote devices.
 
-TX input-to-LoRa control gate:
-- Setting: `input_control_paired_lora_enabled` (LoRa tab).
+Gateway control source:
+- Set on the Flasher **Control** tab using either **MQTT** or **Gateway input**.
+- Only TX/gateway devices run MQTT clients. A remote never connects directly to a broker: MQTT-originated remote control is received by the gateway and forwarded over LoRa.
 - **Mutual Exclusivity:** Gateway physical input-control and MQTT relay control are mutually exclusive.
   - `true`: Physical gateway input transitions and state synchronization own relay authority. The gateway ignores and blocks incoming MQTT relay commands (both local `set/relay` and remote peer `set/relay` topics, logging `relay_local_mqtt_blocked` and `mqtt_remote_relay_blocked` respectively) to prevent conflicting state loops. Remote nodes in slave mode will also block LoRa-bridged MQTT command execution (logging `rx_slave_block_mqtt`).
   - `false`: Gateway input state is reported but does not trigger LoRa relay commands. Local and remote MQTT relay controls are active and processed.

@@ -102,13 +102,13 @@ Performance protections:
 - MQTT socket timeout is short (1 s) to reduce impact if broker is unavailable.
 
 TX LoRa input-control gate:
-- LoRa tab includes `Input drives LoRa relay control` when role is TX.
+- Control tab lets a gateway choose MQTT relay control or `Gateway input` relay control.
 - Enabled: TX input and heartbeat drive paired RX relay state.
 - Disabled: TX input is still available for telemetry/status, but TX does not send input-driven LoRa relay changes.
 
 MQTT deployment note:
 - If the gate is enabled, do not use MQTT `control` for RX units paired to the gateway input-control path, because LoRa input control can overwrite MQTT state.
-- If you must MQTT-control the TX-paired address, disable `Input drives LoRa relay control`.
+- Select MQTT on the Control tab before using MQTT relay commands for paired remotes.
 
 ## 10. Sensor Support (Current)
 Implemented now:
