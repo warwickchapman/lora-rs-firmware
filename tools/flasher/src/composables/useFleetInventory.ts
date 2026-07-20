@@ -161,10 +161,13 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     }
 
     let lastTelemetryTimestamp = history.lastTelemetryTimestamp;
-    if (row.age_ms !== undefined && row.age_ms !== null && row.age_ms < 600000) {
+    if ((lastTelemetryTimestamp === undefined || lastTelemetryTimestamp === null) &&
+        row.age_ms !== undefined && row.age_ms !== null && row.age_ms < 600000) {
       lastTelemetryTimestamp = now - row.age_ms;
     }
-    const ageMs = (row.age_ms !== undefined && row.age_ms !== null) ? row.age_ms : (lastTelemetryTimestamp ? (now - lastTelemetryTimestamp) : undefined);
+    const ageMs = (lastTelemetryTimestamp !== undefined && lastTelemetryTimestamp !== null)
+      ? now - lastTelemetryTimestamp
+      : row.age_ms;
 
     const powerSaveListenOnly = (row.power_save_listen_only !== undefined && row.power_save_listen_only !== null) ? row.power_save_listen_only : history.power_save_listen_only;
     const powerSaveActive = (row.power_save_active !== undefined && row.power_save_active !== null) ? row.power_save_active : history.power_save_active;
@@ -553,10 +556,8 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
               return row;
             });
           }
-          if (!payload.retain) {
-            if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
-            fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
-          }
+          if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
+          fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
           return;
         }
         if (!cacheEntry.sensors[sKey]) {
@@ -571,7 +572,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
 
-    if (recognizedUpdate && !payload.retain) {
+    if (recognizedUpdate) {
       if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
       fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
     }
