@@ -5973,7 +5973,10 @@ onMounted(async () => {
 
   unlistenMqttTelemetry = await listen<any>('mqtt-telemetry-update', (event) => {
     const payload = event.payload;
-    if (fleetTransport.value === 'mqtt' && payload.gateway_id === selectedMqttGatewayChipId.value) {
+    if (
+      fleetTransport.value === 'mqtt' &&
+      normalizeChipId(payload.gateway_id) === normalizeChipId(selectedMqttGatewayChipId.value)
+    ) {
       applyTelemetryUpdate(payload);
       if (gatewaySelectedPort.value === monitorSelectedPort.value) {
         monitorFleetRows.value = mergeMonitorRows(loraInventory.value);

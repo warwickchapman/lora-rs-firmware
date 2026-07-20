@@ -2370,6 +2370,17 @@ bool NodeStateMachine::localOperationalSensorsEnabled() const {
   return false;
 }
 
+void NodeStateMachine::queueOperationalSensorPages(uint8_t dstAddress) {
+  if (!localOperationalSensorsEnabled() || dstAddress == 0 || dstAddress == 255) return;
+
+  // Reuse the bounded sensor-page transport used by explicit Fleet refreshes.
+  // PollResponse remains the compact source of relay/input truth.
+  if (maintenance_sensor_pending_) return;
+  maintenance_sensor_pending_ = true;
+  maintenance_sensor_dst_ = dstAddress;
+  maintenance_sensor_page_index_ = 0;
+}
+
 bool NodeStateMachine::sendInputStatePush(uint32_t now) {
   if (runtime_.controller_address == 0 || runtime_.controller_address == 255) return false;
   if (!radioTxBudgetAvailable()) return false;
@@ -2414,6 +2425,7 @@ bool NodeStateMachine::sendPollResponse(uint8_t dstAddress, int downlinkRssi) {
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
+  queueOperationalSensorPages(dstAddress);
   lrslog::event("rx_poll_response_tx", downlinkRssi, last_counter_, relay_state_);
   return true;
 }

@@ -118,6 +118,7 @@ Otherwise packet is dropped and logged.
   - Page `1` (Debug) carries diagnostic statistics (heap free, max block, fragmentation, and uptime minutes).
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - RX nodes with enabled sensors may send unsolicited `MaintenanceStatus` sensor pages to the gateway at a conservative 60-second operational cadence. This is sensor-state reporting, not a gateway-owned diagnostic sweep.
+- When gateway MQTT remote polling is enabled, each remote `PollResponse` carries current relay/input state. A remote with enabled temperature or tank sensors then queues the same bounded sensor pages used by an explicit Fleet peer refresh. This does not add diagnostics, heap data, or a second sensor protocol.
 - TX/gateway firmware must not run perpetual maintenance sweeps for Fleet/Monitor freshness. Fleet scans, diagnostics, and inventory enrichment are explicit low-priority observability work and must yield to relay/input control.
 - TX applies relay state from a command ACK immediately. A missed command ACK invalidates that relay state until a later ACK, normal status, or identity page confirms it; Fleet must show this as unknown rather than `Off`.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.

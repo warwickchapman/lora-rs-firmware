@@ -50,8 +50,9 @@ export function useFleetInventoryPolling(options: UseFleetInventoryPollingOption
   }
 
   function startFleetCachePolling() {
-    if (options.fleetTransport.value === 'mqtt') return;
-    const targetPort = options.gatewaySelectedPort.value;
+    const targetPort = options.fleetTransport.value === 'mqtt'
+      ? options.selectedMqttGatewayChipId.value
+      : options.gatewaySelectedPort.value;
     if (options.activeMode.value !== 'network' || !targetPort || options.isLoraInventoryScanning.value) return;
     if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
     stopLoraInventoryPolling(false, false);

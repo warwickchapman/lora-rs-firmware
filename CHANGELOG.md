@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Firmware Changes
+- MQTT remote polling now follows a compact relay/input response with the existing bounded sensor pages when a remote has enabled temperature or tank sensors. Headless MQTT therefore refreshes operational sensor readings without a second sensor packet format or diagnostics traffic.
 - Enforced gateway-only MQTT clients: remotes no longer connect to brokers or retain an MQTT-control configuration. All remote MQTT control and telemetry is mediated by the paired gateway over LoRa.
 - EasyPair now collects the full discovery set before allocating addresses. New devices are assigned and provisioned in ascending chip-ID order, while known chips retain their saved address.
 - EasyPair allocation ignores transient peer-cache rows; only configured targets and the current session reserve addresses. Late-poll verification and configured reservations are now visible in the provisioning log.

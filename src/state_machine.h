@@ -557,6 +557,7 @@ class NodeStateMachine {
   void tickPendingOtaPullControl(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
   bool localOperationalSensorsEnabled() const;
+  void queueOperationalSensorPages(uint8_t dstAddress);
   bool sendInputStatePush(uint32_t now);
   bool sendSensorStatePush(uint32_t now);
   bool sendPollResponse(uint8_t dstAddress, int downlinkRssi);

@@ -69,13 +69,18 @@ describe('useFleetInventoryPolling', () => {
     expect(polling.networkInventoryPollMode.value).toBeNull();
   });
 
-  it('cache polling does not run when transport is MQTT', () => {
+  it('cache polling refreshes the selected MQTT gateway', async () => {
     fleetTransport.value = 'mqtt';
     const polling = createPolling();
     polling.startFleetCachePolling();
 
-    expect(polling.networkInventoryPollTimer.value).toBeNull();
-    expect(polling.networkInventoryPollMode.value).toBeNull();
+    expect(polling.networkInventoryPollTimer.value).not.toBeNull();
+    expect(polling.networkInventoryPollMode.value).toBe('cache');
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(refreshCalls).toEqual([
+      { port: 'abc12345', background: true, source: 'fleet' }
+    ]);
   });
 
   it('cache polling does not start if mode is not network or no gateway is selected', () => {
