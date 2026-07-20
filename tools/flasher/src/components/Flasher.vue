@@ -278,6 +278,7 @@ interface SerialDeviceState {
   adminSupported: boolean;
   status: SerialAdminStatus | null;
   config: SerialAdminConfig | null;
+  mqttConfigBaseline: SerialAdminConfig | null;
   adminPassword: string;
   wifiNetworks: WifiNetwork[];
   wifiScanned: boolean;
@@ -1021,6 +1022,7 @@ function newSerialDeviceState(): SerialDeviceState {
     adminSupported: false,
     status: null,
     config: null,
+    mqttConfigBaseline: null,
     adminPassword: '',
     wifiNetworks: [],
     wifiScanned: false,
@@ -1036,6 +1038,19 @@ function newSerialDeviceState(): SerialDeviceState {
     isResetting: false,
     resetStatus: 'Idle'
   };
+}
+
+function cloneSerialAdminConfig(config: SerialAdminConfig): SerialAdminConfig {
+  return {
+    ...config,
+    allowed_controller_addresses: config.allowed_controller_addresses ? [...config.allowed_controller_addresses] : undefined,
+    known_peer_addresses: config.known_peer_addresses ? [...config.known_peer_addresses] : undefined
+  };
+}
+
+function setLoadedSerialAdminConfig(state: SerialDeviceState, config: SerialAdminConfig, fromMqtt: boolean) {
+  state.config = config;
+  state.mqttConfigBaseline = fromMqtt ? cloneSerialAdminConfig(config) : null;
 }
 
 function serialDeviceState(port = selectedPort.value): SerialDeviceState | null {
@@ -4261,7 +4276,11 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
         pushSerialLog('Waiting for retained MQTT config topics to load...');
         const bufState = await ensureMqttConfigLoaded(targetPort);
         if (state) {
-          state.config = normalizeSerialAdminConfig(bufState.buffer as Partial<SerialAdminConfig>, state.status);
+          setLoadedSerialAdminConfig(
+            state,
+            normalizeSerialAdminConfig(bufState.buffer as Partial<SerialAdminConfig>, state.status),
+            true
+          );
         }
       }
       pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
@@ -4276,7 +4295,7 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
       include_secrets: true
     }, 15000, { label: 'Fetch settings' });
     if (state) {
-      state.config = normalizeSerialAdminConfig(out.config, state.status);
+      setLoadedSerialAdminConfig(state, normalizeSerialAdminConfig(out.config, state.status), false);
     }
     pushSerialLog('Configuration loaded. Password fields stay blank unless you enter new values.');
   } catch (e) {
@@ -4310,15 +4329,11 @@ function serialConfigPatch(): Record<string, any> {
   if (!cfg) return {};
   if (settingsTransport.value !== 'mqtt') return buildSettingsConfigPatch(cfg);
 
-  const deviceConfig = mqttConfigBuffers.value[canonicalChipId(selectedPort.value)];
-  if (!deviceConfig?.complete) {
+  const state = serialDeviceState(selectedPort.value);
+  if (!state?.mqttConfigBaseline) {
     throw new Error('Retained MQTT settings are not ready. Fetch settings and try again.');
   }
-  const baseline = normalizeSerialAdminConfig(
-    deviceConfig.buffer as Partial<SerialAdminConfig>,
-    serialDeviceState(selectedPort.value)?.status || null
-  );
-  return buildChangedSettingsConfigPatch(cfg, baseline);
+  return buildChangedSettingsConfigPatch(cfg, state.mqttConfigBaseline);
 }
 
 async function saveSerialAdminConfig() {
@@ -4373,6 +4388,10 @@ async function saveSerialAdminConfig() {
         const deviceConfig = mqttConfigBuffers.value[canonicalChipId(port)];
         if (deviceConfig?.complete) Object.assign(deviceConfig.buffer, configPatches[index]);
       }
+    }
+    if (settingsTransport.value === 'mqtt') {
+      const state = serialDeviceState(port);
+      if (state?.config) state.mqttConfigBaseline = cloneSerialAdminConfig(state.config);
     }
     const rebooting = !!(out.rebooting || out.ota_auth_changed);
     const effects = [
@@ -4525,7 +4544,11 @@ async function loadEasyPairGateway(isAuto = false) {
         const configState = await ensureMqttConfigLoaded(chipId);
         const latestState = serialDeviceState(chipId);
         if (latestState) {
-          latestState.config = normalizeSerialAdminConfig(configState.buffer as Partial<SerialAdminConfig>, latestState.status);
+          setLoadedSerialAdminConfig(
+            latestState,
+            normalizeSerialAdminConfig(configState.buffer as Partial<SerialAdminConfig>, latestState.status),
+            true
+          );
         }
         const status = latestState?.status;
         const cfg = latestState?.config;
@@ -4820,7 +4843,7 @@ async function loadGatewayTargetAddresses(password: string): Promise<number[]> {
     if (!config) {
       const configState = await ensureMqttConfigLoaded(key);
       config = normalizeSerialAdminConfig(configState.buffer as Partial<SerialAdminConfig>, state?.status || null);
-      if (state) state.config = config;
+      if (state) setLoadedSerialAdminConfig(state, config, true);
     }
     return uniqueSortedAddresses(normalizeAddressArray(config?.known_peer_addresses));
   }
@@ -5971,7 +5994,11 @@ onMounted(async () => {
     handleConfigUpdate(chip_id, field, value, (completedChipId, configBuffer) => {
       const state = serialDeviceState(completedChipId);
       if (state) {
-        state.config = normalizeSerialAdminConfig(configBuffer as SerialAdminConfig, state.status);
+        setLoadedSerialAdminConfig(
+          state,
+          normalizeSerialAdminConfig(configBuffer as SerialAdminConfig, state.status),
+          true
+        );
       }
     });
   });

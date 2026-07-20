@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { buildChangedSettingsConfigPatch, buildSettingsConfigPatch, splitMqttSettingsConfigPatches } from './settingsConfigPatch';
 
 describe('settingsConfigPatch', () => {
+  it('produces no MQTT patch when the editor still matches its loaded snapshot', () => {
+    const loaded = {
+      mode: 'paired',
+      role_tx: true,
+      local_address: 254,
+      tx_mqtt_remote_polling_enabled: true
+    };
+
+    expect(buildChangedSettingsConfigPatch(loaded, loaded)).toEqual({});
+  });
+
   it('sends only the changed MQTT setting', () => {
     const baseline = {
       mode: 'paired',
