@@ -13,8 +13,6 @@ extern const uint32_t kMinHeartbeatMs;
 extern const uint32_t kMaxHeartbeatMs;
 extern const uint32_t kMinAckTimeoutMs;
 extern const uint32_t kMaxAckTimeoutMs;
-extern const uint32_t kMinMqttRemoteRetryTimeoutMs;
-extern const uint32_t kMaxMqttRemoteRetryTimeoutMs;
 extern const uint32_t kMinTxPollDefaultIntervalMs;
 extern const uint32_t kMaxTxPollDefaultIntervalMs;
 extern const size_t kMinDeploymentKeyLen;

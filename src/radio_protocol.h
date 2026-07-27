@@ -27,6 +27,10 @@ enum class MessageType : uint8_t {
 };
 
 
+constexpr uint8_t kFlagTimeAuthoritative = 0x01;
+constexpr uint8_t kFlagPairedInputSlave = 0x02;
+constexpr uint8_t kFlagMqttTransaction = 0x04;
+
 struct ProtocolMessage {
   MessageType type;
   uint8_t relay_state;
@@ -36,7 +40,7 @@ struct ProtocolMessage {
   uint8_t sensor_mask;
   uint8_t sensor_digital0;
   uint16_t sensor_analog0;
-  uint32_t unix_time_s;
+  uint32_t unix_time_s; // For Mqtt/MqttStatus with kFlagMqttTransaction set, b8..b11 represents mqtt_command_id
   uint8_t raw_payload[12]{};
   uint32_t counter;
   uint32_t boot_nonce = 0;

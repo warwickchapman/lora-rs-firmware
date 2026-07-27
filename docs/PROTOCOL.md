@@ -39,9 +39,11 @@ Packed fields:
 - `b0`: `relay_state`
 - `b1`: `input_state`
 - `b2`: `flags`
-  - bit0: `time_authoritative` (`1` when sender time is NTP-authoritative)
+  - bit0 (0x01): `time_authoritative`
+  - bit1 (0x02): `paired_input_slave`
+  - bit2 (0x04): `mqtt_transaction` (when set on `Mqtt` or `MqttStatus`, `b8..b11` carries `mqtt_command_id`)
 - `b3`: `temp_code`
-  - `0xFF` = not present
+  - `0xFF`: not present
   - otherwise signed int8 Celsius (`int8_t`)
 - `b4`: `sensor_mask`
   - bit0 (0x01): digital input/status present in `b5`
@@ -53,7 +55,7 @@ Packed fields:
 - `b5`: `sensor_digital0` (multiplexed: carries digital input if bit0 set, or WiFi state if bit3 set)
 - `b6`: `sensor_analog0_lsb` (multiplexed: carries downlink RSSI if bit2 set)
 - `b7`: `sensor_analog0_msb` (reserved)
-- `b8..b11`: `unix_time_s` (little-endian UTC epoch seconds; `0` means unavailable)
+- `b8..b11`: `unix_time_s` (little-endian UTC epoch seconds; `0` means unavailable; for `Mqtt` and `MqttStatus` with `flags.bit2` set, carries 32-bit `mqtt_command_id`)
 
 Notes:
 - `sensor_analog0` is reserved for future analog sensor transport.
@@ -178,8 +180,8 @@ dry-contact state in firmware or Fleet cache.
   - `wifi` (`1`/`0`, `on`/`off`, `enable`/`disable`, or JSON `{ "enabled": true|false }`)
   - `forget` (payload `1` removes node from TX runtime and clears retained peer subtree topics)
 - TX rejects destination `0x00` and `0xFF`.
-- On accepted peer `set/relay`, TX sends LoRa message type `Mqtt` to `addr`.
-- RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
+- On accepted peer `set/relay`, TX sends LoRa message type `Mqtt` with flag bit 0x04 (`kFlagMqttTransaction`) and a 32-bit `mqtt_command_id`.
+- RX replies with `MqttStatus` echoing flag 0x04 and `mqtt_command_id`. Gateway retries execute on a fixed firmware schedule (0, +500 ms, +1.5 s, +3.0 s, deadline at 5.5 s), emitting outcome events (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
 - TX publishes peer Wi-Fi enablement under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/wifi` as retained `1`, `0`, or empty when unknown. Confirmed connection state is a separate retained `wifi_connected` leaf: `1`, `0`, or empty when the maintenance identity page has not established it. `ip` is published only when known and usable; an empty `ip` is not an offline indication.
 - Paired TX input-control waits for slotted ACKs after the broadcast
@@ -191,7 +193,6 @@ dry-contact state in firmware or Fleet cache.
 ## Timing Defaults
 - `heartbeat_ms`: 60000 (60 s)
 - `ack_timeout_ms`: 5000 (5 s)
-- `mqtt_remote_retry_timeout_ms`: 300000 (300 s)
 - `tx_command_retry_timeout_ms`: 180000 (180 s)
 - `rx_failsafe_mode`: `hold_last` (default), options: `force_off`, `force_on`
 - `rx_failsafe_timeout_ms`: 180000 (180 s)

@@ -48,7 +48,6 @@ export function buildSettingsConfigPatch(cfg: Config | null | undefined): Config
     heartbeat_ms: Number(cfg.heartbeat_ms || 60000),
     heartbeat_enabled: cfg.heartbeat_enabled !== false,
     ack_timeout_ms: Number(cfg.ack_timeout_ms || 3000),
-    mqtt_remote_retry_timeout_ms: Number(cfg.mqtt_remote_retry_timeout_ms || 180000),
     tx_mqtt_remote_polling_enabled: !!cfg.tx_mqtt_remote_polling_enabled,
     tx_mqtt_remote_default_poll_interval_ms: Number(cfg.tx_mqtt_remote_default_poll_interval_ms || 300000),
     input_control_paired_lora_enabled: !!cfg.input_control_paired_lora_enabled,

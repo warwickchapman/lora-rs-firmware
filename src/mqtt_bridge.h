@@ -18,6 +18,7 @@ class MqttBridge {
   void disconnect();
   static bool clearPeerRetained(uint8_t addr, uint32_t chipId = 0);
   static void clearAllConfiguredPeerRetainedTopics(const Settings &cfg);
+  static bool publishCmdResult(uint8_t addr, uint32_t commandId, const char *outcome);
 
  private:
   WiFiClient wifi_client_;

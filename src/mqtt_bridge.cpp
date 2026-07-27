@@ -28,6 +28,12 @@ const char *peerAckStateText(PeerAckState s) {
       return "ok";
     case PeerAckState::Timeout:
       return "timeout";
+    case PeerAckState::Mismatch:
+      return "mismatch";
+    case PeerAckState::Untracked:
+      return "untracked";
+    case PeerAckState::Superseded:
+      return "superseded";
     default:
       return "unknown";
   }
@@ -268,6 +274,21 @@ bool MqttBridge::clearPeerRetained(uint8_t addr, uint32_t chipId) {
     return instance_->clearPeerRetainedTopics(addr, chipId);
   }
   return false;
+}
+
+bool MqttBridge::publishCmdResult(uint8_t addr, uint32_t commandId, const char *outcome) {
+  if (instance_ == nullptr || !instance_->mqtt_client_.connected()) return false;
+  char topic[kMqttTopicBufBytes];
+  if (!instance_->buildLocalTopic(topic, sizeof(topic), "event/cmd_result")) return false;
+
+  StaticJsonDocument<128> doc;
+  doc["address"] = addr;
+  doc["command_id"] = commandId;
+  doc["outcome"] = outcome;
+
+  char buf[128];
+  size_t len = serializeJson(doc, buf, sizeof(buf));
+  return instance_->mqtt_client_.publish(topic, reinterpret_cast<const uint8_t *>(buf), len, false);
 }
 
 void MqttBridge::applyConfig(const Settings &cfg, const String &chipIdHex) {

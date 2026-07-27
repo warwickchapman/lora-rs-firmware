@@ -14,6 +14,9 @@ enum class PeerAckState : uint8_t {
   Pending,
   Ok,
   Timeout,
+  Mismatch,
+  Untracked,
+  Superseded,
 };
 
 struct PeerStatusSnapshot {
@@ -102,6 +105,7 @@ struct PeerRuntime {
   uint32_t wifi_pending_deadline_ms = 0;
   bool pending = false;
   uint8_t pending_relay = 0;
+  uint32_t pending_command_id = 0;
   uint8_t retry_step = 0;
   uint32_t next_retry_ms = 0;
   uint32_t pending_counter = 0;

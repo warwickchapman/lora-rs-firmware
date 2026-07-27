@@ -259,7 +259,6 @@ class NodeStateMachine {
     uint32_t heartbeat_ms = 60000;
     bool heartbeat_enabled = true;
     uint32_t ack_timeout_ms = 5000;
-    uint32_t mqtt_remote_retry_timeout_ms = 5000;
     bool tx_mqtt_remote_polling_enabled = false;
     uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
     bool input_control_paired_lora_enabled = false;
@@ -553,7 +552,7 @@ class NodeStateMachine {
   void tickPeerMqttCommands(uint32_t now);
   void tickPeerPolling(uint32_t now);
   void tickMaintenanceRequestQueue(uint32_t now);
-  bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter = nullptr);
+  bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t commandId, uint32_t *sentCounter = nullptr);
   void tickPendingOtaPullControl(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
   bool localOperationalSensorsEnabled() const;

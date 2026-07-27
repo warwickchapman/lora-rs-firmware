@@ -48,7 +48,6 @@ constexpr const char *kAllowedFields[] = {
     "heartbeat_ms",
     "heartbeat_enabled",
     "ack_timeout_ms",
-    "mqtt_remote_retry_timeout_ms",
     "tx_mqtt_remote_polling_enabled",
     "tx_mqtt_remote_default_poll_interval_ms",
     "input_control_paired_lora_enabled",
@@ -314,7 +313,6 @@ bool ConfigStore::begin() {
   cfg_.heartbeat_ms = root["heartbeat_ms"] | 60000;
   cfg_.heartbeat_enabled = root["heartbeat_enabled"] | true;
   cfg_.ack_timeout_ms = root["ack_timeout_ms"] | 5000;
-  cfg_.mqtt_remote_retry_timeout_ms = root["mqtt_remote_retry_timeout_ms"] | 300000;
   cfg_.tx_mqtt_remote_polling_enabled = root["tx_mqtt_remote_polling_enabled"] | false;
   cfg_.tx_mqtt_remote_default_poll_interval_ms = root["tx_mqtt_remote_default_poll_interval_ms"] | 60000;
   cfg_.input_control_paired_lora_enabled = root["input_control_paired_lora_enabled"] | false;
@@ -461,7 +459,6 @@ bool ConfigStore::save() {
   doc["heartbeat_ms"] = cfg_.heartbeat_ms;
   doc["heartbeat_enabled"] = cfg_.heartbeat_enabled;
   doc["ack_timeout_ms"] = cfg_.ack_timeout_ms;
-  doc["mqtt_remote_retry_timeout_ms"] = cfg_.mqtt_remote_retry_timeout_ms;
   doc["tx_mqtt_remote_polling_enabled"] = cfg_.tx_mqtt_remote_polling_enabled;
   doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg_.tx_mqtt_remote_default_poll_interval_ms;
   doc["input_control_paired_lora_enabled"] = cfg_.input_control_paired_lora_enabled;
@@ -735,7 +732,6 @@ void ConfigStore::setDefaults() {
   cfg_.heartbeat_ms = 60000;
   cfg_.heartbeat_enabled = true;
   cfg_.ack_timeout_ms = 5000;
-  cfg_.mqtt_remote_retry_timeout_ms = 300000;
   cfg_.tx_mqtt_remote_polling_enabled = false;
   cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
   cfg_.input_control_paired_lora_enabled = true;

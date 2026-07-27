@@ -9,6 +9,8 @@
 #include "build_info.h"
 #include "logger.h"
 #include "admin_config_utils.h"
+#include "mqtt_bridge.h"
+#include "mqtt_transaction.h"
 #include "runtime_utils.h"
 
 namespace {
@@ -25,12 +27,10 @@ constexpr uint8_t kGroupDirectRetryRounds = 2;
 constexpr uint8_t kMaintenanceIdentityRelayMarker = 0xA0;
 constexpr uint32_t kAckRetryOneShotTimeoutMs = 350;
 constexpr uint32_t kAckRetryInterNodeGapMs = 20;
-constexpr uint32_t kMqttRetryScheduleMs[] = {1000, 2000, 3000, 5000, 8000, 13000, 21000, 34000, 55000};
+constexpr uint32_t kWifiControlTimeoutMs = 300000U;
 constexpr uint32_t kDefaultRemotePollIntervalMs = 60000;
 constexpr uint32_t kMinRemotePollIntervalMs = 60000;
 constexpr uint32_t kMaxRemotePollIntervalMs = 3600000;
-constexpr uint8_t kFlagTimeAuthoritative = 0x01;
-constexpr uint8_t kFlagPairedInputSlave = 0x02;
 constexpr uint32_t kMinRetryTimeoutMs = 5000U;
 constexpr uint32_t kMaxRetryTimeoutMs = 3600000U;
 constexpr uint32_t kMinRxFailsafeTimeoutMs = 5000U;
@@ -419,7 +419,6 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
   runtime_.heartbeat_enabled = cfg.heartbeat_enabled;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
-  runtime_.mqtt_remote_retry_timeout_ms = cfg.mqtt_remote_retry_timeout_ms;
   runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
   runtime_.tx_mqtt_remote_default_poll_interval_ms = cfg.tx_mqtt_remote_default_poll_interval_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
@@ -1043,7 +1042,28 @@ void NodeStateMachine::tickTxGroupCommand(uint32_t now) {
   }
 }
 
-bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t *sentCounter) {
+namespace {
+static uint32_t g_next_mqtt_command_id = 0;
+uint32_t generateMqttCommandId() {
+  if (g_next_mqtt_command_id == 0) {
+#ifdef UNIT_TEST
+    g_next_mqtt_command_id = 1000;
+#else
+    // Collision-reduction seed across reboots (combines chip ID, cycle count, and microsecond timer)
+    uint32_t seed = static_cast<uint32_t>(ESP.getChipId()) ^ static_cast<uint32_t>(ESP.getCycleCount()) ^ static_cast<uint32_t>(micros());
+    g_next_mqtt_command_id = (seed & 0x7FFFFFFF) | 0x1000;
+#endif
+  }
+  uint32_t id = g_next_mqtt_command_id++;
+  if (id == 0) {
+    g_next_mqtt_command_id = 1;
+    id = 1;
+  }
+  return id;
+}
+} // namespace
+
+bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t commandId, uint32_t *sentCounter) {
   if (!radioTxBudgetAvailable()) return false;
   const uint8_t targetRelay = relayState ? 1 : 0;
 
@@ -1052,10 +1072,10 @@ bool NodeStateMachine::sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayStat
   const uint8_t kMqttCommandInputReserved = 0xFFU;
 
   last_counter_++;
-  const uint32_t unixTimeS = currentUnixTimeS(millis());
-  if (!radio_->send(MessageType::Mqtt, targetRelay, kMqttCommandInputReserved, txFlags(), last_counter_, runtime_.local_address, dstAddress,
+  const uint8_t flagsWithTx = txFlags() | kFlagMqttTransaction;
+  if (!radio_->send(MessageType::Mqtt, targetRelay, kMqttCommandInputReserved, flagsWithTx, last_counter_, runtime_.local_address, dstAddress,
                     localTempCodeToSend(),
-                    0, 0xFF, 0xFFFF, unixTimeS)) {
+                    0, 0xFF, 0xFFFF, commandId)) {
     return false;
   }
   last_tx_ms_ = millis();
@@ -1080,20 +1100,49 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
   }
   if (dstAddress == 0 || dstAddress == 255) return false;
 
-  uint32_t sentCounter = 0;
-  if (!sendPeerMqttCommand(dstAddress, relayState, &sentCounter)) {
+  // 1. Acquire tracking slot BEFORE sending any LoRa airtime.
+  PeerRuntime *node = findOrCreatePeer(dstAddress);
+  const bool isPending = (node != nullptr) ? node->pending : false;
+  const uint32_t pendingId = (node != nullptr) ? node->pending_command_id : 0;
+  auto plan = mqtt_transaction_helpers::planOutboundTransaction(node != nullptr, isPending, pendingId);
+
+  if (!plan.may_transmit) {
+    const uint32_t untrackedCmdId = generateMqttCommandId();
+    lrslog::event("mqtt_remote_untracked", 0, untrackedCmdId, dstAddress);
+    MqttBridge::publishCmdResult(
+        dstAddress, untrackedCmdId,
+        mqtt_transaction_helpers::outcomeToString(plan.immediate_outcome));
     return false;
   }
 
-  // Decouple send-path from managed peer slots: if cache is full, keep command send
-  // working as transient fire-and-forget (no retry/poll/ack tracking for this peer).
-  PeerRuntime *node = findOrCreatePeer(dstAddress);
-  if (node == nullptr) {
-    lrslog::event("mqtt_remote_transient", 0, sentCounter, relayState ? 1 : 0);
-    return true;
+  // 2. Generate fresh non-zero command ID for this transaction.
+  const uint32_t commandId = generateMqttCommandId();
+
+  // 3. Attempt to send LoRa frame FIRST.
+  uint32_t sentCounter = 0;
+  if (!sendPeerMqttCommand(dstAddress, relayState, commandId, &sentCounter)) {
+    return false; // Leave old pending transaction untouched if radio send fails!
+  }
+
+  // 4. ONLY after send succeeds: if node had a previous pending transaction, mark it Superseded.
+  if (plan.replaces_pending) {
+    lrslog::event("mqtt_remote_superseded", 0, plan.superseded_command_id, node->pending_relay);
+    MqttBridge::publishCmdResult(
+        dstAddress, plan.superseded_command_id,
+        mqtt_transaction_helpers::outcomeToString(mqtt_transaction_helpers::MqttTransactionOutcome::Superseded));
   }
 
   const uint32_t now = millis();
+  auto commit = mqtt_transaction_helpers::commitOutboundTransaction(commandId, relayState, now);
+  node->pending = commit.is_pending;
+  node->pending_command_id = commit.pending_command_id;
+  node->pending_relay = commit.pending_relay;
+  node->retry_step = commit.retry_step;
+  node->next_retry_ms = commit.next_retry_ms;
+  node->pending_counter = sentCounter;
+  node->pending_deadline_ms = commit.pending_deadline_ms;
+  node->ack_state = commit.ack_state;
+
   if (runtime_.tx_mqtt_remote_polling_enabled && node->poll_interval_ms == 0) {
     uint32_t interval = runtime_.tx_mqtt_remote_default_poll_interval_ms;
     if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
@@ -1106,12 +1155,6 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
       }
     }
   }
-  node->pending = true;
-  node->pending_relay = relayState ? 1 : 0;
-  node->retry_step = 0;
-  node->next_retry_ms = now + kMqttRetryScheduleMs[0];
-  node->pending_counter = sentCounter;
-  node->pending_deadline_ms = now + runtime_.mqtt_remote_retry_timeout_ms;
   node->ack_state = PeerAckState::Pending;
   node->last_cmd_counter = sentCounter;
   return true;
@@ -1187,7 +1230,7 @@ bool NodeStateMachine::mqttSetPeerWifi(uint8_t dstAddress, bool enabled) {
   node->wifi_pending = true;
   node->wifi_pending_enabled = enabled;
   node->wifi_pending_counter = sentCounter;
-  node->wifi_pending_deadline_ms = now + runtime_.mqtt_remote_retry_timeout_ms;
+  node->wifi_pending_deadline_ms = now + kWifiControlTimeoutMs;
   node->wifi_state_known = false;
   lrslog::event(enabled ? "wifi_control_enable_tx" : "wifi_control_disable_tx", 0, sentCounter, dstAddress);
   return true;
@@ -2945,12 +2988,13 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
     PeerRuntime *node = peer_manager_.findByIndex(i);
     if (!node || !node->pending) continue;
 
-    if (static_cast<int32_t>(now - node->pending_deadline_ms) >= 0) {
+    if (mqtt_transaction_helpers::isTransactionTimedOut(now, node->pending_deadline_ms)) {
       node->pending = false;
       node->ack_state = PeerAckState::Timeout;
-      {
-        lrslog::event("mqtt_remote_ack_timeout", 0, node->pending_counter, node->pending_relay);
-      }
+      lrslog::event("mqtt_remote_ack_timeout", 0, node->pending_command_id, node->pending_relay);
+      MqttBridge::publishCmdResult(
+          node->address, node->pending_command_id,
+          mqtt_transaction_helpers::outcomeToString(mqtt_transaction_helpers::MqttTransactionOutcome::Timeout));
       continue;
     }
 
@@ -2964,15 +3008,11 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
       return;
     }
 
+    auto retry = mqtt_transaction_helpers::prepareRetryAttempt(node->pending_command_id, node->retry_step, last_counter_ + 1);
     uint32_t sentCounter = 0;
-    if (sendPeerMqttCommand(node->address, node->pending_relay, &sentCounter)) {
-      const uint8_t idx = node->retry_step < (sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0]))
-                              ? node->retry_step
-                              : (sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0])) - 1;
-      node->next_retry_ms = now + kMqttRetryScheduleMs[idx];
-      if (node->retry_step < ((sizeof(kMqttRetryScheduleMs) / sizeof(kMqttRetryScheduleMs[0])) - 1)) {
-        node->retry_step++;
-      }
+    if (sendPeerMqttCommand(node->address, node->pending_relay, retry.command_id, &sentCounter)) {
+      node->retry_step = retry.next_step;
+      node->next_retry_ms = now + retry.next_delay_ms;
       node->pending_counter = sentCounter;
       node->last_cmd_counter = sentCounter;
       node->ack_state = PeerAckState::Pending;
@@ -3358,7 +3398,7 @@ void NodeStateMachine::tickReceive() {
     return;
   }
 
-  if (msg.type == MessageType::Heartbeat || msg.type == MessageType::PollResponse || msg.type == MessageType::MqttStatus) {
+  if (msg.type == MessageType::Heartbeat || msg.type == MessageType::PollResponse) {
     updateSharedTimeFromPeer(msg.unix_time_s, (msg.flags & kFlagTimeAuthoritative) != 0U);
   }
 
@@ -3498,14 +3538,23 @@ void NodeStateMachine::tickReceive() {
         node->wifi_last_confirm_ms = millis();
       }
       if (msg.type == MessageType::MqttStatus) {
-        // Retries can overlap and responses may arrive out of order.
-        // Any valid status from this node confirms link health and should unblock polling.
-        if (node->pending) {
+        auto dec = mqtt_transaction_helpers::evaluateStatusCorrelation(
+            node->pending, node->pending_command_id, node->pending_relay,
+            msg.flags, msg.unix_time_s, msg.relay_state);
+        if (dec.settle_pending) {
           node->pending = false;
-          lrslog::event("mqtt_remote_ack_ok", msg.rssi, msg.counter, msg.relay_state);
+          if (dec.outcome == mqtt_transaction_helpers::MqttTransactionOutcome::Confirmed) {
+            node->ack_state = PeerAckState::Ok;
+          } else if (dec.outcome == mqtt_transaction_helpers::MqttTransactionOutcome::Mismatch) {
+            node->ack_state = PeerAckState::Mismatch;
+          }
+          MqttBridge::publishCmdResult(
+              msg.src, msg.unix_time_s,
+              mqtt_transaction_helpers::outcomeToString(dec.outcome));
+          lrslog::event("mqtt_remote_ack_result", msg.rssi, msg.counter, static_cast<uint8_t>(dec.outcome));
+        } else {
+          lrslog::event("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
         }
-        node->ack_state = PeerAckState::Ok;
-        lrslog::event("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
       } else {
         // Clear pending on any valid response from this node; retries can overlap counters.
         PollRuntime *poll = peer_manager_.pollStateForPeer(node);
@@ -3579,10 +3628,12 @@ void NodeStateMachine::tickReceive() {
       const uint8_t sensorMask = 0x0C;  // downlink RSSI + WiFi enabled state
       const uint16_t downlinkRssiEnc = static_cast<uint16_t>(static_cast<int16_t>(msg.rssi));
       const uint8_t wifiState = (settings_ == nullptr || settings_->wifi_admin_enabled) ? 1U : 0U;
-      const uint32_t unixTimeS = currentUnixTimeS(millis());
+      const bool isTransaction = (msg.flags & kFlagMqttTransaction) != 0;
+      const uint8_t statusFlags = txFlags() | (isTransaction ? kFlagMqttTransaction : 0U);
+      const uint32_t payloadCmdIdOrTime = isTransaction ? msg.unix_time_s : currentUnixTimeS(millis());
       last_counter_++;
-      if (radio_->send(MessageType::MqttStatus, relay_state_, input_state_, txFlags(), last_counter_, runtime_.local_address,
-                       msg.src, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, unixTimeS)) {
+      if (radio_->send(MessageType::MqttStatus, relay_state_, input_state_, statusFlags, last_counter_, runtime_.local_address,
+                       msg.src, localTempCodeToSend(), sensorMask, wifiState, downlinkRssiEnc, payloadCmdIdOrTime)) {
         last_tx_ms_ = millis();
         markRadioTxSentThisTick();
       }

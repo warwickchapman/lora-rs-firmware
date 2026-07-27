@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Firmware Changes
+- Converted MQTT remote relay control to a short, correlated 5.5-second transaction using a 32-bit `mqtt_command_id` (`b8..b11`) and `kFlagMqttTransaction` flag (0x04). Removed `mqtt_remote_retry_timeout_ms` and replaced the 5-minute background retry loop with a fixed 4-attempt control budget (`0, +500 ms, +1.5 s, +3.0 s`). Gateway emits non-retained transaction outcomes (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
 - Gateway MQTT peer telemetry now publishes explicit `wifi_connected` state. A blank IP remains unknown rather than being treated as proof that a remote is offline.
 
 ### Flasher Features

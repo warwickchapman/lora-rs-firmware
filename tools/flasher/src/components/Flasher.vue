@@ -229,7 +229,6 @@ interface SerialAdminConfig {
   heartbeat_ms?: number;
   heartbeat_enabled?: boolean;
   ack_timeout_ms?: number;
-  mqtt_remote_retry_timeout_ms?: number;
   tx_mqtt_remote_polling_enabled?: boolean;
   tx_mqtt_remote_default_poll_interval_ms?: number;
   input_control_paired_lora_enabled?: boolean;
@@ -2913,7 +2912,6 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     heartbeat_ms: numberValue(cfg.heartbeat_ms, 60000),
     heartbeat_enabled: boolValue(cfg.heartbeat_enabled, true),
     ack_timeout_ms: numberValue(cfg.ack_timeout_ms, 3000),
-    mqtt_remote_retry_timeout_ms: numberValue(cfg.mqtt_remote_retry_timeout_ms, 180000),
     tx_mqtt_remote_polling_enabled: boolValue(cfg.tx_mqtt_remote_polling_enabled, false),
     tx_mqtt_remote_default_poll_interval_ms: numberValue(cfg.tx_mqtt_remote_default_poll_interval_ms, 300000),
     input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, false),

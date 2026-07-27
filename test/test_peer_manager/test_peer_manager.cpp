@@ -3,7 +3,7 @@
 #include <string.h>
 
 void test_peer_manager_sizeof() {
-  TEST_ASSERT_EQUAL_UINT32(176, sizeof(PeerRuntime));
+  TEST_ASSERT_EQUAL_UINT32(184, sizeof(PeerRuntime));
   TEST_ASSERT_EQUAL_UINT32(24, sizeof(PollRuntime));
 }
 

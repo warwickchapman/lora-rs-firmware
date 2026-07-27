@@ -18,7 +18,6 @@ const ConfigField kConfigFields[] = {
     {"heartbeat_ms", ConfigFieldClass::RetainedConfig},
     {"heartbeat_enabled", ConfigFieldClass::RetainedConfig},
     {"ack_timeout_ms", ConfigFieldClass::RetainedConfig},
-    {"mqtt_remote_retry_timeout_ms", ConfigFieldClass::RetainedConfig},
     {"tx_mqtt_remote_polling_enabled", ConfigFieldClass::RetainedConfig},
     {"tx_mqtt_remote_default_poll_interval_ms", ConfigFieldClass::RetainedConfig},
     {"input_control_paired_lora_enabled", ConfigFieldClass::RetainedConfig},

@@ -189,8 +189,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       doc["heartbeat_enabled"],
       cfg.heartbeat_enabled);
   cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
-  cfg.mqtt_remote_retry_timeout_ms =
-      doc["mqtt_remote_retry_timeout_ms"] | cfg.mqtt_remote_retry_timeout_ms;
   cfg.tx_mqtt_remote_polling_enabled = parseBoolField(
       doc["tx_mqtt_remote_polling_enabled"],
       cfg.tx_mqtt_remote_polling_enabled);
@@ -320,10 +318,6 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.ack_timeout_ms = kMinAckTimeoutMs;
   if (cfg.ack_timeout_ms > kMaxAckTimeoutMs)
     cfg.ack_timeout_ms = kMaxAckTimeoutMs;
-  if (cfg.mqtt_remote_retry_timeout_ms < kMinMqttRemoteRetryTimeoutMs)
-    cfg.mqtt_remote_retry_timeout_ms = kMinMqttRemoteRetryTimeoutMs;
-  if (cfg.mqtt_remote_retry_timeout_ms > kMaxMqttRemoteRetryTimeoutMs)
-    cfg.mqtt_remote_retry_timeout_ms = kMaxMqttRemoteRetryTimeoutMs;
   if (cfg.tx_mqtt_remote_default_poll_interval_ms <
       kMinTxPollDefaultIntervalMs) {
     cfg.tx_mqtt_remote_default_poll_interval_ms = kMinTxPollDefaultIntervalMs;

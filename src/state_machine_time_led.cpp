@@ -8,8 +8,6 @@ constexpr uint32_t kRssiMediumIntervalMs = 3000;
 constexpr uint32_t kRssiLowIntervalMs = 1000;
 constexpr uint32_t kNoLinkFastIntervalMs = 150;
 constexpr uint32_t kMinValidUnixTimeS = 1704067200UL;  // 2024-01-01 UTC
-constexpr uint8_t kFlagTimeAuthoritative = 0x01;
-constexpr uint8_t kFlagPairedInputSlave = 0x02;
 }
 
 void NodeStateMachine::setAuthoritativeUnixTime(uint32_t unixTimeS) {

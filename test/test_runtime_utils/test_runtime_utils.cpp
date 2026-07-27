@@ -2,6 +2,7 @@
 #include <cstring>
 
 #include "config_fields.h"
+#include "mqtt_transaction.h"
 #include "runtime_utils.h"
 #include "state_machine.h"
 #include "radio_protocol.h"
@@ -955,6 +956,154 @@ void test_radio_protocol_input_field_validation_scope(void) {
   TEST_ASSERT_FALSE(radio_protocol_helpers::usesOperationalInputFields(MessageType::OtaPullControl));
 }
 
+void test_mqtt_transaction_decision_logic(void) {
+  using namespace mqtt_transaction_helpers;
+
+  // 1. Flagged MqttStatus with matching ID and matching relay -> Confirmed
+  auto d1 = evaluateStatusCorrelation(true, 1001, 1, kFlagMqttTransaction, 1001, 1);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::Confirmed), static_cast<uint8_t>(d1.outcome));
+  TEST_ASSERT_TRUE(d1.settle_pending);
+
+  // 2. Flagged MqttStatus with matching ID but wrong relay -> Mismatch (terminal)
+  auto d2 = evaluateStatusCorrelation(true, 1001, 1, kFlagMqttTransaction, 1001, 0);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::Mismatch), static_cast<uint8_t>(d2.outcome));
+  TEST_ASSERT_TRUE(d2.settle_pending);
+
+  // 3. Unflagged (legacy/timestamp) MqttStatus -> IgnoreObservabilityOnly
+  auto d3 = evaluateStatusCorrelation(true, 1001, 1, 0, 1001, 1);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::IgnoreObservabilityOnly), static_cast<uint8_t>(d3.outcome));
+  TEST_ASSERT_FALSE(d3.settle_pending);
+
+  // 4. Mismatching command_id -> IgnoreObservabilityOnly
+  auto d4 = evaluateStatusCorrelation(true, 1001, 1, kFlagMqttTransaction, 9999, 1);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::IgnoreObservabilityOnly), static_cast<uint8_t>(d4.outcome));
+  TEST_ASSERT_FALSE(d4.settle_pending);
+
+  // 5. Inactive pending -> IgnoreObservabilityOnly
+  auto d5 = evaluateStatusCorrelation(false, 1001, 1, kFlagMqttTransaction, 1001, 1);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::IgnoreObservabilityOnly), static_cast<uint8_t>(d5.outcome));
+  TEST_ASSERT_FALSE(d5.settle_pending);
+
+  // 6. Retry delay schedule (0 -> 500, 1 -> 1500, 2 -> 3000)
+  TEST_ASSERT_EQUAL(500, calculateNextRetryDelayMs(0));
+  TEST_ASSERT_EQUAL(1500, calculateNextRetryDelayMs(1));
+  TEST_ASSERT_EQUAL(3000, calculateNextRetryDelayMs(2));
+  TEST_ASSERT_EQUAL(3000, calculateNextRetryDelayMs(3));
+
+  // 7. Timeout checking
+  TEST_ASSERT_FALSE(isTransactionTimedOut(5000, 5500));
+  TEST_ASSERT_TRUE(isTransactionTimedOut(5500, 5500));
+  TEST_ASSERT_TRUE(isTransactionTimedOut(6000, 5500));
+}
+
+void test_mqtt_transaction_outcomes_and_boundaries(void) {
+  using namespace mqtt_transaction_helpers;
+
+  // 1. Test Untracked produces may_transmit == false
+  auto planUntracked = planOutboundTransaction(false, false, 0);
+  TEST_ASSERT_FALSE(planUntracked.may_transmit);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::Untracked), static_cast<uint8_t>(planUntracked.immediate_outcome));
+  TEST_ASSERT_FALSE(planUntracked.replaces_pending);
+
+  // 2. Test peer found without active pending -> may_transmit == true, replaces_pending == false
+  auto planNew = planOutboundTransaction(true, false, 0);
+  TEST_ASSERT_TRUE(planNew.may_transmit);
+  TEST_ASSERT_FALSE(planNew.replaces_pending);
+
+  // 3. Test successful replacement produces Superseded for existing pending_command_id
+  const uint32_t oldCommandId = 5555;
+  auto planReplace = planOutboundTransaction(true, true, oldCommandId);
+  TEST_ASSERT_TRUE(planReplace.may_transmit);
+  TEST_ASSERT_TRUE(planReplace.replaces_pending);
+  TEST_ASSERT_EQUAL(oldCommandId, planReplace.superseded_command_id);
+
+  // 4. Test commitOutboundTransaction and failed send behavior
+  const uint32_t nowMs = 10000;
+  uint32_t nodePendingId = oldCommandId;
+  bool sendSuccess = false; // Radio send fails
+  if (sendSuccess) {
+    if (planReplace.replaces_pending) {
+      // Superseded emitted for oldCommandId
+    }
+    auto commit = commitOutboundTransaction(9999, 1, nowMs);
+    nodePendingId = commit.pending_command_id;
+  }
+  // Because send failed, commitOutboundTransaction was NOT called, preserving old pending state
+  TEST_ASSERT_EQUAL(oldCommandId, nodePendingId);
+
+  // Test successful commit updates state fields correctly
+  auto commitSuccess = commitOutboundTransaction(9999, 1, nowMs);
+  TEST_ASSERT_TRUE(commitSuccess.is_pending);
+  TEST_ASSERT_EQUAL(9999, commitSuccess.pending_command_id);
+  TEST_ASSERT_EQUAL(1, commitSuccess.pending_relay);
+  TEST_ASSERT_EQUAL(0, commitSuccess.retry_step);
+  TEST_ASSERT_EQUAL(nowMs + 500, commitSuccess.next_retry_ms);
+  TEST_ASSERT_EQUAL(nowMs + 5500, commitSuccess.pending_deadline_ms);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(PeerAckState::Pending), static_cast<uint8_t>(commitSuccess.ack_state));
+
+  // 5. Test outgoing retry descriptor preserves logical command ID while transport counter is fresh per attempt
+  const uint32_t logicalCmdId = 77777;
+  for (uint8_t step = 0; step < 3; step++) {
+    uint32_t freshCounter = 200 + step;
+    auto retry = prepareRetryAttempt(logicalCmdId, step, freshCounter);
+    TEST_ASSERT_EQUAL(logicalCmdId, retry.command_id);
+    TEST_ASSERT_EQUAL(step, retry.current_step);
+    TEST_ASSERT_EQUAL(step + 1, retry.next_step);
+    TEST_ASSERT_EQUAL(freshCounter, retry.transport_counter);
+  }
+
+  // 6. Verify outcome string mapping for all states
+  TEST_ASSERT_EQUAL_STRING("Confirmed", outcomeToString(MqttTransactionOutcome::Confirmed));
+  TEST_ASSERT_EQUAL_STRING("Timeout", outcomeToString(MqttTransactionOutcome::Timeout));
+  TEST_ASSERT_EQUAL_STRING("Mismatch", outcomeToString(MqttTransactionOutcome::Mismatch));
+  TEST_ASSERT_EQUAL_STRING("Untracked", outcomeToString(MqttTransactionOutcome::Untracked));
+  TEST_ASSERT_EQUAL_STRING("Superseded", outcomeToString(MqttTransactionOutcome::Superseded));
+  TEST_ASSERT_EQUAL_STRING("IgnoreObservabilityOnly", outcomeToString(MqttTransactionOutcome::IgnoreObservabilityOnly));
+}
+
+void test_mqtt_transaction_exact_timing_schedule(void) {
+  using namespace mqtt_transaction_helpers;
+
+  const uint32_t commandId = 424242;
+  const uint8_t relayState = 1;
+
+  // Initial send at t = 0
+  uint32_t t = 0;
+  auto commit = commitOutboundTransaction(commandId, relayState, t);
+
+  TEST_ASSERT_EQUAL(0, t); // initial: 0
+  TEST_ASSERT_EQUAL(500, commit.next_retry_ms); // scheduled for retry 1 at 500
+
+  // Retry 1 at t = 500
+  t = commit.next_retry_ms;
+  TEST_ASSERT_EQUAL(500, t); // retry 1: 500
+  uint8_t currentStep = commit.retry_step; // 0
+  auto retry1 = prepareRetryAttempt(commandId, currentStep, 101);
+  TEST_ASSERT_EQUAL(0, retry1.current_step);
+  TEST_ASSERT_EQUAL(1, retry1.next_step);
+  uint32_t nextRetry1 = t + retry1.next_delay_ms;
+  TEST_ASSERT_EQUAL(2000, nextRetry1); // scheduled for retry 2 at 2,000
+
+  // Retry 2 at t = 2000
+  t = nextRetry1;
+  TEST_ASSERT_EQUAL(2000, t); // retry 2: 2,000
+  currentStep = retry1.next_step; // 1
+  auto retry2 = prepareRetryAttempt(commandId, currentStep, 102);
+  TEST_ASSERT_EQUAL(1, retry2.current_step);
+  TEST_ASSERT_EQUAL(2, retry2.next_step);
+  uint32_t nextRetry2 = t + retry2.next_delay_ms;
+  TEST_ASSERT_EQUAL(5000, nextRetry2); // scheduled for retry 3 at 5,000
+
+  // Retry 3 at t = 5000
+  t = nextRetry2;
+  TEST_ASSERT_EQUAL(5000, t); // retry 3: 5,000
+  TEST_ASSERT_FALSE(isTransactionTimedOut(t, commit.pending_deadline_ms)); // active at 5000
+
+  // Timeout at t = 5500
+  t = 5500;
+  TEST_ASSERT_TRUE(isTransactionTimedOut(t, commit.pending_deadline_ms)); // timeout: 5,500
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_isValidRemotePeerIdentity);
@@ -1013,6 +1162,9 @@ int main(int argc, char **argv) {
   RUN_TEST(test_radio_protocol_resolve_input_state);
   RUN_TEST(test_radio_protocol_validate_input_fields);
   RUN_TEST(test_radio_protocol_input_field_validation_scope);
+  RUN_TEST(test_mqtt_transaction_decision_logic);
+  RUN_TEST(test_mqtt_transaction_outcomes_and_boundaries);
+  RUN_TEST(test_mqtt_transaction_exact_timing_schedule);
   RUN_TEST(test_struct_sizes);
   return UNITY_END();
 }

@@ -96,7 +96,6 @@ export interface LocalSerialAdminConfig {
   heartbeat_ms?: number;
   heartbeat_enabled?: boolean;
   ack_timeout_ms?: number;
-  mqtt_remote_retry_timeout_ms?: number;
   tx_mqtt_remote_polling_enabled?: boolean;
   tx_mqtt_remote_default_poll_interval_ms?: number;
   input_control_paired_lora_enabled?: boolean;

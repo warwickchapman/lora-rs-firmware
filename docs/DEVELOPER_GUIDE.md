@@ -147,6 +147,7 @@ Furthermore, sensor-mask bit `0x01` (physical input) and bit `0x08` (WiFi-enable
 Current message types include control/status (`A/C/H/M/S/P/R`) plus provisioning/reset extensions (`W`/`X`).
 `W` (WiFi provisioning) and `X` (factory reset) reuse the same encrypted 12-byte payload slot with custom byte layouts via the radio layer raw-payload send path.
 - `Ack` frames carry acknowledged command counter in payload `b8..b11` and TX validates this before clearing pending command state.
+- **Correlated Transactional MQTT Relay Control**: MQTT `set/relay` commands are short, transactionally correlated operations. Gateway sends `Mqtt` with flag bit `0x04` (`kFlagMqttTransaction`) and a 32-bit `mqtt_command_id` in `b8..b11`. Remote responds with `MqttStatus` echoing flag `0x04` and the `mqtt_command_id`. Retries execute on a fixed firmware schedule (`0, +500 ms, +1.5 s, +3.0 s`, terminating at 5.5 s). Gateway emits non-retained result events on `<root>/event/cmd_result` carrying `{"address": X, "command_id": Y, "outcome": "Confirmed" | "Timeout" | "Mismatch" | "Untracked" | "Superseded"}`. Full peer table saturation emits `Untracked` immediately and transmits zero LoRa airtime.
 
 If payload semantics change again, add protocol-version signaling first.
 
@@ -259,11 +260,12 @@ Gateway control source:
   - `false`: Gateway input state is reported but does not trigger LoRa relay commands. Local and remote MQTT relay controls are active and processed.
 
 
-MQTT remote retry control:
-- Setting: `mqtt_remote_retry_timeout_ms` (default 300000 ms / 300 s).
-- TX retries `Mqtt` command sends with bounded Fibonacci-like backoff until timeout.
-- RX replies with `MqttStatus` (`'S'`) including applied state and telemetry.
-- TX polling uses `PollRequest` (`'P'`) / `PollResponse` (`'R'`) with the same retry-timeout window.
+MQTT remote relay control:
+- `Mqtt` commands are short, correlated transactions using `kFlagMqttTransaction` (0x04) and a 32-bit `mqtt_command_id`.
+- TX retries `Mqtt` commands on a fixed 4-attempt schedule (`0, +500 ms, +1.5 s, +3.0 s`, deadline 5.5 s).
+- RX replies with `MqttStatus` (`'S'`) echoing flag 0x04 and `mqtt_command_id`.
+- Gateway emits transaction outcomes (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
+- TX polling uses `PollRequest` (`'P'`) / `PollResponse` (`'R'`) bounded by `ack_timeout_ms` (minimum 2000 ms).
 - TX scheduled polling controls:
   - `tx_mqtt_remote_polling_enabled` (default `false`)
   - `tx_mqtt_remote_default_poll_interval_ms` (default `60000`, enforced range `60000..3600000`)
