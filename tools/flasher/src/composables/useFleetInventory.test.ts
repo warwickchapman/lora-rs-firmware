@@ -144,6 +144,22 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].input_state_known).toBe(true);
   });
 
+  it('uses explicit WiFi connection telemetry and never infers Offline from an empty IP', () => {
+    const fleet = createFleet();
+    fleet.loraInventory.value = [{ address: 1, chip_id: '00000001' }];
+
+    fleet.applyTelemetryUpdate({ address: 1, field: 'ip', value: '' });
+    expect(fleet.loraInventory.value[0].ip).toBeUndefined();
+    expect(fleet.loraInventory.value[0].wifi_connected_known).toBe(false);
+
+    fleet.applyTelemetryUpdate({ address: 1, field: 'wifi_connected', value: '0' });
+    expect(fleet.loraInventory.value[0].wifi_connected_known).toBe(true);
+    expect(fleet.loraInventory.value[0].wifi_connected).toBe(false);
+
+    fleet.applyTelemetryUpdate({ address: 1, field: 'wifi_connected', value: '' });
+    expect(fleet.loraInventory.value[0].wifi_connected_known).toBe(false);
+  });
+
   it('treats empty relay telemetry as unknown, clearing previous state, but keeps 0 as valid', () => {
     const fleet = createFleet();
     fleet.loraInventory.value = [
@@ -263,7 +279,7 @@ describe('useFleetInventory', () => {
     fleet.loraInventoryScan.value = { active: true, start_address: 1, end_address: 10, next_address: 1, sent: 0, now_ms: 0 };
     expect(fleet.loraInventoryProgressLabel.value).toBe('Scanning configured remotes and same-key candidates...');
     fleet.loraInventoryScan.value = { active: false, start_address: 1, end_address: 10, next_address: 10, sent: 8, now_ms: 0 };
-    expect(fleet.loraInventoryProgressLabel.value).toBe('Complete, 8 probes sent');
+    expect(fleet.loraInventoryProgressLabel.value).toBe('Scan finished, 8 probes sent; identity and WiFi details may still be pending');
   });
 
   it('caches MQTT telemetry when no row exists, merges it on mergeInventoryRows, clears it on clear, and ignores commands', () => {

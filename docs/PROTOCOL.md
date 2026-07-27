@@ -181,7 +181,7 @@ dry-contact state in firmware or Fleet cache.
 - On accepted peer `set/relay`, TX sends LoRa message type `Mqtt` to `addr`.
 - RX replies with `MqttStatus` (counter echoed), and TX retries on timeout using bounded backoff until `mqtt_remote_retry_timeout_ms`.
 - TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
-- TX publishes confirmed peer Wi-Fi state under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/wifi` as retained `1`, `0`, or empty when unknown.
+- TX publishes peer Wi-Fi enablement under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/wifi` as retained `1`, `0`, or empty when unknown. Confirmed connection state is a separate retained `wifi_connected` leaf: `1`, `0`, or empty when the maintenance identity page has not established it. `ip` is published only when known and usable; an empty `ip` is not an offline indication.
 - Paired TX input-control waits for slotted ACKs after the broadcast
   command, then polls missing remotes using `PollRequest` (visibility only, no late actuation) one at a time until the hard retry
   deadline (`tx_command_retry_timeout_ms`). `flags.bit2` (0x04) on `PollRequest` means `b8..b11` (unixTimeS) carries a paired group command correlation id; matching `PollResponse` echoes it and must not set `time_authoritative`.

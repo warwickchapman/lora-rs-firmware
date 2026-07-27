@@ -177,8 +177,13 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     const fwVersion = row.fw_version || history.fwVersion;
     const fwBuild = row.fw_build || history.fw_build;
 
-    const wifiConnected = ((row.wifi_connected_known ? row.wifi_connected : history.wifi_connected) ?? false);
-    const wifiConnectedKnown = row.wifi_connected_known || history.wifi_connected_known || false;
+    const hasRowWifiConnectionState = row.wifi_connected_known !== undefined;
+    const wifiConnectedKnown = hasRowWifiConnectionState
+      ? row.wifi_connected_known === true
+      : history.wifi_connected_known === true;
+    const wifiConnected = hasRowWifiConnectionState
+      ? row.wifi_connected === true
+      : history.wifi_connected === true;
     const ip = wifiConnected ? (row.ip || history.ip) : undefined;
 
     const wifiEnabled = ((row.wifi_enabled_known ? row.wifi_enabled : history.wifi_enabled) ?? false);
@@ -381,7 +386,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (scan.active) {
       return 'Scanning configured remotes and same-key candidates...';
     }
-    return `Complete, ${scan.sent || 0} probes sent`;
+    return `Scan finished, ${scan.sent || 0} probes sent; identity and WiFi details may still be pending`;
   });
 
   const remotesAndCandidatesStatusLine = computed(() => {
@@ -522,11 +527,21 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     else if (f === 'uptime_ms') { recognizedUpdate = true; cacheEntry.device.uptime_ms = Number(val); }
     else if (f === 'role') { recognizedUpdate = true; cacheEntry.device.role = options.normalizeRole(String(val)); }
     else if (f === 'mode') { recognizedUpdate = true; cacheEntry.device.mode = String(val); }
+    else if (f === 'wifi_connected') {
+      recognizedUpdate = true;
+      if (val === '' || val === null || val === undefined) {
+        cacheEntry.device.wifi_connected_known = false;
+        cacheEntry.device.wifi_connected = undefined;
+      } else {
+        cacheEntry.device.wifi_connected = val === '1' || val === 1 || val === true;
+        cacheEntry.device.wifi_connected_known = true;
+      }
+    }
     else if (f === 'ip') {
       recognizedUpdate = true;
-      cacheEntry.device.ip = String(val);
-      cacheEntry.device.wifi_connected = !!val && val !== '0.0.0.0';
-      cacheEntry.device.wifi_connected_known = true;
+      cacheEntry.device.ip = (val === '' || val === null || val === undefined || val === '0.0.0.0')
+        ? undefined
+        : String(val);
     }
     else if (f === 'power_save_listen_only') {
       recognizedUpdate = true;

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Firmware Changes
+- Gateway MQTT peer telemetry now publishes explicit `wifi_connected` state. A blank IP remains unknown rather than being treated as proof that a remote is offline.
+
+### Flasher Features
+- MQTT Fleet treats WiFi/IP identity data as pending until a remote reports it, rather than showing Offline solely because its retained IP leaf is empty.
+
 ## [0.10.3] - 2026-07-20
 
 ### Firmware Changes

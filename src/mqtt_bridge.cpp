@@ -626,7 +626,7 @@ bool MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
       "addr_hex",        "addr_dec",
       "uplink_rssi_dbm", "last_seen_ms",       "last_seen_age_s", "last_cmd_counter",
       "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "forget",           "poll_now",
-      "wifi",            "uptime_ms",          "heap_free",        "heap_max_block",
+      "wifi",            "wifi_connected",     "uptime_ms",        "heap_free",        "heap_max_block",
       "heap_frag_pct",   "fw_version",         "ip",               "power_save_listen_only",
       "power_save_active", "chip_id",          "wifi_rssi_dbm"
   };
@@ -923,6 +923,16 @@ bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYie
     if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi_rssi_dbm")) publishRetainedTopic(topic, numBuf);
   } else {
     if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi_rssi_dbm")) publishRetainedTopic(topic, "");
+  }
+
+  if (!timedOut && node.wifi_connected_known) {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi_connected")) {
+      publishRetainedTopic(topic, node.wifi_connected ? "1" : "0");
+    }
+  } else {
+    if (buildPeerTopic(topic, sizeof(topic), addrSeg, "wifi_connected")) {
+      publishRetainedTopic(topic, "");
+    }
   }
 
   if (buildPeerTopic(topic, sizeof(topic), addrSeg, "ack_state")) publishRetainedTopic(topic, peerAckStateText(node.ack_state));
