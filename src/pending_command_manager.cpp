@@ -165,18 +165,20 @@ void PendingCommandManager::clearWifiProvision() {
 }
 
 // Factory Reset
-void PendingCommandManager::requestFactoryReset(bool keepFleet, bool keepWifi, uint8_t src) {
+void PendingCommandManager::requestFactoryReset(bool keepFleet, bool keepWifi, uint8_t src, uint32_t transactionId) {
   factory_reset_keep_fleet_pending_ = keepFleet;
   factory_reset_keep_wifi_pending_ = keepWifi;
   factory_reset_pending_src_ = src;
+  factory_reset_transaction_id_ = transactionId;
   factory_reset_pending_ = true;
 }
 
-bool PendingCommandManager::consumeFactoryReset(bool &keepFleet, bool &keepWifi, uint8_t &src) {
+bool PendingCommandManager::consumeFactoryReset(bool &keepFleet, bool &keepWifi, uint8_t &src, uint32_t &transactionId) {
   if (!factory_reset_pending_) return false;
   keepFleet = factory_reset_keep_fleet_pending_;
   keepWifi = factory_reset_keep_wifi_pending_;
   src = factory_reset_pending_src_;
+  transactionId = factory_reset_transaction_id_;
   clearFactoryReset();
   return true;
 }
@@ -186,6 +188,7 @@ void PendingCommandManager::clearFactoryReset() {
   factory_reset_keep_fleet_pending_ = true;
   factory_reset_keep_wifi_pending_ = false;
   factory_reset_pending_src_ = 0;
+  factory_reset_transaction_id_ = 0;
 }
 
 // Reboot

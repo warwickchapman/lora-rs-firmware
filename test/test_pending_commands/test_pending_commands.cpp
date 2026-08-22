@@ -104,17 +104,19 @@ void test_pending_command_factory_reset() {
   PendingCommandManager pcm;
   TEST_ASSERT_FALSE(pcm.hasPendingFactoryReset());
 
-  pcm.requestFactoryReset(true, false, 33);
+  pcm.requestFactoryReset(true, false, 33, 0x12345678UL);
   TEST_ASSERT_TRUE(pcm.hasPendingFactoryReset());
 
   bool keepFleet = false;
   bool keepWifi = true;
   uint8_t src = 0;
+  uint32_t transactionId = 0;
 
-  TEST_ASSERT_TRUE(pcm.consumeFactoryReset(keepFleet, keepWifi, src));
+  TEST_ASSERT_TRUE(pcm.consumeFactoryReset(keepFleet, keepWifi, src, transactionId));
   TEST_ASSERT_TRUE(keepFleet);
   TEST_ASSERT_FALSE(keepWifi);
   TEST_ASSERT_EQUAL_UINT8(33, src);
+  TEST_ASSERT_EQUAL_UINT32(0x12345678UL, transactionId);
 
   TEST_ASSERT_FALSE(pcm.hasPendingFactoryReset());
 }
@@ -261,7 +263,7 @@ void test_pending_command_reset_on_config_apply() {
   pcm.requestWifiProvision("A", "B", 1);
   pcm.requestUdpLogControl(true, IPAddress(1,1,1,1), 1, 1, 1);
   pcm.requestOtaPull(IPAddress(1,1,1,1), 1, "sha", 1, 99);
-  pcm.requestFactoryReset(true, true, 1);
+  pcm.requestFactoryReset(true, true, 1, 99);
   pcm.requestFleetProvApply(1, 1, true, 1, "key");
 
   TEST_ASSERT_TRUE(pcm.hasPendingReboot());

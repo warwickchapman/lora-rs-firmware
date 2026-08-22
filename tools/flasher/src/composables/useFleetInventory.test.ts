@@ -339,6 +339,11 @@ describe('useFleetInventory', () => {
     expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_sending' })).toBe('Stage 1/4');
     expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_awaiting_ack' })).toBe('Stage 2/4');
     expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_unconfirmed' })).toBe('Not confirmed');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'reset_sending' })).toBe('Reset 1/2');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'reset_awaiting_ack' })).toBe('Reset 2/2');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'reset_confirmed' })).toBe('Reset confirmed');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'reset_unconfirmed' })).toBe('Reset unconfirmed');
+    expect(fleet.fleetRowStatusTitle({ address: 1, row_state: 'reset_unconfirmed' })).toContain('retained');
     expect(fleet.fleetRowStatusTitle({ address: 1, row_state: 'ota_awaiting_ack' })).toContain('accept');
 
     // Test fleetDeviceUdpLabel

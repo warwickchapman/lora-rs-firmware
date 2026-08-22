@@ -75,6 +75,7 @@ private:
   void handleRemoteSensorConfig(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteFleetKeyChange(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter writer);
+  void handleRemoteFactoryResetStatus(JsonDocument &doc, ResponseWriter writer);
   void handleOtaPull(JsonDocument &doc, ResponseWriter writer);
   void handleUdpLogControl(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
   void handleRemoteUdpLogControl(JsonDocument &doc, ResponseWriter writer);

@@ -27,7 +27,8 @@ Packed fields:
 - `WifiControl` (`'Y'`)
 - `OtaPullControl` (`'O'`)
 - `OtaPullStatus` (`'N'`)
-- `FactoryReset` (`'X'`)
+- `FactoryReset` (`'E'`)
+- `FactoryResetStatus` (`'F'`)
 - `Provisioning` (`'V'`)
 - `MaintenanceRequest` (`'Q'`)
 - `MaintenanceStatus` (`'T'`)
@@ -162,14 +163,15 @@ dry-contact state in firmware or Fleet cache.
   - `payload b2`: error code (populated when opcode is `2`).
   - On any hash validation failure or download error, the remote node explicitly transmits a `download_failed` status back to the gateway and clears its active OTA state to lift silence blocks. The remote does not send success status; success is confirmed via Flasher reboot verification.
   - The gateway serializes one manifest transaction at a time, then releases that RF slot on `manifest_accepted`. Accepted remotes may download concurrently. Compact per-address gateway status records preserve transfer correlation for late failures.
-- `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
-- `FactoryReset` supports an option to preserve the current shared fleet key during reset.
-- Transmitting a remote factory-reset frame is not delivery confirmation. The gateway retains the remote's configured address/chip record after either reset variant; remove that record only through the explicit gateway forget action once the reset has been verified.
+- `FactoryReset` (`'E'`) starts one correlated remote reset transaction. The legacy fire-and-forget type (`'X'`) is deliberately not reused, so mixed old/new firmware safely ignores the incompatible reset command instead of misreading its flags. Payload bytes `b0..b1` are magic, `b2` is the request opcode, `b3` carries the keep-Fleet/keep-WiFi flags, and `b4..b7` carry the 32-bit transaction ID.
+- The gateway permits one reset transaction at a time and retransmits the same transaction once when confirmation is absent. Each RF attempt uses a fresh packet counter while retaining the same reset transaction ID.
+- After validating the request, the remote persists the requested reset configuration. It sends two staggered `FactoryResetStatus` (`'F'`) frames under the current Fleet Key before rebooting. The status carries `committed` or `save_failed`, echoes the option flags, and echoes the transaction ID.
+- A gateway accepts reset status only when source address, transaction ID, flags, and live awaiting transaction all match. A confirmed full reset removes and saves the peer record; a keep-Fleet reset retains it. Missing or invalid confirmation never removes the peer.
 - `Reboot` (`'B'`) carries a compact magic-value command payload for a targeted remote reboot.
 - `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
 - `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.
 
-- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, and `FactoryReset` must be addressed to the target device's LoRa address.
+- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, `FactoryReset`, and `FactoryResetStatus` must be addressed to the target device's LoRa address.
 - Broadcast is reserved for controlled provisioning-style flows. Do not use broadcast for destructive or lockout-prone maintenance commands.
 - Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, factory-reset, or UDP log control commands.
 
@@ -212,7 +214,7 @@ Release firmware also carries a release-owned Flasher compatibility revision. Se
 
 Gateway-mediated remote OTA requires digest-capable firmware on both the USB gateway and target remote; older one-packet OTA trigger firmware will not interoperate with the SHA256-segmented trigger.
 
-Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
+Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset`/`FactoryResetStatus`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
 
 Any future change that changes packet size, encrypted payload layout, replay behavior, addressing rules, or Fleet Key derivation is a breaking protocol change and should use a major version boundary or explicit protocol-version signaling.
 

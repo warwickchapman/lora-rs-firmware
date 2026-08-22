@@ -40,6 +40,7 @@ Fleet mode is a LoRa/MQTT admin helper:
 - calculates and displays the firmware SHA256 before devices are commanded to pull it
 - shows reachable firmware URLs for the local machine's active LAN interfaces
 - can trigger a discovered remote's OTA pull over LoRa from the inventory `Flash` action; the gateway sends the temporary firmware server host/port plus SHA256, and the remote downloads `/firmware.bin` over WiFi only after receiving the digest
+- performs remote factory reset as a correlated save-confirm-reboot transaction; selected remotes run sequentially and unconfirmed devices remain in the gateway for safe retry
 - supports OTA firmware upgrades of the gateway itself over MQTT when the Fleet tab is configured in Remote MQTT Broker mode, routing the `ota_pull` command via secure MQTT admin command topics and verifying reconnection
 - shows the MQTT `ota_pull` payload shape for online devices; payloads must include both `url` and `sha256`
 - listens for UDP logs on fixed port `5514` with a dedicated Start/Stop UDP Listener workflow

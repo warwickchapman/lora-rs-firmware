@@ -1,5 +1,5 @@
 {
-  "revision": 1,
-  "minimum_flasher_version": "0.10.4",
-  "summary": "Initial release-only Flasher compatibility contract."
+  "revision": 2,
+  "minimum_flasher_version": "0.10.5",
+  "summary": "Correlated remote factory-reset confirmation and status workflow."
 }

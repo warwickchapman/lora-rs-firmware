@@ -552,11 +552,53 @@ bool ConfigStore::save() {
   return ok;
 }
 
+bool ConfigStore::removeKnownPeer(uint8_t address, uint32_t &chipId, bool &removed) {
+  chipId = 0;
+  removed = false;
+
+  uint8_t index = cfg_.known_peer_count;
+  for (uint8_t i = 0; i < cfg_.known_peer_count; ++i) {
+    if (cfg_.known_peer_addresses[i] == address) {
+      index = i;
+      break;
+    }
+  }
+  if (index == cfg_.known_peer_count) return true;
+
+  const uint8_t oldCount = cfg_.known_peer_count;
+  chipId = cfg_.known_peer_chip_ids[index];
+  for (uint8_t i = index; i + 1U < oldCount; ++i) {
+    cfg_.known_peer_addresses[i] = cfg_.known_peer_addresses[i + 1U];
+    cfg_.known_peer_chip_ids[i] = cfg_.known_peer_chip_ids[i + 1U];
+  }
+  cfg_.known_peer_count = oldCount - 1U;
+  cfg_.known_peer_addresses[cfg_.known_peer_count] = 0;
+  cfg_.known_peer_chip_ids[cfg_.known_peer_count] = 0;
+
+  if (save()) {
+    removed = true;
+    return true;
+  }
+
+  for (uint8_t i = cfg_.known_peer_count; i > index; --i) {
+    cfg_.known_peer_addresses[i] = cfg_.known_peer_addresses[i - 1U];
+    cfg_.known_peer_chip_ids[i] = cfg_.known_peer_chip_ids[i - 1U];
+  }
+  cfg_.known_peer_addresses[index] = address;
+  cfg_.known_peer_chip_ids[index] = chipId;
+  cfg_.known_peer_count = oldCount;
+  return false;
+}
+
 bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials) {
   const String preservedFleetKey = cfg_.fleet_passphrase.c_str();
   const bool preservedFleetPromptDismissed = cfg_.fleet_setup_prompt_dismissed;
   const String preservedWifiSsid = cfg_.wifi_sta_ssid.c_str();
   const String preservedWifiPassword = cfg_.wifi_sta_password.c_str();
+  const bool preserveRemoteAssignment =
+      keepSharedFleetKey && !cfg_.role_tx && cfg_.mode == kModePaired;
+  const uint8_t preservedLocalAddress = cfg_.local_address;
+  const uint8_t preservedControllerAddress = cfg_.controller_address;
 
   setDefaults();
   ensureProvisionedDefaults();
@@ -564,6 +606,16 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
   if (keepSharedFleetKey && preservedFleetKey.length() > 0) {
     cfg_.fleet_passphrase = preservedFleetKey;
     cfg_.fleet_setup_prompt_dismissed = preservedFleetPromptDismissed || (cfg_.fleet_passphrase != runtime_utils::kDefaultDeploymentKey);
+  }
+  if (preserveRemoteAssignment) {
+    cfg_.role_tx = false;
+    cfg_.role = "remote";
+    cfg_.local_address = preservedLocalAddress;
+    cfg_.controller_address = preservedControllerAddress;
+    cfg_.allowed_controller_count = 1;
+    memset(cfg_.allowed_controller_addresses, 0, sizeof(cfg_.allowed_controller_addresses));
+    cfg_.allowed_controller_addresses[0] = preservedControllerAddress;
+    cfg_.input_control_paired_lora_enabled = false;
   }
   if (keepWifiCredentials) {
     cfg_.wifi_sta_ssid = preservedWifiSsid;
@@ -573,8 +625,9 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
   char maskedKey[32];
   lrslog::maskSecret(maskedKey, sizeof(maskedKey), cfg_.fleet_passphrase.c_str());
   LRS_LOGW(SYS,
-           "event=factory_reset_apply keep_fleet_key=%u keep_wifi=%u fleet_key=%s wifi_ssid=%s",
+           "event=factory_reset_apply keep_fleet_key=%u keep_remote_assignment=%u keep_wifi=%u fleet_key=%s wifi_ssid=%s",
            keepSharedFleetKey ? 1U : 0U,
+           preserveRemoteAssignment ? 1U : 0U,
            keepWifiCredentials ? 1U : 0U,
            maskedKey,
            cfg_.wifi_sta_ssid.c_str());

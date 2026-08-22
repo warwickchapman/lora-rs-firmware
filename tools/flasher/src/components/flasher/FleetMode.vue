@@ -200,6 +200,7 @@ const emit = defineEmits<{
   (e: 'remote-view-logs', address: number | string): void;
   (e: 'remote-forget', address: number | string): void;
   (e: 'remote-factory-reset', address: number | string): void;
+  (e: 'selected-factory-reset'): void;
   (e: 'candidate-adopt', payload: FleetCandidateActionPayload): void;
 }>();
 
@@ -594,6 +595,13 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
         </div>
         <div class="flex items-center gap-3">
           <div class="text-xs text-slate-500">{{ inventorySummary.totalCount }} remote{{ inventorySummary.totalCount === 1 ? '' : 's' }} cached · {{ inventorySummary.selectedCount }} selected</div>
+          <button
+            v-if="inventorySummary.selectedCount > 0"
+            @click="emit('selected-factory-reset')"
+            class="glass-input m-0 h-8 px-3 text-[11px] font-bold text-rose-300 hover:bg-rose-500/15"
+          >
+            Factory reset selected
+          </button>
         </div>
       </div>
       <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
@@ -735,9 +743,9 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                   v-if="device.rowStatusLabel"
                   :class="[
                     'mt-1 inline-flex h-5 w-[96px] items-center justify-center whitespace-nowrap rounded border px-2 text-[10px] font-bold select-none',
-                    (device.rowState === 'unexpected_reboot' || device.rowState === 'ota_failed' || device.rowState === 'ota_unconfirmed' || device.rowState === 'ota_no_reboot')
+                    (device.rowState === 'unexpected_reboot' || device.rowState === 'ota_failed' || device.rowState === 'ota_unconfirmed' || device.rowState === 'ota_no_reboot' || device.rowState === 'reset_unconfirmed' || device.rowState === 'reset_failed')
                       ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-                      : device.rowState === 'ota_updated'
+                      : (device.rowState === 'ota_updated' || device.rowState === 'reset_confirmed')
                         ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                         : device.rowState === 'ota_queued'
                           ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300'

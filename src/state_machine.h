@@ -230,7 +230,28 @@ class NodeStateMachine {
   bool hasPendingSensorConfig() const { return pending_commands_.hasPendingSensorConfig(); }
   bool consumePendingSensorConfig(bool &tempEnabled, bool &tankEnabled, bool &powerSaveEnabled, bool &powerSaveBootGrace);
   bool sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials);
-  bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src);
+  bool isFactoryResetTxActive() const {
+    return factory_reset_tx_.stage >= 1 && factory_reset_tx_.stage <= 3;
+  }
+  bool consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src,
+                                  uint32_t &transactionId);
+  void scheduleFactoryResetStatus(uint8_t dstAddress, uint32_t transactionId,
+                                  bool keepSharedFleetKey, bool keepWifiCredentials, bool committed);
+  bool consumeFactoryResetRebootReady();
+  bool consumeConfirmedPeerFactoryReset(uint8_t &address, uint32_t &transactionId,
+                                        bool &keepSharedFleetKey);
+  void completeConfirmedPeerFactoryReset(uint32_t transactionId, bool persisted);
+
+  struct RemoteFactoryResetStatusRecord {
+    uint8_t dst = 0;
+    uint8_t stage = 0; // 0 idle, 1 sending, 2 awaiting_ack, 3 confirming, 4 committed, 5 unconfirmed, 6 failed
+    uint8_t error_code = 0; // 1 remote save failed, 2 gateway peer-record save failed
+    uint8_t flags = 0;
+    uint8_t retry_count = 0;
+    uint32_t transaction_id = 0;
+    uint32_t deadline_ms = 0;
+  };
+  RemoteFactoryResetStatusRecord getRemoteFactoryResetStatus(uint8_t address) const;
   bool sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey);
   bool hasPendingFleetKeyChange() const;
   bool consumePendingFleetKeyChange(char *keyDest, size_t keySize, uint8_t &src);
@@ -459,6 +480,19 @@ class NodeStateMachine {
   RemoteOtaStatusRecord remote_ota_status_[Settings::kAddressListCap]{};
   RemoteOtaStatusRecord *remoteOtaStatusForAddress(uint8_t address);
 
+  struct FactoryResetRxStatus {
+    bool active = false;
+    bool committed = false;
+    bool reboot_ready = false;
+    uint8_t dst = 0;
+    uint8_t flags = 0;
+    uint8_t copies_remaining = 0;
+    uint32_t transaction_id = 0;
+    uint32_t next_tx_ms = 0;
+  };
+  RemoteFactoryResetStatusRecord factory_reset_tx_{};
+  FactoryResetRxStatus factory_reset_rx_status_{};
+
   uint32_t ota_silence_until_ms_ = 0;
   bool ota_pull_active_ = false;
   uint32_t ota_pull_start_ms_ = 0;
@@ -571,6 +605,8 @@ class NodeStateMachine {
   void tickMaintenanceRequestQueue(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t commandId, uint32_t *sentCounter = nullptr);
   void tickPendingOtaPullControl(uint32_t now);
+  void tickPendingFactoryResetControl(uint32_t now);
+  void tickPendingFactoryResetStatus(uint32_t now);
   bool tickPendingOtaPullAcceptedAck(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
   bool localOperationalSensorsEnabled() const;
@@ -603,6 +639,7 @@ class NodeStateMachine {
   bool handleOtaPullControlFrame(const ProtocolMessage &msg);
   bool handleOtaPullStatusFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
+  bool handleFactoryResetStatusFrame(const ProtocolMessage &msg);
   bool handleRebootFrame(const ProtocolMessage &msg);
   bool handleSensorConfigFrame(const ProtocolMessage &msg);
   bool handleFleetKeyControlFrame(const ProtocolMessage &msg);

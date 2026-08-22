@@ -81,6 +81,7 @@ class ConfigStore {
   Settings &settings();
   const Settings &settings() const;
   bool save();
+  bool removeKnownPeer(uint8_t address, uint32_t &chipId, bool &removed);
   bool factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials = false);
   bool schedulePostOtaFactoryReset(bool keepSharedFleetKey = false, bool keepWifiCredentials = false);
   bool consumePostOtaFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials);

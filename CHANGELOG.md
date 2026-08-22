@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Firmware Changes
+- Corrected **Reset but keep in fleet** to preserve a remote's assigned role, address, and controller address along with its Fleet Key. Previously it preserved only the key, causing the reset device to boot with gateway defaults while its stale peer entry remained on the real gateway.
+- Factory reset now clears the ESP8266 SDK's persistent station credentials as well as the application configuration when WiFi preservation is not selected, preventing a reset remote from reconnecting with a stale SDK WiFi profile.
+- Advanced the release Flasher compatibility contract to revision 2 because the confirmed reset protocol is a clean pre-1.0 break; release firmware requires Flasher 0.10.5 or newer for normal commands.
+- Replaced fire-and-forget remote factory reset with a correlated transaction on a new wire type, ensuring legacy and current reset packets cannot be misinterpreted across mixed firmware. The gateway sends a 32-bit reset ID, performs one bounded retry when no response arrives, and accepts only an authenticated confirmation matching the target, ID, and reset options.
+- A remote now saves its reset configuration before sending two staggered `FactoryResetStatus` confirmations under its current Fleet Key, then reboots. Save failure is reported without rebooting. A full reset removes the gateway peer record only after confirmation and successful gateway persistence; unconfirmed devices remain recoverable.
+
+### Flasher Features
+- Fleet now shows explicit factory-reset stages instead of treating age or disappearance as proof. Selected remotes are reset sequentially, the sequence stops at the first failed or unconfirmed device, and a full-reset row disappears only after the gateway has safely removed its confirmed peer record.
+- Manual Forget and gateway factory reset now warn when they can strand devices. The remote reset modal explains that missing confirmation retains the gateway record for retry.
+
 ## [0.10.4] - 2026-08-22
 
 ### Firmware Changes

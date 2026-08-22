@@ -38,9 +38,9 @@ public:
   void clearWifiProvision();
 
   // Factory Reset
-  void requestFactoryReset(bool keepFleet, bool keepWifi, uint8_t src);
+  void requestFactoryReset(bool keepFleet, bool keepWifi, uint8_t src, uint32_t transactionId);
   bool hasPendingFactoryReset() const { return factory_reset_pending_; }
-  bool consumeFactoryReset(bool &keepFleet, bool &keepWifi, uint8_t &src);
+  bool consumeFactoryReset(bool &keepFleet, bool &keepWifi, uint8_t &src, uint32_t &transactionId);
   void clearFactoryReset();
 
   // Reboot
@@ -108,6 +108,7 @@ private:
   bool factory_reset_keep_fleet_pending_ = true;
   bool factory_reset_keep_wifi_pending_ = false;
   uint8_t factory_reset_pending_src_ = 0;
+  uint32_t factory_reset_transaction_id_ = 0;
 
   bool reboot_pending_ = false;
 

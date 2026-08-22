@@ -118,8 +118,8 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
         // The active OTA operation owns confirmation. Do not convert its
         // expected reboot into a generic Fleet reboot result.
         rowState = 'ota_apply_wait';
-      } else if (history.rowState === 'ota_updated' && knownReboot) {
-        rowState = 'ota_updated';
+      } else if ((history.rowState === 'ota_updated' || history.rowState === 'reset_confirmed') && knownReboot) {
+        rowState = history.rowState;
         rowStateUntilMs = history.rowStateUntilMs;
       } else if (otaTargetVersionMatches) {
         rowState = 'ota_updated';
@@ -310,6 +310,12 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (device.row_state === 'ota_awaiting_ack') return 'Stage 2/4';
     if (device.row_state === 'ota_sending' || device.row_state === 'ota_retrying') return 'Stage 1/4';
     if (device.row_state === 'ota_unconfirmed') return 'Not confirmed';
+    if (device.row_state === 'reset_queued') return 'Reset queued';
+    if (device.row_state === 'reset_sending') return 'Reset 1/2';
+    if (device.row_state === 'reset_awaiting_ack') return 'Reset 2/2';
+    if (device.row_state === 'reset_confirmed') return 'Reset confirmed';
+    if (device.row_state === 'reset_unconfirmed') return 'Reset unconfirmed';
+    if (device.row_state === 'reset_failed') return 'Reset failed';
     if (device.row_state === 'ota_queued') {
       const qIdx = options.otaQueue.value.findIndex(d => d.address === device.address);
       return qIdx >= 0 ? `Queued #${qIdx + 1}` : 'Queued';
@@ -331,6 +337,12 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (device.row_state === 'ota_awaiting_ack') return 'Waiting for the remote to accept the update details.';
     if (device.row_state === 'ota_sending' || device.row_state === 'ota_retrying') return 'Sending update details to the remote.';
     if (device.row_state === 'ota_unconfirmed') return 'The gateway did not receive confirmation that the remote accepted the update.';
+    if (device.row_state === 'reset_queued') return 'Waiting for the active remote factory reset to finish.';
+    if (device.row_state === 'reset_sending') return 'Sending the correlated factory-reset request.';
+    if (device.row_state === 'reset_awaiting_ack') return 'Waiting for confirmation that the remote saved its reset configuration.';
+    if (device.row_state === 'reset_confirmed') return 'The remote confirmed that its reset configuration was saved and is rebooting.';
+    if (device.row_state === 'reset_unconfirmed') return 'The reset was not confirmed. The gateway record was retained for a safe retry.';
+    if (device.row_state === 'reset_failed') return 'The remote or gateway could not persist the confirmed reset transaction.';
     if (device.row_state === 'ota_queued') return 'Waiting for the active remote update to finish.';
     return '';
   }

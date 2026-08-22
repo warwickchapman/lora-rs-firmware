@@ -93,6 +93,7 @@ class App {
   bool handlePendingOtaPull();
   void handlePendingWifiProvision();
   bool handlePendingFactoryReset();
+  void handleConfirmedPeerFactoryReset();
   bool handlePendingReboot();
   bool handlePendingReaddress();
   void handlePendingPeerSync();

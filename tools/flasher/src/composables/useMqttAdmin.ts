@@ -23,7 +23,7 @@ export interface UseMqttAdminOptions {
 
 // PubSubClient's 1024-byte receive buffer also holds the MQTT topic/header.
 const MAX_MQTT_ADMIN_COMMAND_BYTES = 900;
-const FLASHER_COMPATIBILITY_REVISION = 1;
+const FLASHER_COMPATIBILITY_REVISION = 2;
 
 export function useMqttAdmin(options: UseMqttAdminOptions) {
   const pendingMqttRequests = new Map<string, PendingMqttRequest>();

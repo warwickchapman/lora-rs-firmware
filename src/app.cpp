@@ -65,6 +65,7 @@ void App::begin() {
                keepFleetKey ? 1U : 0U,
                keepWifiCredentials ? 1U : 0U);
       if (config_.factoryReset(keepFleetKey, keepWifiCredentials)) {
+        if (!keepWifiCredentials) WiFi.disconnect(true, true);
         delay(100);
         ESP.restart();
         return;
@@ -228,6 +229,7 @@ void App::tick() {
   if (handlePendingOtaPull()) return;
   handlePendingWifiProvision();
   if (handlePendingFactoryReset()) return;
+  handleConfirmedPeerFactoryReset();
   if (handlePendingReboot()) return;
   if (handlePendingReaddress()) return;
   handlePendingPeerSync();
@@ -667,20 +669,47 @@ bool App::handlePendingFactoryReset() {
   bool keepFleetKey = true;
   bool keepWifi = false;
   uint8_t resetSrc = 0;
-  if (sm_.consumePendingFactoryReset(keepFleetKey, keepWifi, resetSrc)) {
+  uint32_t transactionId = 0;
+  if (sm_.consumePendingFactoryReset(keepFleetKey, keepWifi, resetSrc, transactionId)) {
     lrslog::event(keepFleetKey ? "factory_reset_exec_keep"
                                : "factory_reset_exec_full",
                   0, resetSrc, 0);
     clearGatewayRetainedPeersBeforeFactoryReset();
 
-    if (config_.factoryReset(keepFleetKey, keepWifi)) {
-      delay(100);
-      ESP.restart();
-      return true;
-    }
-    lrslog::event("factory_reset_exec_save_fail", 0, resetSrc, 0);
+    const bool saved = config_.factoryReset(keepFleetKey, keepWifi);
+    if (saved && !keepWifi) WiFi.disconnect(true, true);
+    sm_.scheduleFactoryResetStatus(resetSrc, transactionId, keepFleetKey, keepWifi, saved);
+    if (!saved) lrslog::event("factory_reset_exec_save_fail", 0, transactionId, resetSrc);
+  }
+  if (sm_.consumeFactoryResetRebootReady()) {
+    delay(100);
+    ESP.restart();
+    return true;
   }
   return false;
+}
+
+void App::handleConfirmedPeerFactoryReset() {
+  uint8_t address = 0;
+  uint32_t transactionId = 0;
+  bool keepFleetKey = false;
+  if (!sm_.consumeConfirmedPeerFactoryReset(address, transactionId, keepFleetKey)) return;
+
+  if (keepFleetKey) {
+    sm_.completeConfirmedPeerFactoryReset(transactionId, true);
+    return;
+  }
+
+  uint32_t chipId = 0;
+  bool removed = false;
+  if (!config_.removeKnownPeer(address, chipId, removed)) {
+    sm_.completeConfirmedPeerFactoryReset(transactionId, false);
+    return;
+  }
+
+  MqttBridge::clearPeerRetained(address, chipId);
+  sm_.mqttForgetPeer(address);
+  sm_.completeConfirmedPeerFactoryReset(transactionId, true);
 }
 
 void App::clearGatewayRetainedPeersBeforeFactoryReset() {

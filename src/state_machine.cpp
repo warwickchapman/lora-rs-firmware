@@ -1,4 +1,6 @@
 #include "state_machine.h"
+
+#include "factory_reset_transaction_helper.h"
 #include "ota_handoff_helper.h"
 
 #include <ESP8266WiFi.h>
@@ -59,8 +61,14 @@ constexpr uint8_t kOtaPullControlHashChunks = 4;
 constexpr uint32_t kOtaPullControlFrameSpacingMs = 250;
 constexpr uint8_t kFactoryResetMagic0 = 0xA5;
 constexpr uint8_t kFactoryResetMagic1 = 0x5A;
+constexpr uint8_t kFactoryResetOpRequest = 1;
+constexpr uint8_t kFactoryResetStatusCommitted = factory_reset_transaction::kResultCommitted;
+constexpr uint8_t kFactoryResetStatusSaveFailed = factory_reset_transaction::kResultSaveFailed;
 constexpr uint8_t kFactoryResetKeepFleetFlag = 0x01;
 constexpr uint8_t kFactoryResetKeepWifiFlag = 0x02;
+constexpr uint32_t kFactoryResetAckTimeoutMs = 4000;
+constexpr uint32_t kFactoryResetStatusSpacingMs = 250;
+constexpr uint8_t kFactoryResetStatusCopies = 2;
 constexpr uint8_t kRebootMagic0 = 0xB5;
 constexpr uint8_t kRebootMagic1 = 0x5B;
 constexpr uint8_t kSensorConfigMagic0 = 0xC5;
@@ -309,6 +317,8 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
   for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
+  factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
+  factory_reset_rx_status_ = FactoryResetRxStatus{};
   ota_silence_until_ms_ = 0;
   ota_pull_active_ = false;
   ota_pull_start_ms_ = 0;
@@ -402,6 +412,8 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
   for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
+  factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
+  factory_reset_rx_status_ = FactoryResetRxStatus{};
   pending_commands_.resetOnConfigApply();
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
@@ -1415,6 +1427,91 @@ void NodeStateMachine::tickPendingOtaPullControl(uint32_t now) {
   }
 }
 
+void NodeStateMachine::tickPendingFactoryResetControl(uint32_t now) {
+  if (factory_reset_tx_.stage == 2) {
+    if (static_cast<int32_t>(now - factory_reset_tx_.deadline_ms) < 0) return;
+    if (factory_reset_transaction::shouldRetryAfterTimeout(factory_reset_tx_.retry_count)) {
+      factory_reset_tx_.retry_count = 1;
+      factory_reset_tx_.stage = 1;
+      factory_reset_tx_.deadline_ms = now;
+      lrslog::event("factory_reset_peer_retry", 0, factory_reset_tx_.transaction_id,
+                    factory_reset_tx_.dst);
+    } else {
+      factory_reset_tx_.stage = 5;
+      lrslog::event("factory_reset_peer_unconfirmed", 0,
+                    factory_reset_tx_.transaction_id, factory_reset_tx_.dst);
+    }
+    return;
+  }
+  if (factory_reset_tx_.stage != 1) return;
+  if (static_cast<int32_t>(now - factory_reset_tx_.deadline_ms) < 0) return;
+  if (!radioTxBudgetAvailable()) return;
+
+  uint8_t payload[12]{};
+  payload[0] = kFactoryResetMagic0;
+  payload[1] = kFactoryResetMagic1;
+  payload[2] = kFactoryResetOpRequest;
+  payload[3] = factory_reset_tx_.flags;
+  payload[4] = static_cast<uint8_t>(factory_reset_tx_.transaction_id & 0xFFU);
+  payload[5] = static_cast<uint8_t>((factory_reset_tx_.transaction_id >> 8U) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((factory_reset_tx_.transaction_id >> 16U) & 0xFFU);
+  payload[7] = static_cast<uint8_t>((factory_reset_tx_.transaction_id >> 24U) & 0xFFU);
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::FactoryReset, last_counter_, runtime_.local_address,
+                       factory_reset_tx_.dst, payload)) {
+    factory_reset_tx_.deadline_ms = now + kFactoryResetStatusSpacingMs;
+    return;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  factory_reset_tx_.stage = 2;
+  factory_reset_tx_.deadline_ms = now + kFactoryResetAckTimeoutMs;
+  lrslog::event("factory_reset_peer_tx", 0, factory_reset_tx_.transaction_id,
+                factory_reset_tx_.dst);
+}
+
+void NodeStateMachine::tickPendingFactoryResetStatus(uint32_t now) {
+  if (!factory_reset_rx_status_.active) return;
+  if (static_cast<int32_t>(now - factory_reset_rx_status_.next_tx_ms) < 0) return;
+  if (!radioTxBudgetAvailable()) return;
+
+  uint8_t payload[12]{};
+  payload[0] = kFactoryResetMagic0;
+  payload[1] = kFactoryResetMagic1;
+  payload[2] = factory_reset_rx_status_.committed
+                   ? kFactoryResetStatusCommitted
+                   : kFactoryResetStatusSaveFailed;
+  payload[3] = factory_reset_rx_status_.flags;
+  payload[4] = static_cast<uint8_t>(factory_reset_rx_status_.transaction_id & 0xFFU);
+  payload[5] = static_cast<uint8_t>((factory_reset_rx_status_.transaction_id >> 8U) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((factory_reset_rx_status_.transaction_id >> 16U) & 0xFFU);
+  payload[7] = static_cast<uint8_t>((factory_reset_rx_status_.transaction_id >> 24U) & 0xFFU);
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::FactoryResetStatus, last_counter_, runtime_.local_address,
+                       factory_reset_rx_status_.dst, payload)) {
+    factory_reset_rx_status_.next_tx_ms = now + kFactoryResetStatusSpacingMs;
+    return;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  lrslog::event(factory_reset_rx_status_.committed
+                    ? "factory_reset_status_committed_tx"
+                    : "factory_reset_status_save_failed_tx",
+                0, factory_reset_rx_status_.transaction_id, factory_reset_rx_status_.dst);
+
+  if (factory_reset_rx_status_.copies_remaining > 0) {
+    factory_reset_rx_status_.copies_remaining--;
+  }
+  if (factory_reset_rx_status_.copies_remaining == 0) {
+    factory_reset_rx_status_.active = false;
+    factory_reset_rx_status_.reboot_ready = factory_reset_rx_status_.committed;
+  } else {
+    factory_reset_rx_status_.next_tx_ms = now + kFactoryResetStatusSpacingMs;
+  }
+}
+
 bool NodeStateMachine::hasPendingWifiControl() const { return pending_commands_.hasPendingWifiControl(); }
 
 bool NodeStateMachine::consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter) {
@@ -1742,33 +1839,71 @@ bool NodeStateMachine::consumePendingSensorConfig(bool &tempEnabled, bool &tankE
 }
 
 bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials) {
-  if (!radioTxBudgetAvailable()) return false;
   if (!runtime_.role_tx) return false;
   if (radio_ == nullptr) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
+  if (isFactoryResetTxActive()) return false;
 
-  uint8_t payload[12]{};
-  payload[0] = kFactoryResetMagic0;
-  payload[1] = kFactoryResetMagic1;
-  payload[2] = (keepSharedFleetKey ? kFactoryResetKeepFleetFlag : 0) |
-               (keepWifiCredentials ? kFactoryResetKeepWifiFlag : 0);
-  payload[3] = static_cast<uint8_t>(runtime_.local_address);
-  payload[4] = static_cast<uint8_t>(millis() & 0xFFU);
-  last_counter_++;
-  if (!radio_->sendRaw(MessageType::FactoryReset, last_counter_, runtime_.local_address, dstAddress, payload)) {
-    return false;
-  }
-  last_tx_ms_ = millis();
-  markRadioTxSentThisTick();
-  // A LoRa send only confirms that the gateway transmitted the frame. Keep the
-  // peer record until the operator explicitly removes it, so a missed reset
-  // command can be retried or recovered without physical access to the remote.
-  lrslog::event(keepSharedFleetKey ? "factory_reset_peer_tx_keep" : "factory_reset_peer_tx_full", 0, last_counter_, dstAddress);
+  uint32_t transactionId = millis() ^ last_counter_ ^
+                           (static_cast<uint32_t>(dstAddress) << 24U);
+  if (transactionId == 0) transactionId = 1;
+
+  factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
+  factory_reset_tx_.dst = dstAddress;
+  factory_reset_tx_.flags = (keepSharedFleetKey ? kFactoryResetKeepFleetFlag : 0U) |
+                            (keepWifiCredentials ? kFactoryResetKeepWifiFlag : 0U);
+  factory_reset_tx_.transaction_id = transactionId;
+  factory_reset_tx_.stage = 1;
+  factory_reset_tx_.deadline_ms = millis();
+  lrslog::event("factory_reset_peer_queued", 0, transactionId, dstAddress);
   return true;
 }
 
-bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials, uint8_t &src) {
-  return pending_commands_.consumeFactoryReset(keepSharedFleetKey, keepWifiCredentials, src);
+bool NodeStateMachine::consumePendingFactoryReset(bool &keepSharedFleetKey, bool &keepWifiCredentials,
+                                                  uint8_t &src, uint32_t &transactionId) {
+  return pending_commands_.consumeFactoryReset(keepSharedFleetKey, keepWifiCredentials, src, transactionId);
+}
+
+void NodeStateMachine::scheduleFactoryResetStatus(uint8_t dstAddress, uint32_t transactionId,
+                                                  bool keepSharedFleetKey, bool keepWifiCredentials,
+                                                  bool committed) {
+  factory_reset_rx_status_ = FactoryResetRxStatus{};
+  factory_reset_rx_status_.active = true;
+  factory_reset_rx_status_.committed = committed;
+  factory_reset_rx_status_.dst = dstAddress;
+  factory_reset_rx_status_.flags = (keepSharedFleetKey ? kFactoryResetKeepFleetFlag : 0U) |
+                                   (keepWifiCredentials ? kFactoryResetKeepWifiFlag : 0U);
+  factory_reset_rx_status_.copies_remaining = kFactoryResetStatusCopies;
+  factory_reset_rx_status_.transaction_id = transactionId;
+  factory_reset_rx_status_.next_tx_ms = millis() + runtime_utils::kGroupAckLeadMs;
+}
+
+bool NodeStateMachine::consumeFactoryResetRebootReady() {
+  if (!factory_reset_rx_status_.reboot_ready) return false;
+  factory_reset_rx_status_.reboot_ready = false;
+  return true;
+}
+
+bool NodeStateMachine::consumeConfirmedPeerFactoryReset(uint8_t &address, uint32_t &transactionId,
+                                                        bool &keepSharedFleetKey) {
+  if (factory_reset_tx_.stage != 3) return false;
+  address = factory_reset_tx_.dst;
+  transactionId = factory_reset_tx_.transaction_id;
+  keepSharedFleetKey = (factory_reset_tx_.flags & kFactoryResetKeepFleetFlag) != 0U;
+  return true;
+}
+
+void NodeStateMachine::completeConfirmedPeerFactoryReset(uint32_t transactionId, bool persisted) {
+  if (factory_reset_tx_.transaction_id != transactionId || factory_reset_tx_.stage != 3) return;
+  factory_reset_tx_.stage = persisted ? 4 : 6;
+  factory_reset_tx_.error_code = persisted ? 0 : 2;
+  lrslog::event(persisted ? "factory_reset_peer_committed" : "factory_reset_peer_record_save_failed",
+                 0, transactionId, factory_reset_tx_.dst);
+}
+
+NodeStateMachine::RemoteFactoryResetStatusRecord NodeStateMachine::getRemoteFactoryResetStatus(uint8_t address) const {
+  if (factory_reset_tx_.dst != address) return RemoteFactoryResetStatusRecord{};
+  return factory_reset_tx_;
 }
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
@@ -3215,6 +3350,7 @@ void NodeStateMachine::tickTransmitter() {
     }
   }
 
+  tickPendingFactoryResetControl(now);
   tickPendingOtaPullControl(now);
   tickMaintenanceRequestQueue(now);
   tickFleetScan(now);
@@ -3289,6 +3425,8 @@ void NodeStateMachine::tickReceiver() {
 
   tickDeferredAck(now);
   if (rx_deferred_ack_pending_) return;
+  tickPendingFactoryResetStatus(now);
+  if (factory_reset_rx_status_.active || factory_reset_rx_status_.reboot_ready) return;
   if (rx_push_pending_ && sendInputStatePush(now)) return;
   if (tickPendingOtaPullAcceptedAck(now)) return;
   if (tickDeferredObservability()) return;
@@ -3361,6 +3499,7 @@ void NodeStateMachine::tickReceive() {
   const bool isOtaPullControl = (msg.type == MessageType::OtaPullControl);
   const bool isOtaPullStatus = (msg.type == MessageType::OtaPullStatus);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
+  const bool isFactoryResetStatus = (msg.type == MessageType::FactoryResetStatus);
   const bool isReaddress = (msg.type == MessageType::Readdress);
   const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
                               msg.type == MessageType::MaintenanceStatus);
@@ -3369,7 +3508,7 @@ void NodeStateMachine::tickReceive() {
     return;
   }
   const bool isChange = (msg.type == MessageType::Change);
-  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl && !isOtaPullStatus &&
+  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl && !isOtaPullStatus && !isFactoryResetStatus &&
       !isMaintenance && !isChange && !isReaddress && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
@@ -3389,7 +3528,7 @@ void NodeStateMachine::tickReceive() {
   const bool isReboot = (msg.type == MessageType::Reboot);
   const bool isSensorConfig = (msg.type == MessageType::SensorConfig);
   const bool isFleetKeyControl = (msg.type == MessageType::FleetKeyControl);
-  if ((isUdpLogControl || isOtaPullControl || isOtaPullStatus || isFactoryReset || isReboot || isSensorConfig || isFleetKeyControl) && msg.dst != runtime_.local_address) {
+  if ((isUdpLogControl || isOtaPullControl || isOtaPullStatus || isFactoryReset || isFactoryResetStatus || isReboot || isSensorConfig || isFleetKeyControl) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -3442,7 +3581,7 @@ void NodeStateMachine::tickReceive() {
   }
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
-                                                                  isOtaPullControl || isFactoryReset || isMaintenance ||
+                                                                  isOtaPullControl || isFactoryReset || isFactoryResetStatus || isMaintenance ||
                                                                   isReboot || isSensorConfig || isFleetKeyControl || isReaddress);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
@@ -3480,6 +3619,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isFactoryReset) {
     handleFactoryResetFrame(msg);
+    return;
+  }
+  if (isFactoryResetStatus) {
+    handleFactoryResetStatusFrame(msg);
     return;
   }
   if (isReboot) {
@@ -4130,17 +4273,68 @@ void NodeStateMachine::applyReceiverFailsafe(uint32_t now) {
 }
 
 bool NodeStateMachine::handleFactoryResetFrame(const ProtocolMessage &msg) {
-  if (msg.relay_state != kFactoryResetMagic0 || msg.input_state != kFactoryResetMagic1) {
+  const uint8_t *payload = msg.raw_payload;
+  if (payload[0] != kFactoryResetMagic0 || payload[1] != kFactoryResetMagic1 ||
+      payload[2] != kFactoryResetOpRequest) {
     lrslog::event("factory_reset_rx_bad", msg.rssi, msg.counter, 0);
     return false;
   }
-  const bool keepFleet = (msg.flags & kFactoryResetKeepFleetFlag) != 0U;
-  const bool keepWifi = (msg.flags & kFactoryResetKeepWifiFlag) != 0U;
-  pending_commands_.requestFactoryReset(keepFleet, keepWifi, msg.src);
-  {
-    lrslog::event(keepFleet ? "factory_reset_rx_keep" : "factory_reset_rx_full",
-               msg.rssi, msg.counter, msg.src);
+  const uint8_t flags = payload[3];
+  const uint32_t transactionId = static_cast<uint32_t>(payload[4]) |
+                                 (static_cast<uint32_t>(payload[5]) << 8U) |
+                                 (static_cast<uint32_t>(payload[6]) << 16U) |
+                                 (static_cast<uint32_t>(payload[7]) << 24U);
+  if (transactionId == 0) {
+    lrslog::event("factory_reset_rx_bad_transaction", msg.rssi, msg.counter, msg.src);
+    return false;
   }
+  const bool keepFleet = (flags & kFactoryResetKeepFleetFlag) != 0U;
+  const bool keepWifi = (flags & kFactoryResetKeepWifiFlag) != 0U;
+
+  if (factory_reset_rx_status_.transaction_id == transactionId &&
+      factory_reset_rx_status_.dst == msg.src) {
+    factory_reset_rx_status_.active = true;
+    factory_reset_rx_status_.copies_remaining = kFactoryResetStatusCopies;
+    factory_reset_rx_status_.next_tx_ms = millis() + runtime_utils::kGroupAckLeadMs;
+    factory_reset_rx_status_.reboot_ready = false;
+    lrslog::event("factory_reset_rx_duplicate", msg.rssi, transactionId, msg.src);
+    return true;
+  }
+
+  pending_commands_.requestFactoryReset(keepFleet, keepWifi, msg.src, transactionId);
+  lrslog::event(keepFleet ? "factory_reset_rx_keep" : "factory_reset_rx_full",
+                msg.rssi, transactionId, msg.src);
+  return true;
+}
+
+bool NodeStateMachine::handleFactoryResetStatusFrame(const ProtocolMessage &msg) {
+  if (!runtime_.role_tx || factory_reset_tx_.stage != 2) return false;
+  const uint8_t *payload = msg.raw_payload;
+  if (payload[0] != kFactoryResetMagic0 || payload[1] != kFactoryResetMagic1) return false;
+
+  const uint8_t result = payload[2];
+  const uint8_t flags = payload[3];
+  const uint32_t transactionId = static_cast<uint32_t>(payload[4]) |
+                                 (static_cast<uint32_t>(payload[5]) << 8U) |
+                                 (static_cast<uint32_t>(payload[6]) << 16U) |
+                                 (static_cast<uint32_t>(payload[7]) << 24U);
+  if (!factory_reset_transaction::matchesStatus(
+          factory_reset_tx_.dst, msg.src, factory_reset_tx_.transaction_id,
+          transactionId, factory_reset_tx_.flags, flags, result)) {
+    lrslog::event("factory_reset_status_ignored", msg.rssi, transactionId, msg.src);
+    return false;
+  }
+
+  if (result == kFactoryResetStatusSaveFailed) {
+    factory_reset_tx_.stage = 6;
+    factory_reset_tx_.error_code = 1;
+    lrslog::event("factory_reset_peer_save_failed", msg.rssi, transactionId,
+                  factory_reset_tx_.dst);
+    return true;
+  }
+  factory_reset_tx_.stage = 3;
+  lrslog::event("factory_reset_peer_confirming", msg.rssi, transactionId,
+                factory_reset_tx_.dst);
   return true;
 }
 

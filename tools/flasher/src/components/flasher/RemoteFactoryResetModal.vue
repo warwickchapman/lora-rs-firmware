@@ -36,11 +36,11 @@ const computedKeepWifiCredentials = computed({
       <div class="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
         <div>
           <h3 class="text-base font-bold text-rose-400">⚠️ Factory Reset Remote Device {{ address }}</h3>
-          <p class="mt-1 text-xs text-slate-500">Decommissions the remote device over LoRa, formatting its state and triggering a reboot.</p>
+          <p class="mt-1 text-xs text-slate-500">Persists the reset, confirms it over LoRa, then reboots. Multiple selected remotes are processed one at a time.</p>
         </div>
 
         <div class="rounded border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200 leading-relaxed">
-          💡 Select which parts of the remote configuration to preserve during reset. Checking "Reset but keep in fleet" preserves pairing encryption keys so it can reconnect to this fleet. A full reset clears the remote's fleet key, but retains its gateway record so you can retry or recover it if the LoRa command is missed. Remove the record separately only after you have confirmed the reset.
+          💡 Select which parts of the remote configuration to preserve. A full reset removes the gateway record only after the remote confirms that factory defaults were saved. If confirmation is missing, the record remains available for a safe retry.
         </div>
 
         <div class="flex flex-col gap-3 py-1">
@@ -48,7 +48,7 @@ const computedKeepWifiCredentials = computed({
             <input v-model="computedKeepSharedFleetKey" type="checkbox" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-rose-500 focus:ring-0 focus:ring-offset-0" />
             <div>
               <div class="font-semibold text-slate-200">Reset but keep in fleet</div>
-              <div class="text-[10px] text-slate-500 mt-0.5">Preserves pairing encryption keys to stay in this gateway's secure fleet.</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">Preserves the fleet key and assigned remote address so it remains reachable by this gateway.</div>
             </div>
           </label>
           <label class="flex items-center gap-3 text-xs text-slate-200 border border-slate-800/80 bg-slate-950/20 rounded p-2.5 cursor-pointer hover:bg-slate-800/20 transition-colors select-none">
@@ -71,7 +71,7 @@ const computedKeepWifiCredentials = computed({
             @click="emit('confirm')"
             class="m-0 h-9 rounded-md border border-rose-500/40 bg-rose-500/20 text-rose-100 hover:bg-rose-500/30 px-4 text-xs font-bold transition-colors"
           >
-            Factory Reset Device
+            Factory Reset
           </button>
         </div>
       </div>

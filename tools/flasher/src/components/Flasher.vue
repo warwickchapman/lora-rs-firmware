@@ -36,6 +36,7 @@ import FlashMode from './flasher/FlashMode.vue';
 import RemoteSettingsModal from './flasher/RemoteSettingsModal.vue';
 import RemoteFactoryResetModal from './flasher/RemoteFactoryResetModal.vue';
 import type { RemoteFactoryResetDraft } from './flasher/RemoteFactoryResetModal.vue';
+import { remoteFactoryResetDecision } from '../composables/remoteFactoryResetStatus';
 import ProvisionMode from './flasher/ProvisionMode.vue';
 import type {
   ProvisionConfig,
@@ -588,11 +589,12 @@ function handleRemoteSettingsFleetKey(key: string) {
 }
 
 interface FactoryResetModalState {
-  device: LoraInventoryDevice;
+  devices: LoraInventoryDevice[];
   keep_shared_fleet_key: boolean;
   keep_wifi_credentials: boolean;
 }
 const factoryResetTargetModal = ref<FactoryResetModalState | null>(null);
+const remoteFactoryResetBusy = ref(false);
 
 const isFactoryResetTargetModalOpen = computed({
   get: () => !!factoryResetTargetModal.value,
@@ -617,14 +619,16 @@ const factoryResetTargetDraftComputed = computed<RemoteFactoryResetDraft>({
 });
 
 const factoryResetTargetAddressComputed = computed<number | string>(() => {
-  return factoryResetTargetModal.value?.device.address ?? '';
+  const devices = factoryResetTargetModal.value?.devices || [];
+  if (devices.length === 1) return devices[0].address;
+  return devices.length > 1 ? `${devices.length} selected remotes` : '';
 });
 
 function confirmRemoteFactoryReset() {
   const modal = factoryResetTargetModal.value;
   if (!modal) return;
-  executeRemoteFactoryReset(
-    modal.device,
+  executeRemoteFactoryResetSequence(
+    modal.devices,
     modal.keep_shared_fleet_key,
     modal.keep_wifi_credentials
   );
@@ -2428,6 +2432,15 @@ function handleFleetRemoteFactoryReset(address: number) {
   if (d) openFactoryResetModal(d);
 }
 
+function handleFleetSelectedFactoryReset() {
+  const selected = loraInventory.value.filter(device => device.selected);
+  if (selected.length === 0) {
+    notify('Select at least one remote to factory reset.');
+    return;
+  }
+  openFactoryResetModal(selected);
+}
+
 function handleFleetGatewaySettings() {
   activeDropdownAddress.value = null;
   if (fleetTransport.value === 'serial') {
@@ -2479,7 +2492,9 @@ async function handleFleetGatewayFactoryReset() {
     return;
   }
   const confirmed = await confirmOperatorAction(
-    'Factory reset the selected gateway? This clears its fleet membership and WiFi credentials.',
+    loraInventory.value.length > 0
+      ? `Factory reset the selected gateway?\n\n${loraInventory.value.length} configured remote${loraInventory.value.length === 1 ? '' : 's'} remain. Any remote that still holds this Fleet Key may be stranded and require USB recovery.`
+      : 'Factory reset the selected gateway? This clears its fleet membership and WiFi credentials.',
     { confirmText: 'Factory reset gateway', danger: true }
   );
   if (!confirmed) return;
@@ -3093,6 +3108,10 @@ function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_awaiting_ack') return 'bg-cyan-950/30 animate-pulse';
   if (device.row_state === 'ota_unconfirmed') return 'bg-rose-950/40 ring-1 ring-rose-500/40';
   if (device.row_state === 'ota_queued') return 'bg-fuchsia-950/30 ring-1 ring-fuchsia-500/30';
+  if (device.row_state === 'reset_queued') return 'bg-fuchsia-950/30 ring-1 ring-fuchsia-500/30';
+  if (device.row_state === 'reset_sending' || device.row_state === 'reset_awaiting_ack') return 'bg-cyan-950/30 animate-pulse';
+  if (device.row_state === 'reset_confirmed') return 'bg-emerald-950/40 ring-1 ring-emerald-500/40';
+  if (device.row_state === 'reset_unconfirmed' || device.row_state === 'reset_failed') return 'bg-rose-950/40 ring-1 ring-rose-500/40';
   return 'bg-slate-950/20';
 }
 
@@ -3818,16 +3837,20 @@ async function adoptCandidate(candidate: LoraAdoptionCandidate) {
   }
 }
 
-function openFactoryResetModal(device: LoraInventoryDevice) {
+function openFactoryResetModal(deviceOrDevices: LoraInventoryDevice | LoraInventoryDevice[]) {
+  if (remoteFactoryResetBusy.value) {
+    notify('A remote factory reset is already in progress.');
+    return;
+  }
   activeDropdownAddress.value = null;
   factoryResetTargetModal.value = {
-    device,
+    devices: Array.isArray(deviceOrDevices) ? [...deviceOrDevices] : [deviceOrDevices],
     keep_shared_fleet_key: false,
     keep_wifi_credentials: false
   };
 }
 
-async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet: boolean, keepWifi: boolean) {
+async function executeRemoteFactoryResetSequence(devices: LoraInventoryDevice[], keepFleet: boolean, keepWifi: boolean) {
   const { port, password } = fleetGatewayCommandTarget();
   if (!port) {
     notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
@@ -3837,29 +3860,130 @@ async function executeRemoteFactoryReset(device: LoraInventoryDevice, keepFleet:
     notify('Enter the gateway admin password');
     return;
   }
-  try {
-    notify(`Triggering factory reset on remote ${device.address}...`);
-    await sendEasyPairCommandOnPort(port, 'remote_factory_reset', {
-      admin_password: password,
-      target_address: device.address,
-      keep_shared_fleet_key: keepFleet,
-      keep_wifi_credentials: keepWifi
-    }, 8000);
-    notify(`Factory reset command sent to remote ${device.address}. Its gateway record has been retained for recovery.`);
-
-    // Track known reboot to prevent unexpected reboot status
-    const now = Date.now();
+  factoryResetTargetModal.value = null;
+  remoteFactoryResetBusy.value = true;
+  for (const device of devices) {
     fleetRowHistory.value[device.address] = {
       ...(fleetRowHistory.value[device.address] || {}),
-      knownRebootUntilMs: now + 60000,
-      rebootExpectedUntilMs: now + 240000
+      rowState: 'reset_queued',
+      rowStateUntilMs: undefined
     };
+  }
 
-    factoryResetTargetModal.value = null;
-    refreshLoraInventoryStatus(false);
+  let activeDevice: LoraInventoryDevice | null = null;
+  try {
+    for (const device of devices) {
+      activeDevice = device;
+      notify(`Sending factory reset to remote ${device.address}...`);
+      fleetRowHistory.value[device.address] = {
+        ...(fleetRowHistory.value[device.address] || {}),
+        rowState: 'reset_sending',
+        rowStateUntilMs: undefined
+      };
+      loraInventory.value = loraInventory.value.map(row =>
+        row.address === device.address ? { ...row, row_state: 'reset_sending' } : row
+      );
+
+      const out = await sendEasyPairCommandOnPort<any>(port, 'remote_factory_reset', {
+        admin_password: password,
+        target_address: device.address,
+        keep_shared_fleet_key: keepFleet,
+        keep_wifi_credentials: keepWifi
+      }, 8000);
+      const transactionId = Number(out.transaction_id || 0);
+      const deadline = Date.now() + 15000;
+      let terminalStage = '';
+      let errorCode = 0;
+
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const status = await sendEasyPairCommandOnPort<any>(port, 'remote_factory_reset_status', {
+          admin_password: password,
+          address: device.address
+        }, 5000);
+        const decision = remoteFactoryResetDecision(status, device.address, transactionId);
+        if (decision === 'ignore') continue;
+        if (decision === 'pending') {
+          fleetRowHistory.value[device.address] = {
+            ...(fleetRowHistory.value[device.address] || {}),
+            rowState: 'reset_awaiting_ack',
+            rowStateUntilMs: undefined
+          };
+          loraInventory.value = loraInventory.value.map(row =>
+            row.address === device.address ? { ...row, row_state: 'reset_awaiting_ack' } : row
+          );
+        }
+        if (decision === 'committed' || decision === 'unconfirmed' || decision === 'failed') {
+          terminalStage = decision;
+          errorCode = Number(status.error_code || 0);
+          break;
+        }
+      }
+
+      if (terminalStage !== 'committed') {
+        const failed = terminalStage === 'failed';
+        const rowState = failed ? 'reset_failed' : 'reset_unconfirmed';
+        fleetRowHistory.value[device.address] = {
+          ...(fleetRowHistory.value[device.address] || {}),
+          rowState,
+          resetReason: failed ? `error_${errorCode}` : 'confirmation_timeout',
+          rowStateUntilMs: undefined
+        };
+        loraInventory.value = loraInventory.value.map(row =>
+          row.address === device.address ? { ...row, row_state: rowState } : row
+        );
+        notify(failed
+          ? `Factory reset failed on remote ${device.address}; the sequence stopped.`
+          : `Factory reset was not confirmed by remote ${device.address}; its gateway record was retained and the sequence stopped.`);
+        break;
+      }
+
+      const now = Date.now();
+      if (keepFleet) {
+        fleetRowHistory.value[device.address] = {
+          ...(fleetRowHistory.value[device.address] || {}),
+          rowState: 'reset_confirmed',
+          rowStateUntilMs: now + 60000,
+          knownRebootUntilMs: now + 120000,
+          rebootExpectedUntilMs: now + 240000
+        };
+        loraInventory.value = loraInventory.value.map(row =>
+          row.address === device.address ? { ...row, row_state: 'reset_confirmed', row_state_until_ms: now + 60000 } : row
+        );
+      } else {
+        loraInventory.value = loraInventory.value.filter(row => row.address !== device.address);
+        delete fleetRowHistory.value[device.address];
+      }
+      notify(`Factory reset confirmed by remote ${device.address}.`);
+      activeDevice = null;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   } catch (e) {
-    const msg = serialFeatureError(`Remote factory reset`, e);
-    notify(msg);
+    if (activeDevice) {
+      fleetRowHistory.value[activeDevice.address] = {
+        ...(fleetRowHistory.value[activeDevice.address] || {}),
+        rowState: 'reset_unconfirmed',
+        resetReason: 'status_unavailable',
+        rowStateUntilMs: undefined
+      };
+      loraInventory.value = loraInventory.value.map(row =>
+        row.address === activeDevice!.address ? { ...row, row_state: 'reset_unconfirmed' } : row
+      );
+    }
+    notify(serialFeatureError('Remote factory reset', e));
+  } finally {
+    for (const device of devices) {
+      const history = fleetRowHistory.value[device.address];
+      if (history?.rowState === 'reset_queued') {
+        history.rowState = undefined;
+        history.rowStateUntilMs = undefined;
+        loraInventory.value = loraInventory.value.map(row =>
+          row.address === device.address ? { ...row, row_state: undefined, row_state_until_ms: undefined } : row
+        );
+      }
+    }
+    remoteFactoryResetBusy.value = false;
+    refreshLoraInventoryStatus(false);
   }
 }
 
@@ -3874,8 +3998,9 @@ async function executeForgetRemote(device: LoraInventoryDevice) {
     return;
   }
   const deviceName = device.chip_id ? lrsDeviceName(device.chip_id) : `Address ${device.address}`;
+  const resetWasUnconfirmed = fleetRowHistory.value[device.address]?.rowState === 'reset_unconfirmed';
   const confirmed = await confirmOperatorAction(
-    `Remove remote device ${deviceName} from Gateway?\n\nThis will permanently delete its address and name pairing from the gateway configuration.\n\nThe remote itself is not reset. It remains on this fleet key and may appear as a same-key adoption candidate.`,
+    `Remove remote device ${deviceName} from Gateway?\n\nThis will permanently delete its address and name pairing from the gateway configuration.\n\n${resetWasUnconfirmed ? 'Its factory reset was not confirmed. It may still hold this Fleet Key, and removing it can strand the device.\n\n' : ''}The remote itself is not reset. It remains on this fleet key and may appear as a same-key adoption candidate.`,
     { confirmText: 'Remove from Gateway', danger: true }
   );
   if (!confirmed) return;
@@ -6717,6 +6842,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @remote-view-logs="handleFleetRemoteViewLogs"
         @remote-forget="handleFleetRemoteForget"
         @remote-factory-reset="handleFleetRemoteFactoryReset"
+        @selected-factory-reset="handleFleetSelectedFactoryReset"
         @candidate-adopt="handleAdoptCandidatePayload"
       />
     </div>

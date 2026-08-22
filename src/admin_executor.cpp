@@ -800,6 +800,7 @@ void AdminExecutor::handleFactoryReset(JsonDocument &doc, ResponseWriter writer)
   out["keep_wifi_credentials"] = keepWifi;
   sendOk(out, writer);
   delay(100);
+  if (!keepWifi) WiFi.disconnect(true, true);
   ESP.restart();
 }
 
@@ -1642,7 +1643,7 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
     return;
   }
 
-  if (sm_->isOtaPullTxActive()) {
+  if (sm_->isOtaPullTxActive() || sm_->isFactoryResetTxActive()) {
     sendError("remote_ota_pull", "gateway_busy", id, writer);
     return;
   }
@@ -1884,6 +1885,10 @@ void AdminExecutor::handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter w
   const bool keepFleetKey = doc["keep_shared_fleet_key"] | doc["keep_fleet_key"] | false;
   const bool keepWifi = doc["keep_wifi_credentials"] | doc["keep_wifi"] | false;
 
+  if (sm_->isFactoryResetTxActive() || sm_->isOtaPullTxActive()) {
+    sendError("remote_factory_reset", "gateway_busy", id, writer);
+    return;
+  }
   if (!sm_->sendPeerFactoryReset(static_cast<uint8_t>(rawAddr), keepFleetKey, keepWifi)) {
     sendError("remote_factory_reset", "send_failed", id, writer);
     return;
@@ -1896,6 +1901,42 @@ void AdminExecutor::handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter w
   out["target_address"] = rawAddr;
   out["keep_shared_fleet_key"] = keepFleetKey;
   out["keep_wifi_credentials"] = keepWifi;
+  out["transaction_id"] = sm_->getRemoteFactoryResetStatus(static_cast<uint8_t>(rawAddr)).transaction_id;
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleRemoteFactoryResetStatus(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_factory_reset_status", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_factory_reset_status", "runtime_unavailable", id, writer);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | 0;
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
+    sendError("remote_factory_reset_status", "invalid_address", id, writer);
+    return;
+  }
+
+  const NodeStateMachine::RemoteFactoryResetStatusRecord rec =
+      sm_->getRemoteFactoryResetStatus(static_cast<uint8_t>(rawAddr));
+  JsonDocument out;
+  out["cmd"] = "remote_factory_reset_status";
+  if (id[0] != '\0') out["id"] = id;
+  out["addr"] = rec.dst;
+  out["transaction_id"] = rec.transaction_id;
+  const char *stage = "idle";
+  if (rec.stage == 1) stage = "sending";
+  else if (rec.stage == 2) stage = "awaiting_ack";
+  else if (rec.stage == 3) stage = "confirming";
+  else if (rec.stage == 4) stage = "committed";
+  else if (rec.stage == 5) stage = "unconfirmed";
+  else if (rec.stage == 6) stage = "failed";
+  out["stage"] = stage;
+  out["error_code"] = rec.error_code;
   sendOk(out, writer);
 }
 
@@ -2011,32 +2052,17 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
     return;
   }
   const uint8_t addr = static_cast<uint8_t>(rawAddr);
-  auto &cfg = config_->settings();
-  bool found = false;
-
   uint32_t chipId = 0;
-  for (uint8_t i = 0; i < cfg.known_peer_count; ++i) {
-    if (cfg.known_peer_addresses[i] == addr) {
-      chipId = cfg.known_peer_chip_ids[i];
-      for (uint8_t j = i; j + 1 < cfg.known_peer_count; ++j) {
-        cfg.known_peer_addresses[j] = cfg.known_peer_addresses[j + 1];
-        cfg.known_peer_chip_ids[j] = cfg.known_peer_chip_ids[j + 1];
-      }
-      cfg.known_peer_addresses[--cfg.known_peer_count] = 0;
-      cfg.known_peer_chip_ids[cfg.known_peer_count] = 0;
-      found = true;
-      break;
-    }
+  bool found = false;
+  if (!config_->removeKnownPeer(addr, chipId, found)) {
+    sendError(cmd, "save_failed", id, writer);
+    return;
   }
 
   MqttBridge::clearPeerRetained(addr, chipId);
   sm_->mqttForgetPeer(addr);
 
   if (found) {
-    if (!config_->save()) {
-      sendError(cmd, "save_failed", id, writer);
-      return;
-    }
     if (on_apply_)
       on_apply_(on_apply_ctx_, false, false);
   }
@@ -2046,7 +2072,7 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
   if (id[0] != '\0')
     out["id"] = id;
   out["forgotten"] = found;
-  out["target_count"] = cfg.known_peer_count;
+  out["target_count"] = config_->settings().known_peer_count;
   sendOk(out, writer);
 }
 
@@ -2213,6 +2239,10 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
 
   if (strcmp(cmd, "remote_factory_reset") == 0) {
     handleRemoteFactoryReset(doc, writer);
+    return;
+  }
+  if (strcmp(cmd, "remote_factory_reset_status") == 0) {
+    handleRemoteFactoryResetStatus(doc, writer);
     return;
   }
 

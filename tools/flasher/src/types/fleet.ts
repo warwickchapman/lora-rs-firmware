@@ -41,7 +41,7 @@ export interface LoraInventoryDevice {
   ota_eligible?: boolean;
   ota_reason?: string;
   selected?: boolean;
-  row_state?: 'ota_pending' | 'ota_sending' | 'ota_awaiting_ack' | 'ota_downloading' | 'ota_apply_wait' | 'ota_retrying' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'ota_unconfirmed' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed';
+  row_state?: 'ota_pending' | 'ota_sending' | 'ota_awaiting_ack' | 'ota_downloading' | 'ota_apply_wait' | 'ota_retrying' | 'ota_rebooted' | 'ota_updated' | 'ota_no_reboot' | 'ota_unconfirmed' | 'unexpected_reboot' | 'ota_queued' | 'ota_failed' | 'reset_queued' | 'reset_sending' | 'reset_awaiting_ack' | 'reset_confirmed' | 'reset_unconfirmed' | 'reset_failed';
   row_state_until_ms?: number;
   pending_power_save_listen_only?: boolean;
   pending_power_save_tx_ms?: number;
