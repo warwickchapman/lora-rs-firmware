@@ -111,13 +111,14 @@ not by blaming them.
   discards the transfer ID once it commits to `PendingCommandManager`.
   [state_machine.cpp](../src/state_machine.cpp#L3827) and
   [pending_command_manager.cpp](../src/pending_command_manager.cpp#L85).
-- Flasher accepts up to six active pulls, spaces triggers by 500 ms, and treats
+- Flasher currently accepts up to six active pulls, spaces triggers by 500 ms, and treats
   `gateway_busy` as a short reschedule. The gateway itself needs about 1.25
-  seconds between the first and final manifest frame, and permits another
-  request as soon as that last frame is locally sent. This is a real
-  concurrency mismatch, not remote HTTP parallelism. See
+  seconds between the first and final manifest frame, and in reality, accepts one manifest
+  transfer while `ota_pull_tx_` is active (meaning Flasher repeatedly encounters/reschedules
+  `gateway_busy`). This is a real concurrency mismatch, not remote HTTP parallelism. See
   [useFleetOta.ts](../tools/flasher/src/composables/useFleetOta.ts#L22) and
-  [admin_executor.cpp](../src/admin_executor.cpp#L1614).
+  [admin_executor.cpp](../src/admin_executor.cpp#L1614). The proposed implementation deletes
+  this parallel-active abstraction in Flasher.
 - Flasher automatically retries three times after an eight-second apparent
   activity stall or a 45-second no-log timeout. Those timers can run while the
   original remote is downloading, because `ota_downloading` begins on admin
@@ -176,8 +177,9 @@ the current single handoff session match.
 
 The remote sends:
 
-- `manifest_accepted` immediately after the commit validates all four SHA
-  fragments and before the HTTP pull begins;
+- `manifest_accepted` synchronously from inside `handleOtaPullControlFrame()` immediately
+  after the commit validation is successful, using `radioTxBudgetAvailable()` and `markRadioTxSentThisTick()`
+  to send the frame before the blocking HTTP pull begins;
 - `download_failed:<code>` after a local HTTP/SHA/updater failure, using a
   fixed enum derived from existing errors; and
 - no invented success packet after a successful updater end, because reboot
@@ -201,8 +203,8 @@ not the control plane used by Flasher.
 
 ### Flasher state
 
-Replace the address array, `FLEET_OTA_MAX_ACTIVE_PULLS`, generic log-driven
-watchdog, and automatic retry machinery with one `RemoteOtaOperation`:
+Delete the parallel-active abstraction entirely, and model exactly one `activeRemoteOta` operation
+(with no "max active" configuration or setting). The `RemoteOtaOperation` tracks:
 
 `address`, `chipId`, `transferId`, `stage`, `reason`, `targetVersion`, and
 stage deadline timestamps.
@@ -239,13 +241,15 @@ confirmation`; do not send another OTA manifest automatically.
 ## Implementation steps
 
 1. **Firmware: bounded acknowledged handoff.**
-   Update [radio_protocol.h](../src/radio_protocol.h),
-   [state_machine.h](../src/state_machine.h), and
-   [state_machine.cpp](../src/state_machine.cpp) with `OtaPullStatus`, a
-   single sender wait-for-ack phase, exact one-time manifest retransmission,
-   destination/transfer validation, and compact status record. Preserve
-   `isGroupActive()` and one-radio-send-per-tick control priority; OTA control
-   remains lower priority than active relay/input group control.
+    Update [radio_protocol.h](../src/radio_protocol.h),
+    [state_machine.h](../src/state_machine.h), and
+    [state_machine.cpp](../src/state_machine.cpp) with `OtaPullStatus`. The remote
+    sends `manifest_accepted` synchronously inside `handleOtaPullControlFrame()` immediately
+    after successful commit validation, using `radioTxBudgetAvailable()` and `markRadioTxSentThisTick()`.
+    Implement a single sender wait-for-ack phase on the gateway, exact one-time manifest
+    retransmission, destination/transfer validation, and compact status record. Preserve
+    `isGroupActive()` and one-radio-send-per-tick control priority; OTA control
+    remains lower priority than active relay/input group control.
 2. **Firmware: retain identity through the remote lifecycle.**
    Extend only the pending OTA command data in
    [pending_command_manager.h](../src/pending_command_manager.h) and
@@ -261,12 +265,12 @@ confirmation`; do not send another OTA manifest automatically.
    destination. It must not report `downloading` until the matching remote
    acknowledgement is observed.
 4. **Flasher: remove false parallelism and blind retry.**
-   Refactor [useFleetOta.ts](../tools/flasher/src/composables/useFleetOta.ts)
-   to one active operation, polling the status command through existing
-   `sendEasyPairCommandOnPort`. Delete the six-active cap, 500 ms launch
-   cadence, three automatic retries, eight-second log-silence retry, 45-second
-   no-log retry, and log-to-row state mutation. Keep an operator-visible Retry
-   command only after a terminal, evidenced failure/unconfirmed result.
+    Refactor [useFleetOta.ts](../tools/flasher/src/composables/useFleetOta.ts)
+    to model exactly one `activeRemoteOta` operation, polling the status command through existing
+    `sendEasyPairCommandOnPort`. Delete the parallel-active abstraction, "max active" cap, 500 ms launch
+    cadence, three automatic retries, eight-second log-silence retry, 45-second
+    no-log retry, and log-to-row state mutation. Keep an operator-visible Retry
+    command only after a terminal, evidenced failure/unconfirmed result.
 5. **Flasher: targeted confirmation only.**
    Update the Fleet integration in
    [Flasher.vue](../tools/flasher/src/components/Flasher.vue) so no scan is

@@ -26,9 +26,9 @@ public:
   void clearUdpLogControl();
 
   // OTA Pull
-  void requestOtaPull(IPAddress host, uint16_t port, const char* sha256Hex, uint8_t src);
+  void requestOtaPull(IPAddress host, uint16_t port, const char* sha256Hex, uint8_t src, uint8_t transferId);
   bool hasPendingOtaPull() const { return ota_pull_pending_; }
-  bool consumeOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize, uint8_t &src);
+  bool consumeOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize, uint8_t &src, uint8_t &transferId);
   void clearOtaPull();
 
   // WiFi Provision
@@ -97,6 +97,7 @@ private:
   uint16_t ota_pull_pending_port_ = 0;
   FixedSettingString<65> ota_pull_pending_sha256_;
   uint8_t ota_pull_pending_src_ = 0;
+  uint8_t ota_pull_pending_transfer_id_ = 0;
 
   bool wifi_prov_pending_ = false;
   FixedSettingString<33> wifi_prov_pending_ssid_;

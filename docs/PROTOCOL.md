@@ -26,6 +26,7 @@ Packed fields:
 - `WifiProvision` (`'W'`)
 - `WifiControl` (`'Y'`)
 - `OtaPullControl` (`'O'`)
+- `OtaPullStatus` (`'N'`)
 - `FactoryReset` (`'X'`)
 - `Provisioning` (`'V'`)
 - `MaintenanceRequest` (`'Q'`)
@@ -152,9 +153,15 @@ dry-contact state in firmware or Fleet cache.
 - RX persists the requested Wi-Fi enabled state, replies with `WifiControl` op `status` (`payload b0=2`), and echoes the command counter in payload bytes `b8..b11`.
 - TX stores Wi-Fi state confirmations in runtime peer state only; polling/status responses can refresh the state after reboot.
 - `OtaPullControl` (`'O'`) triggers a remote WiFi-connected node to pull `/firmware.bin` from a temporary HTTP server.
-- OTA pull control is segmented as `start`, four `hash` chunks, and `commit`. The encrypted LoRa payload carries the server host/port and the 32-byte firmware SHA256; the target refuses to flash without a complete digest.
-- The remote node maintains strict stateful LoRa telemetry silence throughout both control-frame assembly and the entire HTTP download loop (cleared only on reboot or explicit failure).
-- The HTTP firmware stream is hashed while being written to the inactive OTA slot. The update is finalized only if the final SHA256 matches the authenticated digest. On any hash validation failure or download error, the remote node explicitly clears its active OTA state to lift silence blocks.
+  - OTA pull control is segmented as `start`, four `hash` chunks, and `commit`. The encrypted LoRa payload carries the server host/port and the 32-byte firmware SHA256; the target refuses to flash without a complete digest.
+  - The remote waits for the gateway receive-turnaround guard, then sends `OtaPullStatus` (`'N'`) only if it can transmit the ACK. It retains the manifest and does not start HTTP OTA until that ACK is sent.
+  - Legacy nodes do not support the `OtaPullStatus` type or the explicit transfer ID. This is a breaking change; legacy nodes must be bootstrapped once using direct `espota.py` over Wi-Fi.
+- `OtaPullStatus` (`'N'`) carries the remote status update back to the gateway.
+  - `payload b0`: status opcode (`1` = `manifest_accepted`, `2` = `download_failed`).
+  - `payload b1`: transfer ID.
+  - `payload b2`: error code (populated when opcode is `2`).
+  - On any hash validation failure or download error, the remote node explicitly transmits a `download_failed` status back to the gateway and clears its active OTA state to lift silence blocks. The remote does not send success status; success is confirmed via Flasher reboot verification.
+  - The gateway serializes one manifest transaction at a time, then releases that RF slot on `manifest_accepted`. Accepted remotes may download concurrently. Compact per-address gateway status records preserve transfer correlation for late failures.
 - `FactoryReset` (`'X'`) carries a compact command payload to request remote factory reset.
 - `FactoryReset` supports an option to preserve the current shared fleet key during reset.
 - Transmitting a remote factory-reset frame is not delivery confirmation. The gateway retains the remote's configured address/chip record after either reset variant; remove that record only through the explicit gateway forget action once the reset has been verified.

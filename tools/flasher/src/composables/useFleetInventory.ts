@@ -111,11 +111,19 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     let otaExpected = Number(history.otaExpectedUntilMs || 0) > now;
     const knownReboot = history.knownRebootUntilMs && history.knownRebootUntilMs > now;
     const expectedReboot = history.rebootExpectedUntilMs && history.rebootExpectedUntilMs > now;
+    const otaTargetVersionMatches = otaExpected && !!history.otaTargetVersion && row.fw_version === history.otaTargetVersion;
 
     if (previousUptime > 0 && uptime > 0 && uptime + 30000 < previousUptime) {
-      if (history.rowState === 'ota_updated' && knownReboot) {
+      if (history.rowState === 'ota_apply_wait') {
+        // The active OTA operation owns confirmation. Do not convert its
+        // expected reboot into a generic Fleet reboot result.
+        rowState = 'ota_apply_wait';
+      } else if (history.rowState === 'ota_updated' && knownReboot) {
         rowState = 'ota_updated';
         rowStateUntilMs = history.rowStateUntilMs;
+      } else if (otaTargetVersionMatches) {
+        rowState = 'ota_updated';
+        rowStateUntilMs = now + 30000;
       } else {
         const isExpected = expectedReboot || otaExpected || knownReboot;
         rowState = isExpected ? 'ota_rebooted' : 'unexpected_reboot';
@@ -124,26 +132,12 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
 
-    if (otaExpected && history.fwVersion && row.fw_version && history.fwVersion !== row.fw_version) {
-      rowState = 'ota_updated';
-      rowStateUntilMs = now + 30000;
-    }
-
-    const activeOtaStates = ['ota_pending', 'ota_downloading', 'ota_apply_wait', 'ota_retrying', 'ota_queued'];
-    const targetVersion = options.parseVersion(options.selectedFirmwareCandidateVersion() || '');
-    const reportedVersion = options.parseVersion(row.fw_version || '');
-    if (row.fw_version && targetVersion && reportedVersion &&
-        options.compareParsedVersions(reportedVersion, targetVersion) >= 0 &&
-        activeOtaStates.includes(rowState || '')) {
-      rowState = 'ota_updated';
-      rowStateUntilMs = now + 30000;
-    }
-
     let otaExpectedUntilMs = history.otaExpectedUntilMs;
     if (rowState === 'ota_updated') {
       otaExpectedUntilMs = undefined;
       otaExpected = false;
       history.knownRebootUntilMs = now + 120000;
+      history.otaTargetVersion = undefined;
     }
 
     if (rowState === 'ota_queued' && options.otaQueue.value.some(d => d.address === row.address)) {
@@ -306,23 +300,38 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   }
 
   function fleetRowStatusLabel(device: LoraInventoryDevice): string {
-    if (device.row_state === 'unexpected_reboot') return 'Unexpected reboot';
-    if (device.row_state === 'ota_failed') return 'OTA Failed';
+    if (device.row_state === 'unexpected_reboot') return 'Restarted';
+    if (device.row_state === 'ota_failed') return 'Failed';
     if (device.row_state === 'ota_updated') return 'Updated';
-    if (device.row_state === 'ota_rebooted') return 'Rebooted';
-    if (device.row_state === 'ota_no_reboot') return 'No reboot seen';
-    if (device.row_state === 'ota_pending') return 'Waiting for reboot';
-    if (device.row_state === 'ota_downloading') return 'Downloading OTA...';
-    if (device.row_state === 'ota_apply_wait') return 'Waiting for reboot';
-    if (device.row_state === 'ota_retrying') {
-      const history = fleetRowHistory.value[device.address] || {};
-      const retryCount = history.otaRetryCount || 0;
-      return `Retrying (${retryCount}/3)...`;
-    }
+    if (device.row_state === 'ota_rebooted') return 'Stage 4/4';
+    if (device.row_state === 'ota_no_reboot') return 'Not confirmed';
+    if (device.row_state === 'ota_pending' || device.row_state === 'ota_apply_wait') return 'Stage 4/4';
+    if (device.row_state === 'ota_downloading') return 'Stage 3/4';
+    if (device.row_state === 'ota_awaiting_ack') return 'Stage 2/4';
+    if (device.row_state === 'ota_sending' || device.row_state === 'ota_retrying') return 'Stage 1/4';
+    if (device.row_state === 'ota_unconfirmed') return 'Not confirmed';
     if (device.row_state === 'ota_queued') {
       const qIdx = options.otaQueue.value.findIndex(d => d.address === device.address);
-      return qIdx >= 0 ? `Queued for OTA (#${qIdx + 1})` : 'Queued for OTA';
+      return qIdx >= 0 ? `Queued #${qIdx + 1}` : 'Queued';
     }
+    return '';
+  }
+
+  function fleetRowStatusTitle(device: LoraInventoryDevice): string {
+    if (device.row_state === 'unexpected_reboot') return 'Device restarted outside a requested firmware update.';
+    if (device.row_state === 'ota_failed') {
+      const history = fleetRowHistory.value[device.address] || {};
+      return history.otaReason ? `Firmware update failed: ${history.otaReason}` : 'Firmware update failed.';
+    }
+    if (device.row_state === 'ota_updated') return 'Firmware version and reboot confirmed.';
+    if (device.row_state === 'ota_rebooted') return 'Expected firmware-update reboot detected.';
+    if (device.row_state === 'ota_no_reboot') return 'The target version and reboot were not confirmed before timeout.';
+    if (device.row_state === 'ota_pending' || device.row_state === 'ota_apply_wait') return 'Waiting for the target firmware version and a lower uptime.';
+    if (device.row_state === 'ota_downloading') return 'The remote accepted the update and is downloading firmware.';
+    if (device.row_state === 'ota_awaiting_ack') return 'Waiting for the remote to accept the update details.';
+    if (device.row_state === 'ota_sending' || device.row_state === 'ota_retrying') return 'Sending update details to the remote.';
+    if (device.row_state === 'ota_unconfirmed') return 'The gateway did not receive confirmation that the remote accepted the update.';
+    if (device.row_state === 'ota_queued') return 'Waiting for the active remote update to finish.';
     return '';
   }
 
@@ -444,6 +453,18 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       .slice()
       .sort((a, b) => a.address - b.address)
       .map(row => {
+        if (row.age_ms !== undefined && row.age_ms !== null && row.age_ms >= 0) {
+          const reportedTimestamp = now - row.age_ms;
+          const history = fleetRowHistory.value[row.address] || {};
+          if (history.lastTelemetryTimestamp === undefined ||
+              history.lastTelemetryTimestamp === null ||
+              reportedTimestamp > history.lastTelemetryTimestamp) {
+            fleetRowHistory.value[row.address] = {
+              ...history,
+              lastTelemetryTimestamp: reportedTimestamp
+            };
+          }
+        }
         const cacheKey = `${activeGwId}:${row.address}`;
         const cacheEntry = telemetryCache.value[cacheKey];
         let mergedRow = { ...row };
@@ -645,6 +666,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     candidateStateClass,
     fleetDeviceUdpLabel,
     fleetRowStatusLabel,
+    fleetRowStatusTitle,
     loraInventoryProgressLabel,
     fleetForceScanCooldownRemainingMs,
     fleetForceScanLabel,

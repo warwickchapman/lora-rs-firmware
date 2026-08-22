@@ -28,7 +28,7 @@ import type {
 import { LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, LoraInventoryPeerStatus, SensorReading } from '../types/fleet';
 import { useFleetInventoryPolling, shouldClearScanStateOnTimeout } from '../composables/useFleetInventoryPolling';
 import { useFleetOta } from '../composables/useFleetOta';
-import { useFirmwareServer, NetworkInterface } from '../composables/useFirmwareServer';
+import { useFirmwareServer, FirmwareServerInfo, NetworkInterface } from '../composables/useFirmwareServer';
 import ActivityPanel from './flasher/ActivityPanel.vue';
 import SessionMqttBanner from './flasher/SessionMqttBanner.vue';
 import MonitorMqttSettingsModal from './flasher/MonitorMqttSettingsModal.vue';
@@ -366,6 +366,7 @@ const {
   selectedFirmwareCandidateVersion,
   networkOtaFirmwareOptions,
   fetchFirmware,
+  refreshDefaultLocalFirmware,
   initializeRegion
 } = useFirmwareManager({
   flasherAppVersion,
@@ -385,8 +386,8 @@ const networkInterfaceInterval = ref<ReturnType<typeof window.setInterval> | nul
 const {
   isFirmwareServerStarting,
   firmwareServerInfo,
-  startFirmwareServer,
-  ensureFirmwareServer,
+  startFirmwareServer: startFirmwareServerResolved,
+  ensureFirmwareServer: ensureFirmwareServerResolved,
   stopFirmwareServer,
   firmwareServerTarget,
   handleNetworkInterfacesChanged,
@@ -406,6 +407,23 @@ const {
   pushNetworkLog,
   notify
 });
+
+async function prepareSelectedFirmware(): Promise<void> {
+  const changed = await refreshDefaultLocalFirmware();
+  if (changed && firmwareServerInfo.value) {
+    await stopFirmwareServer();
+  }
+}
+
+async function startFirmwareServer(): Promise<void> {
+  await prepareSelectedFirmware();
+  await startFirmwareServerResolved();
+}
+
+async function ensureFirmwareServer(): Promise<FirmwareServerInfo> {
+  await prepareSelectedFirmware();
+  return await ensureFirmwareServerResolved();
+}
 
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
@@ -832,6 +850,7 @@ const {
   candidateStateClass,
   fleetDeviceUdpLabel,
   fleetRowStatusLabel,
+  fleetRowStatusTitle,
   loraInventoryProgressLabel,
   fleetForceScanCooldownRemainingMs,
   fleetForceScanLabel,
@@ -891,7 +910,6 @@ const {
   fleetFlashAvailable,
   fleetFlashUnavailableReason,
   flashLoraRemote,
-  handleOtaLogLine,
   cleanupFleetOtaTimers
 } = useFleetOta({
   loraInventory,
@@ -925,19 +943,20 @@ const {
       port: target.port,
       sha256: info.sha256
     }, 8000);
-    return { out, target, sha256: info.sha256 };
+    return { out, target, sha256: info.sha256, targetVersion: selectedFirmwareCandidateVersion() };
   },
-  runFollowupInventoryScan: async (address: number) => {
+  queryOtaStatusCommand: async (address: number) => {
     const { port, password } = fleetGatewayCommandTarget();
-    if (!password) throw new Error('missing gateway password');
-    await sendEasyPairCommandOnPort(port, 'start_lora_inventory', {
+    if (!port || !password) throw new Error('Select a gateway and enter the admin password first');
+    return await sendEasyPairCommandOnPort<any>(port, 'remote_ota_status', {
       admin_password: password,
-      start_address: address,
-      end_address: address,
-      interval_ms: 250
-    }, 8000);
-    await new Promise(resolve => setTimeout(resolve, 900));
-    await refreshLoraInventoryStatus();
+      addr: address
+    }, 4000);
+  },
+  refreshLoraPeerCommand: async (address: number) => {
+    const { port } = fleetGatewayCommandTarget();
+    if (!port) return;
+    await refreshLoraInventoryPeers(port, [address], true, 'fleet');
   },
   notify,
   pushNetworkLog,
@@ -3070,7 +3089,9 @@ function fleetRowClass(device: LoraInventoryDevice): string {
   if (device.row_state === 'ota_pending') return 'bg-cyan-950/30';
   if (device.row_state === 'ota_downloading') return 'bg-cyan-950/40 ring-1 ring-cyan-500/40 animate-pulse';
   if (device.row_state === 'ota_apply_wait') return 'bg-sky-950/40 ring-1 ring-sky-500/40';
-  if (device.row_state === 'ota_retrying') return 'bg-amber-950/30 ring-1 ring-amber-500/30 animate-pulse';
+  if (device.row_state === 'ota_sending') return 'bg-cyan-950/30 animate-pulse';
+  if (device.row_state === 'ota_awaiting_ack') return 'bg-cyan-950/30 animate-pulse';
+  if (device.row_state === 'ota_unconfirmed') return 'bg-rose-950/40 ring-1 ring-rose-500/40';
   if (device.row_state === 'ota_queued') return 'bg-fuchsia-950/30 ring-1 ring-fuchsia-500/30';
   return 'bg-slate-950/20';
 }
@@ -3943,6 +3964,7 @@ async function flashFleetGateway() {
     notify(fleetGatewayFlashUnavailableReason());
     return;
   }
+  await prepareSelectedFirmware();
   const firmwareOptions = networkOtaFirmwareOptions();
   if (!firmwareOptions) return;
   const label = isMqtt ? `lrs-${port}` : (fleetGatewayIdentity.value?.ssid || port);
@@ -5368,6 +5390,7 @@ async function startFlash() {
   pushSerialLog('--- Preparing Firmware ---');
 
   try {
+    await prepareSelectedFirmware();
     if (!hasActiveDeviceInfo.value) {
       pushSerialLog('Loading device information before flash...');
       const loaded = await readDeviceInfo();
@@ -5411,6 +5434,7 @@ async function startBulkFlash() {
   }
 
   isBulkFlashing.value = true;
+  await prepareSelectedFirmware();
   const selectedPorts = [...bulkSelectedPorts.value];
   const isLocal = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX);
   const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
@@ -5799,8 +5823,13 @@ const handleWindowClick = () => {
   activeDropdownAddress.value = null;
 };
 
+const handleWindowFocus = () => {
+  refreshDefaultLocalFirmware().catch(() => {});
+};
+
 onMounted(async () => {
   window.addEventListener('click', handleWindowClick);
+  window.addEventListener('focus', handleWindowFocus);
   fleetClockTimer.value = window.setInterval(() => {
     fleetClockMs.value = Date.now();
   }, 1000);
@@ -5909,9 +5938,7 @@ onMounted(async () => {
           }
         }
 
-        if (dev) {
-          handleOtaLogLine(trimmed, dev);
-        }
+        // handleOtaLogLine removed - state is driven solely by gateway status polling
       }
     });
   });
@@ -6063,6 +6090,7 @@ watch(monitorAutoRefresh, (enabled) => {
 
 onUnmounted(() => {
   window.removeEventListener('click', handleWindowClick);
+  window.removeEventListener('focus', handleWindowFocus);
   stopEasyPairStatusPolling();
   stopLoraInventoryPolling();
   stopMonitorPolling();
@@ -6166,6 +6194,7 @@ const fleetDisplayRows = computed<FleetDisplayRow[]>(() => {
       tankDetailLabel: tankDetailLabel(displayDevice),
       uptimeLabel: displayDevice.uptime_ms ? formatUptime(displayDevice.uptime_ms) : '-',
       rowStatusLabel: fleetRowStatusLabel(displayDevice),
+      rowStatusTitle: fleetRowStatusTitle(displayDevice),
       rowState: displayDevice.row_state,
       rssi: displayDevice.rssi,
       ageSeconds: ageMs != null ? Math.round(ageMs / 1000) : null,

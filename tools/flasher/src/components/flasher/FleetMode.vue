@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue';
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue';
 
 export interface FleetConfig {
   sessionConnectionType: 'serial' | 'mqtt' | 'local_broker';
@@ -125,6 +125,7 @@ export interface FleetDisplayRow {
   tankDetailLabel: string | null;
   uptimeLabel: string;
   rowStatusLabel: string | null;
+  rowStatusTitle: string;
   rowState?: string;
   wifi_rssi_dbm?: number;
   rssi?: number;
@@ -203,6 +204,56 @@ const emit = defineEmits<{
 }>();
 
 const networkUdpLogContainer = ref<HTMLDivElement | null>(null);
+const actionMenuTrigger = ref<HTMLElement | null>(null);
+const actionMenuStyle = ref<Record<string, string>>({ visibility: 'hidden' });
+
+function positionActionMenu() {
+  const trigger = actionMenuTrigger.value;
+  const menu = document.querySelector<HTMLElement>('[data-fleet-action-menu]');
+  if (!trigger || !menu || activeDropdownAddress.value === null) return;
+
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const gap = 4;
+  const viewportPadding = 8;
+  const opensAbove = window.innerHeight - triggerRect.bottom - gap < menuRect.height
+    && triggerRect.top - gap >= menuRect.height;
+  const top = opensAbove
+    ? triggerRect.top - menuRect.height - gap
+    : triggerRect.bottom + gap;
+  const left = Math.max(
+    viewportPadding,
+    Math.min(triggerRect.right - menuRect.width, window.innerWidth - menuRect.width - viewportPadding)
+  );
+
+  actionMenuStyle.value = {
+    top: `${Math.max(viewportPadding, top)}px`,
+    left: `${left}px`,
+    visibility: 'visible',
+  };
+}
+
+function toggleActionMenu(address: number | string, event: MouseEvent) {
+  if (activeDropdownAddress.value === address) {
+    activeDropdownAddress.value = null;
+    return;
+  }
+
+  actionMenuTrigger.value = event.currentTarget as HTMLElement;
+  actionMenuStyle.value = { visibility: 'hidden' };
+  activeDropdownAddress.value = address;
+  nextTick(() => positionActionMenu());
+}
+
+onMounted(() => {
+  window.addEventListener('resize', positionActionMenu);
+  window.addEventListener('scroll', positionActionMenu, true);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', positionActionMenu);
+  window.removeEventListener('scroll', positionActionMenu, true);
+});
 
 function scrollNetworkUdpToBottom() {
   if (networkUdpLogContainer.value) {
@@ -505,13 +556,21 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
               <td class="px-2 py-1.5 overflow-visible">
                 <div class="relative inline-block text-left">
                   <button
-                    @click.stop="activeDropdownAddress = (activeDropdownAddress === 'gateway' ? null : 'gateway')"
+                    @click.stop="toggleActionMenu('gateway', $event)"
                     class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center gap-1 select-none"
                   >
                     Actions
                     <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" /></svg>
                   </button>
-                  <div v-if="activeDropdownAddress === 'gateway'" class="absolute right-0 mt-1 w-40 z-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium">
+                </div>
+                <Teleport to="body">
+                  <div
+                    v-if="activeDropdownAddress === 'gateway'"
+                    data-fleet-action-menu
+                    :style="actionMenuStyle"
+                    @click.stop
+                    class="fixed z-[100] w-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium"
+                  >
                     <button @click="emit('gateway-flash'); activeDropdownAddress = null" :disabled="gateway.flashDisabled || !gateway.isUpgradeAvailable" :title="gateway.flashUnavailableReason" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none">⚡ Upgrade</button>
                     <button @click="emit('gateway-settings'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">🛠️ Commands</button>
                     <button @click="emit('gateway-reboot'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">🔄 Reboot</button>
@@ -519,7 +578,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                     <div class="h-[1px] bg-slate-800/80 my-1"></div>
                     <button @click="emit('gateway-factory-reset'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none">⚠️ Factory Reset</button>
                   </div>
-                </div>
+                </Teleport>
               </td>
             </tr>
           </tbody>
@@ -672,9 +731,21 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
               </td>
               <td class="px-2 py-1.5 font-mono">
                 <div class="text-slate-300">{{ device.uptimeLabel }}</div>
-                <div v-if="device.rowStatusLabel" :class="['mt-1 text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer select-none', (device.rowState === 'unexpected_reboot' || device.rowState === 'ota_failed') ? 'text-rose-300' : device.rowState === 'ota_updated' ? 'text-emerald-300' : device.rowState === 'ota_rebooted' ? 'text-orange-400' : 'text-sky-300']" :title="device.rowState === 'unexpected_reboot' ? 'Spontaneous restart detected: Device uptime rolled back (rebooted) without a requested OTA command. Typically caused by power cycles, brownouts, or watchdog resets.' : device.rowState === 'ota_failed' ? 'Download failed: The remote device failed to download the firmware binary from the server.' : device.rowState === 'ota_rebooted' ? 'Normal post-upgrade restart: Device rebooted successfully to boot into the newly written firmware version.' : device.rowState === 'ota_no_reboot' ? 'Upgrade timeout: The firmware binary was served, but the remote did not reboot to apply it within the expected window.' : undefined">
+                <div
+                  v-if="device.rowStatusLabel"
+                  :class="[
+                    'mt-1 inline-flex h-5 w-[96px] items-center justify-center whitespace-nowrap rounded border px-2 text-[10px] font-bold select-none',
+                    (device.rowState === 'unexpected_reboot' || device.rowState === 'ota_failed' || device.rowState === 'ota_unconfirmed' || device.rowState === 'ota_no_reboot')
+                      ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                      : device.rowState === 'ota_updated'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : device.rowState === 'ota_queued'
+                          ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300'
+                          : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                  ]"
+                  :title="device.rowStatusTitle"
+                >
                   {{ device.rowStatusLabel }}
-                  <span v-if="device.rowState === 'unexpected_reboot' || device.rowState === 'ota_failed' || device.rowState === 'ota_rebooted' || device.rowState === 'ota_no_reboot'" class="opacity-60 text-[9px]">ⓘ</span>
                 </div>
               </td>
               <td class="px-2 py-1.5 font-mono">
@@ -702,7 +773,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
               <td class="px-2 py-1.5 overflow-visible">
                 <div class="relative inline-block text-left">
                   <button
-                    @click.stop="activeDropdownAddress = (activeDropdownAddress === device.address ? null : device.address)"
+                    @click.stop="toggleActionMenu(device.address, $event)"
                     class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center gap-1 select-none"
                   >
                     Actions
@@ -710,10 +781,14 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
-
+                </div>
+                <Teleport to="body">
                   <div
                     v-if="activeDropdownAddress === device.address"
-                    class="absolute right-0 mt-1 w-40 z-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium"
+                    data-fleet-action-menu
+                    :style="actionMenuStyle"
+                    @click.stop
+                    class="fixed z-[100] w-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium"
                   >
                     <button
                       @click="emit('remote-flash', device.address); activeDropdownAddress = null"
@@ -758,7 +833,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                       ⚠️ Factory Reset
                     </button>
                   </div>
-                </div>
+                </Teleport>
               </td>
             </tr>
           </tbody>

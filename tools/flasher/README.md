@@ -61,3 +61,8 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and Provision. Switching away from Flash stops the serial monitor so Provision can take the selected gateway port cleanly. Flash and Provision use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Provision WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
 The app restores the last active tab on launch. The main tabs are ordered Flash, Provision, Fleet, Monitor, and Settings.
+
+## Remote OTA Handoff & Watchdog Design
+Remote OTA updates serialize only the short LoRa manifest handoff. As soon as a remote acknowledges its manifest, Flasher starts the next queued handoff while accepted remotes download, reboot, and confirm independently:
+- **Handoff Stages**: Transitions are driven by matching the destination address and transfer ID: `ota_sending` -> `ota_awaiting_ack` -> `ota_downloading`. The remote sends its accepted status only after the gateway's receive-turnaround guard. Non-matching status reports are ignored.
+- **Reboot & Confirmation**: Upon handoff completion, the RF slot is released and the row continues independently. After a 45-second reboot delay window, Flasher paces targeted `refresh_lora_peer` requests one at a time. Successful update requires the expected version and a remote uptime lower than the pre-upgrade baseline.

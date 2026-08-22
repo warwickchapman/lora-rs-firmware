@@ -1661,6 +1661,46 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
   out["port"] = port;
   out["path"] = "/firmware.bin";
   out["sha256"] = sha256;
+  out["transfer_id"] = sm_->getRemoteOtaStatus(static_cast<uint8_t>(rawAddr)).transfer_id;
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleRemoteOtaStatus(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_ota_status", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_ota_status", "runtime_unavailable", id, writer);
+    return;
+  }
+
+  const int rawAddr = doc["addr"] | 0;
+  if (rawAddr < 1 || rawAddr > Settings::kAddressListCap) {
+    sendError("remote_ota_status", "invalid_addr", id, writer);
+    return;
+  }
+
+  NodeStateMachine::RemoteOtaStatusRecord rec = sm_->getRemoteOtaStatus(static_cast<uint8_t>(rawAddr));
+  JsonDocument out;
+  out["cmd"] = "remote_ota_status";
+  if (id[0] != '\0')
+    out["id"] = id;
+  out["addr"] = rec.dst;
+  out["transfer_id"] = rec.transfer_id;
+  out["stage_code"] = rec.stage;
+
+  const char *stageStr = "idle";
+  if (rec.stage == 1) stageStr = "sending";
+  else if (rec.stage == 2) stageStr = "awaiting_ack";
+  else if (rec.stage == 3) stageStr = "accepted";
+  else if (rec.stage == 4) stageStr = "unconfirmed";
+  else if (rec.stage == 5) stageStr = "failed";
+  out["stage"] = stageStr;
+  out["error_code"] = rec.error_code;
+  out["timestamp"] = rec.timestamp;
+
   sendOk(out, writer);
 }
 
@@ -2148,6 +2188,11 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
 
   if (strcmp(cmd, "remote_ota_pull") == 0) {
     handleRemoteOtaPull(doc, writer);
+    return;
+  }
+
+  if (strcmp(cmd, "remote_ota_status") == 0) {
+    handleRemoteOtaStatus(doc, writer);
     return;
   }
 

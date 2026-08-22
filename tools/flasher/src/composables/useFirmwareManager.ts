@@ -37,6 +37,7 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
   const firmwareVersions = ref<string[]>([LOCAL_OPTION]);
   const selectedVersion = ref('');
   const selectedLocalPath = ref('');
+  const selectedLocalIsDefault = ref(false);
   const isFetchingFirmware = ref(false);
   const region = ref<RegionCode>('ZA');
 
@@ -51,8 +52,9 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     return fileMatch ? fileMatch[0] : appVersionGetter();
   }
 
-  function setLocalFirmwareSelection(path: string, announce = true) {
+  function setLocalFirmwareSelection(path: string, announce = true, isDefault = false) {
     selectedLocalPath.value = path;
+    selectedLocalIsDefault.value = isDefault;
     const filename = path.split(/[\\/]/).pop() || 'firmware.bin';
     const localLabel = `${LOCAL_LABEL_PREFIX}${filename}`;
     firmwareVersions.value = firmwareVersions.value.filter(v => !v.startsWith(LOCAL_LABEL_PREFIX));
@@ -61,6 +63,19 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     if (announce) {
       options.pushLog(`Local firmware selected: ${path}`);
     }
+  }
+
+  async function refreshDefaultLocalFirmware(): Promise<boolean> {
+    const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware').catch(() => null);
+    if (!defaultLocalFirmware) return false;
+    if (selectedLocalPath.value && !selectedLocalIsDefault.value) return false;
+    if (selectedLocalPath.value === defaultLocalFirmware) return false;
+    const priorSelection = selectedVersion.value;
+    setLocalFirmwareSelection(defaultLocalFirmware, false, true);
+    if (priorSelection && !priorSelection.startsWith(LOCAL_LABEL_PREFIX)) {
+      selectedVersion.value = priorSelection;
+    }
+    return true;
   }
 
   async function openLocalFileDialog() {
@@ -177,11 +192,8 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
   async function fetchFirmware() {
     isFetchingFirmware.value = true;
     try {
-      const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware').catch(() => null);
+      await refreshDefaultLocalFirmware();
       const remoteVersions = await invoke<string[]>('get_firmware_list');
-      if (defaultLocalFirmware && !selectedLocalPath.value) {
-        setLocalFirmwareSelection(defaultLocalFirmware, false);
-      }
       const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
       firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : []), ...remoteVersions];
 
@@ -190,14 +202,7 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
       }
       await new Promise(resolve => setTimeout(resolve, 400));
     } catch (e) {
-      try {
-        const defaultLocalFirmware = await invoke<string | null>('get_default_local_firmware');
-        if (defaultLocalFirmware && !selectedLocalPath.value) {
-          setLocalFirmwareSelection(defaultLocalFirmware, false);
-        }
-      } catch {
-        // Ignore default-local lookup failure
-      }
+      await refreshDefaultLocalFirmware();
       const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
       firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : [])];
       options.notify('Error fetching firmware: ' + e);
@@ -228,6 +233,7 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     selectedFirmwareCandidateVersion,
     networkOtaFirmwareOptions,
     fetchFirmware,
+    refreshDefaultLocalFirmware,
     openLocalFileDialog,
     setLocalFirmwareSelection,
     detectRegionFromSystem,

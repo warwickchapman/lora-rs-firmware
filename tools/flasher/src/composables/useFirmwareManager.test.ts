@@ -82,6 +82,42 @@ describe('useFirmwareManager', () => {
       expect(manager.firmwareVersions.value).toEqual([LOCAL_OPTION, `${LOCAL_LABEL_PREFIX}firmware.bin`]);
       expect(logs).toContain('Local firmware selected: /some/path/firmware.bin');
     });
+
+    it('refreshes an automatically selected local dev build', async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce('/build/lrs-firmware-0.10.4~9.bin')
+        .mockResolvedValueOnce('/build/lrs-firmware-0.10.4~10.bin');
+
+      const manager = useFirmwareManager(options);
+      expect(await manager.refreshDefaultLocalFirmware()).toBe(true);
+      expect(await manager.refreshDefaultLocalFirmware()).toBe(true);
+      expect(manager.selectedLocalPath.value).toBe('/build/lrs-firmware-0.10.4~10.bin');
+      expect(manager.selectedVersion.value).toBe(`${LOCAL_LABEL_PREFIX}lrs-firmware-0.10.4~10.bin`);
+    });
+
+    it('does not replace a manually selected local file', async () => {
+      vi.mocked(invoke).mockResolvedValue('/build/lrs-firmware-0.10.4~10.bin');
+
+      const manager = useFirmwareManager(options);
+      manager.setLocalFirmwareSelection('/chosen/custom.bin');
+
+      expect(await manager.refreshDefaultLocalFirmware()).toBe(false);
+      expect(manager.selectedLocalPath.value).toBe('/chosen/custom.bin');
+    });
+
+    it('updates the default local entry without replacing a remote release selection', async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce('/build/lrs-firmware-0.10.4~9.bin')
+        .mockResolvedValueOnce('/build/lrs-firmware-0.10.4~10.bin');
+
+      const manager = useFirmwareManager(options);
+      await manager.refreshDefaultLocalFirmware();
+      manager.selectedVersion.value = '0.10.3';
+
+      expect(await manager.refreshDefaultLocalFirmware()).toBe(true);
+      expect(manager.selectedVersion.value).toBe('0.10.3');
+      expect(manager.firmwareVersions.value).toContain(`${LOCAL_LABEL_PREFIX}lrs-firmware-0.10.4~10.bin`);
+    });
   });
 
   describe('region detection and initialization', () => {

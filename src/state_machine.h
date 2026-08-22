@@ -182,10 +182,11 @@ class NodeStateMachine {
   bool hasPendingWifiControl() const;
   bool consumePendingWifiControl(bool &enabled, uint8_t &src, uint32_t &commandCounter);
   bool sendWifiControlStatus(uint8_t dstAddress, bool enabled, uint32_t commandCounter);
+  bool sendOtaPullStatus(uint8_t dstAddress, uint8_t transferId, uint8_t errCode);
   bool hasPendingUdpLogControl() const;
   bool consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src);
   bool consumePendingOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize,
-                             uint8_t &src);
+                             uint8_t &src, uint8_t &transferId);
   bool fleetScanStart(uint8_t startAddress, uint8_t endAddress, uint16_t intervalMs);
   void fleetScanCancel();
   bool fleetScanSnapshot(FleetScanSnapshot &out) const;
@@ -207,6 +208,15 @@ class NodeStateMachine {
   bool isAdoptionActive() const { return adoption_active_; }
   uint32_t adoptionChipId() const { return adoption_chip_id_; }
   uint8_t adoptionAddress() const { return adoption_address_; }
+
+  struct RemoteOtaStatusRecord {
+    uint8_t dst = 0;
+    uint8_t transfer_id = 0;
+    uint8_t stage = 0; // 0 = idle, 1 = sending, 2 = awaiting_ack, 3 = accepted, 4 = unconfirmed, 5 = failed
+    uint8_t error_code = 0;
+    uint32_t timestamp = 0;
+  };
+  RemoteOtaStatusRecord getRemoteOtaStatus(uint8_t address) const;
   bool sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, uint8_t newAddress, uint8_t op);
 
   bool sendFleetWifiProvision(const String &ssid, const String &password, uint8_t targetAddress = 255);
@@ -422,8 +432,10 @@ class NodeStateMachine {
 
   struct OtaPullRxTransfer {
     bool active = false;
+    bool accepted_ack_pending = false;
     uint8_t src = 0;
     uint8_t transfer_id = 0;
+    uint32_t accepted_ack_due_ms = 0;
     IPAddress host;
     uint16_t port = 0;
     uint32_t received_bitmap = 0;
@@ -438,9 +450,14 @@ class NodeStateMachine {
     uint8_t frame_index = 0;
     uint32_t next_tx_ms = 0;
     uint8_t sha256[32]{};
+    bool awaiting_ack = false;
+    uint32_t ack_timeout_ms = 0;
+    uint8_t retry_count = 0;
   };
   OtaPullTxTransfer ota_pull_tx_{};
   OtaPullRxTransfer ota_pull_rx_{};
+  RemoteOtaStatusRecord remote_ota_status_[Settings::kAddressListCap]{};
+  RemoteOtaStatusRecord *remoteOtaStatusForAddress(uint8_t address);
 
   uint32_t ota_silence_until_ms_ = 0;
   bool ota_pull_active_ = false;
@@ -554,6 +571,7 @@ class NodeStateMachine {
   void tickMaintenanceRequestQueue(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t commandId, uint32_t *sentCounter = nullptr);
   void tickPendingOtaPullControl(uint32_t now);
+  bool tickPendingOtaPullAcceptedAck(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
   bool localOperationalSensorsEnabled() const;
   void queueOperationalSensorPages(uint8_t dstAddress);
@@ -583,6 +601,7 @@ class NodeStateMachine {
   bool handleWifiControlFrame(const ProtocolMessage &msg);
   bool handleUdpLogControlFrame(const ProtocolMessage &msg);
   bool handleOtaPullControlFrame(const ProtocolMessage &msg);
+  bool handleOtaPullStatusFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleRebootFrame(const ProtocolMessage &msg);
   bool handleSensorConfigFrame(const ProtocolMessage &msg);

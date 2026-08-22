@@ -18,6 +18,7 @@ enum class MessageType : uint8_t {
   WifiControl = 'Y',
   UdpLogControl = 'U',
   OtaPullControl = 'O',
+  OtaPullStatus = 'N',
   FactoryReset = 'X',
   Provisioning = 'V',
   Reboot = 'B',

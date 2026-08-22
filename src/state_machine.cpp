@@ -1,4 +1,5 @@
 #include "state_machine.h"
+#include "ota_handoff_helper.h"
 
 #include <ESP8266WiFi.h>
 #include <cstdio>
@@ -307,6 +308,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   wifi_prov_rx_ = WifiProvisionRxTransfer{};
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
+  for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
   ota_silence_until_ms_ = 0;
   ota_pull_active_ = false;
   ota_pull_start_ms_ = 0;
@@ -399,6 +401,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   wifi_prov_rx_ = WifiProvisionRxTransfer{};
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_rx_ = OtaPullRxTransfer{};
+  for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
   pending_commands_.resetOnConfigApply();
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
@@ -1098,7 +1101,7 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
     lrslog::event("mqtt_remote_relay_blocked", 0, dstAddress, relayState ? 1 : 0);
     return false;
   }
-  if (dstAddress == 0 || dstAddress == 255) return false;
+  if (dstAddress < 1 || dstAddress > Settings::kAddressListCap) return false;
 
   // 1. Acquire tracking slot BEFORE sending any LoRa airtime.
   PeerRuntime *node = findOrCreatePeer(dstAddress);
@@ -1300,6 +1303,9 @@ bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host
   uint8_t transferId = static_cast<uint8_t>((millis() ^ last_counter_ ^ dstAddress) & 0xFFU);
   if (transferId == 0) transferId = 1;
 
+  RemoteOtaStatusRecord *status = remoteOtaStatusForAddress(dstAddress);
+  if (status == nullptr) return false;
+
   ota_pull_tx_ = OtaPullTxTransfer{};
   ota_pull_tx_.active = true;
   ota_pull_tx_.dst = dstAddress;
@@ -1308,12 +1314,19 @@ bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host
   ota_pull_tx_.port = port;
   memcpy(ota_pull_tx_.sha256, sha256, sizeof(ota_pull_tx_.sha256));
   ota_pull_tx_.next_tx_ms = millis();
+
+  *status = RemoteOtaStatusRecord{};
+  status->dst = dstAddress;
+  status->transfer_id = transferId;
+  status->stage = 1; // sending
+  status->timestamp = millis();
+
   lrslog::event("ota_pull_control_queued", 0, transferId, dstAddress);
   return true;
 }
 
 bool NodeStateMachine::sendQueuedOtaPullControlFrame() {
-  if (!ota_pull_tx_.active || radio_ == nullptr) return false;
+  if (!ota_pull_tx_.active || ota_pull_tx_.awaiting_ack || radio_ == nullptr) return false;
   if (!radioTxBudgetAvailable()) return false;
 
   uint8_t payload[12]{};
@@ -1352,7 +1365,14 @@ bool NodeStateMachine::sendQueuedOtaPullControlFrame() {
   lrslog::event("ota_pull_control_tx", 0, last_counter_, ota_pull_tx_.dst);
   ota_pull_tx_.frame_index++;
   if (ota_pull_tx_.frame_index > kOtaPullControlHashChunks + 1U) {
-    ota_pull_tx_ = OtaPullTxTransfer{};
+    ota_pull_tx_.awaiting_ack = true;
+    ota_pull_tx_.ack_timeout_ms = millis() + 4000;
+    RemoteOtaStatusRecord *status = remoteOtaStatusForAddress(ota_pull_tx_.dst);
+    if (status != nullptr) {
+      status->stage = 2; // awaiting_ack
+      status->timestamp = millis();
+    }
+    lrslog::event("ota_pull_manifest_sent", 0, ota_pull_tx_.transfer_id, ota_pull_tx_.dst);
   } else {
     ota_pull_tx_.next_tx_ms = millis() + kOtaPullControlFrameSpacingMs;
   }
@@ -1361,6 +1381,33 @@ bool NodeStateMachine::sendQueuedOtaPullControlFrame() {
 
 void NodeStateMachine::tickPendingOtaPullControl(uint32_t now) {
   if (!ota_pull_tx_.active) return;
+
+  if (ota_pull_tx_.awaiting_ack) {
+    if (static_cast<int32_t>(now - ota_pull_tx_.ack_timeout_ms) >= 0) {
+      if (ota_pull_tx_.retry_count == 0) {
+        ota_pull_tx_.retry_count = 1;
+        ota_pull_tx_.frame_index = 0;
+        ota_pull_tx_.awaiting_ack = false;
+        ota_pull_tx_.next_tx_ms = now;
+        RemoteOtaStatusRecord *status = remoteOtaStatusForAddress(ota_pull_tx_.dst);
+        if (status != nullptr) {
+          status->stage = 1; // sending
+          status->timestamp = now;
+        }
+        lrslog::event("ota_pull_manifest_retry", 0, ota_pull_tx_.transfer_id, ota_pull_tx_.dst);
+      } else {
+        RemoteOtaStatusRecord *status = remoteOtaStatusForAddress(ota_pull_tx_.dst);
+        ota_pull_tx_ = OtaPullTxTransfer{};
+        if (status != nullptr) {
+          status->stage = 4; // unconfirmed
+          status->timestamp = now;
+        }
+        lrslog::event("ota_pull_handoff_unconfirmed", 0, 0, 0);
+      }
+    }
+    return;
+  }
+
   if (isGroupActive()) return;
   if (static_cast<int32_t>(now - ota_pull_tx_.next_tx_ms) < 0) return;
   if (!sendQueuedOtaPullControlFrame()) {
@@ -1389,6 +1436,25 @@ bool NodeStateMachine::sendWifiControlStatus(uint8_t dstAddress, bool enabled, u
   return true;
 }
 
+bool NodeStateMachine::sendOtaPullStatus(uint8_t dstAddress, uint8_t transferId, uint8_t errCode) {
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  if (!radioTxBudgetAvailable()) return false;
+
+  uint8_t payload[12]{};
+  payload[0] = 2; // kOtaPullStatusOpFailed
+  payload[1] = transferId;
+  payload[2] = errCode;
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::OtaPullStatus, last_counter_, runtime_.local_address, dstAddress, payload)) {
+    return false;
+  }
+  last_tx_ms_ = millis();
+  markRadioTxSentThisTick();
+  lrslog::event("ota_pull_status_failed_tx", 0, last_counter_, dstAddress);
+  return true;
+}
+
 bool NodeStateMachine::hasPendingUdpLogControl() const { return pending_commands_.hasPendingUdpLogControl(); }
 
 bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &host, uint16_t &port, uint32_t &ttlS, uint8_t &src) {
@@ -1396,8 +1462,8 @@ bool NodeStateMachine::consumePendingUdpLogControl(bool &enabled, IPAddress &hos
 }
 
 bool NodeStateMachine::consumePendingOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize,
-                                             uint8_t &src) {
-  return pending_commands_.consumeOtaPull(host, port, sha256HexDest, destSize, src);
+                                             uint8_t &src, uint8_t &transferId) {
+  return pending_commands_.consumeOtaPull(host, port, sha256HexDest, destSize, src, transferId);
 }
 
 bool NodeStateMachine::mqttForgetPeer(uint8_t dstAddress) {
@@ -3224,8 +3290,40 @@ void NodeStateMachine::tickReceiver() {
   tickDeferredAck(now);
   if (rx_deferred_ack_pending_) return;
   if (rx_push_pending_ && sendInputStatePush(now)) return;
+  if (tickPendingOtaPullAcceptedAck(now)) return;
   if (tickDeferredObservability()) return;
   sendSensorStatePush(now);
+}
+
+bool NodeStateMachine::tickPendingOtaPullAcceptedAck(uint32_t now) {
+  if (!ota_pull_rx_.active || !ota_pull_rx_.accepted_ack_pending) return false;
+  if (static_cast<int32_t>(now - ota_pull_rx_.accepted_ack_due_ms) < 0) return true;
+  if (isGroupActive() || !radioTxBudgetAvailable() || radio_ == nullptr) return true;
+
+  uint8_t statusPayload[12]{};
+  statusPayload[0] = 1; // manifest_accepted
+  statusPayload[1] = ota_pull_rx_.transfer_id;
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::OtaPullStatus, last_counter_, runtime_.local_address,
+                       ota_pull_rx_.src, statusPayload)) {
+    // Keep the complete manifest. The gateway will retransmit its bounded
+    // handoff if this response cannot be sent.
+    ota_pull_rx_.accepted_ack_pending = false;
+    lrslog::event("ota_pull_status_accepted_tx_failed", 0, last_counter_, ota_pull_rx_.src);
+    return true;
+  }
+
+  markRadioTxSentThisTick();
+  last_tx_ms_ = now;
+  lrslog::event("ota_pull_status_accepted_tx", 0, last_counter_, ota_pull_rx_.src);
+
+  char sha256Hex[65];
+  sha256BytesToHex(ota_pull_rx_.sha256, sha256Hex);
+  pending_commands_.requestOtaPull(ota_pull_rx_.host, ota_pull_rx_.port, sha256Hex,
+                                   ota_pull_rx_.src, ota_pull_rx_.transfer_id);
+  ota_pull_rx_ = OtaPullRxTransfer{};
+  lrslog::event("ota_pull_control_rx", 0, last_counter_, 0);
+  return true;
 }
 
 static void updatePeerOperationalState(PeerRuntime& node, const ProtocolMessage& msg) {
@@ -3261,6 +3359,7 @@ void NodeStateMachine::tickReceive() {
   const bool isWifiControl = (msg.type == MessageType::WifiControl);
   const bool isUdpLogControl = (msg.type == MessageType::UdpLogControl);
   const bool isOtaPullControl = (msg.type == MessageType::OtaPullControl);
+  const bool isOtaPullStatus = (msg.type == MessageType::OtaPullStatus);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
   const bool isReaddress = (msg.type == MessageType::Readdress);
   const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
@@ -3270,7 +3369,7 @@ void NodeStateMachine::tickReceive() {
     return;
   }
   const bool isChange = (msg.type == MessageType::Change);
-  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl &&
+  if (!isWifiProvision && !isWifiControl && !isUdpLogControl && !isOtaPullControl && !isOtaPullStatus &&
       !isMaintenance && !isChange && !isReaddress && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
@@ -3290,7 +3389,7 @@ void NodeStateMachine::tickReceive() {
   const bool isReboot = (msg.type == MessageType::Reboot);
   const bool isSensorConfig = (msg.type == MessageType::SensorConfig);
   const bool isFleetKeyControl = (msg.type == MessageType::FleetKeyControl);
-  if ((isUdpLogControl || isOtaPullControl || isFactoryReset || isReboot || isSensorConfig || isFleetKeyControl) && msg.dst != runtime_.local_address) {
+  if ((isUdpLogControl || isOtaPullControl || isOtaPullStatus || isFactoryReset || isReboot || isSensorConfig || isFleetKeyControl) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -3373,6 +3472,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isOtaPullControl) {
     handleOtaPullControlFrame(msg);
+    return;
+  }
+  if (isOtaPullStatus) {
+    handleOtaPullStatusFrame(msg);
     return;
   }
   if (isFactoryReset) {
@@ -3955,11 +4058,11 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
       return false;
     }
 
-    char sha256Hex[65];
-    sha256BytesToHex(ota_pull_rx_.sha256, sha256Hex);
-    pending_commands_.requestOtaPull(ota_pull_rx_.host, ota_pull_rx_.port, sha256Hex, ota_pull_rx_.src);
-    ota_pull_rx_ = OtaPullRxTransfer{};
-    lrslog::event("ota_pull_control_rx", msg.rssi, msg.counter, msg.src);
+    // The gateway has just transmitted commit. Let it return to receive mode
+    // before replying; the HTTP pull must not start until this ACK is sent.
+    ota_pull_rx_.accepted_ack_pending = true;
+    ota_pull_rx_.accepted_ack_due_ms = millis() + runtime_utils::kGroupAckLeadMs;
+    lrslog::event("ota_pull_status_accepted_sched", msg.rssi, msg.counter, msg.src);
     return true;
   }
 
@@ -3967,6 +4070,42 @@ bool NodeStateMachine::handleOtaPullControlFrame(const ProtocolMessage &msg) {
   ota_pull_rx_ = OtaPullRxTransfer{};
   ota_pull_active_ = false;
   return false;
+}
+
+bool NodeStateMachine::handleOtaPullStatusFrame(const ProtocolMessage &msg) {
+  if (!runtime_.role_tx) return false;
+
+  const uint8_t *payload = msg.raw_payload;
+  const uint8_t op = payload[0];
+  const uint8_t transferId = payload[1];
+
+  RemoteOtaStatusRecord *status = remoteOtaStatusForAddress(msg.src);
+  if (status == nullptr ||
+      !ota_handoff::OtaHandoffHelper::matchesStatusFrame(ota_pull_tx_, *status, msg.src, transferId, op)) {
+    lrslog::event("ota_status_ignored", msg.rssi, msg.counter, msg.src);
+    return false;
+  }
+
+  const uint8_t errCode = (op == 2) ? payload[2] : 0;
+  if (ota_handoff::OtaHandoffHelper::handleStatusPayload(ota_pull_tx_, *status, op, errCode, millis())) {
+    if (op == 1) {
+      lrslog::event("ota_status_accepted", msg.rssi, msg.counter, msg.src);
+    } else {
+      lrslog::event("ota_status_failed", msg.rssi, msg.counter, errCode);
+    }
+    return true;
+  }
+  return false;
+}
+
+NodeStateMachine::RemoteOtaStatusRecord *NodeStateMachine::remoteOtaStatusForAddress(uint8_t address) {
+  if (address < 1 || address > Settings::kAddressListCap) return nullptr;
+  return &remote_ota_status_[address - 1U];
+}
+
+NodeStateMachine::RemoteOtaStatusRecord NodeStateMachine::getRemoteOtaStatus(uint8_t address) const {
+  if (address < 1 || address > Settings::kAddressListCap) return RemoteOtaStatusRecord{};
+  return remote_ota_status_[address - 1U];
 }
 
 bool NodeStateMachine::ackMatchesPendingCommand(const ProtocolMessage &msg) const {

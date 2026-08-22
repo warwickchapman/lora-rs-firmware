@@ -83,7 +83,7 @@ void PendingCommandManager::clearUdpLogControl() {
 }
 
 // OTA Pull
-void PendingCommandManager::requestOtaPull(IPAddress host, uint16_t port, const char* sha256Hex, uint8_t src) {
+void PendingCommandManager::requestOtaPull(IPAddress host, uint16_t port, const char* sha256Hex, uint8_t src, uint8_t transferId) {
   ota_pull_pending_host_ = host;
   ota_pull_pending_port_ = port;
   if (sha256Hex != nullptr) {
@@ -92,10 +92,11 @@ void PendingCommandManager::requestOtaPull(IPAddress host, uint16_t port, const 
     ota_pull_pending_sha256_ = "";
   }
   ota_pull_pending_src_ = src;
+  ota_pull_pending_transfer_id_ = transferId;
   ota_pull_pending_ = true;
 }
 
-bool PendingCommandManager::consumeOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize, uint8_t &src) {
+bool PendingCommandManager::consumeOtaPull(IPAddress &host, uint16_t &port, char *sha256HexDest, size_t destSize, uint8_t &src, uint8_t &transferId) {
   if (!ota_pull_pending_) return false;
   host = ota_pull_pending_host_;
   port = ota_pull_pending_port_;
@@ -106,6 +107,7 @@ bool PendingCommandManager::consumeOtaPull(IPAddress &host, uint16_t &port, char
     sha256HexDest[copyLen] = '\0';
   }
   src = ota_pull_pending_src_;
+  transferId = ota_pull_pending_transfer_id_;
   clearOtaPull();
   return true;
 }
@@ -116,6 +118,7 @@ void PendingCommandManager::clearOtaPull() {
   ota_pull_pending_port_ = 0;
   ota_pull_pending_sha256_ = "";
   ota_pull_pending_src_ = 0;
+  ota_pull_pending_transfer_id_ = 0;
 }
 
 // WiFi Provision

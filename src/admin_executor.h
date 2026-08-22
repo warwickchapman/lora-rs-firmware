@@ -70,6 +70,7 @@ private:
   void handleCancelLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handlePollDiagnostics(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer);
+  void handleRemoteOtaStatus(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteReboot(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteSensorConfig(JsonDocument &doc, ResponseWriter writer);
   void handleRemoteFleetKeyChange(JsonDocument &doc, ResponseWriter writer);

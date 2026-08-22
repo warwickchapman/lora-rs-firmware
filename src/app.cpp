@@ -578,12 +578,37 @@ void App::handlePendingUdpLogControl() {
   }
 }
 
+static uint8_t mapOtaErrorToCode(const String &err) {
+  if (err == "missing_url") return 1;
+  if (err == "wifi_not_connected") return 2;
+  if (err == "missing_sha256") return 3;
+  if (err == "invalid_sha256") return 4;
+  if (err == "http_begin_failed") return 5;
+  if (err.startsWith("http_")) {
+    int code = err.substring(5).toInt();
+    if (code >= 100 && code <= 599) {
+      return static_cast<uint8_t>(code - 100 + 20);
+    }
+    return 6;
+  }
+  if (err == "missing_content_length") return 7;
+  if (err == "update_begin_failed") return 8;
+  if (err == "download_timeout") return 9;
+  if (err == "download_read_failed") return 10;
+  if (err == "update_write_failed") return 11;
+  if (err == "download_incomplete") return 12;
+  if (err == "sha256_mismatch") return 13;
+  if (err == "update_end_failed") return 14;
+  return 15;
+}
+
 bool App::handlePendingOtaPull() {
   IPAddress otaHost;
   uint16_t otaPort = 0;
   char otaSha256[65];
   uint8_t otaSrc = 0;
-  if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSha256, sizeof(otaSha256), otaSrc)) {
+  uint8_t transferId = 0;
+  if (sm_.consumePendingOtaPull(otaHost, otaPort, otaSha256, sizeof(otaSha256), otaSrc, transferId)) {
     char url[256];
     snprintf(url, sizeof(url), "http://%u.%u.%u.%u:%u%s",
              otaHost[0], otaHost[1], otaHost[2], otaHost[3],
@@ -596,6 +621,8 @@ bool App::handlePendingOtaPull() {
       return true;
     } else {
       LRS_LOGW(SYS, "event=ota_pull_control_failed src=%u error=%s", otaSrc, error.c_str());
+      const uint8_t errCode = mapOtaErrorToCode(error);
+      sm_.sendOtaPullStatus(otaSrc, transferId, errCode);
       sm_.clearOtaPullActive();
     }
   }

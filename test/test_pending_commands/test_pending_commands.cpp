@@ -59,15 +59,17 @@ void test_pending_command_ota_pull() {
   TEST_ASSERT_FALSE(pcm.hasPendingOtaPull());
 
   IPAddress host(10, 0, 0, 10);
-  pcm.requestOtaPull(host, 8080, "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", 55);
+  pcm.requestOtaPull(host, 8080, "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", 55, 42);
   TEST_ASSERT_TRUE(pcm.hasPendingOtaPull());
 
   IPAddress outHost;
   uint16_t port = 0;
   char sha256Dest[65]{};
   uint8_t src = 0;
+  uint8_t outTransferId = 0;
 
-  TEST_ASSERT_TRUE(pcm.consumeOtaPull(outHost, port, sha256Dest, sizeof(sha256Dest), src));
+  TEST_ASSERT_TRUE(pcm.consumeOtaPull(outHost, port, sha256Dest, sizeof(sha256Dest), src, outTransferId));
+  TEST_ASSERT_EQUAL_UINT8(42, outTransferId);
   TEST_ASSERT_EQUAL_UINT8(host[0], outHost[0]);
   TEST_ASSERT_EQUAL_UINT8(host[1], outHost[1]);
   TEST_ASSERT_EQUAL_UINT8(host[2], outHost[2]);
@@ -258,7 +260,7 @@ void test_pending_command_reset_on_config_apply() {
   pcm.requestReboot();
   pcm.requestWifiProvision("A", "B", 1);
   pcm.requestUdpLogControl(true, IPAddress(1,1,1,1), 1, 1, 1);
-  pcm.requestOtaPull(IPAddress(1,1,1,1), 1, "sha", 1);
+  pcm.requestOtaPull(IPAddress(1,1,1,1), 1, "sha", 1, 99);
   pcm.requestFactoryReset(true, true, 1);
   pcm.requestFleetProvApply(1, 1, true, 1, "key");
 
@@ -294,7 +296,7 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
   pcm.requestFleetKeyChange("fleetkey", 1);
 
   // Set one command that should be cleared to confirm reset triggers
-  pcm.requestOtaPull(IPAddress(1,1,1,1), 80, "sha", 1);
+  pcm.requestOtaPull(IPAddress(1,1,1,1), 80, "sha", 1, 99);
 
   TEST_ASSERT_TRUE(pcm.hasPendingWifiControl());
   TEST_ASSERT_TRUE(pcm.hasPendingReboot());
@@ -378,13 +380,15 @@ void test_pending_command_overwrite_string_backed() {
   TEST_ASSERT_EQUAL_UINT8(2, src);
 
   // 2. OTA pull overwrite
-  pcm.requestOtaPull(IPAddress(1,1,1,1), 80, "sha1", 10);
+  pcm.requestOtaPull(IPAddress(1,1,1,1), 80, "sha1", 10, 88);
   TEST_ASSERT_TRUE(pcm.hasPendingOtaPull());
-  pcm.requestOtaPull(IPAddress(2,2,2,2), 443, "sha2", 20);
+  pcm.requestOtaPull(IPAddress(2,2,2,2), 443, "sha2", 20, 89);
   IPAddress host;
   uint16_t port = 0;
   char sha[65]{};
-  TEST_ASSERT_TRUE(pcm.consumeOtaPull(host, port, sha, sizeof(sha), src));
+  uint8_t outTransferId = 0;
+  TEST_ASSERT_TRUE(pcm.consumeOtaPull(host, port, sha, sizeof(sha), src, outTransferId));
+  TEST_ASSERT_EQUAL_UINT8(89, outTransferId);
   TEST_ASSERT_EQUAL_UINT8(2, host[0]);
   TEST_ASSERT_EQUAL_UINT8(2, host[1]);
   TEST_ASSERT_EQUAL_UINT8(2, host[2]);

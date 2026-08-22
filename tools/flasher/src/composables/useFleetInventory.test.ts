@@ -110,6 +110,76 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].relay_state).toBe(1);
   });
 
+  it('keeps a same-version queued remote queued until its active OTA confirms it', () => {
+    const fleet = createFleet();
+    const row: LoraInventoryDevice = {
+      address: 1,
+      chip_id: '00000001',
+      fw_version: '1.0.0',
+      uptime_ms: 120000
+    };
+    fleet.mergeInventoryRows([row]);
+    otaQueue.value = [row];
+    fleet.updateRowHistory(1, { rowState: 'ota_queued' });
+
+    expect(fleet.classifyFleetRow(row, fleetClockMs.value).row_state).toBe('ota_queued');
+  });
+
+  it('keeps an OTA reboot in the active confirmation stage', () => {
+    const fleet = createFleet();
+    const before: LoraInventoryDevice = {
+      address: 1,
+      chip_id: '00000001',
+      fw_version: '1.0.0',
+      uptime_ms: 120000
+    };
+    fleet.mergeInventoryRows([before]);
+    fleet.updateRowHistory(1, { rowState: 'ota_apply_wait' });
+
+    const after = fleet.classifyFleetRow({ ...before, uptime_ms: 10000 }, fleetClockMs.value);
+    expect(after.row_state).toBe('ota_apply_wait');
+  });
+
+  it('promotes a late matching OTA reboot to updated after the active watchdog timed out', () => {
+    const fleet = createFleet();
+    fleet.updateRowHistory(1, {
+      rowState: 'ota_no_reboot',
+      lastRawUptimeMs: 600000,
+      fwVersion: '0.10.4~11',
+      otaTargetVersion: '0.10.4~12',
+      otaExpectedUntilMs: fleetClockMs.value + 600000
+    });
+
+    const after = fleet.classifyFleetRow({
+      address: 1,
+      chip_id: '00000001',
+      fw_version: '0.10.4~12',
+      uptime_ms: 30000
+    }, fleetClockMs.value);
+
+    expect(after.row_state).toBe('ota_updated');
+  });
+
+  it('does not treat a late reboot onto the wrong firmware as OTA success', () => {
+    const fleet = createFleet();
+    fleet.updateRowHistory(1, {
+      rowState: 'ota_no_reboot',
+      lastRawUptimeMs: 600000,
+      fwVersion: '0.10.4~11',
+      otaTargetVersion: '0.10.4~12',
+      otaExpectedUntilMs: fleetClockMs.value + 600000
+    });
+
+    const after = fleet.classifyFleetRow({
+      address: 1,
+      chip_id: '00000001',
+      fw_version: '0.10.4~13',
+      uptime_ms: 30000
+    }, fleetClockMs.value);
+
+    expect(after.row_state).toBe('ota_rebooted');
+  });
+
   it('treats empty input telemetry as unknown, clearing previous state, but keeps 0 as valid', () => {
     const fleet = createFleet();
     fleet.loraInventory.value = [
@@ -260,14 +330,16 @@ describe('useFleetInventory', () => {
       address: 1,
       row_state: 'unexpected_reboot'
     };
-    expect(fleet.fleetRowStatusLabel(dev)).toBe('Unexpected reboot');
+    expect(fleet.fleetRowStatusLabel(dev)).toBe('Restarted');
 
-    // Test new robust status cases
-    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_failed' })).toBe('OTA Failed');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_failed' })).toBe('Failed');
     expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_updated' })).toBe('Updated');
-    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_rebooted' })).toBe('Rebooted');
-    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_downloading' })).toBe('Downloading OTA...');
-    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_retrying' })).toBe('Retrying (0/3)...');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_rebooted' })).toBe('Stage 4/4');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_downloading' })).toBe('Stage 3/4');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_sending' })).toBe('Stage 1/4');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_awaiting_ack' })).toBe('Stage 2/4');
+    expect(fleet.fleetRowStatusLabel({ address: 1, row_state: 'ota_unconfirmed' })).toBe('Not confirmed');
+    expect(fleet.fleetRowStatusTitle({ address: 1, row_state: 'ota_awaiting_ack' })).toContain('accept');
 
     // Test fleetDeviceUdpLabel
     expect(fleet.fleetDeviceUdpLabel({ address: 12, chip_id: '0xABC123', role: 'remote', mode: 'normal' })).toBe('lrs-abc123 addr 12 (remote/normal)');
@@ -528,6 +600,22 @@ describe('useFleetInventory', () => {
 
     expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(1200000);
     expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 1205000)).toBe(5000);
+  });
+
+  it('rebases Age when a newer serial peer detail snapshot arrives', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 9000 }]);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(1000);
+
+    fleetClockMs.value = 20000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 500 }]);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(19500);
+    expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 21000)).toBe(1500);
+
+    fleetClockMs.value = 21000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 5000 }]);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(19500);
   });
 
   it('applyTelemetryUpdate updates lastTelemetryTimestamp for non-retained sensor clears', () => {

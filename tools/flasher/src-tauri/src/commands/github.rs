@@ -37,10 +37,19 @@ pub async fn get_default_local_firmware() -> Result<Option<String>, String> {
     };
     let build_dir = repo_root.join(DEV_BUILD_DIR);
 
-    // Prefer versioned binary (e.g. lrs-firmware-0.9.2~51.bin) so the
-    // Flasher shows the version that was actually compiled.
+    // VERSION is the source of truth. Prefer its matching artifact so dev build
+    // numbers such as ~10 are never ordered lexically behind ~9.
+    if let Ok(version) = std::fs::read_to_string(repo_root.join("VERSION")) {
+        let versioned_path = build_dir.join(format!("lrs-firmware-{}.bin", version.trim()));
+        if versioned_path.is_file() {
+            return Ok(Some(versioned_path.to_string_lossy().to_string()));
+        }
+    }
+
+    // Fall back to the most recently written versioned binary when VERSION has
+    // been bumped but its corresponding target has not been built yet.
     if let Ok(entries) = std::fs::read_dir(&build_dir) {
-        let mut versioned: Vec<PathBuf> = entries
+        let latest = entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| {
@@ -49,10 +58,8 @@ pub async fn get_default_local_firmware() -> Result<Option<String>, String> {
                         .and_then(|n| n.to_str())
                         .map_or(false, |n| n.starts_with("lrs-firmware-"))
             })
-            .collect();
-        // Sort descending so the newest version (highest dev build) wins
-        versioned.sort();
-        if let Some(latest) = versioned.pop() {
+            .max_by_key(|path| path.metadata().and_then(|m| m.modified()).ok());
+        if let Some(latest) = latest {
             return Ok(Some(latest.to_string_lossy().to_string()));
         }
     }
