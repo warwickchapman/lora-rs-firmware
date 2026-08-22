@@ -6,7 +6,9 @@
 - Added a release-only Flasher compatibility contract. Release firmware reports its minimum Flasher compatibility revision through serial status and compact remote maintenance version data, and rejects incompatible normal commands while leaving direct flashing available.
 - Converted MQTT remote relay control to a short, correlated 5.5-second transaction using a 32-bit `mqtt_command_id` (`b8..b11`) and `kFlagMqttTransaction` flag (0x04). Removed `mqtt_remote_retry_timeout_ms` and replaced the 5-minute background retry loop with a fixed 4-attempt control budget (`0, +500 ms, +1.5 s, +3.0 s`). Gateway emits non-retained transaction outcomes (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
 - Gateway MQTT peer telemetry now publishes explicit `wifi_connected` state. A blank IP remains unknown rather than being treated as proof that a remote is offline.
-- Redesigned remote OTA Pull to introduce a stateful gateway handoff with explicit transfer IDs and a guarded `manifest_accepted` LoRa ACK frame. The remote waits for gateway receive turnaround and only begins HTTP download after that ACK is transmitted. The gateway now admits that status through its configured-peer receive path before applying destination and transfer-ID correlation, preventing successful OTA pulls from being reported as unconfirmed and later as unexpected reboots. Remotes also report HTTP/checksum failures (`download_failed`). This is a protocol breaking change; legacy nodes must be upgraded once via direct `espota.py` over Wi-Fi.
+- Redesigned remote OTA Pull as an acknowledged, bounded LoRa handoff. Every manifest carries a transfer ID; the remote validates the complete manifest, waits for gateway receive turnaround, sends `manifest_accepted`, and only then starts its HTTP download. If acknowledgement is lost, the gateway retransmits the manifest once before reporting the handoff as unconfirmed.
+- Added compact fixed-size per-address OTA status records and the authenticated `remote_ota_status` admin command. Gateway status is correlated by destination and transfer ID, rejects stale or premature acknowledgements, and retains accepted sessions long enough to capture a later remote `download_failed` report for HTTP or checksum failure.
+- Remote OTA status frames now enter through the configured-peer receive path before destination and transfer-ID validation. This fixes successful handoffs being discarded before Flasher could observe them. The new status-frame contract is deliberately protocol breaking; legacy remotes require one direct Wi-Fi update before they can use Fleet OTA Pull.
 
 ### Flasher Features
 - Flasher stamps serial and MQTT admin requests with its compatibility revision, allowing release firmware to produce a clear update-required refusal per incompatible device.
@@ -16,6 +18,9 @@
 - Replaced variable-width Remote OTA protocol messages in Fleet rows with fixed-width, colour-coded `Stage 1/4` through `Stage 4/4` badges. Technical details remain available on hover without making the table resize as an update progresses.
 - Flasher now discovers a newly built local `~N` firmware when its window regains focus and revalidates it before flash or OTA commands. Local dev artifacts follow the repo `VERSION` directly, so `~10` and later builds cannot be hidden by lexical filename ordering.
 - Late remote OTA confirmation remains correlated for ten minutes without continued polling. A remote that returns after the active watchdog timeout is shown as `Updated` only when the requested version and a reboot are both observed, instead of being mislabelled `Restarted`.
+
+### Developer Tooling
+- Added `tools/update_fleet.sh` for the one-time direct-Wi-Fi bootstrap of the recorded 12-remote test fleet and gateway. It uses the current ZA `firmware.bin`, derives each ArduinoOTA password locally, defaults to a dry run, accepts remote numbers or `g`, and stops at the first failed or indeterminate upload instead of retrying blindly.
 
 ## [0.10.3] - 2026-07-20
 
