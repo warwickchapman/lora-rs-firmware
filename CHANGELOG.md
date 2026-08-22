@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-08-22
+
 ### Firmware Changes
 - Added a release-only Flasher compatibility contract. Release firmware reports its minimum Flasher compatibility revision through serial status and compact remote maintenance version data, and rejects incompatible normal commands while leaving direct flashing available.
 - Converted MQTT remote relay control to a short, correlated 5.5-second transaction using a 32-bit `mqtt_command_id` (`b8..b11`) and `kFlagMqttTransaction` flag (0x04). Removed `mqtt_remote_retry_timeout_ms` and replaced the 5-minute background retry loop with a fixed 4-attempt control budget (`0, +500 ms, +1.5 s, +3.0 s`). Gateway emits non-retained transaction outcomes (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
