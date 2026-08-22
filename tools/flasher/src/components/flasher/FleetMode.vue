@@ -2,11 +2,6 @@
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue';
 
 export interface FleetConfig {
-  sessionConnectionType: 'serial' | 'mqtt' | 'local_broker';
-  selectedPort: string;
-  selectedMqttManualChipId: string;
-  selectedMqttGatewayChipId: string;
-  pairAdminPassword: string;
   region: string;
   selectedVersion: string;
 }
@@ -85,13 +80,8 @@ export interface MqttGatewayOption {
 }
 
 export interface FleetTransportState {
-  ports: Array<{ port_name: string; description?: string }>;
-  mqttGatewayOptions: MqttGatewayOption[];
-  isSelectedMqttGatewayDiscovered: boolean;
-  manualMqttGatewayError: string | null;
   fleetTransport: 'serial' | 'mqtt';
-  serialPortSelectorDisabled: boolean;
-  showPairAdminPassword: boolean;
+  hasSelectedGateway: boolean;
 }
 
 export interface FleetInventorySummary {
@@ -186,7 +176,6 @@ const emit = defineEmits<{
   (e: 'gateway-events-clear'): void;
   (e: 'gateway-events-copy', includeLogLines: boolean): void;
   (e: 'lora-inventory-debug-copy'): void;
-  (e: 'manual-chip-input', val: string): void;
   (e: 'firmware-fetch'): void;
   (e: 'gateway-load'): void;
   (e: 'gateway-identify'): void;
@@ -267,26 +256,6 @@ watch(() => props.udpLogs.logs.length, () => {
   nextTick(() => scrollNetworkUdpToBottom());
 });
 
-const computedSessionConnectionType = computed({
-  get: () => config.value.sessionConnectionType,
-  set: (val) => { config.value = { ...config.value, sessionConnectionType: val }; }
-});
-const computedSelectedPort = computed({
-  get: () => config.value.selectedPort,
-  set: (val) => { config.value = { ...config.value, selectedPort: val }; }
-});
-const computedSelectedMqttManualChipId = computed({
-  get: () => config.value.selectedMqttManualChipId,
-  set: (val) => { config.value = { ...config.value, selectedMqttManualChipId: val }; }
-});
-const computedSelectedMqttGatewayChipId = computed({
-  get: () => config.value.selectedMqttGatewayChipId,
-  set: (val) => { config.value = { ...config.value, selectedMqttGatewayChipId: val }; }
-});
-const computedPairAdminPassword = computed({
-  get: () => config.value.pairAdminPassword,
-  set: (val) => { config.value = { ...config.value, pairAdminPassword: val }; }
-});
 const computedRegion = computed({
   get: () => config.value.region,
   set: (val) => { config.value = { ...config.value, region: val }; }
@@ -385,52 +354,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Connection Mode</label>
-          <select v-model="computedSessionConnectionType" class="glass-input h-10 appearance-none">
-            <option value="serial">USB Serial Gateway</option>
-            <option value="mqtt">Remote MQTT Broker</option>
-            <option value="local_broker">Local MQTT Broker</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">{{ transportState.fleetTransport === 'serial' ? 'USB gateway' : 'MQTT gateway' }}</label>
-          <select v-if="transportState.fleetTransport === 'serial'" v-model="computedSelectedPort" :disabled="transportState.serialPortSelectorDisabled" class="glass-input h-10 appearance-none disabled:opacity-60">
-            <option value="" disabled>Select USB gateway</option>
-            <option v-for="port in transportState.ports" :key="port.port_name" :value="port.port_name">
-              {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
-            </option>
-          </select>
-          <div v-else-if="transportState.mqttGatewayOptions.length === 0" class="flex flex-col gap-1 w-full">
-            <input
-              v-model="computedSelectedMqttManualChipId"
-              @input="emit('manual-chip-input', computedSelectedMqttManualChipId)"
-              placeholder="Enter manual gateway chip ID"
-              class="glass-input h-10 px-2 text-xs font-mono w-full"
-            />
-            <span class="text-[9px] text-slate-400">
-              No gateways discovered yet. Enter the real gateway chip ID after configuring it to use this broker.
-            </span>
-            <span v-if="transportState.manualMqttGatewayError" class="text-[9px] text-rose-300">
-              {{ transportState.manualMqttGatewayError }}
-            </span>
-          </div>
-          <select v-else v-model="computedSelectedMqttGatewayChipId" class="glass-input h-10 appearance-none w-full">
-            <option value="" disabled>Select MQTT gateway</option>
-            <option v-for="gw in transportState.mqttGatewayOptions" :key="gw.chip_id" :value="gw.chip_id">
-              {{ gw.label }}
-            </option>
-            <!-- Keep manual selection visible when it is not in discovery list -->
-            <option v-if="computedSelectedMqttGatewayChipId && !transportState.isSelectedMqttGatewayDiscovered" :value="computedSelectedMqttGatewayChipId">
-              Manual: lrs-{{ computedSelectedMqttGatewayChipId }}
-            </option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Gateway admin password</label>
-          <input v-model="computedPairAdminPassword" class="glass-input h-10 min-w-0 font-mono" :type="transportState.showPairAdminPassword ? 'text' : 'password'" autocomplete="current-password" />
-        </div>
+      <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div class="flex flex-col gap-1.5 text-xs">
           <label class="font-medium text-slate-400">Region</label>
           <select v-model="computedRegion" class="glass-input h-10 appearance-none">
@@ -478,7 +402,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           </button>
           <button
             @click="emit('gateway-load')"
-            :disabled="gateway.isLoading || (transportState.fleetTransport === 'mqtt' ? !computedSelectedMqttGatewayChipId : !config.selectedPort)"
+            :disabled="gateway.isLoading || !transportState.hasSelectedGateway"
             class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
           >
             {{ gateway.isLoading ? 'Loading...' : 'Load gateway' }}
@@ -487,7 +411,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
             @click="emit('gateway-identify')"
             :disabled="gateway.isIdentifyDisabled"
             :class="['glass-input m-0 h-9 w-11 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50', { 'identify-led-active': gateway.isIdentifying }]"
-            title="Identify selected USB gateway"
+            :title="transportState.fleetTransport === 'mqtt' ? 'Identify selected MQTT gateway' : 'Identify selected USB gateway'"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
           </button>

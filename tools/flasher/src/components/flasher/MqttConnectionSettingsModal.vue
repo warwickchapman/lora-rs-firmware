@@ -14,12 +14,13 @@ const show = defineModel<boolean>({ required: true });
 const draft = defineModel<MqttDraftSettings>('draft', { required: true });
 
 defineProps<{
-  monitorMqttConnected: boolean;
+  sessionMqttConnected: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'toggle-connection'): void;
+  (e: 'connect'): void;
+  (e: 'disconnect'): void;
 }>();
 
 const computedHost = computed({
@@ -63,7 +64,7 @@ const computedShowPass = computed({
       <div class="flex items-center justify-between border-b border-slate-800 bg-slate-900/50 px-3 py-2">
         <div>
           <h2 class="text-sm font-bold text-cyan-300">MQTT Broker Settings</h2>
-          <p class="mt-0.5 text-xs text-slate-500">Used when remote administration or monitoring transport is set to MQTT.</p>
+          <p class="mt-0.5 text-xs text-slate-500">Shared broker connection used by Gateway Session and MQTT Settings targets.</p>
         </div>
         <button
           @click="emit('close')"
@@ -98,17 +99,24 @@ const computedShowPass = computed({
       </div>
 
       <div class="flex items-center justify-between border-t border-slate-800 bg-slate-950/30 px-3 py-2">
-        <span :class="['inline-flex h-8 items-center rounded border px-2 text-[10px] font-bold', monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-          MQTT {{ monitorMqttConnected ? 'configured' : 'not active' }}
+        <span :class="['inline-flex h-8 items-center rounded border px-2 text-[10px] font-bold', sessionMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+          MQTT {{ sessionMqttConnected ? 'connected' : 'disconnected' }}
         </span>
         <div class="flex gap-2">
           <button @click="emit('close')" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
           <button
-            @click="emit('toggle-connection')"
+            v-if="sessionMqttConnected"
+            @click="emit('disconnect')"
+            class="glass-input h-8 px-3 text-xs font-bold"
+          >
+            Disconnect
+          </button>
+          <button
+            @click="emit('connect')"
             :disabled="!computedHost"
             class="primary-btn h-8 px-3 text-xs font-bold disabled:opacity-50"
           >
-            {{ monitorMqttConnected ? 'Disconnect MQTT' : 'Save MQTT' }}
+            {{ sessionMqttConnected ? 'Save and reconnect' : 'Connect' }}
           </button>
         </div>
       </div>

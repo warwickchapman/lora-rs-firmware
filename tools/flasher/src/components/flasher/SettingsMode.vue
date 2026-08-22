@@ -6,7 +6,7 @@ export type RemoteSubTab = 'serial' | 'mqtt' | 'lora';
 
 export interface SettingsForm {
   selectedPort: string;
-  sessionConnectionType: 'serial' | 'mqtt' | 'local_broker';
+  settingsConnectionType: 'serial' | 'mqtt';
   settingsAdminPassword: string;
   selectedMqttManualChipId: string;
   selectedMqttGatewayChipId: string;
@@ -51,7 +51,7 @@ export interface SettingsTransportState {
   mqttGateways: Record<string, SettingsTransportOptionGateway>;
   manualMqttGatewayError: string | null;
   isSelectedMqttGatewayDiscovered: boolean;
-  monitorMqttConnected: boolean;
+  sessionMqttConnected: boolean;
 }
 
 export interface SettingsAdminStatusState {
@@ -170,9 +170,9 @@ const computedSelectedPort = computed({
   get: () => form.value.selectedPort,
   set: (val) => { form.value = { ...form.value, selectedPort: val }; }
 });
-const computedSessionConnectionType = computed({
-  get: () => form.value.sessionConnectionType,
-  set: (val) => { form.value = { ...form.value, sessionConnectionType: val }; }
+const computedSettingsConnectionType = computed({
+  get: () => form.value.settingsConnectionType,
+  set: (val) => { form.value = { ...form.value, settingsConnectionType: val }; }
 });
 const computedSettingsAdminPassword = computed({
   get: () => form.value.settingsAdminPassword,
@@ -454,7 +454,7 @@ function handleManualMqttGatewayInput(val: string) {
 
       <div :class="['grid grid-cols-1 gap-2', transportState.settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_8rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem]']">
         <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Device</label>
+          <label class="font-medium text-slate-400">Settings target</label>
           <div class="flex gap-2">
             <select v-if="transportState.settingsTransport === 'serial'" v-model="computedSelectedPort" :disabled="transportState.serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
               <option value="" disabled>Select USB device</option>
@@ -495,11 +495,10 @@ function handleManualMqttGatewayInput(val: string) {
           </div>
         </div>
         <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Transport</label>
-          <select v-model="computedSessionConnectionType" class="glass-input h-9 appearance-none">
+          <label class="font-medium text-slate-400">Via</label>
+          <select v-model="computedSettingsConnectionType" class="glass-input h-9 appearance-none">
             <option value="serial">USB Serial</option>
-            <option value="mqtt">Remote MQTT Broker</option>
-            <option value="local_broker">Local MQTT Broker</option>
+            <option value="mqtt">MQTT</option>
           </select>
         </div>
         <div v-if="transportState.settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs min-w-0">
@@ -533,8 +532,8 @@ function handleManualMqttGatewayInput(val: string) {
         </div>
         <div v-if="transportState.settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
           <label class="font-medium text-slate-400">MQTT broker</label>
-          <span :class="['inline-flex h-9 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', transportState.monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-            {{ transportState.monitorMqttConnected ? 'Connected' : 'Offline' }}
+          <span :class="['inline-flex h-9 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', transportState.sessionMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+            {{ transportState.sessionMqttConnected ? 'Connected' : 'Offline' }}
           </span>
         </div>
       </div>

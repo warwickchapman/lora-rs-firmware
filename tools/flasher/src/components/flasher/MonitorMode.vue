@@ -2,8 +2,6 @@
 import { computed } from 'vue';
 
 export interface MonitorForm {
-  selectedPort: string;
-  sessionConnectionType: 'serial' | 'mqtt' | 'local_broker';
   monitorAutoRefresh: boolean;
   selectedMonitorDeviceAddress: number | null;
 }
@@ -17,15 +15,9 @@ export interface MonitorHeaderState {
   isMonitorLoopRunning: boolean;
 }
 
-export interface MonitorTransportOptionPort {
-  port_name: string;
-  description?: string;
-}
-
 export interface MonitorTransportState {
-  ports: MonitorTransportOptionPort[];
-  serialPortSelectorDisabled: boolean;
-  monitorMqttConnected: boolean;
+  sessionTargetReady: boolean;
+  transport: 'serial' | 'mqtt';
 }
 
 export interface MonitorGatewayWarningState {
@@ -124,7 +116,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'trigger-identify'): void;
   (e: 'toggle-monitor-loop'): void;
-  (e: 'open-mqtt-settings'): void;
   (e: 'poll-selected-diagnostics'): void;
   (e: 'poll-device-diagnostics', address: number): void;
   (e: 'gateway-events-clear'): void;
@@ -132,14 +123,6 @@ const emit = defineEmits<{
 }>();
 
 // Computed bridges to avoid direct mutations in the child
-const computedSelectedPort = computed({
-  get: () => form.value.selectedPort,
-  set: (val) => { form.value = { ...form.value, selectedPort: val }; }
-});
-const computedSessionConnectionType = computed({
-  get: () => form.value.sessionConnectionType,
-  set: (val) => { form.value = { ...form.value, sessionConnectionType: val }; }
-});
 const computedMonitorAutoRefresh = computed({
   get: () => form.value.monitorAutoRefresh,
   set: (val) => { form.value = { ...form.value, monitorAutoRefresh: val }; }
@@ -221,7 +204,7 @@ const visibleGatewayEvents = computed(() => {
           </label>
           <button
             @click="emit('toggle-monitor-loop')"
-            :disabled="!computedSelectedPort"
+            :disabled="!transportState.sessionTargetReady"
             class="primary-btn m-0 h-8 px-3 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
           >
             {{ headerState.isMonitorLoopRunning ? 'Stop' : 'Monitor' }}
@@ -229,38 +212,6 @@ const visibleGatewayEvents = computed(() => {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1.5fr)_12rem_auto_auto]">
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">USB gateway</label>
-          <select v-model="computedSelectedPort" :disabled="transportState.serialPortSelectorDisabled" class="glass-input h-9 flex-1 appearance-none disabled:opacity-60">
-            <option value="" disabled>Select USB gateway</option>
-            <option v-for="port in transportState.ports" :key="port.port_name" :value="port.port_name">
-              {{ port.port_name }}{{ port.description ? ` - ${port.description}` : '' }}
-            </option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Transport</label>
-          <select v-model="computedSessionConnectionType" class="glass-input h-9 appearance-none">
-            <option value="serial">USB Serial Gateway</option>
-            <option value="mqtt">Remote MQTT Broker</option>
-            <option value="local_broker">Local MQTT Broker</option>
-          </select>
-        </div>
-        <div class="flex flex-col justify-end">
-          <button
-            @click="emit('open-mqtt-settings')"
-            class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold"
-          >
-            MQTT settings
-          </button>
-        </div>
-        <div class="flex flex-col justify-end">
-          <span :class="['inline-flex h-9 min-w-28 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', transportState.monitorMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-            MQTT {{ transportState.monitorMqttConnected ? 'configured' : 'not active' }}
-          </span>
-        </div>
-      </div>
     </div>
 
     <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_22rem] shrink-0">
@@ -346,7 +297,7 @@ const visibleGatewayEvents = computed(() => {
       <div class="flex items-center justify-between gap-3">
         <div>
           <h2 class="text-sm font-bold text-slate-300">Gateway Peer Cache</h2>
-          <div class="mt-1 text-xs text-slate-500">Read-only serial view of the selected gateway's runtime state. Click a row to select it.</div>
+          <div class="mt-1 text-xs text-slate-500">Read-only {{ transportState.transport === 'mqtt' ? 'MQTT' : 'serial' }} view of the selected gateway's runtime state. Click a row to select it.</div>
         </div>
         <div class="flex items-center gap-2">
           <button

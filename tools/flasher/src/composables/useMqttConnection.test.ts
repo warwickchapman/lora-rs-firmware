@@ -4,92 +4,92 @@ import { useMqttConnection } from './useMqttConnection';
 
 describe('useMqttConnection', () => {
   const mockNotify = vi.fn();
-  const mockSetMonitorStatusMessage = vi.fn();
+  const mockSetSessionStatusMessage = vi.fn();
   const isSerialSessionConnected = ref(false);
   const serialSessionConnectionState = ref<'active' | 'partial' | 'offline'>('offline');
 
   const defaultOptions = (mockInvoke = vi.fn()) => ({
     notify: mockNotify,
-    setMonitorStatusMessage: mockSetMonitorStatusMessage,
+    setSessionStatusMessage: mockSetSessionStatusMessage,
     isSerialSessionConnected,
     serialSessionConnectionState,
     invoke: mockInvoke,
   });
 
-  it('computes isSessionConnected correctly based on sessionConnectionType', async () => {
-    const { sessionConnectionType, isSessionConnected, monitorMqttConnected, localBrokerRunning, monitorMqttHost, monitorMqttPort, localBrokerPort } = useMqttConnection(defaultOptions());
+  it('computes transport connectivity based on the selected session transport', () => {
+    const { sessionConnectionType, isSessionTransportConnected, sessionMqttConnected, localBrokerRunning, sessionMqttHost, sessionMqttPort, localBrokerPort } = useMqttConnection(defaultOptions());
 
     // 1. Serial Type
     sessionConnectionType.value = 'serial';
     isSerialSessionConnected.value = false;
-    expect(isSessionConnected.value).toBe(false);
+    expect(isSessionTransportConnected.value).toBe(false);
     isSerialSessionConnected.value = true;
-    expect(isSessionConnected.value).toBe(true);
+    expect(isSessionTransportConnected.value).toBe(true);
 
     // 2. MQTT Type
     sessionConnectionType.value = 'mqtt';
-    monitorMqttConnected.value = false;
-    expect(isSessionConnected.value).toBe(false);
-    monitorMqttConnected.value = true;
-    expect(isSessionConnected.value).toBe(true);
+    sessionMqttConnected.value = false;
+    expect(isSessionTransportConnected.value).toBe(false);
+    sessionMqttConnected.value = true;
+    expect(isSessionTransportConnected.value).toBe(true);
 
     // 3. Local Broker Type
     sessionConnectionType.value = 'local_broker';
     localBrokerRunning.value = false;
-    expect(isSessionConnected.value).toBe(false);
+    expect(isSessionTransportConnected.value).toBe(false);
 
     localBrokerRunning.value = true;
-    monitorMqttConnected.value = true;
-    monitorMqttHost.value = '127.0.0.1';
-    monitorMqttPort.value = 1883;
+    sessionMqttConnected.value = true;
+    sessionMqttHost.value = '127.0.0.1';
+    sessionMqttPort.value = 1883;
     localBrokerPort.value = 1883;
-    expect(isSessionConnected.value).toBe(true);
+    expect(isSessionTransportConnected.value).toBe(true);
 
-    monitorMqttPort.value = 1884;
-    expect(isSessionConnected.value).toBe(false);
+    sessionMqttPort.value = 1884;
+    expect(isSessionTransportConnected.value).toBe(false);
   });
 
-  it('computes computedSessionConnectionState correctly', () => {
-    const { sessionConnectionType, computedSessionConnectionState, monitorMqttConnected, localBrokerRunning, isLocalBrokerStarting } = useMqttConnection(defaultOptions());
+  it('computes transport connection state correctly', () => {
+    const { sessionConnectionType, computedTransportConnectionState, sessionMqttConnected, localBrokerRunning, isLocalBrokerStarting } = useMqttConnection(defaultOptions());
 
     sessionConnectionType.value = 'serial';
     serialSessionConnectionState.value = 'active';
-    expect(computedSessionConnectionState.value).toBe('active');
+    expect(computedTransportConnectionState.value).toBe('active');
 
     sessionConnectionType.value = 'mqtt';
-    monitorMqttConnected.value = true;
-    expect(computedSessionConnectionState.value).toBe('active');
-    monitorMqttConnected.value = false;
-    expect(computedSessionConnectionState.value).toBe('partial');
+    sessionMqttConnected.value = true;
+    expect(computedTransportConnectionState.value).toBe('active');
+    sessionMqttConnected.value = false;
+    expect(computedTransportConnectionState.value).toBe('partial');
 
     sessionConnectionType.value = 'local_broker';
     localBrokerRunning.value = false;
     isLocalBrokerStarting.value = true;
-    expect(computedSessionConnectionState.value).toBe('partial');
+    expect(computedTransportConnectionState.value).toBe('partial');
   });
 
   it('manages settings modal open/close states and draft updates', () => {
-    const { 
-      showMonitorMqttSettings, 
-      monitorMqttHost, 
-      monitorMqttPort, 
-      monitorMqttDraftHost, 
-      monitorMqttDraftPort, 
-      monitorMqttDraftState,
-      openMonitorMqttSettings, 
-      closeMonitorMqttSettings 
+    const {
+      showMqttConnectionSettings,
+      sessionMqttHost,
+      sessionMqttPort,
+      sessionMqttDraftHost,
+      sessionMqttDraftPort,
+      sessionMqttDraftState,
+      openMqttConnectionSettings,
+      closeMqttConnectionSettings
     } = useMqttConnection(defaultOptions());
 
-    monitorMqttHost.value = 'custom.host';
-    monitorMqttPort.value = 8883;
+    sessionMqttHost.value = 'custom.host';
+    sessionMqttPort.value = 8883;
     
-    openMonitorMqttSettings();
-    expect(showMonitorMqttSettings.value).toBe(true);
-    expect(monitorMqttDraftHost.value).toBe('custom.host');
-    expect(monitorMqttDraftPort.value).toBe(8883);
+    openMqttConnectionSettings();
+    expect(showMqttConnectionSettings.value).toBe(true);
+    expect(sessionMqttDraftHost.value).toBe('custom.host');
+    expect(sessionMqttDraftPort.value).toBe(8883);
 
     // Update draft computed
-    monitorMqttDraftState.value = {
+    sessionMqttDraftState.value = {
       host: 'new.host',
       port: 1883,
       topicRoot: 'lora-new',
@@ -98,40 +98,40 @@ describe('useMqttConnection', () => {
       showPass: true
     };
 
-    expect(monitorMqttDraftHost.value).toBe('new.host');
+    expect(sessionMqttDraftHost.value).toBe('new.host');
 
-    closeMonitorMqttSettings();
-    expect(showMonitorMqttSettings.value).toBe(false);
+    closeMqttConnectionSettings();
+    expect(showMqttConnectionSettings.value).toBe(false);
   });
 
   describe('hydration and state change handlers', () => {
     it('applies MQTT state changed payload cases', () => {
-      const { monitorMqttConnected, applyMqttStateChanged } = useMqttConnection(defaultOptions());
+      const { sessionMqttConnected, applyMqttStateChanged } = useMqttConnection(defaultOptions());
 
-      mockSetMonitorStatusMessage.mockClear();
+      mockSetSessionStatusMessage.mockClear();
       applyMqttStateChanged('Connected');
-      expect(monitorMqttConnected.value).toBe(true);
-      expect(mockSetMonitorStatusMessage).toHaveBeenCalledWith('MQTT monitor connected.');
+      expect(sessionMqttConnected.value).toBe(true);
+      expect(mockSetSessionStatusMessage).toHaveBeenCalledWith('MQTT broker connected.');
 
-      mockSetMonitorStatusMessage.mockClear();
+      mockSetSessionStatusMessage.mockClear();
       applyMqttStateChanged('Connecting');
-      expect(mockSetMonitorStatusMessage).toHaveBeenCalledWith('MQTT monitor connecting...');
+      expect(mockSetSessionStatusMessage).toHaveBeenCalledWith('MQTT broker connecting...');
 
-      mockSetMonitorStatusMessage.mockClear();
+      mockSetSessionStatusMessage.mockClear();
       applyMqttStateChanged('Disconnected');
-      expect(monitorMqttConnected.value).toBe(false);
-      expect(mockSetMonitorStatusMessage).toHaveBeenCalledWith('MQTT monitor disconnected.');
+      expect(sessionMqttConnected.value).toBe(false);
+      expect(mockSetSessionStatusMessage).toHaveBeenCalledWith('MQTT broker disconnected.');
 
-      mockSetMonitorStatusMessage.mockClear();
+      mockSetSessionStatusMessage.mockClear();
       applyMqttStateChanged({ Error: 'Authentication Failed' });
-      expect(monitorMqttConnected.value).toBe(false);
-      expect(mockSetMonitorStatusMessage).toHaveBeenCalledWith('MQTT monitor error: Authentication Failed');
+      expect(sessionMqttConnected.value).toBe(false);
+      expect(mockSetSessionStatusMessage).toHaveBeenCalledWith('MQTT broker error: Authentication Failed');
     });
 
     it('hydrates MQTT state', () => {
-      const { monitorMqttConnected, hydrateMqttState } = useMqttConnection(defaultOptions());
+      const { sessionMqttConnected, hydrateMqttState } = useMqttConnection(defaultOptions());
       hydrateMqttState('Connected');
-      expect(monitorMqttConnected.value).toBe(true);
+      expect(sessionMqttConnected.value).toBe(true);
     });
 
     it('hydrates local broker status', () => {
@@ -147,20 +147,36 @@ describe('useMqttConnection', () => {
   });
 
   describe('actions', () => {
-    it('toggles MQTT connection', async () => {
+    it('connects and disconnects MQTT explicitly', async () => {
       const mockInvoke = vi.fn().mockResolvedValue(true);
-      const { monitorMqttConnected, toggleMonitorMqttConnection } = useMqttConnection(defaultOptions(mockInvoke));
+      const { sessionMqttConnected, connectSessionMqtt, disconnectSessionMqtt } = useMqttConnection(defaultOptions(mockInvoke));
 
       // 1. Connect path
-      monitorMqttConnected.value = false;
-      await toggleMonitorMqttConnection();
+      sessionMqttConnected.value = false;
+      await connectSessionMqtt();
       expect(mockInvoke).toHaveBeenCalledWith('connect_mqtt_broker', expect.any(Object));
-      expect(monitorMqttConnected.value).toBe(true);
+      expect(sessionMqttConnected.value).toBe(true);
 
       // 2. Disconnect path
-      await toggleMonitorMqttConnection();
+      await disconnectSessionMqtt();
       expect(mockInvoke).toHaveBeenCalledWith('disconnect_mqtt_broker');
-      expect(monitorMqttConnected.value).toBe(false);
+      expect(sessionMqttConnected.value).toBe(false);
+    });
+
+    it('can connect the shared broker without changing the operational transport and preserves a blank password draft', async () => {
+      const mockInvoke = vi.fn().mockResolvedValue(true);
+      const connection = useMqttConnection(defaultOptions(mockInvoke));
+      connection.sessionConnectionType.value = 'serial';
+      connection.sessionMqttPassword.value = 'existing-secret';
+      connection.sessionMqttDraftPassword.value = '';
+
+      await connection.connectSessionMqtt(true);
+
+      expect(connection.sessionConnectionType.value).toBe('serial');
+      expect(connection.sessionMqttDraftPassword.value).toBe('');
+      expect(mockInvoke).toHaveBeenCalledWith('connect_mqtt_broker', {
+        config: expect.objectContaining({ password: 'existing-secret' })
+      });
     });
 
     it('starts local MQTT broker', async () => {
@@ -171,6 +187,52 @@ describe('useMqttConnection', () => {
       expect(mockInvoke).toHaveBeenCalledWith('start_local_mqtt_broker', { port: 1883 });
       expect(localBrokerRunning.value).toBe(true);
       expect(localBrokerLans.value).toEqual(['192.168.1.10']);
+    });
+
+    it('keeps remote broker parameters while connecting the local broker', async () => {
+      const mockInvoke = vi.fn().mockImplementation((command: string) => {
+        if (command === 'start_local_mqtt_broker') return Promise.resolve(['192.168.1.10']);
+        return Promise.resolve(true);
+      });
+      const connection = useMqttConnection(defaultOptions(mockInvoke));
+      connection.sessionMqttDraftState.value = {
+        host: 'remote.example',
+        port: 2883,
+        topicRoot: 'field',
+        user: 'operator',
+        pass: '',
+        showPass: false
+      };
+      connection.sessionMqttPassword.value = 'remote-secret';
+
+      await connection.startAndConnectLocalBroker();
+
+      expect(connection.sessionMqttDraftState.value).toEqual(expect.objectContaining({
+        host: 'remote.example',
+        port: 2883,
+        topicRoot: 'field',
+        user: 'operator'
+      }));
+      expect(mockInvoke).toHaveBeenCalledWith('connect_mqtt_broker', {
+        config: expect.objectContaining({
+          host: '127.0.0.1',
+          port: 1883,
+          user: null,
+          password: null,
+          topic_root: 'lora'
+        })
+      });
+
+      await connection.connectConfiguredSessionMqtt();
+      expect(mockInvoke).toHaveBeenLastCalledWith('connect_mqtt_broker', {
+        config: expect.objectContaining({
+          host: 'remote.example',
+          port: 2883,
+          user: 'operator',
+          password: 'remote-secret',
+          topic_root: 'field'
+        })
+      });
     });
   });
 });

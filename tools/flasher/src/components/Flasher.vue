@@ -30,8 +30,13 @@ import { useFleetInventoryPolling, shouldClearScanStateOnTimeout } from '../comp
 import { useFleetOta } from '../composables/useFleetOta';
 import { useFirmwareServer, FirmwareServerInfo, NetworkInterface } from '../composables/useFirmwareServer';
 import ActivityPanel from './flasher/ActivityPanel.vue';
-import SessionMqttBanner from './flasher/SessionMqttBanner.vue';
-import MonitorMqttSettingsModal from './flasher/MonitorMqttSettingsModal.vue';
+import GatewaySessionPanel from './flasher/GatewaySessionPanel.vue';
+import type {
+  GatewaySessionForm,
+  GatewaySessionDisplayState,
+  GatewaySessionTransportState
+} from './flasher/GatewaySessionPanel.vue';
+import MqttConnectionSettingsModal from './flasher/MqttConnectionSettingsModal.vue';
 import FlashMode from './flasher/FlashMode.vue';
 import RemoteSettingsModal from './flasher/RemoteSettingsModal.vue';
 import RemoteFactoryResetModal from './flasher/RemoteFactoryResetModal.vue';
@@ -305,8 +310,9 @@ const DISCONNECTED_PORT_CACHE_GRACE_MS = 120000;
 
 const ports = ref<SerialPort[]>([]);
 const flashSelectedPort = ref('');
+// Provisioning intentionally owns a separate target from the operational gateway session.
 const gatewaySelectedPort = ref('');
-const monitorSelectedPort = ref('');
+const gatewaySessionSerialPort = ref('');
 const settingsSelectedPort = ref('');
 interface InFlightRead {
   seq: number;
@@ -317,13 +323,13 @@ const selectedPort = computed<string>({
   get() {
     if (activeMode.value === 'pair') return pairGatewayKey.value;
     if (activeMode.value === 'network') {
-      return fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+      return fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
     }
     if (activeMode.value === 'monitor') {
-      return monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+      return monitorTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
     }
     if (activeMode.value === 'settings') {
-      return settingsTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : settingsSelectedPort.value;
+      return settingsTransport.value === 'mqtt' ? settingsMqttGatewayChipId.value : settingsSelectedPort.value;
     }
     return flashSelectedPort.value;
   },
@@ -336,19 +342,19 @@ const selectedPort = computed<string>({
       }
     } else if (activeMode.value === 'network') {
       if (fleetTransport.value === 'mqtt') {
-        selectedMqttGatewayChipId.value = port;
+        gatewaySessionMqttGatewayChipId.value = port;
       } else {
-        gatewaySelectedPort.value = port;
+        gatewaySessionSerialPort.value = port;
       }
     } else if (activeMode.value === 'monitor') {
       if (monitorTransport.value === 'mqtt') {
-        selectedMqttGatewayChipId.value = port;
+        gatewaySessionMqttGatewayChipId.value = port;
       } else {
-        monitorSelectedPort.value = port;
+        gatewaySessionSerialPort.value = port;
       }
     } else if (activeMode.value === 'settings') {
       if (settingsTransport.value === 'mqtt') {
-        selectedMqttGatewayChipId.value = port;
+        settingsMqttGatewayChipId.value = port;
       } else {
         settingsSelectedPort.value = port;
       }
@@ -659,12 +665,12 @@ const monitorTransport = computed<'serial' | 'mqtt'>(() => {
 });
 
 // Unified session gateway connection state variables
-const isSerialSessionConnected = computed(() => portGatewayReady(gatewaySelectedPort.value));
+const isSerialSessionConnected = computed(() => portGatewayReady(gatewaySessionSerialPort.value));
 const serialSessionConnectionState = computed<'active' | 'partial' | 'offline'>(() => {
-  if (portGatewayReady(gatewaySelectedPort.value)) {
+  if (portGatewayReady(gatewaySessionSerialPort.value)) {
     return 'active';
   }
-  if (gatewaySelectedPort.value) {
+  if (gatewaySessionSerialPort.value) {
     return 'partial';
   }
   return 'offline';
@@ -674,32 +680,33 @@ const {
   sessionConnectionType,
   localBrokerPort,
   showSessionConfigPanel,
-  monitorMqttTopicRoot,
-  monitorMqttConnected,
-  showMonitorMqttSettings,
-  isSessionConnected,
-  computedSessionConnectionState,
-  monitorMqttDraftState,
+  sessionMqttHost,
+  sessionMqttPort,
+  sessionMqttTopicRoot,
+  sessionMqttConnected,
+  sessionMqttConnectionState,
+  sessionMqttError,
+  showMqttConnectionSettings,
+  sessionMqttDraftState,
   localBrokerState,
   mqttSettingsState,
-  toggleMonitorMqttConnection,
+  connectSessionMqtt,
+  connectConfiguredSessionMqtt,
+  disconnectSessionMqtt,
   startAndConnectLocalBroker,
-  adoptMonitorMqttFromStatus,
-  openMonitorMqttSettings,
-  closeMonitorMqttSettings,
+  adoptSessionMqttFromStatus,
+  openMqttConnectionSettings,
+  closeMqttConnectionSettings,
   applyMqttStateChanged,
   hydrateMqttState,
   hydrateLocalBrokerStatus
 } = useMqttConnection({
   notify,
-  setMonitorStatusMessage: (msg) => { monitorStatusMessage.value = msg; },
+  setSessionStatusMessage: (msg) => { monitorStatusMessage.value = msg; },
   isSerialSessionConnected,
   serialSessionConnectionState
 });
-
-watch(computedSessionConnectionState, (newVal) => {
-  sessionConnectionState.value = newVal;
-}, { immediate: true });
+const gatewaySessionAutoActionsReady = ref(false);
 const monitorFleetRows = ref<LoraInventoryDevice[]>([]);
 const selectedMonitorDeviceAddress = ref<number | null>(null);
 const hasDiagnosticsData = computed(() => {
@@ -712,9 +719,19 @@ const pairTransport = ref<'serial' | 'mqtt'>('serial');
 const pairGatewayLoaded = ref(false);
 const mqttGateways = ref<Record<string, any>>({});
 const lastMqttDiscoveryMs = ref<Record<string, number>>({});
+// Provisioning target (legacy names retained locally to keep its workflow independent).
 const selectedMqttGatewayChipId = ref('');
 const selectedMqttManualChipId = ref('');
 const manualMqttGatewayError = ref('');
+// Fleet and Monitor share this operational gateway target.
+const gatewaySessionMqttGatewayChipId = ref('');
+const gatewaySessionMqttManualChipId = ref('');
+const gatewaySessionManualMqttGatewayError = ref('');
+// Settings is intentionally a one-off explicit target.
+const settingsConnectionType = ref<'serial' | 'mqtt'>('serial');
+const settingsMqttGatewayChipId = ref('');
+const settingsMqttManualChipId = ref('');
+const settingsManualMqttGatewayError = ref('');
 
 const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
 
@@ -753,14 +770,32 @@ function isMqttFleetPassphraseDefault(): boolean {
 const isSelectedMqttGatewayDiscovered = computed(() => {
   return !!selectedMqttGatewayChipId.value && selectedMqttGatewayChipId.value in mqttGateways.value;
 });
+const isGatewaySessionMqttGatewayDiscovered = computed(() => {
+  return !!gatewaySessionMqttGatewayChipId.value && gatewaySessionMqttGatewayChipId.value in mqttGateways.value;
+});
+const isSettingsMqttGatewayDiscovered = computed(() => {
+  return !!settingsMqttGatewayChipId.value && settingsMqttGatewayChipId.value in mqttGateways.value;
+});
 
 // Watcher to keep the manual input field synchronized if a discovered option is selected
 watch(selectedMqttGatewayChipId, (newVal) => {
-  if (newVal && newVal in mqttGateways.value) {
-    selectedMqttManualChipId.value = newVal;
-    manualMqttGatewayError.value = '';
-  }
   if (newVal) {
+    selectedMqttManualChipId.value = newVal;
+    if (newVal in mqttGateways.value) manualMqttGatewayError.value = '';
+    ensureMqttGatewayDefaultState(newVal);
+  }
+});
+watch(gatewaySessionMqttGatewayChipId, (newVal) => {
+  if (newVal) {
+    gatewaySessionMqttManualChipId.value = newVal;
+    if (newVal in mqttGateways.value) gatewaySessionManualMqttGatewayError.value = '';
+    ensureMqttGatewayDefaultState(newVal);
+  }
+});
+watch(settingsMqttGatewayChipId, (newVal) => {
+  if (newVal) {
+    settingsMqttManualChipId.value = newVal;
+    if (newVal in mqttGateways.value) settingsManualMqttGatewayError.value = '';
     ensureMqttGatewayDefaultState(newVal);
   }
 });
@@ -788,9 +823,26 @@ async function ensureMqttGatewayDefaultState(rawChipId: string | undefined | nul
 
 // Normalization and validation function for manual entry
 function handleManualMqttGatewayInput(val: string) {
+  applyManualMqttGatewayInput(val, selectedMqttGatewayChipId, selectedMqttManualChipId, manualMqttGatewayError);
+}
+
+function handleGatewaySessionManualMqttGatewayInput(val: string) {
+  applyManualMqttGatewayInput(val, gatewaySessionMqttGatewayChipId, gatewaySessionMqttManualChipId, gatewaySessionManualMqttGatewayError);
+}
+
+function handleSettingsManualMqttGatewayInput(val: string) {
+  applyManualMqttGatewayInput(val, settingsMqttGatewayChipId, settingsMqttManualChipId, settingsManualMqttGatewayError);
+}
+
+function applyManualMqttGatewayInput(
+  val: string,
+  selectedGateway: Ref<string>,
+  manualGateway: Ref<string>,
+  error: Ref<string>
+) {
   const trimmed = val.trim();
   if (!trimmed) {
-    manualMqttGatewayError.value = '';
+    error.value = '';
     return;
   }
 
@@ -802,13 +854,12 @@ function handleManualMqttGatewayInput(val: string) {
 
   // Validate format (6 to 8 hex chars)
   if (/^[0-9a-f]{6,8}$/.test(clean)) {
-    selectedMqttGatewayChipId.value = clean;
-    selectedPort.value = clean;
-    selectedMqttManualChipId.value = clean;
+    selectedGateway.value = clean;
+    manualGateway.value = clean;
     ensureMqttGatewayDefaultState(clean);
-    manualMqttGatewayError.value = '';
+    error.value = '';
   } else {
-    manualMqttGatewayError.value = 'Must be of format "lrs-<6-8 hex>" or "<6-8 hex>"';
+    error.value = 'Must be of format "lrs-<6-8 hex>" or "<6-8 hex>"';
   }
 }
 
@@ -824,7 +875,7 @@ const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null)
 const monitorAutoRefresh = ref(true);
 const gatewaySnapshotPauseCount = ref(0);
 const settingsTransport = computed<'serial' | 'mqtt'>(() => {
-  return sessionConnectionType.value === 'serial' ? 'serial' : 'mqtt';
+  return settingsConnectionType.value === 'serial' ? 'serial' : 'mqtt';
 });
 const settingsTab = ref<SettingsTab>('general');
 const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
@@ -876,7 +927,7 @@ const {
   normalizeRole,
   parseVersion,
   compareParsedVersions,
-  activeGatewayId: () => selectedMqttGatewayChipId.value
+  activeGatewayId: () => gatewaySessionMqttGatewayChipId.value
 });
 const candidateTotal = ref(0);
 const candidateTruncated = ref(false);
@@ -918,8 +969,8 @@ const {
 } = useFleetInventoryPolling({
   activeMode: activeMode as Ref<any>,
   fleetTransport,
-  gatewaySelectedPort,
-  selectedMqttGatewayChipId,
+  gatewaySelectedPort: gatewaySessionSerialPort,
+  selectedMqttGatewayChipId: gatewaySessionMqttGatewayChipId,
   isLoraInventoryScanning,
   refreshGatewaySnapshot,
   fleetScanPollIntervalMs: FLEET_SCAN_POLL_INTERVAL_MS,
@@ -993,6 +1044,7 @@ const pairFleetKey = ref('');
 const pairFleetKeySource = ref<'none' | 'gateway' | 'factory_generated' | 'manual'>('none');
 const showPairFleetKey = ref(false);
 const showPairAdminPassword = ref(false);
+const showGatewaySessionAdminPassword = ref(false);
 const pairStatus = ref<EasyPairStatus | null>(null);
 const isPairBusy = ref(false);
 const isGatewayLoading = ref(false);
@@ -1026,6 +1078,7 @@ const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
 const MONITOR_AFTER_FLASH_STORAGE_KEY = 'lrs_flasher_monitor_after_flash';
 const ERASE_BEFORE_FLASH_STORAGE_KEY = 'lrs_flasher_erase_before_flash';
 const MONITOR_AUTO_REFRESH_STORAGE_KEY = 'lrs_flasher_monitor_auto_refresh';
+const GATEWAY_SESSION_STORAGE_KEY = 'lrs_flasher_gateway_session';
 const TAB_PORT_STORAGE_KEYS = {
   serial: 'lrs_flasher_flash_port',
   pair: 'lrs_flasher_provision_port',
@@ -1112,13 +1165,13 @@ const deviceInfo = computed<DeviceInfo | null>({
 });
 const targetGatewayKey = computed(() => {
   if (activeMode.value === 'network') {
-    return fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+    return fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
   }
   if (activeMode.value === 'settings') {
-    return settingsTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : settingsSelectedPort.value;
+    return settingsTransport.value === 'mqtt' ? settingsMqttGatewayChipId.value : settingsSelectedPort.value;
   }
   if (activeMode.value === 'monitor') {
-    return monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+    return monitorTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
   }
   if (activeMode.value === 'pair') {
     return pairGatewayKey.value;
@@ -1252,10 +1305,10 @@ const isGatewayUpgradeAvailable = computed(() => {
   return compareParsedVersions(p1, p2) > 0;
 });
 const fleetGatewayReady = computed(() =>
-  !!gatewaySelectedPort.value &&
+  !!gatewaySessionSerialPort.value &&
   !!fleetGatewayIdentity.value &&
   !!fleetGatewayDevice.value?.adminSupported &&
-  !!adminPasswordForPort(gatewaySelectedPort.value)
+  !!adminPasswordForPort(gatewaySessionSerialPort.value)
 );
 const fleetGatewayIsFactoryDefault = computed(() => {
   const st = fleetGatewayStatus.value;
@@ -1264,7 +1317,7 @@ const fleetGatewayIsFactoryDefault = computed(() => {
 const fleetGatewayFlashDisabled = computed(() => {
   const { port, password, isMqtt } = fleetGatewayCommandTarget();
   if (!port) return true;
-  if (isMqtt && !monitorMqttConnected.value) return true;
+  if (isMqtt && !sessionMqttConnected.value) return true;
   if (isMqtt && !password) return true;
   return fleetGatewayFlashPhase.value !== 'idle' ||
     isNetworkGatewayLoading.value ||
@@ -1409,10 +1462,10 @@ const systemConfigState = computed(() => ({
 const settingsFormComputed = computed<SettingsForm>({
   get: () => ({
     selectedPort: selectedPort.value,
-    sessionConnectionType: sessionConnectionType.value,
+    settingsConnectionType: settingsConnectionType.value,
     settingsAdminPassword: settingsAdminPassword.value,
-    selectedMqttManualChipId: selectedMqttManualChipId.value,
-    selectedMqttGatewayChipId: selectedMqttGatewayChipId.value,
+    selectedMqttManualChipId: settingsMqttManualChipId.value,
+    selectedMqttGatewayChipId: settingsMqttGatewayChipId.value,
     settingsTab: settingsTab.value,
     remoteSubTab: remoteSubTab.value,
     showSettingsAdminPassword: showSettingsAdminPassword.value,
@@ -1423,11 +1476,11 @@ const settingsFormComputed = computed<SettingsForm>({
     serialFactoryKeepWifi: serialFactoryKeepWifi.value,
   }),
   set: (val) => {
+    settingsConnectionType.value = val.settingsConnectionType;
     selectedPort.value = val.selectedPort;
-    sessionConnectionType.value = val.sessionConnectionType;
     settingsAdminPassword.value = val.settingsAdminPassword;
-    selectedMqttManualChipId.value = val.selectedMqttManualChipId;
-    selectedMqttGatewayChipId.value = val.selectedMqttGatewayChipId;
+    settingsMqttManualChipId.value = val.selectedMqttManualChipId;
+    settingsMqttGatewayChipId.value = val.selectedMqttGatewayChipId;
     settingsTab.value = val.settingsTab;
     remoteSubTab.value = val.remoteSubTab;
     showSettingsAdminPassword.value = val.showSettingsAdminPassword;
@@ -1461,9 +1514,9 @@ const settingsTransportStateComputed = computed<SettingsTransportState>(() => ({
   mqttGateways: Object.fromEntries(
     Object.entries(mqttGateways.value).map(([k, v]) => [k, { chip_id: v.chip_id }])
   ),
-  manualMqttGatewayError: manualMqttGatewayError.value,
-  isSelectedMqttGatewayDiscovered: isSelectedMqttGatewayDiscovered.value,
-  monitorMqttConnected: monitorMqttConnected.value,
+  manualMqttGatewayError: settingsManualMqttGatewayError.value,
+  isSelectedMqttGatewayDiscovered: isSettingsMqttGatewayDiscovered.value,
+  sessionMqttConnected: sessionMqttConnected.value,
 }));
 
 const settingsAdminStatusStateComputed = computed<SettingsAdminStatusState | null>(() => {
@@ -1497,14 +1550,10 @@ const settingsWifiStateComputed = computed<SettingsWifiState>(() => ({
 
 const monitorFormComputed = computed<MonitorForm>({
   get: () => ({
-    selectedPort: selectedPort.value,
-    sessionConnectionType: sessionConnectionType.value,
     monitorAutoRefresh: monitorAutoRefresh.value,
     selectedMonitorDeviceAddress: selectedMonitorDeviceAddress.value,
   }),
   set: (val) => {
-    selectedPort.value = val.selectedPort;
-    sessionConnectionType.value = val.sessionConnectionType;
     monitorAutoRefresh.value = val.monitorAutoRefresh;
     selectedMonitorDeviceAddress.value = val.selectedMonitorDeviceAddress;
   }
@@ -1520,9 +1569,10 @@ const monitorHeaderStateComputed = computed<MonitorHeaderState>(() => ({
 }));
 
 const monitorTransportStateComputed = computed<MonitorTransportState>(() => ({
-  ports: ports.value.map(p => ({ port_name: p.port_name, description: p.description || undefined })),
-  serialPortSelectorDisabled: serialPortSelectorDisabled.value,
-  monitorMqttConnected: monitorMqttConnected.value,
+  sessionTargetReady: monitorTransport.value === 'mqtt'
+    ? sessionMqttConnected.value && !!gatewaySessionMqttGatewayChipId.value && isGatewaySessionMqttGatewayDiscovered.value
+    : !!gatewaySessionSerialPort.value,
+  transport: monitorTransport.value,
 }));
 
 const monitorGatewayWarningStateComputed = computed<MonitorGatewayWarningState>(() => ({
@@ -1651,7 +1701,9 @@ const settingsEmptyMessage = computed(() => {
     return '';
   }
   if (!hasActiveDeviceInfo.value) {
-    return 'Select a USB device, then read identity or fetch settings.';
+    return settingsTransport.value === 'mqtt'
+      ? 'Select an MQTT gateway, connect the broker, then fetch settings.'
+      : 'Select a USB device, then read identity or fetch settings.';
   }
   if (settingsTab.value === 'general') {
     return 'Fetch settings to edit role, addresses, and fleet identity. Refresh status for live firmware health.';
@@ -1722,8 +1774,8 @@ const fleetGatewaySummary = computed(() => {
   if (status) {
     const wifi = status.wifi?.sta_connected ? `WiFi ${status.wifi.ip || 'connected'}` : `WiFi ${status.wifi?.status || 'offline'}`;
     const transport = isMqtt
-      ? `MQTT lrs-${selectedMqttGatewayChipId.value || 'not selected'}`
-      : `USB ${gatewaySelectedPort.value || 'not selected'}`;
+      ? `MQTT lrs-${gatewaySessionMqttGatewayChipId.value || 'not selected'}`
+      : `USB ${gatewaySessionSerialPort.value || 'not selected'}`;
     return `${status.role || 'gateway'} · ${transport} · ${wifi} · heap ${formatBytes(status.heap_free)} free`;
   }
   if (fleetGatewayIdentity.value) {
@@ -1739,16 +1791,16 @@ const fleetScanDisabled = computed(() =>
 );
 
 const gatewayWifiReady = computed(() =>
-  !!gatewaySelectedPort.value &&
-  serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
-  !!serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadyIp
+  !!pairGatewayKey.value &&
+  serialDeviceState(pairGatewayKey.value)?.gatewayWifiReadySsid === pairWifiSsid.value.trim() &&
+  !!serialDeviceState(pairGatewayKey.value)?.gatewayWifiReadyIp
 );
 const pairWifiSsidInScan = computed(() =>
   !!pairWifiSsid.value.trim() &&
   wifiNetworks.value.some(n => n.ssid === pairWifiSsid.value.trim())
 );
 const gatewayWifiStatusText = computed(() => {
-  const state = serialDeviceState(gatewaySelectedPort.value);
+  const state = serialDeviceState(pairGatewayKey.value);
   const ssid = state?.gatewayWifiReadySsid;
   const ip = state?.gatewayWifiReadyIp;
   if (ssid && ip) {
@@ -1757,7 +1809,7 @@ const gatewayWifiStatusText = computed(() => {
   return 'Gateway WiFi: not connected. You can still send credentials to remotes over LoRa.';
 });
 const gatewayWifiHelpText = computed(() => {
-  const state = serialDeviceState(gatewaySelectedPort.value);
+  const state = serialDeviceState(pairGatewayKey.value);
   const ssid = state?.gatewayWifiReadySsid;
   const ip = state?.gatewayWifiReadyIp;
   if (ssid && ip) {
@@ -2160,8 +2212,8 @@ function reconcileTabPortSelections(currentNames: string[], newPorts: string[], 
   };
 
   flashSelectedPort.value = ensureSelection(flashSelectedPort.value, activeMode.value === 'serial');
-  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'pair' || activeMode.value === 'network');
-  monitorSelectedPort.value = ensureSelection(monitorSelectedPort.value, activeMode.value === 'monitor');
+  gatewaySelectedPort.value = ensureSelection(gatewaySelectedPort.value, activeMode.value === 'pair');
+  gatewaySessionSerialPort.value = ensureSelection(gatewaySessionSerialPort.value, activeMode.value === 'network' || activeMode.value === 'monitor');
   settingsSelectedPort.value = ensureSelection(settingsSelectedPort.value, activeMode.value === 'settings');
 }
 
@@ -2211,11 +2263,57 @@ function chooseDefaultPort(portNames: string[]): string {
 function loadSavedTabPorts() {
   try {
     flashSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.serial) || flashSelectedPort.value;
-    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || gatewaySelectedPort.value;
-    monitorSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.monitor) || monitorSelectedPort.value;
+    gatewaySelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.pair) || gatewaySelectedPort.value;
+    gatewaySessionSerialPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.network) || localStorage.getItem(TAB_PORT_STORAGE_KEYS.monitor) || gatewaySessionSerialPort.value;
     settingsSelectedPort.value = localStorage.getItem(TAB_PORT_STORAGE_KEYS.settings) || settingsSelectedPort.value;
   } catch {
     // Ignore storage failures; runtime auto-selection still works.
+  }
+}
+
+function loadGatewaySessionPreferences() {
+  try {
+    const raw = localStorage.getItem(GATEWAY_SESSION_STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw) as Partial<{
+      transport: 'serial' | 'mqtt' | 'local_broker';
+      serialPort: string;
+      mqttGatewayChipId: string;
+      mqttHost: string;
+      mqttPort: number;
+      mqttTopicRoot: string;
+    }>;
+    if (saved.transport === 'serial' || saved.transport === 'mqtt' || saved.transport === 'local_broker') {
+      sessionConnectionType.value = saved.transport;
+    }
+    if (typeof saved.serialPort === 'string') gatewaySessionSerialPort.value = saved.serialPort;
+    if (typeof saved.mqttGatewayChipId === 'string') gatewaySessionMqttGatewayChipId.value = saved.mqttGatewayChipId;
+    if (typeof saved.mqttHost === 'string') sessionMqttHost.value = saved.mqttHost;
+    if (Number.isInteger(saved.mqttPort)) sessionMqttPort.value = Number(saved.mqttPort);
+    if (typeof saved.mqttTopicRoot === 'string') sessionMqttTopicRoot.value = saved.mqttTopicRoot;
+    sessionMqttDraftState.value = {
+      ...sessionMqttDraftState.value,
+      host: typeof saved.mqttHost === 'string' ? saved.mqttHost : sessionMqttDraftState.value.host,
+      port: Number.isInteger(saved.mqttPort) ? Number(saved.mqttPort) : sessionMqttDraftState.value.port,
+      topicRoot: typeof saved.mqttTopicRoot === 'string' ? saved.mqttTopicRoot : sessionMqttDraftState.value.topicRoot,
+    };
+  } catch {
+    // Ignore invalid or unavailable storage; defaults remain usable.
+  }
+}
+
+function saveGatewaySessionPreferences() {
+  try {
+    localStorage.setItem(GATEWAY_SESSION_STORAGE_KEY, JSON.stringify({
+      transport: sessionConnectionType.value,
+      serialPort: gatewaySessionSerialPort.value,
+      mqttGatewayChipId: gatewaySessionMqttGatewayChipId.value,
+      mqttHost: sessionMqttDraftState.value.host,
+      mqttPort: sessionMqttDraftState.value.port,
+      mqttTopicRoot: sessionMqttDraftState.value.topicRoot,
+    }));
+  } catch {
+    // Ignore storage failures; the current session still works in memory.
   }
 }
 
@@ -2793,14 +2891,14 @@ function pairPassword(): string {
 
 function fleetGatewayCommandTarget() {
   const isMqtt = fleetTransport.value === 'mqtt';
-  const port = isMqtt ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  const port = isMqtt ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
   const password = adminPasswordForPort(port);
   return { port, password, isMqtt };
 }
 
 function monitorGatewayCommandTarget() {
   const isMqtt = monitorTransport.value === 'mqtt';
-  const port = isMqtt ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+  const port = isMqtt ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
   const password = adminPasswordForPort(port);
   return { port, password, isMqtt };
 }
@@ -3009,8 +3107,8 @@ const {
   sendMqttAdminCommand,
   handleMqttAdminResponse
 } = useMqttAdmin({
-  monitorMqttConnected,
-  monitorMqttTopicRoot,
+  mqttConnected: sessionMqttConnected,
+  mqttTopicRoot: sessionMqttTopicRoot,
   adminPasswordForPort,
   normalizeChipId
 });
@@ -3046,7 +3144,7 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
 
 async function loadNetworkGateway() {
   if (fleetTransport.value === 'mqtt') {
-    const chipId = selectedMqttGatewayChipId.value;
+    const chipId = gatewaySessionMqttGatewayChipId.value;
     if (!chipId || isNetworkGatewayLoading.value) return;
     isNetworkGatewayLoading.value = true;
     networkStatusMessage.value = `Loading MQTT gateway lrs-${chipId}...`;
@@ -3073,7 +3171,7 @@ async function loadNetworkGateway() {
     return;
   }
 
-  const port = gatewaySelectedPort.value;
+  const port = gatewaySessionSerialPort.value;
   if (!port || isNetworkGatewayLoading.value) return;
   isNetworkGatewayLoading.value = true;
   networkStatusMessage.value = `Loading gateway on ${port}...`;
@@ -3096,8 +3194,8 @@ async function loadNetworkGateway() {
       loraInventory.value = [];
       loraInventoryScan.value = null;
       isLoraInventoryScanning.value = false;
-      if (gatewaySelectedPort.value === port) {
-        gatewaySelectedPort.value = '';
+      if (gatewaySessionSerialPort.value === port) {
+        gatewaySessionSerialPort.value = '';
       }
       return;
     }
@@ -3149,7 +3247,7 @@ function clearFleetGatewayCache() {
 
 function mergeLoraInventoryRows(rows: LoraInventoryDevice[]) {
   const processed = mergeInventoryRows(rows);
-  if (gatewaySelectedPort.value && gatewaySelectedPort.value === monitorSelectedPort.value) {
+  if (gatewaySelectedPort.value && gatewaySelectedPort.value === gatewaySessionSerialPort.value) {
     monitorFleetRows.value = mergeMonitorRows(processed);
   }
 }
@@ -3183,7 +3281,7 @@ function scheduleFleetScanSettleRefresh(port: string) {
   }
   fleetScanSettleTimer.value = window.setTimeout(() => {
     fleetScanSettleTimer.value = null;
-    const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+    const targetPort = fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
     if (activeMode.value !== 'network' || port !== targetPort || isLoraInventoryScanning.value) return;
     void refreshGatewaySnapshot(port, true, 'fleet');
   }, FLEET_SCAN_SETTLE_REFRESH_MS);
@@ -3215,12 +3313,12 @@ async function refreshLoraInventoryPeers(port: string, addresses: number[], back
       lastLoraInventoryPeerStatusByAddress.value[address] = peer;
       if (!peer.device) continue;
       if (source === 'fleet') {
-        const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+        const targetPort = fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
         if (port === targetPort) {
           mergeLoraInventoryRow(peer.device);
         }
       }
-      const targetMonitor = monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+      const targetMonitor = monitorTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
       if (source === 'monitor' && port === targetMonitor) {
         monitorFleetRows.value = mergeMonitorRows([
           ...monitorFleetRows.value.filter(existing => existing.address !== peer.device!.address),
@@ -3330,7 +3428,14 @@ function tankDetailLabel(_row: LoraInventoryDevice): string {
 
 
 async function refreshMonitorData(background = false) {
-  const port = monitorSelectedPort.value;
+  if (monitorTransport.value === 'mqtt') {
+    const chipId = gatewaySessionMqttGatewayChipId.value;
+    if (!sessionMqttConnected.value || !chipId || !isGatewaySessionMqttGatewayDiscovered.value) return;
+    monitorFleetRows.value = mergeMonitorRows(loraInventory.value);
+    monitorStatusMessage.value = `Listening for MQTT telemetry from lrs-${normalizeChipId(chipId)}.`;
+    return;
+  }
+  const port = gatewaySessionSerialPort.value;
   if (!port || isMonitorRefreshing.value) return;
   if (background && activeMode.value !== 'monitor') return;
   isMonitorRefreshing.value = true;
@@ -3367,20 +3472,20 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       { label: 'Gateway status snapshot', priority: background ? 'background' : 'user', dropIfBusy: background }
     );
     applySerialAdminStatus(status, port);
-    if (port === monitorSelectedPort.value) adoptMonitorMqttFromStatus(status);
+    if (port === gatewaySessionSerialPort.value) adoptSessionMqttFromStatus(status);
     if (!status.role_tx) {
       if (source === 'fleet') {
         networkStatusMessage.value = gatewayRequiredMessage('Fleet');
         clearFleetGatewayCache();
-        if (gatewaySelectedPort.value === port) {
-          gatewaySelectedPort.value = '';
+        if (gatewaySessionSerialPort.value === port) {
+          gatewaySessionSerialPort.value = '';
         }
       } else {
         monitorStatusMessage.value = gatewayRequiredMessage('Monitor');
         monitorFleetRows.value = [];
         stopMonitorPolling();
-        if (monitorSelectedPort.value === port) {
-          monitorSelectedPort.value = '';
+        if (gatewaySessionSerialPort.value === port) {
+          gatewaySessionSerialPort.value = '';
         }
       }
       if (!background) notify(source === 'fleet' ? networkStatusMessage.value : monitorStatusMessage.value);
@@ -3398,7 +3503,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
     lastLoraInventoryStatusAtMs.value = Date.now();
     lastLoraInventoryStatusPort.value = port;
 
-    const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+    const targetPort = fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
     if (source === 'fleet' && port === targetPort) {
       const wasScanning = isLoraInventoryScanning.value;
       const scanActive = !!inventory.scan?.active;
@@ -3431,7 +3536,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
         startFleetCachePolling();
       }
     }
-    const targetMonitor = monitorTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : monitorSelectedPort.value;
+    const targetMonitor = monitorTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
     if (source === 'monitor' && port === targetMonitor) {
       mergeMonitorSeedRows(inventory.devices || []);
       const monitorAddresses = (inventory.devices || []).map(device => device.address);
@@ -3465,7 +3570,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
 }
 
 async function withGatewayForeground<T>(port: string, work: () => Promise<T>): Promise<T> {
-  const resumeMonitorLoop = isMonitorLoopRunning.value && monitorAutoRefresh.value && monitorSelectedPort.value === port;
+  const resumeMonitorLoop = isMonitorLoopRunning.value && monitorAutoRefresh.value && gatewaySessionSerialPort.value === port;
   gatewaySnapshotPauseCount.value++;
   stopMonitorPolling();
   stopLoraInventoryPolling(false);
@@ -3473,10 +3578,10 @@ async function withGatewayForeground<T>(port: string, work: () => Promise<T>): P
     return await work();
   } finally {
     gatewaySnapshotPauseCount.value = Math.max(0, gatewaySnapshotPauseCount.value - 1);
-    if (resumeMonitorLoop && monitorAutoRefresh.value && monitorSelectedPort.value === port) {
+    if (resumeMonitorLoop && monitorAutoRefresh.value && gatewaySessionSerialPort.value === port) {
       startMonitorPolling();
     }
-    if (activeMode.value === 'network' && gatewaySelectedPort.value === port && !isLoraInventoryScanning.value) {
+    if (activeMode.value === 'network' && gatewaySessionSerialPort.value === port && !isLoraInventoryScanning.value) {
       startFleetCachePolling();
     }
   }
@@ -3485,7 +3590,7 @@ async function withGatewayForeground<T>(port: string, work: () => Promise<T>): P
 function startMonitorPolling() {
   stopMonitorPolling();
   isMonitorLoopRunning.value = true;
-  if (monitorAutoRefresh.value) {
+  if (monitorAutoRefresh.value && monitorTransport.value === 'serial') {
     monitorPollTimer.value = window.setInterval(() => {
       refreshMonitorData(true);
     }, 5000);
@@ -3514,7 +3619,7 @@ function toggleMonitorLoop() {
 
 
 async function ensureFleetGatewayStatus(force = false): Promise<SerialAdminStatus | null> {
-  const port = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  const port = fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
   const state = serialDeviceState(port);
   if (!force && state?.status) return state.status;
   try {
@@ -3817,8 +3922,8 @@ async function executeRemoteReboot(device: LoraInventoryDevice) {
 
 async function adoptCandidate(candidate: LoraAdoptionCandidate) {
   const isMqtt = fleetTransport.value === 'mqtt';
-  const port = isMqtt ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
-  const password = pairAdminPassword.value;
+  const port = isMqtt ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
+  const password = adminPasswordForPort(port);
 
   if (!port) {
     notify(isMqtt ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
@@ -4090,7 +4195,7 @@ async function executeRemoteFleetKeyChange(device: LoraInventoryDevice, newKey: 
 function fleetGatewayFlashUnavailableReason(): string {
   const { port, isMqtt } = fleetGatewayCommandTarget();
   if (!port) return isMqtt ? 'Select an MQTT gateway first' : 'Select a USB gateway first';
-  if (isMqtt && !monitorMqttConnected.value) return 'MQTT broker is not connected. Connect in the Monitor tab first.';
+  if (isMqtt && !sessionMqttConnected.value) return 'MQTT broker is not connected. Open Gateway Session connection settings first.';
   if (isMqtt && !fleetGatewayCommandTarget().password) return 'Enter the gateway admin password';
   if (fleetGatewayFlashPhase.value !== 'idle') return 'Gateway flash is already running';
   if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
@@ -4668,7 +4773,7 @@ async function factoryResetSerialDevice() {
       state.config = null;
       state.wifiNetworks = [];
     }
-    if (port && port === gatewaySelectedPort.value) {
+    if (port && port === gatewaySessionSerialPort.value) {
       clearFleetGatewayCache();
     }
     pushSerialLog('Factory reset command accepted; device is rebooting and loaded settings were invalidated.');
@@ -4694,6 +4799,13 @@ async function loadEasyPairGateway(isAuto = false) {
   if (pairTransport.value === 'mqtt') {
     const chipId = key.replace(/^lrs-/, '');
     pushPairLog(`Loading MQTT gateway lrs-${chipId}...`);
+    if (!sessionMqttConnected.value) {
+      pushPairLog('MQTT broker is not connected. Open Broker settings and connect first.');
+      if (!isAuto) notify('MQTT broker is not connected. Open Broker settings and connect first.');
+      loadGatewayInFlight = false;
+      isGatewayLoading.value = false;
+      return;
+    }
     try {
       const gw = mqttGateways.value[chipId];
       const state = serialDeviceState(chipId);
@@ -5109,7 +5221,7 @@ async function scanGatewayWifi() {
     return;
   }
   isWifiScanning.value = true;
-  pushPairLog('Scanning WiFi networks from the USB gateway...');
+  pushPairLog(`Scanning WiFi networks from the ${pairTransport.value === 'mqtt' ? 'MQTT' : 'USB'} gateway...`);
   try {
     const out = await sendPairCommand<WifiScanResponse>('wifi_scan', {
       admin_password: password
@@ -5177,13 +5289,14 @@ async function scanSettingsWifi() {
 
 async function openPairWifiTab() {
   pairPanelTab.value = 'wifi';
-  if (!gatewaySelectedPort.value || isGatewayLoading.value || isWifiScanning.value) {
+  const key = pairGatewayKey.value;
+  if (!key || isGatewayLoading.value || isWifiScanning.value) {
     return;
   }
   if (gatewayWifiReady.value) {
     return;
   }
-  if (serialDeviceState(gatewaySelectedPort.value)?.wifiScanned && wifiNetworks.value.length > 0) {
+  if (serialDeviceState(key)?.wifiScanned && wifiNetworks.value.length > 0) {
     return;
   }
   if (gatewayReady.value && await refreshGatewayStatusForPair()) {
@@ -5193,7 +5306,7 @@ async function openPairWifiTab() {
 }
 
 function clearGatewayWifiReady() {
-  const state = serialDeviceState(gatewaySelectedPort.value);
+  const state = serialDeviceState(pairGatewayKey.value);
   if (!state) return;
   state.gatewayWifiReadySsid = '';
   state.gatewayWifiReadyIp = '';
@@ -5212,7 +5325,7 @@ function applySerialAdminStatus(out: SerialAdminStatus, port = selectedPort.valu
   }
   state.adminSupported = true;
 
-  const targetPort = fleetTransport.value === 'mqtt' ? selectedMqttGatewayChipId.value : gatewaySelectedPort.value;
+  const targetPort = fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
   if (port && port === targetPort) {
     const sessionKey = `${out.chip_id || ''}:${out.commissioned === true}:${out.fleet_passphrase_default === true}:${out.role_tx === true}:${out.local_address || 0}`;
     if (activeGatewaySessionKey.value && activeGatewaySessionKey.value !== sessionKey) {
@@ -5290,7 +5403,7 @@ async function waitForGatewayWifiConnection(ssid: string, attemptId: number, tim
     const wifiIp = wifi?.ip?.trim() || '';
     const wifiSsid = wifi?.sta_ssid?.trim() || '';
     if ((wifi?.sta_connected || wifiStatus === 'connected') && wifiSsid === ssid && wifiIp && wifiIp !== '0.0.0.0') {
-      applySerialAdminStatus(out, gatewaySelectedPort.value);
+      applySerialAdminStatus(out, pairGatewayKey.value);
       return out;
     }
     const label = wifi?.status || 'connecting';
@@ -5329,7 +5442,7 @@ async function connectGatewayWifi() {
       state.gatewayWifiReadySsid = ssid;
       state.gatewayWifiReadyIp = status.wifi?.ip || '';
     }
-    pushPairLog(`Gateway connected to ${ssid} at ${serialDeviceState(gatewaySelectedPort.value)?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
+    pushPairLog(`Gateway connected to ${ssid} at ${serialDeviceState(pairGatewayKey.value)?.gatewayWifiReadyIp || status.wifi?.ip || 'unknown IP'}. You can now send WiFi to remotes.`);
   } catch (e) {
     if (String(e).includes('gateway_wifi_cancelled')) return;
     const msg = serialFeatureError('WiFi save', e);
@@ -5840,19 +5953,12 @@ watch(activeMode, (mode) => {
 
   const port = selectedPort.value;
   const targetMode = mode || 'serial';
-  if (port && !isSelectedPortMonitoring.value) {
+  if (port && !isSelectedPortMonitoring.value && targetMode !== 'network' && targetMode !== 'monitor') {
     ensureDeviceInfoForPort(port, targetMode).then((ok) => {
       if (selectedPort.value !== port || (activeMode.value || 'serial') !== targetMode) {
         return;
       }
-      const state = serialDeviceState(port);
-      if (ok && targetMode === 'network') {
-        if (state?.status && !state.status.role_tx) {
-          networkStatusMessage.value = 'Selected device is not a Gateway.';
-          return;
-        }
-        loadNetworkGateway();
-      } else if (ok && targetMode === 'pair') {
+      if (ok && targetMode === 'pair') {
         loadEasyPairGateway(true);
       }
     });
@@ -5861,9 +5967,6 @@ watch(activeMode, (mode) => {
   if (mode !== 'monitor') stopMonitorPolling();
   if (mode !== 'network') {
     stopLoraInventoryPolling(false);
-  } else if (portGatewayReady(gatewaySelectedPort.value)) {
-    // Gateway was already loaded (e.g. switching back to Fleet tab) — just refresh inventory
-    refreshLoraInventoryStatus(false).finally(() => startFleetCachePolling());
   }
 });
 
@@ -5872,19 +5975,12 @@ watch(selectedPort, (port) => {
   serialUptimeMs.value = activeSerialDevice.value?.status?.uptime_ms ?? null;
 
   const targetMode = activeMode.value || 'serial';
-  if (port && !isSelectedPortMonitoring.value) {
+  if (port && !isSelectedPortMonitoring.value && targetMode !== 'network' && targetMode !== 'monitor') {
     ensureDeviceInfoForPort(port, targetMode).then((ok) => {
       if (selectedPort.value !== port || (activeMode.value || 'serial') !== targetMode) {
         return;
       }
-      const state = serialDeviceState(port);
-      if (ok && targetMode === 'network') {
-        if (state?.status && !state.status.role_tx) {
-          networkStatusMessage.value = 'Selected device is not a Gateway.';
-          return;
-        }
-        loadNetworkGateway();
-      } else if (ok && targetMode === 'pair') {
+      if (ok && targetMode === 'pair') {
         loadEasyPairGateway(true);
       }
     });
@@ -5896,27 +5992,45 @@ watch(selectedPort, (port) => {
   }
 });
 
-watch(selectedMqttGatewayChipId, (newVal) => {
+watch(gatewaySessionMqttGatewayChipId, () => {
   clearFleetGatewayCache();
+  monitorFleetRows.value = [];
+  selectedMonitorDeviceAddress.value = null;
+  stopMonitorPolling();
   activeGatewaySessionKey.value = '';
-  if (newVal && activeMode.value === 'network') {
-    loadNetworkGateway();
-  }
 });
 
 watch(fleetTransport, () => {
   clearFleetGatewayCache();
+  monitorFleetRows.value = [];
+  selectedMonitorDeviceAddress.value = null;
+  stopMonitorPolling();
   activeGatewaySessionKey.value = '';
+  networkStatusMessage.value = fleetTransport.value === 'mqtt'
+    ? 'Select an MQTT gateway, then load its fleet cache.'
+    : 'Select a USB gateway, then load its fleet cache.';
+  monitorStatusMessage.value = monitorTransport.value === 'mqtt'
+    ? 'Select an MQTT gateway and start Monitor.'
+    : 'Select a USB gateway and start Monitor.';
+});
+
+watch(sessionMqttConnectionState, (state, previousState) => {
+  if (state === 'connecting' && previousState !== 'connecting') {
+    mqttGateways.value = {};
+    lastMqttDiscoveryMs.value = {};
+  }
+  if (sessionConnectionType.value !== 'serial' && state !== 'connected') {
+    clearFleetGatewayCache();
+    monitorFleetRows.value = [];
+    selectedMonitorDeviceAddress.value = null;
+    stopMonitorPolling();
+    activeGatewaySessionKey.value = '';
+  }
 });
 
 watch(gatewaySelectedPort, (port) => {
-  // Provisioning side-effects
   pairStatus.value = null;
   saveTabPort('pair', port);
-  // Fleet side-effects
-  saveTabPort('network', port);
-  clearFleetGatewayCache();
-  activeGatewaySessionKey.value = '';
 
   const targetMode = activeMode.value || 'serial';
   if (port && !isSelectedPortMonitoring.value) {
@@ -5924,14 +6038,7 @@ watch(gatewaySelectedPort, (port) => {
       if (gatewaySelectedPort.value !== port || (activeMode.value || 'serial') !== targetMode) {
         return;
       }
-      const state = serialDeviceState(port);
-      if (ok && targetMode === 'network') {
-        if (state?.status && !state.status.role_tx) {
-          networkStatusMessage.value = 'Selected device is not a Gateway.';
-          return;
-        }
-        loadNetworkGateway();
-      } else if (ok && targetMode === 'pair') {
+      if (ok && targetMode === 'pair') {
         loadEasyPairGateway(true);
       }
     });
@@ -5949,22 +6056,37 @@ watch(gatewayPortDeviceInfo, (info) => {
   if (!info) return;
   const port = gatewaySelectedPort.value;
   if (!port || portGatewayReady(port)) return;
-  if (activeMode.value === 'network') {
-    loadNetworkGateway();
-  } else if (activeMode.value === 'pair') {
+  if (activeMode.value === 'pair') {
     loadEasyPairGateway(true);
   }
 });
 
-watch(flashSelectedPort, port => saveTabPort('serial', port));
-watch(monitorSelectedPort, port => saveTabPort('monitor', port));
-watch(settingsSelectedPort, port => saveTabPort('settings', port));
+watch(gatewaySessionSerialPort, (port) => {
+  saveTabPort('network', port);
+  clearFleetGatewayCache();
+  monitorFleetRows.value = [];
+  selectedMonitorDeviceAddress.value = null;
+  stopMonitorPolling();
+  activeGatewaySessionKey.value = '';
+});
 
-watch(sessionConnectionType, async (newVal) => {
-  if (newVal === 'local_broker') {
+watch(
+  [sessionConnectionType, gatewaySessionSerialPort, gatewaySessionMqttGatewayChipId, sessionMqttDraftState],
+  saveGatewaySessionPreferences,
+  { deep: true }
+);
+
+watch(sessionConnectionType, async (transport, previousTransport) => {
+  if (!gatewaySessionAutoActionsReady.value || transport === previousTransport) return;
+  if (transport === 'mqtt') {
+    await connectConfiguredSessionMqtt();
+  } else if (transport === 'local_broker') {
     await startAndConnectLocalBroker();
   }
 });
+
+watch(flashSelectedPort, port => saveTabPort('serial', port));
+watch(settingsSelectedPort, port => saveTabPort('settings', port));
 
 const handleWindowClick = () => {
   activeDropdownAddress.value = null;
@@ -5981,6 +6103,9 @@ onMounted(async () => {
     fleetClockMs.value = Date.now();
   }, 1000);
   loadSavedTabPorts();
+  loadGatewaySessionPreferences();
+  await nextTick();
+  gatewaySessionAutoActionsReady.value = true;
   try {
     flasherAppVersion.value = await invoke<string>('get_app_version');
   } catch {
@@ -6147,10 +6272,10 @@ onMounted(async () => {
     const payload = event.payload;
     if (
       fleetTransport.value === 'mqtt' &&
-      normalizeChipId(payload.gateway_id) === normalizeChipId(selectedMqttGatewayChipId.value)
+      normalizeChipId(payload.gateway_id) === normalizeChipId(gatewaySessionMqttGatewayChipId.value)
     ) {
       applyTelemetryUpdate(payload);
-      if (gatewaySelectedPort.value === monitorSelectedPort.value) {
+      if (monitorTransport.value === 'mqtt' && isMonitorLoopRunning.value) {
         monitorFleetRows.value = mergeMonitorRows(loraInventory.value);
       }
     }
@@ -6390,13 +6515,13 @@ const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
 });
 
 const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
-  const info = gatewaySelectedPort.value ? serialDeviceState(gatewaySelectedPort.value) : null;
+  const info = gatewaySessionSerialPort.value ? serialDeviceState(gatewaySessionSerialPort.value) : null;
   const rebootAlert = fleetGatewayUnexpectedReboot.value;
   const rebootAlertLine = rebootAlert
     ? `Uptime rolled back from ${formatUptime(rebootAlert.previousUptimeMs)} to ${formatUptime(rebootAlert.currentUptimeMs)}.`
     : '';
   return {
-    hasGatewayDeviceWarning: !!(gatewaySelectedPort.value && info?.status && !info.status.role_tx),
+    hasGatewayDeviceWarning: !!(gatewaySessionSerialPort.value && info?.status && !info.status.role_tx),
     hasUnexpectedReboot: !!rebootAlert,
     rebootAlertLine,
     badgeClass: fleetGatewayBadgeClass.value,
@@ -6483,14 +6608,132 @@ const mqttGatewayOptionsComputed = computed<MqttGatewayOption[]>(() =>
   }))
 );
 
-const fleetTransportStateComputed = computed<FleetTransportState>(() => ({
-  ports: ports.value.map(p => ({ port_name: p.port_name, description: p.description || undefined })),
+const gatewaySessionTargetKey = computed(() =>
+  fleetTransport.value === 'mqtt'
+    ? gatewaySessionMqttGatewayChipId.value
+    : gatewaySessionSerialPort.value
+);
+
+const gatewaySessionIsActive = computed(() => {
+  if (sessionConnectionType.value === 'serial') {
+    return portGatewayReady(gatewaySessionSerialPort.value);
+  }
+  const selectedGateway = gatewaySessionMqttGatewayChipId.value;
+  if (!selectedGateway || !isGatewaySessionMqttGatewayDiscovered.value || !sessionMqttConnected.value) {
+    return false;
+  }
+  if (sessionConnectionType.value === 'local_broker') {
+    return localBrokerState.value.running &&
+      mqttSettingsState.value.host === '127.0.0.1' &&
+      mqttSettingsState.value.port === localBrokerPort.value;
+  }
+  return true;
+});
+
+const gatewaySessionChangeDisabledReason = computed(() => {
+  if (isFlashing.value) return 'Gateway Session cannot change while flashing is active.';
+  if (hasActiveRemoteOtaPulls.value || ['flashing', 'rebooting', 'waiting'].includes(fleetGatewayFlashPhase.value)) return 'Gateway Session cannot change while OTA is active.';
+  if (serialAdminBusy.value) return 'Gateway Session cannot change while an admin command is active.';
+  if (isLoraInventoryScanning.value || isLoraInventoryScanStarting.value) return 'Gateway Session cannot change while a Fleet scan is active.';
+  if (isNetworkGatewayLoading.value) return 'Gateway Session cannot change while the gateway is loading.';
+  if (sessionMqttConnectionState.value === 'connecting' || localBrokerState.value.isStarting || localBrokerState.value.isClientConnecting) return 'Gateway Session transport is connecting.';
+  return '';
+});
+
+const gatewaySessionDisplayStateComputed = computed<GatewaySessionDisplayState>(() => {
+  let state: GatewaySessionDisplayState['state'] = 'offline';
+  let label = 'Offline';
+  let mqttConnectionState = sessionMqttConnectionState.value;
+  let mqttError = sessionMqttError.value;
+
+  if (sessionConnectionType.value === 'serial') {
+    if (gatewaySessionIsActive.value) {
+      state = 'active';
+      label = 'Active';
+    } else if (gatewaySessionSerialPort.value) {
+      state = 'partial';
+      label = 'Waiting for gateway';
+    }
+  } else if (sessionConnectionType.value === 'local_broker' && localBrokerState.value.error) {
+    state = 'error';
+    label = 'Local broker error';
+    mqttConnectionState = 'error';
+    mqttError = localBrokerState.value.error;
+  } else if (sessionConnectionType.value === 'local_broker' && localBrokerState.value.isStarting) {
+    state = 'partial';
+    label = 'Starting local broker';
+    mqttConnectionState = 'connecting';
+  } else if (sessionMqttConnectionState.value === 'error') {
+    state = 'error';
+    label = 'Broker error';
+  } else if (!sessionMqttConnected.value) {
+    state = sessionMqttConnectionState.value === 'connecting' ? 'partial' : 'offline';
+    label = sessionMqttConnectionState.value === 'connecting' ? 'Connecting' : 'Broker offline';
+  } else if (!gatewaySessionMqttGatewayChipId.value) {
+    state = 'partial';
+    label = 'Select gateway';
+  } else if (!isGatewaySessionMqttGatewayDiscovered.value) {
+    state = 'partial';
+    label = 'Waiting for gateway';
+  } else if (sessionConnectionType.value === 'local_broker' && !gatewaySessionIsActive.value) {
+    state = 'partial';
+    label = 'Local broker not ready';
+  } else {
+    state = 'active';
+    label = 'Active';
+  }
+
+  return {
+    state,
+    label,
+    changeDisabled: !!gatewaySessionChangeDisabledReason.value,
+    changeDisabledReason: gatewaySessionChangeDisabledReason.value,
+    mqttConnectionState,
+    mqttError,
+  };
+});
+
+watch(gatewaySessionDisplayStateComputed, display => {
+  sessionConnectionState.value = display.state === 'active'
+    ? 'active'
+    : display.state === 'partial'
+      ? 'partial'
+      : 'offline';
+}, { immediate: true });
+
+const gatewaySessionTransportStateComputed = computed<GatewaySessionTransportState>(() => ({
+  ports: ports.value.map(port => ({ port_name: port.port_name, description: port.description || undefined })),
   mqttGatewayOptions: mqttGatewayOptionsComputed.value,
-  isSelectedMqttGatewayDiscovered: isSelectedMqttGatewayDiscovered.value,
-  manualMqttGatewayError: manualMqttGatewayError.value,
-  fleetTransport: fleetTransport.value,
+  isSelectedMqttGatewayDiscovered: isGatewaySessionMqttGatewayDiscovered.value,
+  manualMqttGatewayError: gatewaySessionManualMqttGatewayError.value,
   serialPortSelectorDisabled: serialPortSelectorDisabled.value,
-  showPairAdminPassword: showPairAdminPassword.value
+}));
+
+const gatewaySessionFormComputed = computed<GatewaySessionForm>({
+  get: () => ({
+    transport: sessionConnectionType.value,
+    selectedSerialPort: gatewaySessionSerialPort.value,
+    selectedMqttGatewayChipId: gatewaySessionMqttGatewayChipId.value,
+    selectedMqttManualChipId: gatewaySessionMqttManualChipId.value,
+    adminPassword: adminPasswordForPort(gatewaySessionTargetKey.value),
+    showAdminPassword: showGatewaySessionAdminPassword.value,
+  }),
+  set: value => {
+    sessionConnectionType.value = value.transport;
+    gatewaySessionSerialPort.value = value.selectedSerialPort;
+    gatewaySessionMqttGatewayChipId.value = value.selectedMqttGatewayChipId;
+    gatewaySessionMqttManualChipId.value = value.selectedMqttManualChipId;
+    showGatewaySessionAdminPassword.value = value.showAdminPassword;
+    const state = serialDeviceState(value.transport === 'serial' ? value.selectedSerialPort : value.selectedMqttGatewayChipId);
+    if (state) state.adminPassword = value.adminPassword;
+  }
+});
+
+const fleetTransportStateComputed = computed<FleetTransportState>(() => ({
+  fleetTransport: fleetTransport.value,
+  hasSelectedGateway: fleetTransport.value === 'mqtt'
+    ? !!gatewaySessionMqttGatewayChipId.value
+    : !!gatewaySessionSerialPort.value
 }));
 
 const fleetInventorySummaryComputed = computed<FleetInventorySummary>(() => ({
@@ -6506,20 +6749,10 @@ const fleetCandidateSummaryComputed = computed<FleetCandidateSummary>(() => ({
 
 const fleetConfigComputed = computed<FleetConfig>({
   get: () => ({
-    sessionConnectionType: sessionConnectionType.value,
-    selectedPort: selectedPort.value,
-    selectedMqttManualChipId: selectedMqttManualChipId.value,
-    selectedMqttGatewayChipId: selectedMqttGatewayChipId.value,
-    pairAdminPassword: pairAdminPassword.value,
     region: region.value,
     selectedVersion: selectedVersion.value
   }),
   set: (val) => {
-    sessionConnectionType.value = val.sessionConnectionType;
-    selectedPort.value = val.selectedPort;
-    selectedMqttManualChipId.value = val.selectedMqttManualChipId;
-    selectedMqttGatewayChipId.value = val.selectedMqttGatewayChipId;
-    pairAdminPassword.value = val.pairAdminPassword;
     region.value = val.region as any;
     selectedVersion.value = val.selectedVersion;
   }
@@ -6598,7 +6831,7 @@ const provisionGatewayStateComputed = computed<ProvisionGatewayState>(() => {
     hasGatewayDeviceWarning: hasWarning,
     hasUncommissionedWarning: hasUncommissioned,
     gatewayLabel,
-    isGatewayLoadDisabled: isGatewayLoading.value || isPairBusy.value || !gatewayKey,
+    isGatewayLoadDisabled: isGatewayLoading.value || isPairBusy.value || !gatewayKey || (pairTransport.value === 'mqtt' && !sessionMqttConnected.value),
     isGatewayLoading: isGatewayLoading.value,
     gatewayRoleLabel: state?.status?.role || '-'
   };
@@ -6613,7 +6846,9 @@ const provisionTransportStateComputed = computed<ProvisionTransportState>(() => 
   isSelectedMqttGatewayDiscovered: isSelectedMqttGatewayDiscovered.value,
   manualMqttGatewayError: manualMqttGatewayError.value,
   serialPortSelectorDisabled: serialPortSelectorDisabled.value,
-  isRefreshingPorts: isRefreshingPorts.value
+  isRefreshingPorts: isRefreshingPorts.value,
+  mqttConnected: sessionMqttConnected.value,
+  mqttConnectionState: sessionMqttConnectionState.value
 }));
 
 const provisionSessionSummaryComputed = computed<ProvisionSessionSummary | null>(() => {
@@ -6678,17 +6913,20 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
 
 <template>
   <div class="relative h-full flex flex-col gap-3">
-    <SessionMqttBanner
-      v-model="sessionConnectionType"
-      v-model:show-session-config-panel="showSessionConfigPanel"
+    <GatewaySessionPanel
+      v-if="activeMode === 'network' || activeMode === 'monitor'"
+      v-model="gatewaySessionFormComputed"
+      v-model:show-connection-settings="showSessionConfigPanel"
       v-model:local-broker-port="localBrokerPort"
-      v-model:mqtt-draft="monitorMqttDraftState"
-      :is-session-connected="isSessionConnected"
+      v-model:mqtt-draft="sessionMqttDraftState"
+      :display-state="gatewaySessionDisplayStateComputed"
+      :transport-state="gatewaySessionTransportStateComputed"
       :local-broker-state="localBrokerState"
-      :mqtt-settings-state="mqttSettingsState"
-      @start-local-broker="startAndConnectLocalBroker"
+      @manual-chip-input="handleGatewaySessionManualMqttGatewayInput"
+      @connect-mqtt="connectSessionMqtt()"
+      @disconnect-mqtt="disconnectSessionMqtt()"
+      @start-local-broker="startAndConnectLocalBroker()"
       @copy-gateway-settings="handleCopyLocalGatewaySettings"
-      @toggle-mqtt-connection="toggleMonitorMqttConnection"
     />
 
     <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
@@ -6740,6 +6978,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @load-gateway="loadEasyPairGateway(false)"
         @open-wifi-tab="openPairWifiTab"
         @refresh-ports="refreshPorts"
+        @open-mqtt-settings="openMqttConnectionSettings"
         @manual-chip-input="handleManualMqttGatewayInput"
         @generate-fleet-key="generatePairFleetKey(true)"
         @mark-fleet-key-manual="markPairFleetKeyManual"
@@ -6792,8 +7031,8 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @fetch-settings="fetchSerialDeviceSettings"
         @copy-config-json="copySerialAdminConfigJson"
         @refresh-ports="refreshPorts"
-        @manual-chip-input="handleManualMqttGatewayInput"
-        @open-mqtt-settings="openMonitorMqttSettings"
+        @manual-chip-input="handleSettingsManualMqttGatewayInput"
+        @open-mqtt-settings="openMqttConnectionSettings"
         @scan-wifi="scanSettingsWifi"
         @save-config="saveSerialAdminConfig"
         @reboot-device="rebootSerialDevice"
@@ -6815,19 +7054,19 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         :gateway-events="gatewayEventsComputed"
         @trigger-identify="triggerIdentify"
         @toggle-monitor-loop="toggleMonitorLoop"
-        @open-mqtt-settings="openMonitorMqttSettings"
         @poll-selected-diagnostics="executeSelectedMonitorPollDiagnostics"
         @poll-device-diagnostics="handleMonitorPollDeviceDiagnostics"
         @gateway-events-clear="clearGatewayEvents"
         @gateway-events-copy="copyGatewayEvents"
       />
 
-      <MonitorMqttSettingsModal
-        v-model="showMonitorMqttSettings"
-        v-model:draft="monitorMqttDraftState"
-        :monitor-mqtt-connected="monitorMqttConnected"
-        @close="closeMonitorMqttSettings"
-        @toggle-connection="toggleMonitorMqttConnection"
+      <MqttConnectionSettingsModal
+        v-model="showMqttConnectionSettings"
+        v-model:draft="sessionMqttDraftState"
+        :session-mqtt-connected="sessionMqttConnected"
+        @close="closeMqttConnectionSettings"
+        @connect="connectSessionMqtt(true)"
+        @disconnect="disconnectSessionMqtt()"
       />
 
       <FleetMode
@@ -6857,7 +7096,6 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @gateway-events-clear="clearGatewayEvents"
         @gateway-events-copy="copyGatewayEvents"
         @lora-inventory-debug-copy="copyLoraInventoryDebug"
-        @manual-chip-input="handleManualMqttGatewayInput"
         @firmware-fetch="fetchFirmware"
         @gateway-load="loadNetworkGateway"
         @gateway-identify="triggerIdentify"

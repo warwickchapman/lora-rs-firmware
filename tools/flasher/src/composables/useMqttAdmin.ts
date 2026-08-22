@@ -14,8 +14,8 @@ export interface MqttGatewaySession {
 }
 
 export interface UseMqttAdminOptions {
-  monitorMqttConnected: Ref<boolean>;
-  monitorMqttTopicRoot: Ref<string>;
+  mqttConnected: Ref<boolean>;
+  mqttTopicRoot: Ref<string>;
   adminPasswordForPort: (port: string) => string;
   normalizeChipId: (raw: string | undefined | null) => string;
   invokeMqttPublish?: (topic: string, payload: string) => Promise<void>;
@@ -51,7 +51,7 @@ export function useMqttAdmin(options: UseMqttAdminOptions) {
   ): Promise<T> {
     const normalizedChipId = options.normalizeChipId(chipId);
     const reqId = `req-${Math.random().toString(36).substring(2, 11)}`;
-    const topic = `${options.monitorMqttTopicRoot.value}/lrs-${normalizedChipId}/admin_command`;
+    const topic = `${options.mqttTopicRoot.value}/lrs-${normalizedChipId}/admin_command`;
     const requestPayload = {
       id: reqId,
       cmd,
@@ -111,8 +111,8 @@ export function useMqttAdmin(options: UseMqttAdminOptions) {
     payload: Record<string, any> = {},
     timeoutMs = 8000
   ): Promise<T> {
-    if (!options.monitorMqttConnected.value) {
-      throw new Error('MQTT broker is not connected. Connect in the Monitor tab first.');
+    if (!options.mqttConnected.value) {
+      throw new Error('MQTT broker is not connected. Open MQTT connection settings and connect first.');
     }
 
     const normalizedChipId = options.normalizeChipId(chipId);

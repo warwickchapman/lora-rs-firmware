@@ -9,9 +9,17 @@ export interface MqttDraftState {
   showPass: boolean;
 }
 
+interface MqttConnectionOverride {
+  host: string;
+  port: number;
+  topicRoot: string;
+  user: string;
+  password: string;
+}
+
 export interface UseMqttConnectionOptions {
   notify: (msg: string) => void;
-  setMonitorStatusMessage: (msg: string) => void;
+  setSessionStatusMessage: (msg: string) => void;
   isSerialSessionConnected: Ref<boolean> | ComputedRef<boolean>;
   serialSessionConnectionState: Ref<'active' | 'partial' | 'offline'> | ComputedRef<'active' | 'partial' | 'offline'>;
   // Optional Tauri invoke injection for test mocking
@@ -19,10 +27,10 @@ export interface UseMqttConnectionOptions {
 }
 
 export function useMqttConnection(options: UseMqttConnectionOptions) {
-  const { 
-    notify, 
-    setMonitorStatusMessage, 
-    isSerialSessionConnected, 
+  const {
+    notify,
+    setSessionStatusMessage,
+    isSerialSessionConnected,
     serialSessionConnectionState,
     invoke = (cmd: string, args?: any) => import('@tauri-apps/api/core').then(m => m.invoke(cmd, args))
   } = options;
@@ -38,50 +46,52 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
   const isLocalBrokerStarting = ref(false);
   const showSessionConfigPanel = ref(false);
 
-  // Monitor Client Configuration Refs
-  const monitorMqttHost = ref('venus.local');
-  const monitorMqttPort = ref(1883);
-  const monitorMqttUser = ref('');
-  const monitorMqttPassword = ref('');
-  const monitorMqttTopicRoot = ref('lora');
-  const monitorMqttConnected = ref(false);
-  const showMonitorMqttPassword = ref(false);
-  const showMonitorMqttSettings = ref(false);
-  const monitorMqttDraftHost = ref('venus.local');
-  const monitorMqttDraftPort = ref(1883);
-  const monitorMqttDraftUser = ref('');
-  const monitorMqttDraftPassword = ref('');
-  const monitorMqttDraftTopicRoot = ref('lora');
+  // Shared broker client configuration
+  const sessionMqttHost = ref('venus.local');
+  const sessionMqttPort = ref(1883);
+  const sessionMqttUser = ref('');
+  const sessionMqttPassword = ref('');
+  const sessionMqttTopicRoot = ref('lora');
+  const sessionMqttConnected = ref(false);
+  const sessionMqttConnectionState = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const sessionMqttError = ref('');
+  const showSessionMqttPassword = ref(false);
+  const showMqttConnectionSettings = ref(false);
+  const sessionMqttDraftHost = ref('venus.local');
+  const sessionMqttDraftPort = ref(1883);
+  const sessionMqttDraftUser = ref('');
+  const sessionMqttDraftPassword = ref('');
+  const sessionMqttDraftTopicRoot = ref('lora');
 
   // Computeds
-  const isSessionConnected = computed(() => {
+  const isSessionTransportConnected = computed(() => {
     if (sessionConnectionType.value === 'serial') {
       return isSerialSessionConnected.value;
     }
     if (sessionConnectionType.value === 'mqtt') {
-      return monitorMqttConnected.value;
+      return sessionMqttConnected.value;
     }
     if (sessionConnectionType.value === 'local_broker') {
       return localBrokerRunning.value &&
-             monitorMqttConnected.value &&
-             monitorMqttHost.value === '127.0.0.1' &&
-             monitorMqttPort.value === localBrokerPort.value;
+             sessionMqttConnected.value &&
+             sessionMqttHost.value === '127.0.0.1' &&
+             sessionMqttPort.value === localBrokerPort.value;
     }
     return false;
   });
 
-  const computedSessionConnectionState = computed<'active' | 'partial' | 'offline'>(() => {
+  const computedTransportConnectionState = computed<'active' | 'partial' | 'offline'>(() => {
     if (sessionConnectionType.value === 'serial') {
       return serialSessionConnectionState.value;
     }
     if (sessionConnectionType.value === 'mqtt') {
-      if (monitorMqttConnected.value) {
+      if (sessionMqttConnected.value) {
         return 'active';
       }
       return 'partial';
     }
     if (sessionConnectionType.value === 'local_broker') {
-      const isClientConnected = monitorMqttConnected.value && monitorMqttHost.value === '127.0.0.1' && monitorMqttPort.value === localBrokerPort.value;
+      const isClientConnected = sessionMqttConnected.value && sessionMqttHost.value === '127.0.0.1' && sessionMqttPort.value === localBrokerPort.value;
       if (localBrokerRunning.value && isClientConnected) {
         return 'active';
       }
@@ -93,22 +103,22 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
     return 'offline';
   });
 
-  const monitorMqttDraftState = computed({
+  const sessionMqttDraftState = computed({
     get: () => ({
-      host: monitorMqttDraftHost.value,
-      port: monitorMqttDraftPort.value,
-      topicRoot: monitorMqttDraftTopicRoot.value,
-      user: monitorMqttDraftUser.value,
-      pass: monitorMqttDraftPassword.value,
-      showPass: showMonitorMqttPassword.value
+      host: sessionMqttDraftHost.value,
+      port: sessionMqttDraftPort.value,
+      topicRoot: sessionMqttDraftTopicRoot.value,
+      user: sessionMqttDraftUser.value,
+      pass: sessionMqttDraftPassword.value,
+      showPass: showSessionMqttPassword.value
     }),
     set: (val) => {
-      monitorMqttDraftHost.value = val.host;
-      monitorMqttDraftPort.value = val.port;
-      monitorMqttDraftTopicRoot.value = val.topicRoot;
-      if (val.user !== undefined) monitorMqttDraftUser.value = val.user;
-      if (val.pass !== undefined) monitorMqttDraftPassword.value = val.pass;
-      if (val.showPass !== undefined) showMonitorMqttPassword.value = val.showPass;
+      sessionMqttDraftHost.value = val.host;
+      sessionMqttDraftPort.value = val.port;
+      sessionMqttDraftTopicRoot.value = val.topicRoot;
+      if (val.user !== undefined) sessionMqttDraftUser.value = val.user;
+      if (val.pass !== undefined) sessionMqttDraftPassword.value = val.pass;
+      if (val.showPass !== undefined) showSessionMqttPassword.value = val.showPass;
     }
   });
 
@@ -122,48 +132,91 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
   }));
 
   const mqttSettingsState = computed(() => ({
-    connected: monitorMqttConnected.value,
-    host: monitorMqttHost.value,
-    port: monitorMqttPort.value
+    connected: sessionMqttConnected.value,
+    host: sessionMqttHost.value,
+    port: sessionMqttPort.value
   }));
 
   // Connection Handler Methods
-  async function toggleMonitorMqttConnection(preserveSessionConnectionType = false) {
-    if (monitorMqttConnected.value) {
+  async function disconnectSessionMqtt() {
+    if (sessionMqttConnected.value) {
       try {
         await invoke('disconnect_mqtt_broker');
-        monitorMqttConnected.value = false;
-        setMonitorStatusMessage('MQTT monitor disconnected.');
+        sessionMqttConnected.value = false;
+        sessionMqttConnectionState.value = 'disconnected';
+        sessionMqttError.value = '';
+        setSessionStatusMessage('MQTT broker disconnected.');
       } catch (e) {
+        sessionMqttConnectionState.value = 'error';
+        sessionMqttError.value = String(e);
         notify(`MQTT disconnect error: ${e}`);
       }
     } else {
-      monitorMqttHost.value = monitorMqttDraftHost.value.trim() || 'venus.local';
-      monitorMqttPort.value = Number(monitorMqttDraftPort.value || 1883);
-      monitorMqttUser.value = monitorMqttDraftUser.value;
-      monitorMqttPassword.value = monitorMqttDraftPassword.value;
-      monitorMqttTopicRoot.value = monitorMqttDraftTopicRoot.value.trim() || 'lora';
-      if (!preserveSessionConnectionType) {
-        sessionConnectionType.value = 'mqtt';
-      }
-
-      try {
-        await invoke('connect_mqtt_broker', {
-          config: {
-            host: monitorMqttHost.value,
-            port: monitorMqttPort.value,
-            user: monitorMqttUser.value || null,
-            password: monitorMqttPassword.value || null,
-            topic_root: monitorMqttTopicRoot.value
-          }
-        });
-        monitorMqttConnected.value = true;
-        setMonitorStatusMessage('MQTT monitor connected.');
-      } catch (e) {
-        notify(`MQTT connection error: ${e}`);
-      }
+      sessionMqttConnectionState.value = 'disconnected';
+      sessionMqttError.value = '';
     }
-    showMonitorMqttSettings.value = false;
+  }
+
+  async function connectSessionMqtt(
+    preserveSessionConnectionType = false,
+    connectionOverride?: MqttConnectionOverride
+  ) {
+    if (sessionMqttConnected.value) {
+      await disconnectSessionMqtt();
+      if (sessionMqttConnected.value) return;
+    }
+
+    sessionMqttHost.value = connectionOverride?.host || sessionMqttDraftHost.value.trim() || 'venus.local';
+    sessionMqttPort.value = Number(connectionOverride?.port || sessionMqttDraftPort.value || 1883);
+    sessionMqttUser.value = connectionOverride?.user ?? sessionMqttDraftUser.value;
+    if (!connectionOverride && sessionMqttDraftPassword.value) {
+      sessionMqttPassword.value = sessionMqttDraftPassword.value;
+    }
+    sessionMqttTopicRoot.value = connectionOverride?.topicRoot || sessionMqttDraftTopicRoot.value.trim() || 'lora';
+    const connectionPassword = connectionOverride?.password ?? sessionMqttPassword.value;
+    if (!preserveSessionConnectionType) {
+      sessionConnectionType.value = 'mqtt';
+    }
+
+    sessionMqttConnectionState.value = 'connecting';
+    sessionMqttError.value = '';
+    setSessionStatusMessage('MQTT broker connecting...');
+    try {
+      await invoke('connect_mqtt_broker', {
+        config: {
+          host: sessionMqttHost.value,
+          port: sessionMqttPort.value,
+          user: sessionMqttUser.value || null,
+          password: connectionPassword || null,
+          topic_root: sessionMqttTopicRoot.value
+        }
+      });
+      sessionMqttConnected.value = true;
+      sessionMqttConnectionState.value = 'connected';
+      if (!connectionOverride) sessionMqttDraftPassword.value = '';
+      setSessionStatusMessage('MQTT broker connected.');
+      showMqttConnectionSettings.value = false;
+    } catch (e) {
+      sessionMqttConnected.value = false;
+      sessionMqttConnectionState.value = 'error';
+      sessionMqttError.value = String(e);
+      setSessionStatusMessage(`MQTT broker error: ${e}`);
+      notify(`MQTT connection error: ${e}`);
+    }
+  }
+
+  async function connectConfiguredSessionMqtt() {
+    const configuredHost = sessionMqttDraftHost.value.trim() || 'venus.local';
+    const configuredPort = Number(sessionMqttDraftPort.value || 1883);
+    const configuredTopicRoot = sessionMqttDraftTopicRoot.value.trim() || 'lora';
+    const alreadyConnected =
+      sessionMqttConnected.value &&
+      sessionMqttHost.value === configuredHost &&
+      sessionMqttPort.value === configuredPort &&
+      sessionMqttUser.value === sessionMqttDraftUser.value &&
+      sessionMqttTopicRoot.value === configuredTopicRoot;
+    if (alreadyConnected) return;
+    await connectSessionMqtt(true);
   }
 
   async function startLocalMqttBroker() {
@@ -190,20 +243,15 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
     if (!localBrokerRunning.value) return;
     isLocalBrokerClientConnecting.value = true;
     localBrokerClientMessage.value = `Connecting Flasher client to 127.0.0.1:${localBrokerPort.value}...`;
-    monitorMqttDraftHost.value = '127.0.0.1';
-    monitorMqttDraftPort.value = localBrokerPort.value;
-    monitorMqttDraftUser.value = '';
-    monitorMqttDraftPassword.value = '';
-    monitorMqttDraftTopicRoot.value = 'lora';
-
     try {
-      if (monitorMqttConnected.value) {
-        await invoke('disconnect_mqtt_broker');
-        monitorMqttConnected.value = false;
-      }
-
-      await toggleMonitorMqttConnection(true);
-      if (monitorMqttConnected.value) {
+      await connectSessionMqtt(true, {
+        host: '127.0.0.1',
+        port: localBrokerPort.value,
+        user: '',
+        password: '',
+        topicRoot: 'lora'
+      });
+      if (sessionMqttConnected.value) {
         localBrokerClientMessage.value = `Flasher client connected to local broker on 127.0.0.1:${localBrokerPort.value}.`;
         notify('Flasher client connected to local broker.');
       } else {
@@ -225,60 +273,69 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
     }
 
     if (!localBrokerRunning.value) {
-      showSessionConfigPanel.value = true;
       return;
     }
 
     const alreadyConnected =
-      monitorMqttConnected.value &&
-      monitorMqttHost.value === '127.0.0.1' &&
-      monitorMqttPort.value === localBrokerPort.value;
+      sessionMqttConnected.value &&
+      sessionMqttHost.value === '127.0.0.1' &&
+      sessionMqttPort.value === localBrokerPort.value;
 
     if (!alreadyConnected) {
       await applyLocalBrokerToMqttConfig();
     }
   }
 
-  function adoptMonitorMqttFromStatus(st: { mqtt?: { host?: string; port?: number; topic_root?: string } } | null) {
+  function adoptSessionMqttFromStatus(st: { mqtt?: { host?: string; port?: number; topic_root?: string } } | null) {
     if (!st?.mqtt) return;
-    monitorMqttHost.value = st.mqtt.host || monitorMqttHost.value;
-    monitorMqttPort.value = Number(st.mqtt.port || monitorMqttPort.value || 1883);
-    monitorMqttTopicRoot.value = st.mqtt.topic_root || monitorMqttTopicRoot.value || 'lora';
+    sessionMqttHost.value = st.mqtt.host || sessionMqttHost.value;
+    sessionMqttPort.value = Number(st.mqtt.port || sessionMqttPort.value || 1883);
+    sessionMqttTopicRoot.value = st.mqtt.topic_root || sessionMqttTopicRoot.value || 'lora';
   }
 
-  function openMonitorMqttSettings() {
-    monitorMqttDraftHost.value = monitorMqttHost.value || 'venus.local';
-    monitorMqttDraftPort.value = Number(monitorMqttPort.value || 1883);
-    monitorMqttDraftUser.value = monitorMqttUser.value;
-    monitorMqttDraftPassword.value = monitorMqttPassword.value;
-    monitorMqttDraftTopicRoot.value = monitorMqttTopicRoot.value || 'lora';
-    showMonitorMqttSettings.value = true;
+  function openMqttConnectionSettings() {
+    sessionMqttDraftHost.value = sessionMqttHost.value || 'venus.local';
+    sessionMqttDraftPort.value = Number(sessionMqttPort.value || 1883);
+    sessionMqttDraftUser.value = sessionMqttUser.value;
+    sessionMqttDraftPassword.value = '';
+    sessionMqttDraftTopicRoot.value = sessionMqttTopicRoot.value || 'lora';
+    showMqttConnectionSettings.value = true;
   }
 
-  function closeMonitorMqttSettings() {
-    showMonitorMqttSettings.value = false;
+  function closeMqttConnectionSettings() {
+    showMqttConnectionSettings.value = false;
   }
 
   // Hydration & state sync hooks for external events
   function applyMqttStateChanged(state: string | { Error: string } | null | undefined) {
     if (state === 'Connected') {
-      monitorMqttConnected.value = true;
-      setMonitorStatusMessage('MQTT monitor connected.');
+      sessionMqttConnected.value = true;
+      sessionMqttConnectionState.value = 'connected';
+      sessionMqttError.value = '';
+      setSessionStatusMessage('MQTT broker connected.');
     } else if (state === 'Connecting') {
-      setMonitorStatusMessage('MQTT monitor connecting...');
+      sessionMqttConnectionState.value = 'connecting';
+      sessionMqttError.value = '';
+      setSessionStatusMessage('MQTT broker connecting...');
     } else if (state === 'Disconnected') {
-      monitorMqttConnected.value = false;
-      setMonitorStatusMessage('MQTT monitor disconnected.');
+      sessionMqttConnected.value = false;
+      sessionMqttConnectionState.value = 'disconnected';
+      sessionMqttError.value = '';
+      setSessionStatusMessage('MQTT broker disconnected.');
     } else if (state && typeof state === 'object' && 'Error' in state) {
-      monitorMqttConnected.value = false;
-      setMonitorStatusMessage(`MQTT monitor error: ${state.Error}`);
+      sessionMqttConnected.value = false;
+      sessionMqttConnectionState.value = 'error';
+      sessionMqttError.value = state.Error;
+      setSessionStatusMessage(`MQTT broker error: ${state.Error}`);
     }
   }
 
   function hydrateMqttState(state: string | null | undefined) {
     if (state === 'Connected') {
-      monitorMqttConnected.value = true;
-      setMonitorStatusMessage('MQTT monitor connected.');
+      sessionMqttConnected.value = true;
+      sessionMqttConnectionState.value = 'connected';
+      sessionMqttError.value = '';
+      setSessionStatusMessage('MQTT broker connected.');
     }
   }
 
@@ -299,31 +356,35 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
     isLocalBrokerClientConnecting,
     isLocalBrokerStarting,
     showSessionConfigPanel,
-    monitorMqttHost,
-    monitorMqttPort,
-    monitorMqttUser,
-    monitorMqttPassword,
-    monitorMqttTopicRoot,
-    monitorMqttConnected,
-    showMonitorMqttPassword,
-    showMonitorMqttSettings,
-    monitorMqttDraftHost,
-    monitorMqttDraftPort,
-    monitorMqttDraftUser,
-    monitorMqttDraftPassword,
-    monitorMqttDraftTopicRoot,
-    isSessionConnected,
-    computedSessionConnectionState,
-    monitorMqttDraftState,
+    sessionMqttHost,
+    sessionMqttPort,
+    sessionMqttUser,
+    sessionMqttPassword,
+    sessionMqttTopicRoot,
+    sessionMqttConnected,
+    sessionMqttConnectionState,
+    sessionMqttError,
+    showSessionMqttPassword,
+    showMqttConnectionSettings,
+    sessionMqttDraftHost,
+    sessionMqttDraftPort,
+    sessionMqttDraftUser,
+    sessionMqttDraftPassword,
+    sessionMqttDraftTopicRoot,
+    isSessionTransportConnected,
+    computedTransportConnectionState,
+    sessionMqttDraftState,
     localBrokerState,
     mqttSettingsState,
-    toggleMonitorMqttConnection,
+    connectSessionMqtt,
+    connectConfiguredSessionMqtt,
+    disconnectSessionMqtt,
     startLocalMqttBroker,
     applyLocalBrokerToMqttConfig,
     startAndConnectLocalBroker,
-    adoptMonitorMqttFromStatus,
-    openMonitorMqttSettings,
-    closeMonitorMqttSettings,
+    adoptSessionMqttFromStatus,
+    openMqttConnectionSettings,
+    closeMqttConnectionSettings,
     applyMqttStateChanged,
     hydrateMqttState,
     hydrateLocalBrokerStatus

@@ -3,8 +3,8 @@ import { ref } from 'vue';
 import { useMqttAdmin } from './useMqttAdmin';
 
 describe('useMqttAdmin', () => {
-  let monitorMqttConnected = ref(true);
-  let monitorMqttTopicRoot = ref('lora');
+  let mqttConnected = ref(true);
+  let mqttTopicRoot = ref('lora');
   let passwords: Record<string, string> = {};
   let publishCalls: { topic: string; payload: any }[] = [];
 
@@ -12,8 +12,8 @@ describe('useMqttAdmin', () => {
   const normalizeChipId = (raw: string | undefined | null) => String(raw || '').trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '').toLowerCase();
 
   beforeEach(() => {
-    monitorMqttConnected.value = true;
-    monitorMqttTopicRoot.value = 'lora';
+    mqttConnected.value = true;
+    mqttTopicRoot.value = 'lora';
     passwords = { '123456': 'secret-pass' };
     publishCalls = [];
     vi.useFakeTimers();
@@ -21,8 +21,8 @@ describe('useMqttAdmin', () => {
 
   const createAdmin = (invokeMqttPublish?: (topic: string, payload: string) => Promise<void>) => {
     return useMqttAdmin({
-      monitorMqttConnected,
-      monitorMqttTopicRoot,
+      mqttConnected,
+      mqttTopicRoot,
       adminPasswordForPort,
       normalizeChipId,
       invokeMqttPublish: invokeMqttPublish || (async (topic, payload) => {
@@ -92,8 +92,8 @@ describe('useMqttAdmin', () => {
   it('expired/invalid session refreshes and retries once', async () => {
     let mockPublishCalls: any[] = [];
     const admin = useMqttAdmin({
-      monitorMqttConnected,
-      monitorMqttTopicRoot,
+      mqttConnected,
+      mqttTopicRoot,
       adminPasswordForPort,
       normalizeChipId,
       invokeMqttPublish: async (_topic, payload) => {
@@ -141,8 +141,8 @@ describe('useMqttAdmin', () => {
   it('two queued commands for the same gateway where the first expires the session, then refreshes/retries, and both complete without leaving pending requests stuck', async () => {
     let mockPublishCalls: any[] = [];
     const admin = useMqttAdmin({
-      monitorMqttConnected,
-      monitorMqttTopicRoot,
+      mqttConnected,
+      mqttTopicRoot,
       adminPasswordForPort,
       normalizeChipId,
       invokeMqttPublish: async (_topic, payload) => {

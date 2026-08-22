@@ -36,6 +36,8 @@ export interface ProvisionTransportState {
   manualMqttGatewayError: string | null;
   serialPortSelectorDisabled: boolean;
   isRefreshingPorts: boolean;
+  mqttConnected: boolean;
+  mqttConnectionState: 'disconnected' | 'connecting' | 'connected' | 'error';
 }
 
 export interface ProvisionSessionSummary {
@@ -106,6 +108,7 @@ const emit = defineEmits<{
   (e: 'load-gateway'): void;
   (e: 'open-wifi-tab'): void;
   (e: 'refresh-ports'): void;
+  (e: 'open-mqtt-settings'): void;
   (e: 'manual-chip-input', val: string): void;
   (e: 'generate-fleet-key'): void;
   (e: 'mark-fleet-key-manual'): void;
@@ -256,6 +259,19 @@ function wifiSignalLabel(rssi: number): string {
         </div>
       </div>
 
+      <div v-if="computedPairTransport === 'mqtt'" class="flex min-h-9 flex-col gap-2 rounded border border-slate-800 bg-slate-950/30 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex min-w-0 items-center gap-2 text-xs">
+          <span :class="['h-2 w-2 shrink-0 rounded-full', transportState.mqttConnected ? 'bg-emerald-400' : transportState.mqttConnectionState === 'connecting' ? 'bg-amber-400' : transportState.mqttConnectionState === 'error' ? 'bg-rose-400' : 'bg-slate-600']"></span>
+          <span class="font-medium text-slate-300">MQTT broker</span>
+          <span :class="['font-bold', transportState.mqttConnected ? 'text-emerald-300' : transportState.mqttConnectionState === 'connecting' ? 'text-amber-300' : transportState.mqttConnectionState === 'error' ? 'text-rose-300' : 'text-slate-500']">
+            {{ transportState.mqttConnectionState }}
+          </span>
+        </div>
+        <button @click="emit('open-mqtt-settings')" class="glass-input m-0 h-8 whitespace-nowrap px-3 text-[11px] font-bold hover:bg-slate-700/70">
+          Connection settings
+        </button>
+      </div>
+
       <div class="grid grid-cols-2 rounded border border-slate-800 bg-slate-950/30 text-xs font-bold">
         <button
           @click="computedPairPanelTab = 'pair'"
@@ -363,7 +379,7 @@ function wifiSignalLabel(rssi: number): string {
             <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20 21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
             <span>{{ pairState.isPairBusy ? 'Cancel' : 'Provision' }}</span>
           </button>
-          <button @click="emit('start-discovery')" :disabled="pairState.isPairBusy || gatewayState.isGatewayLoading || !config.selectedPort" class="glass-input h-9 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa without provisioning">
+          <button @click="emit('start-discovery')" :disabled="pairState.isPairBusy || gatewayState.isGatewayLoading || !config.selectedPort || (computedPairTransport === 'mqtt' && !transportState.mqttConnected)" class="glass-input h-9 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold" title="Discover powered remotes over LoRa without provisioning">
             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
             Scan
           </button>
@@ -380,7 +396,7 @@ function wifiSignalLabel(rssi: number): string {
           </div>
           <button
             @click="emit('scan-wifi')"
-            :disabled="wifiState.isWifiScanning || gatewayState.isGatewayLoading || !config.selectedPort"
+            :disabled="wifiState.isWifiScanning || gatewayState.isGatewayLoading || !config.selectedPort || (computedPairTransport === 'mqtt' && !transportState.mqttConnected)"
             class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
           >
             <svg xmlns="http://www.w3.org/2000/svg" :class="['w-4 h-4', { 'animate-spin text-cyan-300': wifiState.isWifiScanning || gatewayState.isGatewayLoading }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>

@@ -17,10 +17,12 @@ Flash mode is the USB firmware and local maintenance workflow:
 
 ### Settings
 
-Settings is the local USB maintenance surface for a selected device. It uses the
-`LRS:` serial-admin protocol:
+Settings is an explicit, one-device maintenance surface. Its target is independent
+of the Fleet/Monitor Gateway Session, so an operator can choose either a USB device
+or a gateway discovered through the shared MQTT broker without changing the active
+operational gateway:
 
-- load status and redacted configuration from a USB-connected LRS device
+- load status and redacted configuration through USB serial admin or authenticated MQTT admin
 - edit local role/address, LoRa timing/failsafe/debug settings, WiFi STA/AP/static-IP settings, MQTT client/control settings, and DS18B20 settings
 - leave secret fields blank to preserve existing WiFi, MQTT, fleet, or admin secrets
 - identify, reboot, or guarded factory-reset the selected device
@@ -29,7 +31,11 @@ Settings is the local USB maintenance surface for a selected device. It uses the
 
 Fleet mode is a LoRa/MQTT admin helper:
 
-- loads a selected USB-connected LRS device as the LoRa gateway, including the factory-derived admin password needed for Fleet actions
+- shares one persistent Gateway Session with Monitor, with an explicit USB Serial Gateway, Remote MQTT Broker, or Local MQTT Broker transport and gateway target
+- keeps broker connection state separate from the selected operational transport, allowing MQTT Settings work to remain connected while Fleet/Monitor uses USB serial
+- immediately connects with the saved parameters when Remote MQTT Broker is selected, or starts and connects the local service when Local MQTT Broker is selected; Connection settings is the fallback for errors or edits
+- changes gateway context without automatically scanning LoRa or loading diagnostics; those observability actions remain operator initiated
+- loads the selected gateway, including the factory-derived or entered admin password needed for Fleet actions
 - keeps the gateway visible as its own Fleet panel with load, identify, and USB flash actions, while remote counts remain remote-only
 - reads the TX/gateway-owned peer cache over serial admin
 - scans the supported LRS remote range through the gateway with explicit `start_lora_inventory` operator action
@@ -48,6 +54,13 @@ Fleet mode is a LoRa/MQTT admin helper:
 
 The TX/gateway owns the serial-mode peer runtime cache; Flasher reads that cache and only starts LoRa probing when the operator clicks Scan Fleet. Peer state is updated from compact encrypted LoRa maintenance-status responses and does not expose secrets. Online devices can also be commanded through MQTT admin. A USB-connected gateway can forward `ota_pull` and `remote_udp_log_control` over LoRa only to remotes that already have WiFi connectivity/IP eligibility; remotes without WiFi cannot pull firmware or stream UDP logs. Gateway-side UDP logging control is strictly MQTT-only.
 
+### Monitor
+
+Monitor uses the same Gateway Session and selected gateway as Fleet. Its refresh
+loop starts only when the operator clicks Monitor and stops when the gateway context
+changes. Broker settings are available from the Gateway Session instead of being
+owned by the Monitor tab.
+
 ## Provision foundation
 
 New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
@@ -58,6 +71,12 @@ New firmware exposes a USB serial admin protocol for Flasher-driven pairing:
 - remotes are discovered and provisioned over LoRa by that selected gateway
 - gateway target additions should be written with `set_gateway_targets`; the firmware merges by default, and destructive full-list replacement requires `replace: true`
 - Provision and Flash include an Identify LED action, shown only after the selected port confirms LRS serial-admin support, that triggers the device's 3 fast flashes, pause, 3 fast flashes pattern and animates the same pattern in the app
+
+Provision can also target a gateway through the shared MQTT broker connection. Its
+MQTT broker badge and Broker settings button remain visible on both the Pair and
+WiFi views. MQTT gateway loading, LoRa discovery, and WiFi scanning stay disabled
+until the broker is connected; connecting here does not change the Fleet/Monitor
+Gateway Session target.
 
 Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and Provision. Switching away from Flash stops the serial monitor so Provision can take the selected gateway port cleanly. Flash and Provision use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Provision WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
