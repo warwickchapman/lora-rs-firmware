@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { exit } from '@tauri-apps/plugin-process';
 import Flasher from './components/Flasher.vue';
+import {
+  EMPTY_CONNECTION_SUMMARY,
+  connectionSummaryTitle,
+  type ConnectionHeaderSummary,
+} from './composables/connectionsDisplay';
 
 interface SystemStatus {
   ready: boolean;
@@ -12,6 +17,8 @@ interface SystemStatus {
 
 const status = ref<SystemStatus>({ ready: false, message: 'Checking System...' });
 const sessionConnectionState = ref<'active' | 'partial' | 'offline'>('offline');
+const connectionsPanelOpen = ref(false);
+const connectionSummary = ref<ConnectionHeaderSummary>({ ...EMPTY_CONNECTION_SUMMARY });
 const appVersion = ref('');
 const isFullscreen = ref(true);
 const isTogglingWindowMode = ref(false);
@@ -31,6 +38,7 @@ function initialActiveMode(): ActiveMode {
 }
 
 const activeMode = ref<ActiveMode>(initialActiveMode());
+const connectionButtonTitle = computed(() => connectionSummaryTitle(connectionSummary.value));
 
 interface NavItem {
   mode: ActiveMode;
@@ -167,6 +175,12 @@ async function toggleWindowMode() {
 }
 
 function handleKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && connectionsPanelOpen.value) {
+    event.preventDefault();
+    connectionsPanelOpen.value = false;
+    return;
+  }
+
   // Guard against typing in input/textarea/select or contenteditable elements
   const target = event.target as HTMLElement | null;
   if (target) {
@@ -208,6 +222,7 @@ onUnmounted(() => {
 });
 
 watch(activeMode, (mode) => {
+  connectionsPanelOpen.value = false;
   try {
     localStorage.setItem(MODE_STORAGE_KEY, mode);
   } catch {
@@ -243,18 +258,39 @@ watch(activeMode, (mode) => {
         </button>
       </div>
       <div class="flex gap-2">
-        <div :class="['glass-card h-8 px-2 flex items-center gap-2 text-sm transition-all',
-                     sessionConnectionState === 'active' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' :
-                     sessionConnectionState === 'partial' ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' :
-                     'bg-red-500/10 border-red-500/20 text-red-400']"
-             :title="sessionConnectionState === 'active' ? 'Gateway Session: Active' :
-                     sessionConnectionState === 'partial' ? 'Gateway Session: Connecting / Configured' :
-                     'Gateway Session: Offline'">
-          <span :class="['w-2 h-2 rounded-full',
-                         sessionConnectionState === 'active' ? 'bg-emerald-500' :
-                         sessionConnectionState === 'partial' ? 'bg-amber-500 animate-pulse' :
-                         'bg-red-500 animate-pulse']"></span>
-        </div>
+        <button
+          @click="connectionsPanelOpen = !connectionsPanelOpen"
+          :aria-expanded="connectionsPanelOpen"
+          :class="[
+            'glass-card relative h-8 min-w-8 px-2 flex items-center justify-center gap-1.5 text-sm transition-all hover:bg-slate-800/80',
+            connectionsPanelOpen ? 'border-cyan-500/50 text-cyan-200' : 'text-slate-300'
+          ]"
+          :title="connectionButtonTitle"
+          :aria-label="`Connections. ${connectionButtonTitle}`"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15"></path>
+            <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15"></path>
+          </svg>
+          <span :class="[
+            'h-2 w-2 rounded-full',
+            connectionSummary.state === 'active' ? 'bg-emerald-400' :
+            connectionSummary.state === 'partial' ? 'bg-amber-400 animate-pulse' :
+            connectionSummary.state === 'error' ? 'bg-rose-500 animate-pulse' :
+            'bg-slate-500'
+          ]"></span>
+          <span
+            v-if="connectionSummary.brokerRelevant"
+            :class="[
+              'h-1.5 w-1.5 rounded-full',
+              connectionSummary.brokerState === 'connected' ? 'bg-emerald-400' :
+              connectionSummary.brokerState === 'connecting' ? 'bg-amber-400 animate-pulse' :
+              connectionSummary.brokerState === 'error' ? 'bg-rose-500 animate-pulse' :
+              'bg-slate-600'
+            ]"
+            title="Shared MQTT broker"
+          ></span>
+        </button>
         <button
           @click="toggleWindowMode"
           :disabled="isTogglingWindowMode"
@@ -288,7 +324,12 @@ watch(activeMode, (mode) => {
     </header>
  
     <main class="w-full flex-1 min-h-0">
-      <Flasher v-model:active-mode="activeMode" v-model:session-connection-state="sessionConnectionState" />
+      <Flasher
+        v-model:active-mode="activeMode"
+        v-model:session-connection-state="sessionConnectionState"
+        v-model:connections-panel-open="connectionsPanelOpen"
+        v-model:connection-summary="connectionSummary"
+      />
     </main>
   </div>
 </template>
