@@ -1,0 +1,5 @@
+{
+  "revision": 1,
+  "minimum_flasher_version": "0.10.4",
+  "summary": "Initial release-only Flasher compatibility contract."
+}

@@ -217,6 +217,7 @@ bool PeerManager::buildStatusSnapshot(size_t index, PeerStatusSnapshot &out) con
   out.fw_minor = p.fw_minor;
   out.fw_patch = p.fw_patch;
   out.fw_build = p.fw_build;
+  out.min_flasher_compat_revision = p.min_flasher_compat_revision;
   out.uptime_ms = p.uptime_ms;
   out.maintenance_debug_known = p.maintenance_debug_known;
   out.heap_free = p.heap_free;

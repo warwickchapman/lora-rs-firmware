@@ -477,6 +477,7 @@ void AdminExecutor::execute(const char *jsonCommand, size_t length, ResponseWrit
     }
   }
 
+  if (!requireCompatibleFlasher(doc, cmd, writer)) return;
   handleCommand(doc, writer, isMqtt);
 }
 
@@ -485,6 +486,30 @@ bool AdminExecutor::requireAdmin(const JsonDocument &doc) {
     return false;
   const char *password = doc["admin_password"] | doc["password"] | "";
   return config_->settings().admin_password.equals(password);
+}
+
+bool AdminExecutor::requiresCompatibleFlasher(const char *cmd) const {
+  return strcmp(cmd, "hello") != 0 && strcmp(cmd, "status") != 0 &&
+         strcmp(cmd, "identity") != 0 && strcmp(cmd, "admin_challenge") != 0 &&
+         strcmp(cmd, "lora_inventory_status") != 0 && strcmp(cmd, "lora_inventory_peer") != 0;
+}
+
+bool AdminExecutor::requireCompatibleFlasher(const JsonDocument &doc, const char *cmd,
+                                             ResponseWriter writer) {
+  if (!LRS_RELEASE_COMPATIBILITY_ENABLED || !requiresCompatibleFlasher(cmd)) return true;
+  const uint8_t hostRevision = doc["flasher_compat_revision"] | 0;
+  uint8_t requiredRevision = LRS_COMPATIBILITY_REVISION;
+  uint8_t target = doc["addr"] | 0;
+  if (target == 0) target = doc["address"] | 0;
+  if (target != 0 && sm_ != nullptr) {
+    PeerStatusSnapshot peer{};
+    if (sm_->peerByAddress(target, peer) && peer.min_flasher_compat_revision > requiredRevision) {
+      requiredRevision = peer.min_flasher_compat_revision;
+    }
+  }
+  if (hostRevision >= requiredRevision) return true;
+  sendError(cmd, "flasher_update_required", requestId(doc), writer);
+  return false;
 }
 
 void AdminExecutor::sendError(const char *cmd, const char *error,
@@ -610,6 +635,8 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
   if (id[0] != '\0')
     out["id"] = id;
   out["fw_version"] = LRS_FW_VERSION;
+  out["min_flasher_compat_revision"] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
+  out["flasher_compatibility_gate"] = LRS_RELEASE_COMPATIBILITY_ENABLED != 0;
   out["chip_id"] = config_->chipIdHex();
   out["uptime_ms"] = millis();
   out["heap_free"] = lrslog::heapFree();
@@ -1351,6 +1378,7 @@ void AdminExecutor::handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter wr
         snprintf(fwBuf, sizeof(fwBuf), "%u.%u.%u", p.fw_major, p.fw_minor, p.fw_patch);
       }
       row["fw_version"] = fwBuf;
+      row["min_flasher_compat_revision"] = p.min_flasher_compat_revision;
     }
   }
   if (p.uptime_ms > 0)
@@ -2002,6 +2030,8 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
       out["id"] = id;
     out["protocol"] = 1;
     out["fw_version"] = LRS_FW_VERSION;
+    out["min_flasher_compat_revision"] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
+    out["flasher_compatibility_gate"] = LRS_RELEASE_COMPATIBILITY_ENABLED != 0;
     out["max_remotes"] = Settings::kAddressListCap;
     out["requires_prefix"] = "LRS:";
     sendOk(out, writer);
@@ -2026,6 +2056,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     out["local_address"] = cfg.local_address;
     if (!cfg.role_tx) out["controller_address"] = cfg.controller_address;
     out["fw_version"] = LRS_FW_VERSION;
+    out["min_flasher_compat_revision"] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
     sendOk(out, writer);
     return;
   }

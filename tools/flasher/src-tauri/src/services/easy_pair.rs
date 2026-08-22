@@ -4,6 +4,14 @@ use std::time::{Duration, Instant};
 
 const SERIAL_ADMIN_BAUD: u32 = 115_200;
 const SERIAL_ADMIN_PREFIX: &str = "LRS:";
+const FLASHER_COMPATIBILITY: &str = include_str!("../../../../../RELEASE_COMPATIBILITY.json");
+
+fn flasher_compatibility_revision() -> u64 {
+    serde_json::from_str::<Value>(FLASHER_COMPATIBILITY)
+        .ok()
+        .and_then(|value| value.get("revision").and_then(Value::as_u64))
+        .unwrap_or(1)
+}
 
 pub fn send_serial_admin_command(
     port_name: &str,
@@ -11,6 +19,9 @@ pub fn send_serial_admin_command(
     timeout_ms: u64,
     mut on_log_line: impl FnMut(&str),
 ) -> Result<Value, String> {
+    if let Some(obj) = request.as_object_mut() {
+        obj.insert("flasher_compat_revision".into(), json!(flasher_compatibility_revision()));
+    }
     let id = ensure_request_id(&mut request);
     let cmd = request
         .get("cmd")
@@ -62,6 +73,12 @@ pub fn send_serial_admin_command(
                                         "{} failed: unknown_cmd - Flash this gateway with the latest firmware and try again.",
                                         human_command_label(&cmd)
                                     ));
+                                }
+                                if error == "flasher_update_required" {
+                                    return Err(
+                                        "Flasher update required: this device firmware needs a newer Flasher before normal operations can continue. Direct flashing remains available."
+                                            .into(),
+                                    );
                                 }
                                 if let Some(detail) = parsed.get("detail").and_then(Value::as_str) {
                                     return Err(format!("{}: {}", error, detail));

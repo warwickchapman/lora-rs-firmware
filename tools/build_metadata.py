@@ -70,6 +70,17 @@ def _read_repo_version(default):
         return default
 
 
+def _read_release_compatibility(project_dir):
+    try:
+        data = json.loads((Path(project_dir) / "RELEASE_COMPATIBILITY.json").read_text(encoding="utf-8"))
+        revision = int(data["revision"])
+    except Exception as exc:
+        raise RuntimeError(f"Invalid RELEASE_COMPATIBILITY.json: {exc}")
+    if revision < 1 or revision > 255:
+        raise RuntimeError("RELEASE_COMPATIBILITY.json revision must be 1..255")
+    return revision
+
+
 def _guard_unique_dev_build(project_dir, fw_version, build_id):
     if "~" not in fw_version:
         return
@@ -94,6 +105,8 @@ def _guard_unique_dev_build(project_dir, fw_version, build_id):
 
 
 fw_version = _read_repo_version(env.GetProjectOption("custom_fw_version", "0.0.0-dev"))
+compatibility_revision = _read_release_compatibility(env.subst("$PROJECT_DIR"))
+release_compatibility_enabled = 0 if ("~" in fw_version or "-dev" in fw_version) else 1
 fw_major, fw_minor, fw_patch = version_parts(fw_version)
 fw_dev_build = version_dev_build(fw_version)
 git_sha = _run_git(["rev-parse", "--short", "HEAD"], "nogit")
@@ -111,6 +124,8 @@ env.Append(
         ("LRS_FW_MINOR", fw_minor),
         ("LRS_FW_PATCH", fw_patch),
         ("LRS_FW_DEV_BUILD", fw_dev_build),
+        ("LRS_COMPATIBILITY_REVISION", compatibility_revision),
+        ("LRS_RELEASE_COMPATIBILITY_ENABLED", release_compatibility_enabled),
         ("LRS_GIT_SHA", '\\"%s\\"' % git_sha),
         ("LRS_GIT_BRANCH", '\\"%s\\"' % git_branch),
         ("LRS_GIT_DIRTY", dirty),

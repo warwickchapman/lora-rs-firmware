@@ -201,6 +201,8 @@ dry-contact state in firmware or Fleet cache.
 The current 12-byte payload format is not wire-compatible with older 8-byte payload firmware.
 Upgrade paired nodes together.
 
+Release firmware also carries a release-owned Flasher compatibility revision. Serial `hello`, `identity`, and `status` report `min_flasher_compat_revision`; maintenance Version page byte `b11` carries the same value for each remote. A value of `0` means a development build and never enables the gate. Release firmware permits only compatibility discovery reads from an older Flasher and returns `flasher_update_required` for normal commands. Direct flashing remains intentionally unrestricted.
+
 Gateway-mediated remote OTA requires digest-capable firmware on both the USB gateway and target remote; older one-packet OTA trigger firmware will not interoperate with the SHA256-segmented trigger.
 
 Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.

@@ -2724,6 +2724,7 @@ bool NodeStateMachine::sendMaintenanceVersionStatus(uint8_t dstAddress) {
   payload[4] = patch;
   encodeU16LE(payload + 5, build);
   encodeU32LE(payload + 7, millis());
+  payload[11] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
 
   last_counter_++;
   if (!radio_->sendRaw(MessageType::MaintenanceStatus, last_counter_,
@@ -2931,6 +2932,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
     node->fw_patch = p[4];
     node->fw_build = decodeU16LE(p + 5);
     node->uptime_ms = decodeU32LE(p + 7);
+    node->min_flasher_compat_revision = p[11];
     node->uptime_received_ms = millis();
     lrslog::event("maint_version_rx", msg.rssi, msg.counter, node->address);
   } else if (p[1] == kMaintenancePageSensors) {

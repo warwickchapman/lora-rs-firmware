@@ -90,6 +90,25 @@ def read_version(root: Path) -> str:
     return raw.lstrip("v")
 
 
+def read_release_compatibility(root: Path, version: str) -> tuple[dict, str]:
+    """Return the release contract and its required operator-facing guide."""
+    try:
+        contract = json.loads((root / "RELEASE_COMPATIBILITY.json").read_text(encoding="utf-8"))
+        revision = int(contract["revision"])
+        minimum = str(contract["minimum_flasher_version"])
+    except Exception as exc:
+        raise RuntimeError(f"Invalid RELEASE_COMPATIBILITY.json: {exc}")
+    if revision < 1 or revision > 255 or not re.fullmatch(r"\d+\.\d+\.\d+(?:[-.][A-Za-z0-9]+)*", minimum):
+        raise RuntimeError("Release compatibility contract needs revision 1..255 and a SemVer minimum Flasher version")
+    guide_path = root / "docs" / "release_notes" / f"{version}-compatibility.md"
+    if not guide_path.is_file():
+        raise RuntimeError(f"Missing required compatibility guide: {guide_path.relative_to(root)}")
+    guide = guide_path.read_text(encoding="utf-8").strip()
+    if not guide.startswith("## Compatibility"):
+        raise RuntimeError(f"Compatibility guide must begin with '## Compatibility': {guide_path.relative_to(root)}")
+    return contract, guide
+
+
 def derive_next_patch_dev_version(version: str) -> str:
     """
     Convert X.Y.Z[-suffix] into X.Y.(Z+1)-dev.
@@ -809,6 +828,8 @@ def main() -> int:
     os.chdir(root)
 
     version = read_version(root)
+    compatibility_contract, compatibility_guide = read_release_compatibility(root, version)
+    print(f"Release compatibility: revision {compatibility_contract['revision']}, minimum Flasher {compatibility_contract['minimum_flasher_version']}")
     # Default to stable (prerelease=false) as per user instructions
     # Only allow override via CLI if we add the flag later, for now force stable
     is_prerelease = False 
@@ -864,6 +885,8 @@ def main() -> int:
         if args.no_build_flasher or args.reuse_flasher:
             summary_with_flags += "\n\n<!-- SKIP_FLASHER_BUILD -->"
         notes = build_release_notes(version, summary_with_flags, args.highlight, za_asset, us_asset, quote)
+    if "## Compatibility" not in notes:
+        notes = f"{notes.rstrip()}\n\n{compatibility_guide}\n"
     notes_file = Path(tempfile.gettempdir()) / f"release-{tag}.md"
     notes_file.write_text(notes, encoding="utf-8")
 

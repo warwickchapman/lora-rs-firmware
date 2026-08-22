@@ -49,6 +49,8 @@ private:
   // Command handlers
   void handleCommand(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
   bool requireAdmin(const JsonDocument &doc);
+  bool requiresCompatibleFlasher(const char *cmd) const;
+  bool requireCompatibleFlasher(const JsonDocument &doc, const char *cmd, ResponseWriter writer);
   void sendError(const char *cmd, const char *error, const char *id, ResponseWriter writer);
   void sendOk(JsonDocument &doc, ResponseWriter writer);
   void buildProvisioningStatus(JsonDocument &doc, bool isMqtt = false);

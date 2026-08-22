@@ -11,6 +11,7 @@ export interface LoraInventoryDevice {
   chip_id?: string;
   fw_version?: string;
   fw_build?: number;
+  min_flasher_compat_revision?: number;
   role?: string;
   mode?: string;
   wifi_enabled_known?: boolean;

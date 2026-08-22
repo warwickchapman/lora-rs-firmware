@@ -130,6 +130,7 @@ USB serial admin protocol:
 - `ota_pull` and `remote_ota_pull` require a 64-character SHA256 for the firmware payload. The remote LoRa trigger sends that digest over the encrypted LoRa control channel before the target downloads `/firmware.bin`.
 - `identify` flashes the local LED with a distinct 3 fast flashes, pause, 3 fast flashes pattern; clients should animate the same pattern in the UI.
 - Lost admin passwords are not reset in place; physical recovery is erase-and-reflash.
+- Release-only compatibility: Flasher supplies `flasher_compat_revision` on every command. Firmware compares it with its own release requirement and, for remote-targeted gateway commands, the cached remote requirement. Incompatible normal commands return `flasher_update_required`; `hello`, `identity`, `status`, and compact Fleet reads remain available to explain the lock.
 
 ## 7a. Heap and Memory Management Rules
 To prevent heap exhaustion and fragmentation on the ESP8266:
@@ -401,6 +402,7 @@ Deterministic release mode (preferred):
 5. Optional pruning control: `--keep-workflow-runs <N>` (default `10`; use `0` to disable for a specific run).
 
 Mandatory pre-release validation gate:
+- Complete `RELEASE_COMPATIBILITY.json`, add `docs/release_notes/<version>-compatibility.md`, and paste the completed [release-chat compatibility brief](release_notes/RELEASE_CHAT_COMPATIBILITY_BRIEF.md) into the dedicated release chat. The release tool blocks if the contract or guide is missing.
 - A release is not ready unless all four pass:
   - `pio test -e native`
   - `python3 tools/test_version_metadata.py`

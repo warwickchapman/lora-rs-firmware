@@ -113,6 +113,8 @@ Use `tools/release_manager.py` to run the same release flow end-to-end:
   - `--verify-full-assets` only after flasher assets are present
 
 Pre-release gate notes:
+- Every non-development release must have a valid `RELEASE_COMPATIBILITY.json` and matching `docs/release_notes/<version>-compatibility.md`. `tools/release_manager.py` blocks publication without both and appends the guide to the release notes.
+- Compatibility revision is a small monotonic Flasher contract, not the release version. Raise it only when the firmware requires newer Flasher behaviour. Direct flashing always remains available; post-boot normal commands are rejected by incompatible release firmware.
 - Native tests are intentionally limited to pure firmware helpers (no ESP8266 hardware mocks).
 - Bench/soak validation is still required for LoRa ACK behavior, WiFi reconnect, OTA pull, serial-admin/Flasher workflows, and long-running heap stability.
 - Flasher `npm run build` is not part of this specific gate unless `tools/flasher/**` changed.

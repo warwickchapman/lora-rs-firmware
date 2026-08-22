@@ -48,6 +48,7 @@ struct PeerStatusSnapshot {
   uint8_t fw_minor = 0;
   uint8_t fw_patch = 0;
   uint16_t fw_build = 0;
+  uint8_t min_flasher_compat_revision = 0;
   uint32_t uptime_ms = 0;
   bool maintenance_debug_known = false;
   uint32_t heap_free = 0;
@@ -88,6 +89,7 @@ struct PeerRuntime {
   uint8_t fw_minor = 0;
   uint8_t fw_patch = 0;
   uint16_t fw_build = 0;
+  uint8_t min_flasher_compat_revision = 0;
   uint32_t uptime_ms = 0;
   uint32_t uptime_received_ms = 0;
   bool maintenance_debug_known = false;

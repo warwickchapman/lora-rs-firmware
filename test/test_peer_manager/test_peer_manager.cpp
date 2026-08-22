@@ -116,6 +116,7 @@ void test_peer_manager_snapshot_consistency() {
   p->input_state_known = true;
   p->uplink_rssi = -70;
   p->wifi_rssi_dbm = -65;
+  p->min_flasher_compat_revision = 7;
 
   PeerStatusSnapshot snap{};
   TEST_ASSERT_TRUE(pm.buildStatusSnapshot(0, snap));
@@ -127,6 +128,7 @@ void test_peer_manager_snapshot_consistency() {
   TEST_ASSERT_EQUAL_INT(-70, snap.uplink_rssi);
   TEST_ASSERT_EQUAL_INT(-65, snap.wifi_rssi_dbm);
   TEST_ASSERT_EQUAL_UINT32(1002, snap.chip_id);
+  TEST_ASSERT_EQUAL_UINT8(7, snap.min_flasher_compat_revision);
 
   // Bounds check snapshot
   TEST_ASSERT_FALSE(pm.buildStatusSnapshot(1, snap));
