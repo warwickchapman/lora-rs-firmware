@@ -405,6 +405,8 @@ Deterministic release mode (preferred):
    - workflow run pruning for `package_flasher.yml` (keeps latest 10 completed runs by default).
 4. Release notes are deterministic in this mode: the file content is published verbatim.
 5. Optional pruning control: `--keep-workflow-runs <N>` (default `10`; use `0` to disable for a specific run).
+6. Prepare a short release announcement as the final step, providing a plain English summary of the changelog with a link to the published release in the public repository (`warwickchapman/lora-rs-firmware`).
+
 
 Mandatory pre-release validation gate:
 - Complete `RELEASE_COMPATIBILITY.json`, add `docs/release_notes/<version>-compatibility.md`, and paste the completed [release-chat compatibility brief](release_notes/RELEASE_CHAT_COMPATIBILITY_BRIEF.md) into the dedicated release chat. The release tool blocks if the contract or guide is missing.

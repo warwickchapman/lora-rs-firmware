@@ -82,3 +82,10 @@ When reviewing an implementation against an approved plan:
 - Do not reuse a dev build version for a different firmware or Flasher artifact.
 - Use `python3 tools/bump_dev_build.py` before a new development build.
 - Firmware builds record the source tree used for each `~DEVBUILD` value and reject reusing the same dev build number after code changes.
+
+## Release Announcement Rule
+
+- As the final step of every release, prepare a short release announcement.
+- The announcement must include a plain English summary of the changelog and a direct link to the published release in the public repository (`warwickchapman/lora-rs-firmware`). The main repository (`warwickchapman/lora-rs`) is private and must not be linked in announcements.
+
+
