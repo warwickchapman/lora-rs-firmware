@@ -29,6 +29,8 @@ Packed fields:
 - `OtaPullStatus` (`'N'`)
 - `FactoryReset` (`'E'`)
 - `FactoryResetStatus` (`'F'`)
+- `Readdress` (`'D'`)
+- `ReaddressStatus` (`'G'`)
 - `Provisioning` (`'V'`)
 - `MaintenanceRequest` (`'Q'`)
 - `MaintenanceStatus` (`'T'`)
@@ -167,11 +169,15 @@ dry-contact state in firmware or Fleet cache.
 - The gateway permits one reset transaction at a time and retransmits the same transaction once when confirmation is absent. Each RF attempt uses a fresh packet counter while retaining the same reset transaction ID.
 - After validating the request, the remote persists the requested reset configuration. It sends two staggered `FactoryResetStatus` (`'F'`) frames under the current Fleet Key before rebooting. The status carries `committed` or `save_failed`, echoes the option flags, and echoes the transaction ID.
 - A gateway accepts reset status only when source address, transaction ID, flags, and live awaiting transaction all match. A confirmed full reset removes and saves the peer record; a keep-Fleet reset retains it. Missing or invalid confirmation never removes the peer.
+- `Readdress` (`'D'`) starts one correlated adoption transaction. Payload `b0..b2` carries the 24-bit chip ID, `b3` the assigned address, and `b4..b7` the 32-bit transaction ID. The gateway permits one adoption at a time and retries the same transaction once.
+- Manual Forget changes gateway state only: after the peer record is removed and saved, its known chip ID is copied into the bounded volatile candidate table. The remote retains its Fleet Key, address, controller address, configuration, and live replay counter. A gateway reboot loses this candidate hint and normal same-key maintenance identity discovery is used again.
+- The remote persists and applies the assigned address before sending two staggered `ReaddressStatus` (`'G'`) frames. Status echoes chip ID, address, and transaction ID in `b0..b7`; `b8` is `committed` or `save_failed`. Duplicate and already-applied requests resend the stored result without another flash write.
+- A gateway accepts `committed` only from the assigned address and `save_failed` only from the old address, with exact chip and transaction correlation. It reports adoption complete only after its own peer record also saves. A full fleet rejects Adopt; address zero has no reset meaning.
 - `Reboot` (`'B'`) carries a compact magic-value command payload for a targeted remote reboot.
 - `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
 - `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.
 
-- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, `FactoryReset`, and `FactoryResetStatus` must be addressed to the target device's LoRa address.
+- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, `FactoryReset`, `FactoryResetStatus`, and `ReaddressStatus` must be addressed to the target device's LoRa address. `Readdress` remains chip-scoped so an exact retry still reaches a remote after it has committed its new address.
 - Broadcast is reserved for controlled provisioning-style flows. Do not use broadcast for destructive or lockout-prone maintenance commands.
 - Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, factory-reset, or UDP log control commands.
 

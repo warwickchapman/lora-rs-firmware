@@ -34,8 +34,7 @@ enum class CandidateState : uint8_t {
   Identified,
   Readdressing,
   Adopted,
-  Failed,
-  ResetRequested
+  Failed
 };
 
 struct DiscoveryCandidate {
@@ -48,14 +47,6 @@ struct DiscoveryCandidate {
   bool in_use = false;
   uint8_t probe_attempt_count = 0;
   uint32_t last_probe_ms = 0;
-};
-
-enum class RemoteReaddressState : uint8_t {
-  Idle,
-  PendingSave,
-  PendingReset,
-  Completed,
-  Failed
 };
 
 enum class MaintenanceRequestSource : uint8_t {
@@ -226,32 +217,6 @@ uint8_t resolveAdoptionAddress(
     uint8_t knownPeerCount,
     const uint8_t *knownPeerAddresses,
     const uint32_t *knownPeerChipIds
-);
-
-bool validateGatewayConfirm(
-    uint32_t targetChipId,
-    uint8_t newAddress,
-    uint8_t msgSrc,
-    bool adoptionActive,
-    uint32_t adoptionChipId,
-    uint8_t adoptionAddress,
-    uint8_t adoptionDstAddr
-);
-
-RemoteReaddressState transitionRemoteReaddress(
-    RemoteReaddressState currentState,
-    bool rxRequest,
-    uint8_t rxNewAddress,
-    bool saveSucceeded,
-    bool &outSendConfirm,
-    uint8_t &outConfirmAddress
-);
-
-bool transitionAdoptionStart(
-    CandidateState &cState,
-    bool &adoptionActive,
-    bool isReset,
-    bool txSuccess
 );
 
 constexpr uint32_t kCandidateProbeGlobalGapMs = 500;

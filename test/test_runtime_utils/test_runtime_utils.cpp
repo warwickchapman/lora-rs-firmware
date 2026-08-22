@@ -491,7 +491,7 @@ void test_candidate_out_of_range_readdress() {
   TEST_ASSERT_EQUAL_UINT8(1, resolved);
 }
 
-void test_full_fleet_dangerous_reset_guarded() {
+void test_full_fleet_refuses_adoption() {
   // Configured peers fill the entire list of 12 peers
   uint8_t known_peers[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
   uint32_t known_peer_chip_ids[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
@@ -500,142 +500,13 @@ void test_full_fleet_dangerous_reset_guarded() {
   CandidateReason reason = runtime_utils::evaluateCandidateReason(
       5, 0x999, 12, known_peers, known_peer_chip_ids
   );
-  TEST_ASSERT_EQUAL(CandidateReason::Conflict, reason);
+  TEST_ASSERT_EQUAL(CandidateReason::Full, reason);
   
-  // Since fleet is full (all 1..12 are taken), resolveAdoptionAddress should return 0 (reset request)
+  // A full fleet has no adoption address. It must not become a reset request.
   uint8_t resolved = runtime_utils::resolveAdoptionAddress(
       5, 0x999, 12, known_peers, known_peer_chip_ids
   );
   TEST_ASSERT_EQUAL_UINT8(0, resolved);
-}
-
-void test_remote_two_stage_confirm_success() {
-  bool outSendConfirm = false;
-  uint8_t outConfirmAddress = 99;
-  RemoteReaddressState state = runtime_utils::transitionRemoteReaddress(
-      RemoteReaddressState::Idle,
-      true,  // rxRequest
-      5,     // rxNewAddress
-      false, // saveSucceeded (not done yet)
-      outSendConfirm,
-      outConfirmAddress
-  );
-  TEST_ASSERT_EQUAL(RemoteReaddressState::PendingSave, state);
-  TEST_ASSERT_FALSE(outSendConfirm);
-
-  state = runtime_utils::transitionRemoteReaddress(
-      state,
-      false, // rxRequest
-      5,     // rxNewAddress
-      true,  // saveSucceeded
-      outSendConfirm,
-      outConfirmAddress
-  );
-  TEST_ASSERT_EQUAL(RemoteReaddressState::Completed, state);
-  TEST_ASSERT_TRUE(outSendConfirm);
-  TEST_ASSERT_EQUAL_UINT8(5, outConfirmAddress);
-}
-
-void test_remote_two_stage_confirm_save_fail() {
-  bool outSendConfirm = false;
-  uint8_t outConfirmAddress = 99;
-  RemoteReaddressState state = runtime_utils::transitionRemoteReaddress(
-      RemoteReaddressState::Idle,
-      true,  // rxRequest
-      5,     // rxNewAddress
-      false, // saveSucceeded
-      outSendConfirm,
-      outConfirmAddress
-  );
-  TEST_ASSERT_EQUAL(RemoteReaddressState::PendingSave, state);
-  TEST_ASSERT_FALSE(outSendConfirm);
-
-  state = runtime_utils::transitionRemoteReaddress(
-      state,
-      false, // rxRequest
-      5,     // rxNewAddress
-      false, // saveSucceeded (failed!)
-      outSendConfirm,
-      outConfirmAddress
-  );
-  TEST_ASSERT_EQUAL(RemoteReaddressState::Failed, state);
-  TEST_ASSERT_FALSE(outSendConfirm);
-}
-
-void test_remote_two_stage_reset_confirm_success() {
-  bool outSendConfirm = false;
-  uint8_t outConfirmAddress = 99;
-  RemoteReaddressState state = runtime_utils::transitionRemoteReaddress(
-      RemoteReaddressState::Idle,
-      true,  // rxRequest
-      0,     // rxNewAddress (reset)
-      false, // saveSucceeded
-      outSendConfirm,
-      outConfirmAddress
-  );
-  TEST_ASSERT_EQUAL(RemoteReaddressState::PendingReset, state);
-  TEST_ASSERT_FALSE(outSendConfirm);
-
-  state = runtime_utils::transitionRemoteReaddress(
-      state,
-      false, // rxRequest
-      0,     // rxNewAddress
-      true,  // saveSucceeded
-      outSendConfirm,
-      outConfirmAddress
-  );
-  TEST_ASSERT_EQUAL(RemoteReaddressState::Completed, state);
-  TEST_ASSERT_TRUE(outSendConfirm);
-  TEST_ASSERT_EQUAL_UINT8(0, outConfirmAddress);
-}
-
-void test_gateway_confirm_validation() {
-  // Successful readdress confirm
-  TEST_ASSERT_TRUE(runtime_utils::validateGatewayConfirm(
-      0x123, 5, 5, true, 0x123, 5, 16
-  ));
-
-  // Mismatched confirm address
-  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
-      0x123, 6, 5, true, 0x123, 5, 16
-  ));
-
-  // Mismatched source address for readdress (should be 5, not old 16)
-  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
-      0x123, 5, 16, true, 0x123, 5, 16
-  ));
-
-  // Successful reset confirm (source must be old address 16 since new address is 0)
-  TEST_ASSERT_TRUE(runtime_utils::validateGatewayConfirm(
-      0x123, 0, 16, true, 0x123, 0, 16
-  ));
-
-  // Mismatched source address for reset (should be old address 16, not 5)
-  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
-      0x123, 0, 5, true, 0x123, 0, 16
-  ));
-
-  // Adoption inactive
-  TEST_ASSERT_FALSE(runtime_utils::validateGatewayConfirm(
-      0x123, 5, 5, false, 0x123, 5, 16
-  ));
-}
-
-void test_start_adoption_reverts_on_tx_fail() {
-  CandidateState cState = CandidateState::Identified;
-  bool adoptionActive = false;
-  
-  // TX fails on first attempt
-  bool ok = runtime_utils::transitionAdoptionStart(cState, adoptionActive, false, false);
-  TEST_ASSERT_FALSE(ok);
-  TEST_ASSERT_EQUAL(CandidateState::Identified, cState);
-  TEST_ASSERT_FALSE(adoptionActive);
-
-  // TX succeeds
-  ok = runtime_utils::transitionAdoptionStart(cState, adoptionActive, false, true);
-  TEST_ASSERT_TRUE(ok);
-  TEST_ASSERT_EQUAL(CandidateState::Readdressing, cState);
-  TEST_ASSERT_TRUE(adoptionActive);
 }
 
 void test_candidate_probe_tick_flow() {
@@ -1142,12 +1013,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_candidate_conflict_readdress);
   RUN_TEST(test_candidate_unknown_chip_is_not_conflict);
   RUN_TEST(test_candidate_out_of_range_readdress);
-  RUN_TEST(test_full_fleet_dangerous_reset_guarded);
-  RUN_TEST(test_remote_two_stage_confirm_success);
-  RUN_TEST(test_remote_two_stage_confirm_save_fail);
-  RUN_TEST(test_remote_two_stage_reset_confirm_success);
-  RUN_TEST(test_gateway_confirm_validation);
-  RUN_TEST(test_start_adoption_reverts_on_tx_fail);
+  RUN_TEST(test_full_fleet_refuses_adoption);
   RUN_TEST(test_candidate_probe_tick_flow);
   RUN_TEST(test_candidate_telemetry_does_not_reset_active_attempts);
   RUN_TEST(test_mqtt_controller_authorization_remote_accepts_controller_address);

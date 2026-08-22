@@ -136,34 +136,21 @@ void test_pending_command_readdress() {
   PendingCommandManager pcm;
   TEST_ASSERT_FALSE(pcm.hasPendingReaddress());
 
-  pcm.requestReaddress(12, runtime_utils::kGatewayAddress);
+  pcm.requestReaddress(12, runtime_utils::kGatewayAddress, 0x123456, 0x87654321);
   TEST_ASSERT_TRUE(pcm.hasPendingReaddress());
 
   uint8_t newAddress = 0;
   uint8_t gwAddr = 0;
+  uint32_t chipId = 0;
+  uint32_t transactionId = 0;
 
-  TEST_ASSERT_TRUE(pcm.consumeReaddress(newAddress, gwAddr));
+  TEST_ASSERT_TRUE(pcm.consumeReaddress(newAddress, gwAddr, chipId, transactionId));
   TEST_ASSERT_EQUAL_UINT8(12, newAddress);
   TEST_ASSERT_EQUAL_UINT8(runtime_utils::kGatewayAddress, gwAddr);
+  TEST_ASSERT_EQUAL_UINT32(0x123456, chipId);
+  TEST_ASSERT_EQUAL_UINT32(0x87654321, transactionId);
 
   TEST_ASSERT_FALSE(pcm.hasPendingReaddress());
-}
-
-void test_pending_command_peer_sync() {
-  PendingCommandManager pcm;
-  TEST_ASSERT_FALSE(pcm.hasPendingPeerSync());
-
-  pcm.requestPeerSync(0x123456, 5);
-  TEST_ASSERT_TRUE(pcm.hasPendingPeerSync());
-
-  uint32_t chipId = 0;
-  uint8_t address = 0;
-
-  TEST_ASSERT_TRUE(pcm.consumePeerSync(chipId, address));
-  TEST_ASSERT_EQUAL_UINT32(0x123456, chipId);
-  TEST_ASSERT_EQUAL_UINT8(5, address);
-
-  TEST_ASSERT_FALSE(pcm.hasPendingPeerSync());
 }
 
 void test_pending_command_sensor_config() {
@@ -243,7 +230,7 @@ void test_pending_command_truncation() {
 void test_pending_command_reset_all() {
   PendingCommandManager pcm;
   pcm.requestReboot();
-  pcm.requestReaddress(1, 2);
+  pcm.requestReaddress(1, 2, 3, 4);
   pcm.requestWifiProvision("A", "B", 1);
 
   TEST_ASSERT_TRUE(pcm.hasPendingReboot());
@@ -289,11 +276,10 @@ void test_pending_command_reset_on_config_apply() {
 void test_pending_command_reset_on_config_apply_all_survivors() {
   PendingCommandManager pcm;
 
-  // Set all 6 commands that should survive
+  // Set all commands that should survive
   pcm.requestWifiControl(true, 100, 10);
   pcm.requestReboot();
-  pcm.requestReaddress(5, runtime_utils::kGatewayAddress);
-  pcm.requestPeerSync(12345, 2);
+  pcm.requestReaddress(5, runtime_utils::kGatewayAddress, 12345, 67890);
   pcm.requestSensorConfig(true, false, true, false);
   pcm.requestFleetKeyChange("fleetkey", 1);
 
@@ -303,7 +289,6 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
   TEST_ASSERT_TRUE(pcm.hasPendingWifiControl());
   TEST_ASSERT_TRUE(pcm.hasPendingReboot());
   TEST_ASSERT_TRUE(pcm.hasPendingReaddress());
-  TEST_ASSERT_TRUE(pcm.hasPendingPeerSync());
   TEST_ASSERT_TRUE(pcm.hasPendingSensorConfig());
   TEST_ASSERT_TRUE(pcm.hasPendingFleetKeyChange());
   TEST_ASSERT_TRUE(pcm.hasPendingOtaPull());
@@ -314,14 +299,13 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
   TEST_ASSERT_TRUE(pcm.hasPendingWifiControl());
   TEST_ASSERT_TRUE(pcm.hasPendingReboot());
   TEST_ASSERT_TRUE(pcm.hasPendingReaddress());
-  TEST_ASSERT_TRUE(pcm.hasPendingPeerSync());
   TEST_ASSERT_TRUE(pcm.hasPendingSensorConfig());
   TEST_ASSERT_TRUE(pcm.hasPendingFleetKeyChange());
 
   // Non-survivor must be cleared
   TEST_ASSERT_FALSE(pcm.hasPendingOtaPull());
 
-  // Consume and verify details of all 6 survivors to ensure exact preservation
+  // Consume and verify details of all survivors to ensure exact preservation
   bool wifiEnabled = false;
   uint32_t wifiCounter = 0;
   uint8_t wifiSrc = 0;
@@ -334,15 +318,14 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
 
   uint8_t newAddr = 0;
   uint8_t gwAddr = 0;
-  TEST_ASSERT_TRUE(pcm.consumeReaddress(newAddr, gwAddr));
+  uint32_t readdressChipId = 0;
+  uint32_t readdressTransactionId = 0;
+  TEST_ASSERT_TRUE(pcm.consumeReaddress(newAddr, gwAddr, readdressChipId,
+                                        readdressTransactionId));
   TEST_ASSERT_EQUAL_UINT8(5, newAddr);
   TEST_ASSERT_EQUAL_UINT8(runtime_utils::kGatewayAddress, gwAddr);
-
-  uint32_t syncChipId = 0;
-  uint8_t syncAddr = 0;
-  TEST_ASSERT_TRUE(pcm.consumePeerSync(syncChipId, syncAddr));
-  TEST_ASSERT_EQUAL_UINT32(12345, syncChipId);
-  TEST_ASSERT_EQUAL_UINT8(2, syncAddr);
+  TEST_ASSERT_EQUAL_UINT32(12345, readdressChipId);
+  TEST_ASSERT_EQUAL_UINT32(67890, readdressTransactionId);
 
   bool temp = false, tank = true, powerSave = false, bootGrace = true;
   TEST_ASSERT_TRUE(pcm.consumeSensorConfig(temp, tank, powerSave, bootGrace));
@@ -361,7 +344,6 @@ void test_pending_command_reset_on_config_apply_all_survivors() {
   TEST_ASSERT_FALSE(pcm.hasPendingWifiControl());
   TEST_ASSERT_FALSE(pcm.hasPendingReboot());
   TEST_ASSERT_FALSE(pcm.hasPendingReaddress());
-  TEST_ASSERT_FALSE(pcm.hasPendingPeerSync());
   TEST_ASSERT_FALSE(pcm.hasPendingSensorConfig());
   TEST_ASSERT_FALSE(pcm.hasPendingFleetKeyChange());
 }
@@ -433,7 +415,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_pending_command_factory_reset);
   RUN_TEST(test_pending_command_reboot);
   RUN_TEST(test_pending_command_readdress);
-  RUN_TEST(test_pending_command_peer_sync);
   RUN_TEST(test_pending_command_sensor_config);
   RUN_TEST(test_pending_command_fleet_prov_apply);
   RUN_TEST(test_pending_command_fleet_key_change);

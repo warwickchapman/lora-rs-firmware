@@ -351,13 +351,14 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (c.state === 'seen_address_only') return 'identifying';
     if (c.state === 'identified') return 'ready to adopt';
     if (c.state === 'readdressing') return 'adopting';
-    if (c.state === 'reset_requested') return 'reset requested';
     if (c.state === 'failed') {
       if (c.chip_id) {
         return 'ready to retry adopt';
       } else {
         const ageMs = c.age_ms ?? 0;
-        return ageMs < CANDIDATE_RECENT_IDENTITY_MS ? 'retrying identity' : 'identity failed';
+        return ageMs < CANDIDATE_RECENT_IDENTITY_MS
+          ? 'retrying identity'
+          : 'identity unavailable — rescan';
       }
     }
     return c.state;
@@ -366,7 +367,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   function candidateStateClass(c: LoraAdoptionCandidate): string {
     if (c.state === 'adopted') return 'text-emerald-400';
     if (c.state === 'readdressing') return 'text-sky-400 animate-pulse';
-    if (c.state === 'reset_requested') return 'text-amber-400 animate-pulse';
     if (c.state === 'seen_address_only') return 'text-slate-400 animate-pulse';
     if (c.state === 'identified') return 'text-slate-300';
     if (c.state === 'failed') {
@@ -434,7 +434,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     ).length;
     const ready = loraCandidates.value.filter(c => (c.state === 'identified' || c.state === 'failed') && !!c.chip_id).length;
     const adopting = loraCandidates.value.filter(c => c.state === 'readdressing').length;
-    const resetting = loraCandidates.value.filter(c => c.state === 'reset_requested').length;
     const adopted = loraCandidates.value.filter(c => c.state === 'adopted').length;
     const failed = loraCandidates.value.filter(c =>
       c.state === 'failed' && !c.chip_id && (c.age_ms ?? 0) >= CANDIDATE_RECENT_IDENTITY_MS
@@ -444,7 +443,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (identifying > 0) parts.push(`${identifying} identifying`);
     if (ready > 0) parts.push(`${ready} ready`);
     if (adopting > 0) parts.push(`${adopting} adopting`);
-    if (resetting > 0) parts.push(`${resetting} resetting`);
     if (adopted > 0) parts.push(`${adopted} adopted`);
     if (failed > 0) parts.push(`${failed} failed`);
     

@@ -116,7 +116,10 @@ turnaround guard before the first remote reply, so address `1` is not a special 
   - Unresponsive candidates are transitioned to `Failed` after 4 failed query attempts, preventing head-of-line blocking for other candidates.
   - Active `SeenAddressOnly` candidates do not have their probe attempt count reset by incoming telemetry packets, avoiding infinite probe loops.
   - Candidates in the `Failed` state are automatically revived and transitioned back to `SeenAddressOnly` if new telemetry is received.
-  - Peer adoption is completed via explicit readdressing or reset commands. Readdress request retries are sent by the gateway every 1000ms up to 5 retries (6 attempts total) to accommodate ESP8266 remote flash write/erase stalls (~300ms) and close-proximity RF noise.
+  - A successful manual Forget removes and saves the peer record, clears its runtime/MQTT state, then seeds the removed chip ID into the existing volatile candidate table. The remote is not changed, and no paired trust or address ownership is retained; this only avoids needlessly rediscovering identity the gateway already knew.
+  - Peer adoption is one correlated transaction at a time. The gateway sends a chip-scoped readdress request with a 32-bit transaction ID, retries that exact request once, and accepts only a matching `ReaddressStatus` from the expected old/new address.
+  - The remote saves and applies its new address before sending two staggered `committed` copies. Duplicate or already-applied requests resend status without rewriting flash. `save_failed` leaves the remote on its old address.
+  - Adoption becomes complete only after the gateway also saves the peer record. A gateway save failure is retried locally; a full fleet refuses adoption and never converts Adopt into factory reset.
 - `identify` flashes the local LED with the Identify pattern for physical unit lookup.
 
 USB serial admin protocol:

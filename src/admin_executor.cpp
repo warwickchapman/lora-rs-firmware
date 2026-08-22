@@ -67,7 +67,6 @@ const char* candidateStateToString(CandidateState s) {
     case CandidateState::Readdressing: return "readdressing";
     case CandidateState::Adopted: return "adopted";
     case CandidateState::Failed: return "failed";
-    case CandidateState::ResetRequested: return "reset_requested";
     default: return "unknown";
   }
 }
@@ -1275,13 +1274,25 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
   out["candidate_total"] = cCount;
   out["candidate_truncated"] = isMqtt && (cCount > 4);
 
-  if (sm_->isAdoptionActive()) {
+  const NodeStateMachine::RemoteAdoptionStatusRecord adoption = sm_->getAdoptionStatus();
+  if (adoption.stage != 0) {
     JsonObject adoptObj = out["adoption"].to<JsonObject>();
-    adoptObj["active"] = true;
+    adoptObj["active"] = sm_->isAdoptionTxActive();
     char chipBuf[9];
-    snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(sm_->adoptionChipId() & 0xFFFFFFUL));
+    snprintf(chipBuf, sizeof(chipBuf), "%06lx",
+             static_cast<unsigned long>(adoption.chip_id & 0xFFFFFFUL));
     adoptObj["chip_id"] = chipBuf;
-    adoptObj["assigned_address"] = sm_->adoptionAddress();
+    adoptObj["assigned_address"] = adoption.assigned_address;
+    adoptObj["transaction_id"] = adoption.transaction_id;
+    const char *stage = "idle";
+    if (adoption.stage == 1) stage = "sending";
+    else if (adoption.stage == 2) stage = "awaiting_ack";
+    else if (adoption.stage == 3) stage = "saving_gateway";
+    else if (adoption.stage == 4) stage = "committed";
+    else if (adoption.stage == 5) stage = "unconfirmed";
+    else if (adoption.stage == 6) stage = "failed";
+    adoptObj["stage"] = stage;
+    adoptObj["error_code"] = adoption.error_code;
   }
 
   if (shouldLog) {
@@ -1643,7 +1654,8 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
     return;
   }
 
-  if (sm_->isOtaPullTxActive() || sm_->isFactoryResetTxActive()) {
+  if (sm_->isOtaPullTxActive() || sm_->isFactoryResetTxActive() ||
+      sm_->isAdoptionTxActive()) {
     sendError("remote_ota_pull", "gateway_busy", id, writer);
     return;
   }
@@ -1885,7 +1897,8 @@ void AdminExecutor::handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter w
   const bool keepFleetKey = doc["keep_shared_fleet_key"] | doc["keep_fleet_key"] | false;
   const bool keepWifi = doc["keep_wifi_credentials"] | doc["keep_wifi"] | false;
 
-  if (sm_->isFactoryResetTxActive() || sm_->isOtaPullTxActive()) {
+  if (sm_->isFactoryResetTxActive() || sm_->isOtaPullTxActive() ||
+      sm_->isAdoptionTxActive()) {
     sendError("remote_factory_reset", "gateway_busy", id, writer);
     return;
   }
@@ -2052,6 +2065,10 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
     return;
   }
   const uint8_t addr = static_cast<uint8_t>(rawAddr);
+  PeerStatusSnapshot previousPeer{};
+  const int candidateRssi = sm_->peerByAddress(addr, previousPeer)
+                                ? previousPeer.uplink_rssi
+                                : -127;
   uint32_t chipId = 0;
   bool found = false;
   if (!config_->removeKnownPeer(addr, chipId, found)) {
@@ -2065,6 +2082,11 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
   if (found) {
     if (on_apply_)
       on_apply_(on_apply_ctx_, false, false);
+    // Forget removes the persisted peer and rebuilds runtime state, but the
+    // chip identity we just removed is still authoritative. Keep it only in
+    // the existing bounded candidate table so Forget is immediately
+    // reversible without another maintenance identity round trip.
+    if (chipId != 0) sm_->recordDiscoveryCandidate(addr, chipId, candidateRssi);
   }
 
   JsonDocument out;
@@ -2073,6 +2095,12 @@ void AdminExecutor::handleForgetGatewayTarget(JsonDocument &doc, ResponseWriter 
     out["id"] = id;
   out["forgotten"] = found;
   out["target_count"] = config_->settings().known_peer_count;
+  if (found && chipId != 0) {
+    char chipBuf[9];
+    snprintf(chipBuf, sizeof(chipBuf), "%06lx",
+             static_cast<unsigned long>(chipId & 0xFFFFFFUL));
+    out["adoption_candidate_chip_id"] = chipBuf;
+  }
   sendOk(out, writer);
 }
 
@@ -2376,6 +2404,25 @@ void AdminExecutor::handleAdoptCandidate(JsonDocument &doc, ResponseWriter write
     sendError(cmd, "invalid_chip_id", id, writer);
     return;
   }
+
+  if (sm_->retryAdoptionPersistence(chipId)) {
+    const NodeStateMachine::RemoteAdoptionStatusRecord adoption = sm_->getAdoptionStatus();
+    JsonDocument out;
+    out["cmd"] = cmd;
+    if (id[0] != '\0') out["id"] = id;
+    out["chip_id"] = doc["chip_id"];
+    out["assigned_address"] = adoption.assigned_address;
+    out["transaction_id"] = adoption.transaction_id;
+    out["stage"] = "saving_gateway";
+    sendOk(out, writer);
+    return;
+  }
+
+  if (sm_->isAdoptionTxActive() || sm_->isFactoryResetTxActive() ||
+      sm_->isOtaPullTxActive()) {
+    sendError(cmd, "gateway_busy", id, writer);
+    return;
+  }
   
   DiscoveryCandidate c{};
   if (!sm_->candidateByChipId(chipId, c)) {
@@ -2390,9 +2437,12 @@ void AdminExecutor::handleAdoptCandidate(JsonDocument &doc, ResponseWriter write
   
   const auto &cfg = config_->settings();
   uint8_t assignedAddress = runtime_utils::resolveAdoptionAddress(c.address, chipId, cfg.known_peer_count, cfg.known_peer_addresses, cfg.known_peer_chip_ids);
-  bool isReset = (assignedAddress == 0);
-  
-  if (sm_->startAdoption(chipId, assignedAddress, isReset)) {
+  if (assignedAddress == 0) {
+    sendError(cmd, "fleet_full", id, writer);
+    return;
+  }
+
+  if (sm_->startAdoption(chipId, assignedAddress)) {
     JsonDocument out;
     out["cmd"] = cmd;
     if (id[0] != '\0') out["id"] = id;
@@ -2401,7 +2451,8 @@ void AdminExecutor::handleAdoptCandidate(JsonDocument &doc, ResponseWriter write
     snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(chipId & 0xFFFFFFUL));
     out["chip_id"] = chipBuf;
     out["assigned_address"] = assignedAddress;
-    out["reset_requested"] = isReset;
+    out["transaction_id"] = sm_->getAdoptionStatus().transaction_id;
+    out["stage"] = "sending";
     sendOk(out, writer);
   } else {
     sendError(cmd, "adoption_start_failed", id, writer);
@@ -2411,6 +2462,11 @@ void AdminExecutor::handleAdoptCandidate(JsonDocument &doc, ResponseWriter write
 bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
   if (config_ == nullptr) return false;
   auto &cfg = config_->settings();
+  const uint8_t previousCount = cfg.known_peer_count;
+  uint8_t previousAddresses[Settings::kAddressListCap]{};
+  uint32_t previousChipIds[Settings::kAddressListCap]{};
+  memcpy(previousAddresses, cfg.known_peer_addresses, sizeof(previousAddresses));
+  memcpy(previousChipIds, cfg.known_peer_chip_ids, sizeof(previousChipIds));
   
   int existingIdx = -1;
   for (size_t i = 0; i < cfg.known_peer_count; ++i) {
@@ -2440,5 +2496,8 @@ bool AdminExecutor::addPeerToConfig(uint32_t chipId, uint8_t address) {
     }
     return true;
   }
+  cfg.known_peer_count = previousCount;
+  memcpy(cfg.known_peer_addresses, previousAddresses, sizeof(previousAddresses));
+  memcpy(cfg.known_peer_chip_ids, previousChipIds, sizeof(previousChipIds));
   return false;
 }

@@ -132,8 +132,6 @@ class NodeStateMachine {
   friend class AdminExecutor;
   static constexpr uint32_t kIdentifyLedDurationMs = 6000;
   static constexpr uint32_t kMaintenancePageGapMs = 200;
-  static constexpr uint32_t kAdoptionRetryIntervalMs = 1000;
-  static constexpr uint8_t kAdoptionMaxRetries = 5;
 
   bool begin(const Settings &cfg, RadioProtocol *radio);
   void applyConfig(const Settings &cfg);
@@ -197,17 +195,36 @@ class NodeStateMachine {
   void removeDiscoveryCandidate(uint32_t chipId);
   CandidateReason evaluateCandidateReason(uint8_t address, uint32_t chipId) const;
   void evaluateAllCandidateReasons();
-  bool startAdoption(uint32_t chipId, uint8_t assignedAddress, bool isReset);
+  bool startAdoption(uint32_t chipId, uint8_t assignedAddress);
   void cancelAdoption();
-  bool consumePendingPeerSync(uint32_t &chipId, uint8_t &address);
   bool hasPendingReaddress() const;
-  bool consumePendingReaddress(uint8_t &outNewAddress, uint8_t &outGwAddr);
-  bool sendReaddressConfirm(uint8_t gwAddr, uint8_t newAddress);
+  bool consumePendingReaddress(uint8_t &outNewAddress, uint8_t &outGwAddr,
+                               uint32_t &outChipId, uint32_t &outTransactionId);
+  void scheduleReaddressStatus(uint8_t dstAddress, uint32_t chipId,
+                               uint32_t transactionId, uint8_t assignedAddress,
+                               bool committed);
+  bool consumeConfirmedAdoption(uint32_t &chipId, uint8_t &address,
+                                uint32_t &transactionId);
+  void completeAdoptionPersistence(uint32_t chipId, uint8_t address,
+                                   uint32_t transactionId, bool persisted);
+  bool retryAdoptionPersistence(uint32_t chipId);
   bool handleReaddressFrame(const ProtocolMessage &msg);
 
-  bool isAdoptionActive() const { return adoption_active_; }
-  uint32_t adoptionChipId() const { return adoption_chip_id_; }
-  uint8_t adoptionAddress() const { return adoption_address_; }
+  struct RemoteAdoptionStatusRecord {
+    uint8_t dst = 0;
+    uint8_t assigned_address = 0;
+    uint8_t stage = 0; // 0 idle, 1 sending, 2 awaiting_ack, 3 saving_gateway, 4 committed, 5 unconfirmed, 6 failed
+    uint8_t error_code = 0; // 1 remote save failed, 2 gateway peer-record save failed
+    uint8_t retry_count = 0;
+    uint32_t chip_id = 0;
+    uint32_t transaction_id = 0;
+    uint32_t deadline_ms = 0;
+  };
+  bool isAdoptionTxActive() const {
+    return adoption_tx_.stage == 1 || adoption_tx_.stage == 2 ||
+           adoption_tx_.stage == 3;
+  }
+  RemoteAdoptionStatusRecord getAdoptionStatus() const { return adoption_tx_; }
 
   struct RemoteOtaStatusRecord {
     uint8_t dst = 0;
@@ -217,7 +234,8 @@ class NodeStateMachine {
     uint32_t timestamp = 0;
   };
   RemoteOtaStatusRecord getRemoteOtaStatus(uint8_t address) const;
-  bool sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, uint8_t newAddress, uint8_t op);
+  bool sendPeerReaddress(uint8_t dstAddress, uint32_t chipId,
+                         uint8_t newAddress, uint32_t transactionId);
 
   bool sendFleetWifiProvision(const String &ssid, const String &password, uint8_t targetAddress = 255);
   bool hasPendingWifiProvision() const;
@@ -406,13 +424,23 @@ class NodeStateMachine {
 
   PeerManager peer_manager_;
   DiscoveryCandidate discovery_candidates_[Settings::kAddressListCap]{};
-  bool adoption_active_ = false;
-  uint32_t adoption_chip_id_ = 0;
-  uint8_t adoption_address_ = 0;
-  uint8_t adoption_dst_addr_ = 0;
-  uint32_t adoption_sent_ms_ = 0;
-  uint8_t adoption_retry_count_ = 0;
-  bool adoption_is_reset_ = false;
+  RemoteAdoptionStatusRecord adoption_tx_{};
+  bool confirmed_adoption_pending_ = false;
+  uint32_t confirmed_adoption_chip_id_ = 0;
+  uint8_t confirmed_adoption_address_ = 0;
+  uint32_t confirmed_adoption_transaction_id_ = 0;
+
+  struct ReaddressRxStatus {
+    bool active = false;
+    bool committed = false;
+    uint8_t dst = 0;
+    uint8_t assigned_address = 0;
+    uint8_t copies_remaining = 0;
+    uint32_t chip_id = 0;
+    uint32_t transaction_id = 0;
+    uint32_t next_tx_ms = 0;
+  };
+  ReaddressRxStatus readdress_rx_status_{};
 
 
   bool fleet_scan_active_ = false;
@@ -607,6 +635,7 @@ class NodeStateMachine {
   void tickPendingOtaPullControl(uint32_t now);
   void tickPendingFactoryResetControl(uint32_t now);
   void tickPendingFactoryResetStatus(uint32_t now);
+  void tickPendingReaddressStatus(uint32_t now);
   bool tickPendingOtaPullAcceptedAck(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
   bool localOperationalSensorsEnabled() const;
@@ -640,6 +669,7 @@ class NodeStateMachine {
   bool handleOtaPullStatusFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleFactoryResetStatusFrame(const ProtocolMessage &msg);
+  bool handleReaddressStatusFrame(const ProtocolMessage &msg);
   bool handleRebootFrame(const ProtocolMessage &msg);
   bool handleSensorConfigFrame(const ProtocolMessage &msg);
   bool handleFleetKeyControlFrame(const ProtocolMessage &msg);

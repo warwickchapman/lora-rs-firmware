@@ -234,6 +234,10 @@ CandidateReason evaluateCandidateReason(
   if (address < 1 || address > 12) {
     return CandidateReason::OutOfRange;
   }
+  if (resolveAdoptionAddress(address, chipId, knownPeerCount, knownPeerAddresses,
+                             knownPeerChipIds) == 0) {
+    return CandidateReason::Full;
+  }
   if (knownPeerAddresses != nullptr) {
     for (size_t i = 0; i < knownPeerCount; ++i) {
       if (knownPeerAddresses[i] == address) {
@@ -293,78 +297,6 @@ uint8_t resolveAdoptionAddress(
   }
   // No free address
   return 0;
-}
-
-bool validateGatewayConfirm(
-    uint32_t targetChipId,
-    uint8_t newAddress,
-    uint8_t msgSrc,
-    bool adoptionActive,
-    uint32_t adoptionChipId,
-    uint8_t adoptionAddress,
-    uint8_t adoptionDstAddr
-) {
-  if (!adoptionActive) return false;
-  if (targetChipId != adoptionChipId) return false;
-  if (newAddress != adoptionAddress) return false;
-  uint8_t expectedSrc = (adoptionAddress == 0) ? adoptionDstAddr : adoptionAddress;
-  return (msgSrc == expectedSrc);
-}
-
-RemoteReaddressState transitionRemoteReaddress(
-    RemoteReaddressState currentState,
-    bool rxRequest,
-    uint8_t rxNewAddress,
-    bool saveSucceeded,
-    bool &outSendConfirm,
-    uint8_t &outConfirmAddress
-) {
-  outSendConfirm = false;
-  if (currentState == RemoteReaddressState::Idle) {
-    if (rxRequest) {
-      if (rxNewAddress == 0) {
-        return RemoteReaddressState::PendingReset;
-      } else {
-        return RemoteReaddressState::PendingSave;
-      }
-    }
-  } else if (currentState == RemoteReaddressState::PendingSave) {
-    if (saveSucceeded) {
-      outSendConfirm = true;
-      outConfirmAddress = rxNewAddress;
-      return RemoteReaddressState::Completed;
-    } else {
-      return RemoteReaddressState::Failed;
-    }
-  } else if (currentState == RemoteReaddressState::PendingReset) {
-    if (saveSucceeded) {
-      outSendConfirm = true;
-      outConfirmAddress = 0;
-      return RemoteReaddressState::Completed;
-    } else {
-      return RemoteReaddressState::Failed;
-    }
-  }
-  return currentState;
-}
-
-bool transitionAdoptionStart(
-    CandidateState &cState,
-    bool &adoptionActive,
-    bool isReset,
-    bool txSuccess
-) {
-  if (cState != CandidateState::Identified && cState != CandidateState::Failed) {
-    return false;
-  }
-  cState = isReset ? CandidateState::ResetRequested : CandidateState::Readdressing;
-  adoptionActive = true;
-  if (!txSuccess) {
-    cState = CandidateState::Identified;
-    adoptionActive = false;
-    return false;
-  }
-  return true;
 }
 
 bool tickCandidateProbe(

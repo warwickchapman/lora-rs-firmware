@@ -13,7 +13,6 @@ void PendingCommandManager::resetAll() {
   clearFactoryReset();
   clearReboot();
   clearReaddress();
-  clearPeerSync();
   clearSensorConfig();
   clearFleetProvApply();
   clearFleetKeyChange();
@@ -207,16 +206,24 @@ void PendingCommandManager::clearReboot() {
 }
 
 // Readdress
-void PendingCommandManager::requestReaddress(uint8_t newAddress, uint8_t gwAddr) {
+void PendingCommandManager::requestReaddress(uint8_t newAddress, uint8_t gwAddr,
+                                             uint32_t chipId,
+                                             uint32_t transactionId) {
   readdress_pending_new_address_ = newAddress;
   readdress_pending_gw_addr_ = gwAddr;
+  readdress_pending_chip_id_ = chipId;
+  readdress_pending_transaction_id_ = transactionId;
   readdress_pending_ = true;
 }
 
-bool PendingCommandManager::consumeReaddress(uint8_t &newAddress, uint8_t &gwAddr) {
+bool PendingCommandManager::consumeReaddress(uint8_t &newAddress, uint8_t &gwAddr,
+                                             uint32_t &chipId,
+                                             uint32_t &transactionId) {
   if (!readdress_pending_) return false;
   newAddress = readdress_pending_new_address_;
   gwAddr = readdress_pending_gw_addr_;
+  chipId = readdress_pending_chip_id_;
+  transactionId = readdress_pending_transaction_id_;
   clearReaddress();
   return true;
 }
@@ -225,27 +232,8 @@ void PendingCommandManager::clearReaddress() {
   readdress_pending_ = false;
   readdress_pending_new_address_ = 0;
   readdress_pending_gw_addr_ = 0;
-}
-
-// Peer Sync
-void PendingCommandManager::requestPeerSync(uint32_t chipId, uint8_t address) {
-  peer_sync_chip_id_ = chipId;
-  peer_sync_address_ = address;
-  peer_sync_pending_ = true;
-}
-
-bool PendingCommandManager::consumePeerSync(uint32_t &chipId, uint8_t &address) {
-  if (!peer_sync_pending_) return false;
-  chipId = peer_sync_chip_id_;
-  address = peer_sync_address_;
-  clearPeerSync();
-  return true;
-}
-
-void PendingCommandManager::clearPeerSync() {
-  peer_sync_pending_ = false;
-  peer_sync_chip_id_ = 0;
-  peer_sync_address_ = 0;
+  readdress_pending_chip_id_ = 0;
+  readdress_pending_transaction_id_ = 0;
 }
 
 // Sensor Config

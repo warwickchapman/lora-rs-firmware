@@ -2,6 +2,7 @@
 
 #include "factory_reset_transaction_helper.h"
 #include "ota_handoff_helper.h"
+#include "readdress_transaction_helper.h"
 
 #include <ESP8266WiFi.h>
 #include <cstdio>
@@ -69,6 +70,11 @@ constexpr uint8_t kFactoryResetKeepWifiFlag = 0x02;
 constexpr uint32_t kFactoryResetAckTimeoutMs = 4000;
 constexpr uint32_t kFactoryResetStatusSpacingMs = 250;
 constexpr uint8_t kFactoryResetStatusCopies = 2;
+constexpr uint8_t kReaddressStatusCommitted = readdress_transaction::kResultCommitted;
+constexpr uint8_t kReaddressStatusSaveFailed = readdress_transaction::kResultSaveFailed;
+constexpr uint32_t kReaddressAckTimeoutMs = 4000;
+constexpr uint32_t kReaddressStatusSpacingMs = 250;
+constexpr uint8_t kReaddressStatusCopies = 2;
 constexpr uint8_t kRebootMagic0 = 0xB5;
 constexpr uint8_t kRebootMagic1 = 0x5B;
 constexpr uint8_t kSensorConfigMagic0 = 0xC5;
@@ -319,6 +325,9 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
   factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
   factory_reset_rx_status_ = FactoryResetRxStatus{};
+  adoption_tx_ = RemoteAdoptionStatusRecord{};
+  confirmed_adoption_pending_ = false;
+  readdress_rx_status_ = ReaddressRxStatus{};
   ota_silence_until_ms_ = 0;
   ota_pull_active_ = false;
   ota_pull_start_ms_ = 0;
@@ -414,6 +423,11 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
   factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
   factory_reset_rx_status_ = FactoryResetRxStatus{};
+  if (adoption_tx_.stage != 3) {
+    adoption_tx_ = RemoteAdoptionStatusRecord{};
+    confirmed_adoption_pending_ = false;
+  }
+  readdress_rx_status_ = ReaddressRxStatus{};
   pending_commands_.resetOnConfigApply();
   prov_ = ProvisioningSessionRuntime{};
   prov_rx_ = ProvTargetRxState{};
@@ -1509,6 +1523,48 @@ void NodeStateMachine::tickPendingFactoryResetStatus(uint32_t now) {
     factory_reset_rx_status_.reboot_ready = factory_reset_rx_status_.committed;
   } else {
     factory_reset_rx_status_.next_tx_ms = now + kFactoryResetStatusSpacingMs;
+  }
+}
+
+void NodeStateMachine::tickPendingReaddressStatus(uint32_t now) {
+  if (!readdress_rx_status_.active) return;
+  if (static_cast<int32_t>(now - readdress_rx_status_.next_tx_ms) < 0) return;
+  if (!radioTxBudgetAvailable() || radio_ == nullptr) return;
+
+  uint8_t payload[12]{};
+  payload[0] = static_cast<uint8_t>(readdress_rx_status_.chip_id & 0xFFU);
+  payload[1] = static_cast<uint8_t>((readdress_rx_status_.chip_id >> 8U) & 0xFFU);
+  payload[2] = static_cast<uint8_t>((readdress_rx_status_.chip_id >> 16U) & 0xFFU);
+  payload[3] = readdress_rx_status_.assigned_address;
+  payload[4] = static_cast<uint8_t>(readdress_rx_status_.transaction_id & 0xFFU);
+  payload[5] = static_cast<uint8_t>((readdress_rx_status_.transaction_id >> 8U) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((readdress_rx_status_.transaction_id >> 16U) & 0xFFU);
+  payload[7] = static_cast<uint8_t>((readdress_rx_status_.transaction_id >> 24U) & 0xFFU);
+  payload[8] = readdress_rx_status_.committed
+                   ? kReaddressStatusCommitted
+                   : kReaddressStatusSaveFailed;
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::ReaddressStatus, last_counter_,
+                       runtime_.local_address, readdress_rx_status_.dst, payload)) {
+    readdress_rx_status_.next_tx_ms = now + kReaddressStatusSpacingMs;
+    return;
+  }
+  last_tx_ms_ = now;
+  markRadioTxSentThisTick();
+  lrslog::event(readdress_rx_status_.committed
+                    ? "readdress_status_committed_tx"
+                    : "readdress_status_save_failed_tx",
+                0, readdress_rx_status_.transaction_id,
+                readdress_rx_status_.assigned_address);
+
+  if (readdress_rx_status_.copies_remaining > 0) {
+    readdress_rx_status_.copies_remaining--;
+  }
+  if (readdress_rx_status_.copies_remaining == 0) {
+    readdress_rx_status_.active = false;
+  } else {
+    readdress_rx_status_.next_tx_ms = now + kReaddressStatusSpacingMs;
   }
 }
 
@@ -3428,6 +3484,8 @@ void NodeStateMachine::tickReceiver() {
   tickPendingFactoryResetStatus(now);
   if (factory_reset_rx_status_.active || factory_reset_rx_status_.reboot_ready) return;
   if (rx_push_pending_ && sendInputStatePush(now)) return;
+  tickPendingReaddressStatus(now);
+  if (readdress_rx_status_.active) return;
   if (tickPendingOtaPullAcceptedAck(now)) return;
   if (tickDeferredObservability()) return;
   sendSensorStatePush(now);
@@ -3501,6 +3559,7 @@ void NodeStateMachine::tickReceive() {
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
   const bool isFactoryResetStatus = (msg.type == MessageType::FactoryResetStatus);
   const bool isReaddress = (msg.type == MessageType::Readdress);
+  const bool isReaddressStatus = (msg.type == MessageType::ReaddressStatus);
   const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
                               msg.type == MessageType::MaintenanceStatus);
   if (isProvisioning) {
@@ -3528,7 +3587,9 @@ void NodeStateMachine::tickReceive() {
   const bool isReboot = (msg.type == MessageType::Reboot);
   const bool isSensorConfig = (msg.type == MessageType::SensorConfig);
   const bool isFleetKeyControl = (msg.type == MessageType::FleetKeyControl);
-  if ((isUdpLogControl || isOtaPullControl || isOtaPullStatus || isFactoryReset || isFactoryResetStatus || isReboot || isSensorConfig || isFleetKeyControl) && msg.dst != runtime_.local_address) {
+  if ((isUdpLogControl || isOtaPullControl || isOtaPullStatus || isFactoryReset ||
+       isFactoryResetStatus || isReaddressStatus || isReboot || isSensorConfig ||
+       isFleetKeyControl) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -3541,7 +3602,8 @@ void NodeStateMachine::tickReceive() {
     const bool heartbeat = (msg.type == MessageType::Heartbeat);
     const bool change = (msg.type == MessageType::Change);
     const bool isAck = (msg.type == MessageType::Ack);
-    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !heartbeat && !change && !isAck && !isReaddress && !fromPaired) {
+    if (!mqttStatus && !pollResponse && !wifiStatus && !isMaintenance && !heartbeat &&
+        !change && !isAck && !isReaddress && !isReaddressStatus && !fromPaired) {
       lrslog::event("rx_wrong_source", msg.rssi, msg.counter, msg.relay_state);
       return;
     }
@@ -3582,7 +3644,7 @@ void NodeStateMachine::tickReceive() {
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
                                                                   isOtaPullControl || isFactoryReset || isFactoryResetStatus || isMaintenance ||
-                                                                  isReboot || isSensorConfig || isFleetKeyControl || isReaddress);
+                                                                  isReboot || isSensorConfig || isFleetKeyControl || isReaddress || isReaddressStatus);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -3591,7 +3653,7 @@ void NodeStateMachine::tickReceive() {
   
   if (runtime_.role_tx && settings_ != nullptr && settings_->mode == "paired") {
     if (msg.src != 0 && msg.src != 255 && msg.src != runtime_.local_address) {
-      if (!isConfiguredOperationalPeer(msg.src)) {
+      if (!isReaddressStatus && !isConfiguredOperationalPeer(msg.src)) {
         recordDiscoveryCandidate(msg.src, 0, msg.rssi);
       }
     }
@@ -3623,6 +3685,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isFactoryResetStatus) {
     handleFactoryResetStatusFrame(msg);
+    return;
+  }
+  if (isReaddressStatus) {
+    handleReaddressStatusFrame(msg);
     return;
   }
   if (isReboot) {
@@ -5011,7 +5077,8 @@ void NodeStateMachine::evaluateAllCandidateReasons() {
   }
 }
 
-bool NodeStateMachine::startAdoption(uint32_t chipId, uint8_t assignedAddress, bool isReset) {
+bool NodeStateMachine::startAdoption(uint32_t chipId, uint8_t assignedAddress) {
+  if (isAdoptionTxActive() || assignedAddress < 1 || assignedAddress > 12) return false;
   int cIdx = -1;
   for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
     if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == chipId) {
@@ -5026,54 +5093,54 @@ bool NodeStateMachine::startAdoption(uint32_t chipId, uint8_t assignedAddress, b
     return false;
   }
   
-  c.state = isReset ? CandidateState::ResetRequested : CandidateState::Readdressing;
+  c.state = CandidateState::Readdressing;
   c.last_seen_ms = millis();
-  
-  adoption_active_ = true;
-  adoption_chip_id_ = chipId;
-  adoption_address_ = assignedAddress;
-  adoption_dst_addr_ = c.address;
-  adoption_sent_ms_ = millis();
-  adoption_retry_count_ = 0;
-  adoption_is_reset_ = isReset;
-  
-  bool sent = sendPeerReaddress(adoption_dst_addr_, adoption_chip_id_, adoption_address_, 0);
-  if (!sent) {
-    c.state = CandidateState::Identified;
-    adoption_active_ = false;
-    return false;
-  }
-  return true;
 
+  uint32_t transactionId = millis() ^ last_counter_ ^ chipId ^
+                           (static_cast<uint32_t>(assignedAddress) << 24U);
+  if (transactionId == 0) transactionId = 1;
+  adoption_tx_ = RemoteAdoptionStatusRecord{};
+  adoption_tx_.dst = c.address;
+  adoption_tx_.assigned_address = assignedAddress;
+  adoption_tx_.stage = 1;
+  adoption_tx_.chip_id = chipId;
+  adoption_tx_.transaction_id = transactionId;
+  adoption_tx_.deadline_ms = millis();
+  lrslog::event("candidate_adoption_queued", 0, transactionId, c.address);
+  return true;
 }
 
 void NodeStateMachine::cancelAdoption() {
-  if (!adoption_active_) return;
-  
+  if (adoption_tx_.stage != 1 && adoption_tx_.stage != 2) return;
   for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
-    if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == adoption_chip_id_) {
-      if (discovery_candidates_[i].state == CandidateState::Readdressing ||
-          discovery_candidates_[i].state == CandidateState::ResetRequested) {
+    if (discovery_candidates_[i].in_use &&
+        discovery_candidates_[i].chip_id == adoption_tx_.chip_id) {
+      if (discovery_candidates_[i].state == CandidateState::Readdressing) {
         discovery_candidates_[i].state = CandidateState::Identified;
       }
       break;
     }
   }
-  
-  adoption_active_ = false;
-  lrslog::event("candidate_adoption_cancelled", 0, 0, adoption_chip_id_);
+  lrslog::event("candidate_adoption_cancelled", 0, adoption_tx_.transaction_id,
+                adoption_tx_.dst);
+  adoption_tx_ = RemoteAdoptionStatusRecord{};
 }
 
-bool NodeStateMachine::sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, uint8_t newAddress, uint8_t op) {
+bool NodeStateMachine::sendPeerReaddress(uint8_t dstAddress, uint32_t chipId,
+                                         uint8_t newAddress,
+                                         uint32_t transactionId) {
   if (!radioTxBudgetAvailable()) return false;
-  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  if (radio_ == nullptr || dstAddress == 0 || dstAddress == 255 ||
+      newAddress < 1 || newAddress > 12 || transactionId == 0) return false;
   uint8_t payload[12]{};
   payload[0] = static_cast<uint8_t>(chipId & 0xFFU);
-  payload[1] = static_cast<uint8_t>((chipId >> 8) & 0xFFU);
-  payload[2] = static_cast<uint8_t>((chipId >> 16) & 0xFFU);
-  payload[3] = static_cast<uint8_t>((chipId >> 24) & 0xFFU);
-  payload[4] = newAddress;
-  payload[5] = op;
+  payload[1] = static_cast<uint8_t>((chipId >> 8U) & 0xFFU);
+  payload[2] = static_cast<uint8_t>((chipId >> 16U) & 0xFFU);
+  payload[3] = newAddress;
+  payload[4] = static_cast<uint8_t>(transactionId & 0xFFU);
+  payload[5] = static_cast<uint8_t>((transactionId >> 8U) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((transactionId >> 16U) & 0xFFU);
+  payload[7] = static_cast<uint8_t>((transactionId >> 24U) & 0xFFU);
   last_counter_++;
   if (!radio_->sendRaw(MessageType::Readdress, last_counter_,
                        runtime_.local_address, dstAddress, payload)) {
@@ -5081,50 +5148,113 @@ bool NodeStateMachine::sendPeerReaddress(uint8_t dstAddress, uint32_t chipId, ui
   }
   last_tx_ms_ = millis();
   markRadioTxSentThisTick();
-  if (op == 0) {
-    if (newAddress == 0) {
-      lrslog::event("candidate_key_reset_sent", 0, last_counter_, dstAddress);
-    } else {
-      lrslog::event("candidate_readdressing", 0, last_counter_, dstAddress);
-    }
-  }
+  lrslog::event("candidate_readdressing", 0, transactionId, dstAddress);
   return true;
-}
-
-bool NodeStateMachine::consumePendingPeerSync(uint32_t &chipId, uint8_t &address) {
-  return pending_commands_.consumePeerSync(chipId, address);
 }
 
 bool NodeStateMachine::hasPendingReaddress() const {
   return pending_commands_.hasPendingReaddress();
 }
 
-bool NodeStateMachine::consumePendingReaddress(uint8_t &outNewAddress, uint8_t &outGwAddr) {
-  return pending_commands_.consumeReaddress(outNewAddress, outGwAddr);
+bool NodeStateMachine::consumePendingReaddress(uint8_t &outNewAddress,
+                                               uint8_t &outGwAddr,
+                                               uint32_t &outChipId,
+                                               uint32_t &outTransactionId) {
+  return pending_commands_.consumeReaddress(outNewAddress, outGwAddr, outChipId,
+                                            outTransactionId);
 }
 
+void NodeStateMachine::scheduleReaddressStatus(uint8_t dstAddress, uint32_t chipId,
+                                               uint32_t transactionId,
+                                               uint8_t assignedAddress,
+                                               bool committed) {
+  readdress_rx_status_ = ReaddressRxStatus{};
+  readdress_rx_status_.active = true;
+  readdress_rx_status_.committed = committed;
+  readdress_rx_status_.dst = dstAddress;
+  readdress_rx_status_.assigned_address = assignedAddress;
+  readdress_rx_status_.copies_remaining = kReaddressStatusCopies;
+  readdress_rx_status_.chip_id = chipId;
+  readdress_rx_status_.transaction_id = transactionId;
+  readdress_rx_status_.next_tx_ms = millis() + runtime_utils::kGroupAckLeadMs;
+}
+
+bool NodeStateMachine::consumeConfirmedAdoption(uint32_t &chipId, uint8_t &address,
+                                                uint32_t &transactionId) {
+  if (!confirmed_adoption_pending_) return false;
+  chipId = confirmed_adoption_chip_id_;
+  address = confirmed_adoption_address_;
+  transactionId = confirmed_adoption_transaction_id_;
+  confirmed_adoption_pending_ = false;
+  return true;
+}
+
+void NodeStateMachine::completeAdoptionPersistence(uint32_t chipId, uint8_t address,
+                                                   uint32_t transactionId,
+                                                   bool persisted) {
+  if (adoption_tx_.chip_id != chipId || adoption_tx_.assigned_address != address ||
+      adoption_tx_.transaction_id != transactionId) return;
+  adoption_tx_.stage = persisted ? 4 : 6;
+  adoption_tx_.error_code = persisted ? 0 : 2;
+  adoption_tx_.deadline_ms = millis();
+  for (DiscoveryCandidate &candidate : discovery_candidates_) {
+    if (!candidate.in_use || candidate.chip_id != chipId) continue;
+    candidate.state = persisted ? CandidateState::Adopted : CandidateState::Failed;
+    candidate.address = address;
+    candidate.last_seen_ms = millis();
+    break;
+  }
+  lrslog::event(persisted ? "candidate_adopted" : "candidate_gateway_save_failed",
+                0, transactionId, address);
+}
+
+bool NodeStateMachine::retryAdoptionPersistence(uint32_t chipId) {
+  if (adoption_tx_.stage != 6 || adoption_tx_.error_code != 2 ||
+      adoption_tx_.chip_id != chipId || confirmed_adoption_pending_) return false;
+  adoption_tx_.stage = 3;
+  adoption_tx_.error_code = 0;
+  confirmed_adoption_pending_ = true;
+  confirmed_adoption_chip_id_ = adoption_tx_.chip_id;
+  confirmed_adoption_address_ = adoption_tx_.assigned_address;
+  confirmed_adoption_transaction_id_ = adoption_tx_.transaction_id;
+  return true;
+}
 
 void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
   if (isGroupActive()) return;
-  if (adoption_active_) {
-    if (static_cast<int32_t>(now - adoption_sent_ms_) >= static_cast<int32_t>(kAdoptionRetryIntervalMs)) {
-      if (adoption_retry_count_ < kAdoptionMaxRetries) {
-        adoption_retry_count_++;
-        adoption_sent_ms_ = now;
-        sendPeerReaddress(adoption_dst_addr_, adoption_chip_id_, adoption_address_, 0);
-      } else {
-        adoption_active_ = false;
-        for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
-          if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == adoption_chip_id_) {
-            discovery_candidates_[i].state = CandidateState::Failed;
-            discovery_candidates_[i].last_seen_ms = now;
-            break;
-          }
+  if (adoption_tx_.stage == 2 &&
+      static_cast<int32_t>(now - adoption_tx_.deadline_ms) >= 0) {
+    if (readdress_transaction::shouldRetryAfterTimeout(adoption_tx_.retry_count)) {
+      adoption_tx_.retry_count = 1;
+      adoption_tx_.stage = 1;
+      adoption_tx_.deadline_ms = now;
+      lrslog::event("candidate_adoption_retry", 0, adoption_tx_.transaction_id,
+                    adoption_tx_.dst);
+    } else {
+      adoption_tx_.stage = 5;
+      for (DiscoveryCandidate &candidate : discovery_candidates_) {
+        if (candidate.in_use && candidate.chip_id == adoption_tx_.chip_id) {
+          candidate.state = CandidateState::Failed;
+          candidate.last_seen_ms = now;
+          break;
         }
-        lrslog::event("candidate_readdress_failed", 0, 0, adoption_chip_id_);
       }
+      lrslog::event("candidate_adoption_unconfirmed", 0,
+                    adoption_tx_.transaction_id, adoption_tx_.dst);
     }
   }
+  if (adoption_tx_.stage == 1 &&
+      static_cast<int32_t>(now - adoption_tx_.deadline_ms) >= 0) {
+    if (sendPeerReaddress(adoption_tx_.dst, adoption_tx_.chip_id,
+                          adoption_tx_.assigned_address,
+                          adoption_tx_.transaction_id)) {
+      adoption_tx_.stage = 2;
+      adoption_tx_.deadline_ms = now + kReaddressAckTimeoutMs;
+    } else {
+      adoption_tx_.deadline_ms = now + kReaddressStatusSpacingMs;
+    }
+  }
+  if (isAdoptionTxActive()) return;
   
   static uint32_t last_global_probe_ms = 0;
   for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
@@ -5148,74 +5278,82 @@ void NodeStateMachine::tickCandidatesAndAdoption(uint32_t now) {
 bool NodeStateMachine::handleReaddressFrame(const ProtocolMessage &msg) {
   const uint8_t *p = msg.raw_payload;
   const uint32_t targetChipId = static_cast<uint32_t>(p[0]) |
-                                (static_cast<uint32_t>(p[1]) << 8) |
-                                (static_cast<uint32_t>(p[2]) << 16) |
-                                (static_cast<uint32_t>(p[3]) << 24);
-  const uint8_t newAddress = p[4];
-  const uint8_t op = p[5];
-  
-  if (runtime_.role_tx) {
-    if (op == 1) { // Confirm
-      if (runtime_utils::validateGatewayConfirm(targetChipId, newAddress, msg.src,
-                                                adoption_active_, adoption_chip_id_,
-                                                adoption_address_, adoption_dst_addr_)) {
-        adoption_active_ = false;
-        // Find and update candidate
-        for (size_t i = 0; i < Settings::kAddressListCap; ++i) {
-          if (discovery_candidates_[i].in_use && discovery_candidates_[i].chip_id == targetChipId) {
-            discovery_candidates_[i].state = CandidateState::Adopted;
-            discovery_candidates_[i].address = newAddress;
-            discovery_candidates_[i].last_seen_ms = millis();
-            break;
-          }
-        }
-        lrslog::event("candidate_adopted", 0, newAddress, targetChipId);
-        
-        if (newAddress != 0) {
-          // Queue sync to config
-          pending_commands_.requestPeerSync(targetChipId, newAddress);
-        } else {
-          // Reset successful, remove candidate from list so it doesn't linger
-          removeDiscoveryCandidate(targetChipId);
-        }
-        return true;
-      }
-    }
-  } else {
-    if (op == 0) { // Request
-      const uint32_t myChipId = runtime_utils::canonicalEspChipId();
-      if (targetChipId == myChipId) {
-        // Queue readdress change for app.cpp to consume
-        pending_commands_.requestReaddress(newAddress, msg.src);
-        return true;
-      }
-    }
+                                (static_cast<uint32_t>(p[1]) << 8U) |
+                                (static_cast<uint32_t>(p[2]) << 16U);
+  const uint8_t newAddress = p[3];
+  const uint32_t transactionId = static_cast<uint32_t>(p[4]) |
+                                 (static_cast<uint32_t>(p[5]) << 8U) |
+                                 (static_cast<uint32_t>(p[6]) << 16U) |
+                                 (static_cast<uint32_t>(p[7]) << 24U);
+  if (runtime_.role_tx || targetChipId != runtime_utils::canonicalEspChipId() ||
+      newAddress < 1 || newAddress > 12 || transactionId == 0) return false;
+
+  if (readdress_rx_status_.chip_id == targetChipId &&
+      readdress_rx_status_.transaction_id == transactionId &&
+      readdress_rx_status_.assigned_address == newAddress &&
+      readdress_rx_status_.dst == msg.src) {
+    readdress_rx_status_.active = true;
+    readdress_rx_status_.copies_remaining = kReaddressStatusCopies;
+    readdress_rx_status_.next_tx_ms = millis() + runtime_utils::kGroupAckLeadMs;
+    lrslog::event("readdress_rx_duplicate", msg.rssi, transactionId, msg.src);
+    return true;
   }
-  return false;
+
+  if (settings_ != nullptr && settings_->local_address == newAddress) {
+    scheduleReaddressStatus(msg.src, targetChipId, transactionId, newAddress, true);
+    lrslog::event("readdress_rx_already_applied", msg.rssi, transactionId, newAddress);
+    return true;
+  }
+
+  pending_commands_.requestReaddress(newAddress, msg.src, targetChipId,
+                                     transactionId);
+  lrslog::event("readdress_rx", msg.rssi, transactionId, newAddress);
+  return true;
 }
 
-bool NodeStateMachine::sendReaddressConfirm(uint8_t gwAddr, uint8_t newAddress) {
-  if (radio_ == nullptr || gwAddr == 0 || gwAddr == 255) return false;
-  
-  uint32_t myChipId = runtime_utils::canonicalEspChipId();
-  uint8_t payload[12]{};
-  payload[0] = static_cast<uint8_t>(myChipId & 0xFFU);
-  payload[1] = static_cast<uint8_t>((myChipId >> 8) & 0xFFU);
-  payload[2] = static_cast<uint8_t>((myChipId >> 16) & 0xFFU);
-  payload[3] = static_cast<uint8_t>((myChipId >> 24) & 0xFFU);
-  payload[4] = newAddress;
-  payload[5] = 1; // Confirm
-  
-  uint8_t srcAddress = (newAddress == 0) ? runtime_.local_address : newAddress;
-  
-  last_counter_++;
-  bool ok = radio_->sendRaw(MessageType::Readdress, last_counter_, srcAddress, gwAddr, payload);
-  if (ok) {
-    last_tx_ms_ = millis();
-    markRadioTxSentThisTick();
-    lrslog::event("readdress_confirm_tx", 0, last_counter_, newAddress);
+bool NodeStateMachine::handleReaddressStatusFrame(const ProtocolMessage &msg) {
+  if (!runtime_.role_tx || adoption_tx_.stage != 2) return false;
+  const uint8_t *p = msg.raw_payload;
+  const uint32_t chipId = static_cast<uint32_t>(p[0]) |
+                          (static_cast<uint32_t>(p[1]) << 8U) |
+                          (static_cast<uint32_t>(p[2]) << 16U);
+  const uint8_t assignedAddress = p[3];
+  const uint32_t transactionId = static_cast<uint32_t>(p[4]) |
+                                 (static_cast<uint32_t>(p[5]) << 8U) |
+                                 (static_cast<uint32_t>(p[6]) << 16U) |
+                                 (static_cast<uint32_t>(p[7]) << 24U);
+  const uint8_t result = p[8];
+  if (assignedAddress != adoption_tx_.assigned_address ||
+      !readdress_transaction::matchesStatus(
+          adoption_tx_.dst, adoption_tx_.assigned_address, msg.src,
+          adoption_tx_.chip_id, chipId, adoption_tx_.transaction_id,
+          transactionId, result)) {
+    lrslog::event("readdress_status_ignored", msg.rssi, transactionId, msg.src);
+    return false;
   }
-  return ok;
+
+  if (result == kReaddressStatusSaveFailed) {
+    adoption_tx_.stage = 6;
+    adoption_tx_.error_code = 1;
+    for (DiscoveryCandidate &candidate : discovery_candidates_) {
+      if (candidate.in_use && candidate.chip_id == chipId) {
+        candidate.state = CandidateState::Failed;
+        candidate.last_seen_ms = millis();
+        break;
+      }
+    }
+    lrslog::event("candidate_remote_save_failed", msg.rssi, transactionId, msg.src);
+    return true;
+  }
+
+  adoption_tx_.stage = 3;
+  confirmed_adoption_pending_ = true;
+  confirmed_adoption_chip_id_ = chipId;
+  confirmed_adoption_address_ = assignedAddress;
+  confirmed_adoption_transaction_id_ = transactionId;
+  lrslog::event("candidate_remote_committed", msg.rssi, transactionId,
+                assignedAddress);
+  return true;
 }
 
 size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }

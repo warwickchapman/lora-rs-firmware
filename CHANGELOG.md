@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Firmware Changes
+- Replaced adoption's uncorrelated readdress confirmation with a small transaction matching the proven factory-reset handoff: one 32-bit transaction ID, one bounded request retry, and two staggered `ReaddressStatus` copies. A remote reports `save_failed` from its old address or `committed` from its saved new address, while duplicate/already-applied requests resend status without another flash write.
+- Forget now carries the removed peer's already-known chip identity into the gateway's existing bounded, volatile candidate table after persistence succeeds. A same-key remote is therefore immediately adoptable without depending on a second maintenance identity exchange; no trust or remote configuration is retained.
+- The gateway now reports adoption as complete only after both the remote address save and gateway peer-record save succeed. A failed gateway save rolls its in-memory peer edit back and offers a local-only retry; unconfirmed radio adoption remains safely retryable, and a full fleet refuses Adopt instead of silently converting it into a factory reset.
+- Advanced the release Flasher compatibility contract to revision 3 for the clean pre-1.0 adoption protocol break.
 - Corrected **Reset but keep in fleet** to preserve a remote's assigned role, address, and controller address along with its Fleet Key. Previously it preserved only the key, causing the reset device to boot with gateway defaults while its stale peer entry remained on the real gateway.
 - Factory reset now clears the ESP8266 SDK's persistent station credentials as well as the application configuration when WiFi preservation is not selected, preventing a reset remote from reconnecting with a stale SDK WiFi profile.
 - Advanced the release Flasher compatibility contract to revision 2 because the confirmed reset protocol is a clean pre-1.0 break; release firmware requires Flasher 0.10.5 or newer for normal commands.
@@ -10,6 +14,7 @@
 - A remote now saves its reset configuration before sending two staggered `FactoryResetStatus` confirmations under its current Fleet Key, then reboots. Save failure is reported without rebooting. A full reset removes the gateway peer record only after confirmation and successful gateway persistence; unconfirmed devices remain recoverable.
 
 ### Flasher Features
+- Fleet now shows precise adoption stages and failures: sending, waiting for the remote, saving the gateway, unconfirmed, remote save failed, or gateway save failed. Full fleets show a non-actionable `fleet full` reason, and gateway persistence can be retried without sending another LoRa command.
 - Fleet now shows explicit factory-reset stages instead of treating age or disappearance as proof. Selected remotes are reset sequentially, the sequence stops at the first failed or unconfirmed device, and a full-reset row disappears only after the gateway has safely removed its confirmed peer record.
 - Manual Forget and gateway factory reset now warn when they can strand devices. The remote reset modal explains that missing confirmation retains the gateway record for retry.
 

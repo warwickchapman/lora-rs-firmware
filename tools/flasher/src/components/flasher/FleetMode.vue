@@ -147,6 +147,7 @@ export interface FleetCandidateDisplayRow {
   stateText: string;
   stateClass: string;
   showAdoptButton: boolean;
+  adoptButtonLabel: string;
   adoptTextClass: string;
 }
 
@@ -963,6 +964,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                   c.reason === 'conflict' ? 'border-rose-500/20 bg-rose-500/5 text-rose-400' :
                   c.reason === 'out_of_range' ? 'border-amber-500/20 bg-amber-500/5 text-amber-400' :
                   c.reason === 'known_chip_moved' ? 'border-sky-500/20 bg-sky-500/5 text-sky-400' :
+                  c.reason === 'full' ? 'border-rose-500/20 bg-rose-500/5 text-rose-400' :
                   'border-slate-800 bg-slate-900/50 text-slate-500'
                 ]">
                   {{ c.reason }}
@@ -979,7 +981,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                   @click="emit('candidate-adopt', { address: c.address, chip_id: c.chip_id })"
                   class="glass-input m-0 h-7 px-3 hover:bg-slate-700/70 text-[10px] font-bold flex items-center justify-center select-none"
                 >
-                  Adopt
+                  {{ c.adoptButtonLabel }}
                 </button>
                 <span
                   v-else

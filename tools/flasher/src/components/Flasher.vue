@@ -37,6 +37,7 @@ import RemoteSettingsModal from './flasher/RemoteSettingsModal.vue';
 import RemoteFactoryResetModal from './flasher/RemoteFactoryResetModal.vue';
 import type { RemoteFactoryResetDraft } from './flasher/RemoteFactoryResetModal.vue';
 import { remoteFactoryResetDecision } from '../composables/remoteFactoryResetStatus';
+import { adoptionButtonLabel, adoptionStatusText, adoptionTransactionPending } from '../composables/adoptionStatus';
 import ProvisionMode from './flasher/ProvisionMode.vue';
 import type {
   ProvisionConfig,
@@ -880,6 +881,24 @@ const {
 const candidateTotal = ref(0);
 const candidateTruncated = ref(false);
 const loraAdoptionStatus = ref<LoraAdoptionStatus | null>(null);
+const pendingAdoptionToastTransactionId = ref(0);
+
+watch(loraAdoptionStatus, status => {
+  if (!status || !pendingAdoptionToastTransactionId.value ||
+      status.transaction_id !== pendingAdoptionToastTransactionId.value) return;
+  if (status.stage === 'committed') {
+    notify(`Adoption confirmed; remote ${status.assigned_address} is saved in the gateway.`);
+  } else if (status.stage === 'unconfirmed') {
+    notify(`Adoption unconfirmed — the remote may already be at address ${status.assigned_address}. Retry Adopt safely.`);
+  } else if (status.stage === 'failed') {
+    notify(status.error_code === 2
+      ? `Remote adopted at address ${status.assigned_address}, but the gateway record was not saved. Retry save.`
+      : `Adoption failed because the remote could not save address ${status.assigned_address}.`);
+  } else {
+    return;
+  }
+  pendingAdoptionToastTransactionId.value = 0;
+});
 const lastLoraInventoryStatus = ref<LoraInventoryStatus | null>(null);
 const lastLoraInventoryStatusAtMs = ref(0);
 const lastLoraInventoryStatusPort = ref('');
@@ -3817,11 +3836,14 @@ async function adoptCandidate(candidate: LoraAdoptionCandidate) {
 
   try {
     notify(`Adopting candidate ${label}...`);
-    await sendEasyPairCommandOnPort(port, 'adopt_candidate', {
+    const out = await sendEasyPairCommandOnPort<any>(port, 'adopt_candidate', {
       admin_password: password,
       chip_id: candidate.chip_id
     }, 8000);
-    notify(`Adoption request sent for candidate ${label}.`);
+    pendingAdoptionToastTransactionId.value = Number(out.transaction_id || 0);
+    notify(out.stage === 'saving_gateway'
+      ? `Retrying gateway save for ${label}...`
+      : `Adoption request sent for candidate ${label}.`);
 
     // Ensure active polling starts/continues
     if (isMqtt) {
@@ -6335,14 +6357,20 @@ const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
   const clock = fleetClockMs.value;
   return loraCandidates.value.map(c => {
     const ageMs = calculateCandidateAgeMs(c, clock);
+    const adoption = loraAdoptionStatus.value?.chip_id === c.chip_id
+      ? loraAdoptionStatus.value
+      : null;
+    let stateText = candidateStateText(c);
+    if (c.reason === 'full') stateText = 'fleet full';
+    stateText = adoptionStatusText(adoption) || stateText;
 
     const isRecentFailed = c.state === 'failed' && (ageMs == null || ageMs < CANDIDATE_RECENT_IDENTITY_MS);
     const textClass =
       (c.state === 'seen_address_only' || isRecentFailed) ? 'text-slate-500 animate-pulse' :
       c.state === 'readdressing' ? 'text-sky-400 animate-pulse' :
-      c.state === 'reset_requested' ? 'text-amber-400 animate-pulse' :
       c.state === 'failed' ? 'text-rose-500' :
       'text-slate-500';
+    const transactionPending = adoptionTransactionPending(adoption);
     return {
       address: c.address,
       chip_id: c.chip_id,
@@ -6351,9 +6379,11 @@ const fleetDisplayCandidates = computed<FleetCandidateDisplayRow[]>(() => {
       ageSeconds: ageMs != null ? Math.round(ageMs / 1000) : null,
       reason: c.reason || 'unknown',
       state: c.state || '',
-      stateText: candidateStateText(c),
+      stateText,
       stateClass: candidateStateClass(c),
-      showAdoptButton: ['identified', 'failed'].includes(c.state || '') && !!c.chip_id,
+      showAdoptButton: ['identified', 'failed'].includes(c.state || '') && !!c.chip_id &&
+        c.reason !== 'full' && !transactionPending,
+      adoptButtonLabel: adoptionButtonLabel(adoption, c.state),
       adoptTextClass: textClass
     };
   });

@@ -96,7 +96,7 @@ class App {
   void handleConfirmedPeerFactoryReset();
   bool handlePendingReboot();
   bool handlePendingReaddress();
-  void handlePendingPeerSync();
+  void handleConfirmedAdoption();
   void handlePendingSensorConfig();
   void handlePendingFleetProvision();
   bool handlePendingFleetKeyChange();

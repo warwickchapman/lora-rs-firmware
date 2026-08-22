@@ -26,6 +26,7 @@ enum class MessageType : uint8_t {
   SensorConfig = 'K',
   FleetKeyControl = 'Z',
   Readdress = 'D',
+  ReaddressStatus = 'G',
 };
 
 

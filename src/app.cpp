@@ -232,7 +232,7 @@ void App::tick() {
   handleConfirmedPeerFactoryReset();
   if (handlePendingReboot()) return;
   if (handlePendingReaddress()) return;
-  handlePendingPeerSync();
+  handleConfirmedAdoption();
   handlePendingSensorConfig();
   handlePendingFleetProvision();
   if (handlePendingFleetKeyChange()) return;
@@ -735,48 +735,35 @@ bool App::handlePendingReboot() {
 bool App::handlePendingReaddress() {
   uint8_t newAddress = 0;
   uint8_t gwAddr = 0;
-  if (sm_.consumePendingReaddress(newAddress, gwAddr)) {
-    if (newAddress == 0) {
-      lrslog::event("readdress_exec_reset", 0, 0, 0);
-      if (config_.factoryReset(false, true)) {
-        if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
-          lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
-          LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
-        }
-        delay(100);
-        ESP.restart();
-        return true;
-      } else {
-        lrslog::event("readdress_save_fail", 0, newAddress, 0);
-      }
-    } else {
-      auto &cfg = config_.settings();
-      cfg.local_address = newAddress;
-      lrslog::event("readdress_exec", 0, newAddress, 0);
-      if (config_.save()) {
-        if (!sm_.sendReaddressConfirm(gwAddr, newAddress)) {
-          lrslog::event("readdress_confirm_fail", 0, newAddress, gwAddr);
-          LRS_LOGE(SYS, "event=readdress_confirm_fail address=%u gw=%u", newAddress, gwAddr);
-        }
-        applyUpdatedConfig(false, false);
-      } else {
-        lrslog::event("readdress_save_fail", 0, newAddress, 0);
-      }
-    }
+  uint32_t chipId = 0;
+  uint32_t transactionId = 0;
+  if (!sm_.consumePendingReaddress(newAddress, gwAddr, chipId, transactionId)) {
+    return false;
   }
+
+  auto &cfg = config_.settings();
+  const uint8_t oldAddress = cfg.local_address;
+  cfg.local_address = newAddress;
+  lrslog::event("readdress_exec", 0, transactionId, newAddress);
+  const bool saved = config_.save();
+  if (saved) {
+    applyUpdatedConfig(false, false);
+  } else {
+    cfg.local_address = oldAddress;
+    lrslog::event("readdress_save_fail", 0, transactionId, newAddress);
+  }
+  sm_.scheduleReaddressStatus(gwAddr, chipId, transactionId, newAddress, saved);
   return false;
 }
 
-void App::handlePendingPeerSync() {
-  uint32_t syncChipId = 0;
-  uint8_t syncAddress = 0;
-  if (sm_.consumePendingPeerSync(syncChipId, syncAddress)) {
-    if (admin_executor_.addPeerToConfig(syncChipId, syncAddress)) {
-      lrslog::event("peer_sync_success", 0, syncAddress, syncChipId);
-    } else {
-      lrslog::event("peer_sync_fail", 0, syncAddress, syncChipId);
-    }
-  }
+void App::handleConfirmedAdoption() {
+  uint32_t chipId = 0;
+  uint8_t address = 0;
+  uint32_t transactionId = 0;
+  if (!sm_.consumeConfirmedAdoption(chipId, address, transactionId)) return;
+
+  const bool persisted = admin_executor_.addPeerToConfig(chipId, address);
+  sm_.completeAdoptionPersistence(chipId, address, transactionId, persisted);
 }
 
 void App::handlePendingSensorConfig() {

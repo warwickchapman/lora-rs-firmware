@@ -50,16 +50,12 @@ public:
   void clearReboot();
 
   // Readdress
-  void requestReaddress(uint8_t newAddress, uint8_t gwAddr);
+  void requestReaddress(uint8_t newAddress, uint8_t gwAddr, uint32_t chipId,
+                        uint32_t transactionId);
   bool hasPendingReaddress() const { return readdress_pending_; }
-  bool consumeReaddress(uint8_t &newAddress, uint8_t &gwAddr);
+  bool consumeReaddress(uint8_t &newAddress, uint8_t &gwAddr, uint32_t &chipId,
+                        uint32_t &transactionId);
   void clearReaddress();
-
-  // Peer Sync
-  void requestPeerSync(uint32_t chipId, uint8_t address);
-  bool hasPendingPeerSync() const { return peer_sync_pending_; }
-  bool consumePeerSync(uint32_t &chipId, uint8_t &address);
-  void clearPeerSync();
 
   // Sensor Config
   void requestSensorConfig(bool tempEnabled, bool tankEnabled, bool powerSaveEnabled, bool powerSaveBootGrace);
@@ -115,10 +111,8 @@ private:
   bool readdress_pending_ = false;
   uint8_t readdress_pending_new_address_ = 0;
   uint8_t readdress_pending_gw_addr_ = 0;
-
-  bool peer_sync_pending_ = false;
-  uint32_t peer_sync_chip_id_ = 0;
-  uint8_t peer_sync_address_ = 0;
+  uint32_t readdress_pending_chip_id_ = 0;
+  uint32_t readdress_pending_transaction_id_ = 0;
 
   bool sensor_config_pending_ = false;
   bool sensor_config_temp_enabled_ = false;

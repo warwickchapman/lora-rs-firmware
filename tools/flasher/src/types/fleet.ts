@@ -58,13 +58,16 @@ export interface LoraAdoptionCandidate {
   last_seen_local_ms?: number;
   age_ms?: number;
   reason: 'ok' | 'known_chip_moved' | 'conflict' | 'out_of_range' | 'full';
-  state: 'seen_address_only' | 'identified' | 'readdressing' | 'adopted' | 'failed' | 'reset_requested';
+  state: 'seen_address_only' | 'identified' | 'readdressing' | 'adopted' | 'failed';
 }
 
 export interface LoraAdoptionStatus {
   active: boolean;
   chip_id?: string;
   assigned_address: number;
+  transaction_id: number;
+  stage: 'sending' | 'awaiting_ack' | 'saving_gateway' | 'committed' | 'unconfirmed' | 'failed';
+  error_code: number;
 }
 
 export interface LoraInventoryStatus {
