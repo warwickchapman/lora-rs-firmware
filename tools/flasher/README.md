@@ -32,6 +32,8 @@ operational gateway:
 Fleet mode is a LoRa/MQTT admin helper:
 
 - shares one persistent Gateway Session with Monitor, with an explicit USB Serial Gateway, Remote MQTT Broker, or Local MQTT Broker transport and gateway target
+- opens that Gateway Session from the compact Connections control in the application header instead of reserving vertical Fleet/Monitor space; the control separately indicates the selected task target and shared MQTT broker state
+- automatically closes the Connections popover when a newly selected gateway becomes active, but leaves it open on failures and while connection settings are being edited
 - keeps broker connection state separate from the selected operational transport, allowing MQTT Settings work to remain connected while Fleet/Monitor uses USB serial
 - immediately connects with the saved parameters when Remote MQTT Broker is selected, or starts and connects the local service when Local MQTT Broker is selected; Connection settings is the fallback for errors or edits
 - changes gateway context without automatically scanning LoRa or loading diagnostics; those observability actions remain operator initiated
@@ -81,6 +83,7 @@ Gateway Session target.
 Flasher coordinates USB-port ownership between flashing, device-info reads, serial monitoring, and Provision. Switching away from Flash stops the serial monitor so Provision can take the selected gateway port cleanly. Flash and Provision use one shared serial device state per selected USB port: device details, serial-admin support/status/config, gateway WiFi state, and scanned WiFi networks all live in that per-port record until the port is unplugged. Provision WiFi reads the selected gateway status before scanning; if the gateway is already connected to WiFi, the app shows it as connected without asking the operator to scan or connect again.
 
 The app restores the last active tab on launch. The main tabs are ordered Flash, Provision, Fleet, Monitor, and Settings.
+The header Connections control is contextual: Fleet and Monitor edit their shared Gateway Session there, while Flash, Provision, and Settings show a compact connection summary and retain their explicit target selector beside the operation to reduce wrong-device mistakes.
 
 ## Remote OTA Handoff & Watchdog Design
 Remote OTA updates serialize only the short LoRa manifest handoff. As soon as a remote acknowledges its manifest, Flasher starts the next queued handoff while accepted remotes download, reboot, and confirm independently:

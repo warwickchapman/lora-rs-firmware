@@ -11,6 +11,12 @@ import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTi
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
 import { useMqttConnection } from '../composables/useMqttConnection';
+import {
+  EMPTY_CONNECTION_SUMMARY,
+  shouldAutoCollapseConnections,
+  type ConnectionHeaderSummary,
+  type ConnectionIndicatorState,
+} from '../composables/connectionsDisplay';
 import FleetMode from './flasher/FleetMode.vue';
 import type {
   FleetConfig,
@@ -79,6 +85,10 @@ type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 const sessionConnectionState = defineModel<'active' | 'partial' | 'offline'>('sessionConnectionState', { default: 'offline' });
+const connectionsPanelOpen = defineModel<boolean>('connectionsPanelOpen', { default: false });
+const connectionSummary = defineModel<ConnectionHeaderSummary>('connectionSummary', {
+  default: () => ({ ...EMPTY_CONNECTION_SUMMARY }),
+});
 
 type SettingsTab = 'general' | 'control' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 type FleetGatewayFlashPhase = 'idle' | 'flashing' | 'rebooting' | 'waiting' | 'updated' | 'failed' | 'unknown';
@@ -6693,6 +6703,108 @@ const gatewaySessionDisplayStateComputed = computed<GatewaySessionDisplayState>(
   };
 });
 
+function contextualTargetState(
+  target: string,
+  ready: boolean,
+  usesMqtt: boolean,
+): { state: ConnectionIndicatorState; label: string } {
+  if (!target) return { state: 'offline', label: 'No target' };
+  if (usesMqtt && sessionMqttConnectionState.value === 'error') {
+    return { state: 'error', label: 'Broker error' };
+  }
+  if (usesMqtt && !sessionMqttConnected.value) {
+    return {
+      state: sessionMqttConnectionState.value === 'connecting' ? 'partial' : 'offline',
+      label: sessionMqttConnectionState.value === 'connecting' ? 'Connecting' : 'Broker offline',
+    };
+  }
+  return ready
+    ? { state: 'active', label: 'Ready' }
+    : { state: 'partial', label: 'Target selected' };
+}
+
+const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => {
+  let contextLabel = 'Connection';
+  let transportLabel = '';
+  let targetLabel = 'No target selected';
+  let targetState: { state: ConnectionIndicatorState; label: string } = {
+    state: 'offline',
+    label: 'No target',
+  };
+  let contextUsesMqtt = false;
+
+  if (activeMode.value === 'network' || activeMode.value === 'monitor') {
+    contextLabel = activeMode.value === 'network' ? 'Fleet gateway' : 'Monitor gateway';
+    contextUsesMqtt = sessionConnectionType.value !== 'serial';
+    transportLabel = sessionConnectionType.value === 'serial'
+      ? 'USB Serial'
+      : sessionConnectionType.value === 'local_broker'
+        ? 'Local MQTT'
+        : 'Remote MQTT';
+    targetLabel = contextUsesMqtt
+      ? (gatewaySessionMqttGatewayChipId.value ? `lrs-${gatewaySessionMqttGatewayChipId.value}` : 'No gateway selected')
+      : (gatewaySessionSerialPort.value || 'No gateway selected');
+    targetState = {
+      state: gatewaySessionDisplayStateComputed.value.state,
+      label: gatewaySessionDisplayStateComputed.value.label,
+    };
+  } else if (activeMode.value === 'pair') {
+    contextLabel = 'Provision target';
+    contextUsesMqtt = pairTransport.value === 'mqtt';
+    transportLabel = contextUsesMqtt ? 'MQTT' : 'USB Serial';
+    targetLabel = pairGatewayKey.value
+      ? (contextUsesMqtt ? `lrs-${pairGatewayKey.value}` : pairGatewayKey.value)
+      : 'No gateway selected';
+    targetState = contextualTargetState(pairGatewayKey.value, gatewayReady.value, contextUsesMqtt);
+  } else if (activeMode.value === 'settings') {
+    contextLabel = 'Settings target';
+    contextUsesMqtt = settingsTransport.value === 'mqtt';
+    const target = contextUsesMqtt ? settingsMqttGatewayChipId.value : settingsSelectedPort.value;
+    transportLabel = contextUsesMqtt ? 'MQTT' : 'USB Serial';
+    targetLabel = target ? (contextUsesMqtt ? `lrs-${target}` : target) : 'No device selected';
+    targetState = contextualTargetState(
+      target,
+      contextUsesMqtt ? isSettingsMqttGatewayDiscovered.value : !!serialDeviceState(target)?.deviceInfo,
+      contextUsesMqtt,
+    );
+  } else {
+    contextLabel = 'Flash target';
+    transportLabel = 'USB Serial';
+    targetLabel = flashSelectedPort.value || 'No device selected';
+    targetState = contextualTargetState(
+      flashSelectedPort.value,
+      !!serialDeviceState(flashSelectedPort.value)?.deviceInfo,
+      false,
+    );
+  }
+
+  return {
+    contextLabel,
+    transportLabel,
+    targetLabel,
+    state: targetState.state,
+    stateLabel: targetState.label,
+    brokerState: sessionMqttConnectionState.value,
+    brokerRelevant: contextUsesMqtt ||
+      sessionConnectionType.value !== 'serial' ||
+      sessionMqttConnectionState.value !== 'disconnected',
+  };
+});
+
+watch(connectionHeaderSummaryComputed, summary => {
+  connectionSummary.value = summary;
+}, { immediate: true });
+
+watch(
+  () => gatewaySessionDisplayStateComputed.value.state,
+  (state, previousState) => {
+    if ((activeMode.value === 'network' || activeMode.value === 'monitor') &&
+        shouldAutoCollapseConnections(previousState, state, showSessionConfigPanel.value)) {
+      connectionsPanelOpen.value = false;
+    }
+  },
+);
+
 watch(gatewaySessionDisplayStateComputed, display => {
   sessionConnectionState.value = display.state === 'active'
     ? 'active'
@@ -6913,21 +7025,104 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
 
 <template>
   <div class="relative h-full flex flex-col gap-3">
-    <GatewaySessionPanel
-      v-if="activeMode === 'network' || activeMode === 'monitor'"
-      v-model="gatewaySessionFormComputed"
-      v-model:show-connection-settings="showSessionConfigPanel"
-      v-model:local-broker-port="localBrokerPort"
-      v-model:mqtt-draft="sessionMqttDraftState"
-      :display-state="gatewaySessionDisplayStateComputed"
-      :transport-state="gatewaySessionTransportStateComputed"
-      :local-broker-state="localBrokerState"
-      @manual-chip-input="handleGatewaySessionManualMqttGatewayInput"
-      @connect-mqtt="connectSessionMqtt()"
-      @disconnect-mqtt="disconnectSessionMqtt()"
-      @start-local-broker="startAndConnectLocalBroker()"
-      @copy-gateway-settings="handleCopyLocalGatewaySettings"
-    />
+    <Teleport to="body">
+      <div
+        v-if="connectionsPanelOpen"
+        class="fixed inset-0 z-[90]"
+        aria-hidden="true"
+        @click="connectionsPanelOpen = false"
+      ></div>
+      <div
+        v-if="connectionsPanelOpen"
+        class="fixed right-3 top-[4.25rem] z-[100] max-h-[calc(100vh-5rem)] max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-lg shadow-2xl"
+        role="dialog"
+        aria-modal="false"
+        :aria-label="`${connectionHeaderSummaryComputed.contextLabel} connections`"
+        @click.stop
+      >
+        <div v-if="activeMode === 'network' || activeMode === 'monitor'" class="relative w-[70rem] max-w-full">
+          <button
+            type="button"
+            @click="connectionsPanelOpen = false"
+            class="glass-input absolute right-3 top-3 z-10 m-0 h-8 w-8 p-0 text-slate-400 hover:text-white"
+            aria-label="Close connections"
+          >
+            ×
+          </button>
+          <GatewaySessionPanel
+            v-model="gatewaySessionFormComputed"
+            v-model:show-connection-settings="showSessionConfigPanel"
+            v-model:local-broker-port="localBrokerPort"
+            v-model:mqtt-draft="sessionMqttDraftState"
+            :display-state="gatewaySessionDisplayStateComputed"
+            :transport-state="gatewaySessionTransportStateComputed"
+            :local-broker-state="localBrokerState"
+            @manual-chip-input="handleGatewaySessionManualMqttGatewayInput"
+            @connect-mqtt="connectSessionMqtt()"
+            @disconnect-mqtt="disconnectSessionMqtt()"
+            @start-local-broker="startAndConnectLocalBroker()"
+            @copy-gateway-settings="handleCopyLocalGatewaySettings"
+          />
+        </div>
+
+        <div v-else class="glass-card w-[30rem] max-w-full border-slate-600 bg-slate-900/98 p-4 text-left">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-bold text-cyan-300">{{ connectionHeaderSummaryComputed.contextLabel }}</h2>
+              <p class="mt-1 text-[10px] text-slate-500">
+                Target selection remains beside this operation so the destination is explicit.
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="connectionsPanelOpen = false"
+              class="glass-input m-0 h-8 w-8 shrink-0 p-0 text-slate-400 hover:text-white"
+              aria-label="Close connections"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="mt-3 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded border border-slate-800 bg-slate-950/40 p-3 text-xs">
+            <span class="text-slate-500">Via</span>
+            <span class="font-medium text-slate-200">{{ connectionHeaderSummaryComputed.transportLabel }}</span>
+            <span class="text-slate-500">Target</span>
+            <span class="truncate font-mono text-slate-200" :title="connectionHeaderSummaryComputed.targetLabel">{{ connectionHeaderSummaryComputed.targetLabel }}</span>
+            <span class="text-slate-500">Status</span>
+            <span :class="[
+              'font-bold',
+              connectionHeaderSummaryComputed.state === 'active' ? 'text-emerald-300' :
+              connectionHeaderSummaryComputed.state === 'partial' ? 'text-amber-300' :
+              connectionHeaderSummaryComputed.state === 'error' ? 'text-rose-300' :
+              'text-slate-400'
+            ]">
+              {{ connectionHeaderSummaryComputed.stateLabel }}
+            </span>
+          </div>
+
+          <div v-if="connectionHeaderSummaryComputed.brokerRelevant" class="mt-3 flex items-center justify-between gap-3 rounded border border-slate-800 bg-slate-950/40 p-3 text-xs">
+            <div class="flex min-w-0 items-center gap-2">
+              <span :class="[
+                'h-2 w-2 shrink-0 rounded-full',
+                sessionMqttConnectionState === 'connected' ? 'bg-emerald-400' :
+                sessionMqttConnectionState === 'connecting' ? 'bg-amber-400 animate-pulse' :
+                sessionMqttConnectionState === 'error' ? 'bg-rose-500' :
+                'bg-slate-600'
+              ]"></span>
+              <span class="text-slate-400">Shared MQTT broker</span>
+              <span class="font-bold text-slate-200">{{ sessionMqttConnectionState }}</span>
+            </div>
+            <button
+              type="button"
+              @click="connectionsPanelOpen = false; openMqttConnectionSettings()"
+              class="glass-input m-0 h-8 shrink-0 px-3 text-[11px] font-bold hover:bg-slate-700/70"
+            >
+              Connection settings
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
