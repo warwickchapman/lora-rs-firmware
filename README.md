@@ -14,8 +14,8 @@ The former device-hosted Web UI, REST API, and captive-portal admin flow have be
 For shipped release `.bin` files, use `esptool` and the included helper:
 
 - Helper script (recommended):
-  - Windows: `python tools/flash_release.py --port COM7 --bin lrs-firmware-0.10.5~9-za.bin`
-  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin lrs-firmware-0.10.5~9-za.bin`
+  - Windows: `python tools/flash_release.py --port COM7 --bin lrs-firmware-0.10.5~15-za.bin`
+  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin lrs-firmware-0.10.5~15-za.bin`
 
 The helper reads chip ID, flashes firmware, and prints:
 - device name: `lrs-<chipid>`
@@ -26,8 +26,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash at address `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~9-za.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~9-za.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~15-za.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~15-za.bin`
 
 Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
 
