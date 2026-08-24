@@ -1031,7 +1031,7 @@ const {
       raw: `addr=${device.address} transfer_id=${out.transfer_id}`,
       operation_id: captureId
     }});
-    return { out, target, sha256: info.sha256, targetVersion: selectedFirmwareCandidateVersion() };
+    return { out, target, sha256: info.sha256, targetVersion: selectedFirmwareCandidateVersion(), captureId };
   },
   queryOtaStatusCommand: async (address: number) => {
     const { port, password } = fleetGatewayCommandTarget();
@@ -1050,6 +1050,9 @@ const {
   pushNetworkLog,
   setNetworkStatusMessage: (msg) => { networkStatusMessage.value = msg; },
   serialFeatureError
+  ,recordOtaEvent: (captureId, event, raw) => {
+    invoke('record_diagnostic_event', { input: { source: 'flasher', transport: 'host', event, raw, operation_id: captureId } }).catch(() => {});
+  }
 });
 const firmwareServerOtaBusy = computed(() =>
   otaQueue.value.length > 0 ||

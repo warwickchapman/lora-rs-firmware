@@ -12,6 +12,7 @@ export interface UseFleetOtaOptions {
     target: { host: string; port: number };
     sha256: string;
     targetVersion: string;
+    captureId: string;
   }>;
   queryOtaStatusCommand: (address: number) => Promise<{
     addr: number;
@@ -26,6 +27,7 @@ export interface UseFleetOtaOptions {
   pushNetworkLog: (msg: string) => void;
   setNetworkStatusMessage: (msg: string) => void;
   serialFeatureError: (feature: string, err: unknown) => string;
+  recordOtaEvent?: (captureId: string, event: string, raw: string) => void;
 }
 
 export function useFleetOta(options: UseFleetOtaOptions) {
@@ -42,7 +44,8 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     notify,
     pushNetworkLog,
     setNetworkStatusMessage,
-    serialFeatureError
+    serialFeatureError,
+    recordOtaEvent
   } = options;
 
   const otaTriggerBusyAddress = ref<number | null>(null);
@@ -58,6 +61,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     preCommandUptimeMs: number;
     refreshRequested: boolean;
     acceptedAtMs: number;
+    captureId: string;
   }
 
   // LoRa serializes only the manifest handoff. Accepted HTTP pulls continue independently.
@@ -234,6 +238,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     if (current.stage === newStage) return;
 
     current.stage = newStage;
+    recordOtaEvent?.(current.captureId, newStage, `addr=${current.address} transfer_id=${current.transferId}`);
     if (newStage === 'ota_apply_wait') {
       current.lastScanMs = Date.now() + 45000; // 45 seconds reboot delay window
       current.refreshRequested = false;
@@ -250,6 +255,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
   }
 
   function finishOta(current: RemoteOtaSession, finalState: 'ota_failed' | 'ota_unconfirmed' | 'ota_updated' | 'ota_no_reboot', reason?: string) {
+    recordOtaEvent?.(current.captureId, finalState, `addr=${current.address} transfer_id=${current.transferId}${reason ? ` reason=${reason}` : ''}`);
     const preserveLateConfirmation = finalState === 'ota_no_reboot';
     fleetRowHistory.value[current.address] = {
       ...(fleetRowHistory.value[current.address] || {}),
@@ -275,7 +281,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
     try {
       otaTriggerBusyAddress.value = device.address;
 
-      const { out, target, sha256, targetVersion } = await triggerOtaCommand(device);
+      const { out, target, sha256, targetVersion, captureId } = await triggerOtaCommand(device);
 
       const startedAtMs = Date.now();
       activeRemoteOta.value = {
@@ -289,6 +295,7 @@ export function useFleetOta(options: UseFleetOtaOptions) {
         preCommandUptimeMs: device.uptime_ms || 0,
         refreshRequested: false,
         acceptedAtMs: 0
+        ,captureId
       };
 
       fleetRowHistory.value[device.address] = {
