@@ -27,7 +27,6 @@ import type {
   FleetConfig,
   FleetGatewayStatus,
   FleetServerStatus,
-  FleetUdpLogs,
   FleetTransportState,
   FleetInventorySummary,
   FleetCandidateSummary,
@@ -82,6 +81,8 @@ import type {
   SettingsWifiState
 } from './flasher/SettingsMode.vue';
 import MonitorMode from './flasher/MonitorMode.vue';
+import LogsMode from './flasher/LogsMode.vue';
+import { useLogSession } from '../composables/useLogSession';
 import type {
   MonitorForm,
   MonitorHeaderState,
@@ -92,7 +93,7 @@ import type {
   MonitorDisplayRow
 } from './flasher/MonitorMode.vue';
 
-type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
+type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'logs' | 'settings';
 
 const activeMode = defineModel<ActiveMode>('activeMode', { default: 'pair' });
 const sessionConnectionState = defineModel<'active' | 'partial' | 'offline'>('sessionConnectionState', { default: 'offline' });
@@ -409,6 +410,7 @@ const bulkSelectedPorts = ref<string[]>([]);
 const bulkMode = ref(false);
 const isMonitoring = ref(false);
 const isNetworkUdpMonitoring = ref(false);
+const logSession = useLogSession();
 const otaQueue = ref<LoraInventoryDevice[]>([]);
 const networkInterfaceInterval = ref<ReturnType<typeof window.setInterval> | null>(null);
 
@@ -441,58 +443,6 @@ async function ensureFirmwareServer(): Promise<FirmwareServerInfo> {
 
 const serialLogs = ref<string[]>([]);
 const networkLogs = ref<string[]>([]);
-const filteredNetworkLogs = computed(() => {
-  const targetLabel = networkUdpTarget.value;
-  if (!targetLabel) {
-    return networkLogs.value.map(line => formatUdpLogLine(line));
-  }
-
-  const dev = loraInventory.value.find(d => fleetDeviceUdpLabel(d) === targetLabel);
-  const targetIp = dev?.ip;
-  const targetAddress = dev?.address;
-
-  return networkLogs.value
-    .filter(line => {
-      const ipMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+/);
-      if (!ipMatch) {
-        if (line.includes('addr ') || line.includes('follow-up ')) {
-          const addrMatch = line.match(/(?:addr|follow-up)\s+(\d+)/);
-          if (addrMatch) {
-            const addr = Number(addrMatch[1]);
-            if (targetAddress !== undefined && addr !== targetAddress) {
-              return false;
-            }
-          }
-        }
-        return true;
-      }
-      return targetIp && ipMatch[1] === targetIp;
-    })
-    .map(line => formatUdpLogLine(line));
-});
-
-function formatUdpLogLine(line: string): string {
-  if (!line) return '';
-  const ipMatch = line.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(.*)$/);
-  if (!ipMatch) return line;
-
-  const ip = ipMatch[1];
-  const rest = ipMatch[2];
-
-  const dev = loraInventory.value.find(d => d.ip === ip);
-  if (dev) {
-    const chip = String(dev.chip_id || '').trim().replace(/^0x/i, '').toLowerCase();
-    const name = chip ? `lrs-${chip}` : `Addr ${dev.address}`;
-    return `[${name}] ${rest}`;
-  }
-
-  const gwIp = fleetGatewayStatus.value?.wifi?.ip;
-  if (gwIp && gwIp === ip) {
-    return `[Gateway] ${rest}`;
-  }
-
-  return `[${ip}] ${rest}`;
-}
 
 const pairLogs = ref<string[]>([]);
 const serialUptimeMs = ref<number | null>(null);
@@ -655,8 +605,6 @@ const lastPortSnapshot = ref<string[]>([]);
 const portSeenSequence = ref<Record<string, number>>({});
 const portSeenCounter = ref(0);
 const networkUdpLogsExpanded = ref(false);
-const fleetGatewayEventsExpanded = ref(false);
-const fleetGatewayEventsIncludeLogLines = ref(false);
 const monitorGatewayEventsExpanded = ref(false);
 const monitorGatewayEventsIncludeLogLines = ref(false);
 const gatewayEvents = ref<GatewayEventRecord[]>([]);
@@ -923,7 +871,9 @@ const settingsTransport = computed<'serial' | 'mqtt'>(() => {
 const settingsTab = ref<SettingsTab>('general');
 const remoteSubTab = ref<'serial' | 'mqtt' | 'lora'>('serial');
 const networkUdpTarget = ref('');
-const activeRemoteUdpAddress = ref<number | null>(null);
+const activeRemoteUdpAddresses = ref<number[]>([]);
+const udpForwardingGatewayTarget = ref('');
+let remoteUdpLogQueue: Promise<void> = Promise.resolve();
 const fleetClockMs = ref(Date.now());
 const isLoraInventoryScanning = ref(false);
 const fleetScanActiveSinceMs = ref(0);
@@ -945,7 +895,6 @@ const {
   rowFreshness,
   candidateStateText,
   candidateStateClass,
-  fleetDeviceUdpLabel,
   fleetRowStatusLabel,
   fleetRowStatusTitle,
   loraInventoryProgressLabel,
@@ -1974,6 +1923,7 @@ function pushSerialLogForPort(port: string, line: string) {
 
 function pushMonitorLogForPort(port: string, line: string) {
   if (!line || !port) return;
+  logSession.append({ sourceId: `serial:${port}`, sourceLabel: `USB gateway · ${port}`, transport: 'serial', raw: line });
   pushGatewayEventFromLog(port, line);
   const state = serialDeviceState(port);
   if (state) {
@@ -2466,14 +2416,6 @@ function copyActivityLog() {
   copyToClipboard(activeLogs.value.join('\n'), 'activity log');
 }
 
-function copyNetworkUdpLog() {
-  if (filteredNetworkLogs.value.length === 0) {
-    notify('No UDP logs to copy');
-    return;
-  }
-  copyToClipboard(filteredNetworkLogs.value.join('\n'), 'UDP log');
-}
-
 function formatGatewayEvent(event: GatewayEventRecord): string {
   const meta = `${event.ms}ms ${event.level} ${event.event || '-'} port=${event.port} rssi=${event.rssi} ctr=${event.counter} st=${event.state}`;
   if (event.level === 'raw' || event.level === 'log_line' || event.level === 'crash' || event.event === 'serial_raw') {
@@ -2613,7 +2555,8 @@ function handleFleetRemoteIdentify(address: number) {
 
 function handleFleetRemoteViewLogs(address: number) {
   const d = loraInventory.value.find(x => x.address === address);
-  if (d) triggerRemoteUdpLogging(d);
+  if (!d) return;
+  openRemoteLogs(d);
 }
 
 function handleFleetRemoteForget(address: number) {
@@ -2646,7 +2589,9 @@ function handleFleetGatewaySettings() {
 
 function handleFleetGatewayViewLogs() {
   activeDropdownAddress.value = null;
-  fleetGatewayEventsExpanded.value = true;
+  const target = gatewaySessionTargetKey.value;
+  if (!target) { notify('Select a gateway first'); return; }
+  openGatewayLogs();
 }
 
 async function handleFleetGatewayReboot() {
@@ -2828,8 +2773,12 @@ async function startNetworkUdpMonitor(): Promise<boolean> {
     nextTick(() => scrollNetworkUdpToBottom());
     return true;
   } catch (e) {
-    pushNetworkLog('UDP monitor start error: ' + e);
-    notify('UDP monitor start error: ' + e);
+    const detail = String(e || 'unknown error');
+    const message = /address already in use/i.test(detail)
+      ? 'UDP port 5514 is already in use. Stop logging in the other Flasher instance or application, then try again.'
+      : `UDP monitor start error: ${detail}`;
+    pushNetworkLog(message);
+    notify(message);
     return false;
   }
 }
@@ -2864,6 +2813,7 @@ async function triggerGatewayUdpLogging() {
           ttl_s: 300
         }, 8000);
         pushNetworkLog('Gateway UDP logging enabled successfully: ' + JSON.stringify(res));
+        udpForwardingGatewayTarget.value = port;
       } catch (e) {
         pushNetworkLog('Failed to enable gateway-side UDP log control: ' + e);
       }
@@ -2873,7 +2823,13 @@ async function triggerGatewayUdpLogging() {
   }
 }
 
-async function triggerRemoteUdpLogging(device: LoraInventoryDevice) {
+function triggerRemoteUdpLogging(device: LoraInventoryDevice): Promise<void> {
+  const queued = remoteUdpLogQueue.then(() => enableRemoteUdpLogging(device));
+  remoteUdpLogQueue = queued.catch(() => {});
+  return queued;
+}
+
+async function enableRemoteUdpLogging(device: LoraInventoryDevice) {
   const { port, password } = fleetGatewayCommandTarget();
   if (!port) {
     notify(fleetTransport.value === 'mqtt' ? 'Select the MQTT gateway first' : 'Select the USB gateway first');
@@ -2910,7 +2866,10 @@ async function triggerRemoteUdpLogging(device: LoraInventoryDevice) {
     notify(`Remote UDP logging triggered for address ${device.address}`);
     pushNetworkLog(`Remote UDP logging enabled for Address ${device.address} sending to ${hostIp}: ` + JSON.stringify(res));
     networkUdpTarget.value = `Addr ${device.address}`;
-    activeRemoteUdpAddress.value = device.address;
+    if (!activeRemoteUdpAddresses.value.includes(device.address)) {
+      activeRemoteUdpAddresses.value = [...activeRemoteUdpAddresses.value, device.address];
+    }
+    udpForwardingGatewayTarget.value = port;
   } catch (e) {
     const msg = serialFeatureError(`Remote UDP log control`, e);
     notify(msg);
@@ -2918,24 +2877,42 @@ async function triggerRemoteUdpLogging(device: LoraInventoryDevice) {
   }
 }
 
+function copyLogs() {
+  const output = logSession.visibleRecords.value.map(record => `${new Date(record.receivedAt).toISOString()} ${record.sourceLabel} ${record.transport} ${record.event || record.severity} ${record.raw}`).join('\n');
+  if (!output) { notify('No logs to copy'); return; }
+  copyToClipboard(output, 'logs');
+}
+
+function exportLogs() {
+  const jsonl = logSession.exportJsonl();
+  if (!jsonl) { notify('No logs to export'); return; }
+  const url = URL.createObjectURL(new Blob([jsonl], { type: 'application/x-ndjson' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `thanda-lora-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  notify('Logs exported');
+}
+
 async function stopNetworkUdpMonitor() {
   try {
     const stopped = await invoke<string>('stop_network_udp_monitor');
     pushNetworkLog(stopped);
-    const port = fleetGatewayCommandTarget().port;
-    const password = fleetGatewayCommandTarget().password;
+    const port = udpForwardingGatewayTarget.value;
+    const password = adminPasswordForPort(port);
     if (port && password) {
-      if (activeRemoteUdpAddress.value !== null) {
-        pushNetworkLog(`Requesting remote ${activeRemoteUdpAddress.value} to stop UDP log forwarding...`);
+      for (const address of activeRemoteUdpAddresses.value) {
+        pushNetworkLog(`Requesting remote ${address} to stop UDP log forwarding...`);
         try {
           await sendEasyPairCommandOnPort(port, 'remote_udp_log_control', {
             admin_password: password,
-            address: activeRemoteUdpAddress.value,
+            address,
             enabled: false
           }, 8000);
-          pushNetworkLog(`Remote ${activeRemoteUdpAddress.value} UDP logging disabled.`);
+          pushNetworkLog(`Remote ${address} UDP logging disabled.`);
         } catch (e) {
-          pushNetworkLog(`Failed to disable remote UDP logging on Address ${activeRemoteUdpAddress.value}: ` + e);
+          pushNetworkLog(`Failed to disable remote UDP logging on Address ${address}: ` + e);
         }
       }
 
@@ -2957,7 +2934,8 @@ async function stopNetworkUdpMonitor() {
   } finally {
     isNetworkUdpMonitoring.value = false;
     networkUdpTarget.value = '';
-    activeRemoteUdpAddress.value = null;
+    activeRemoteUdpAddresses.value = [];
+    udpForwardingGatewayTarget.value = '';
     networkUdpLogsExpanded.value = false;
   }
 }
@@ -6304,6 +6282,18 @@ onMounted(async () => {
           }
         }
 
+        const sourceId = dev
+          ? `remote:${gatewaySessionTargetKey.value}:${dev.address}`
+          : fleetTransport.value === 'mqtt' && gatewaySessionTargetKey.value
+            ? `mqtt:${gatewaySessionTargetKey.value}`
+            : 'udp:unknown';
+        const sourceLabel = dev
+          ? `Remote ${dev.address}${dev.chip_id ? ` · lrs-${dev.chip_id}` : ''}`
+          : fleetTransport.value === 'mqtt' && gatewaySessionTargetKey.value
+            ? `MQTT gateway · lrs-${gatewaySessionTargetKey.value}`
+            : 'UDP source · unknown';
+        logSession.append({ sourceId, sourceLabel, transport: 'udp', raw: trimmed });
+
         // handleOtaLogLine removed - state is driven solely by gateway status polling
       }
     });
@@ -6482,9 +6472,7 @@ onUnmounted(() => {
   if (unlistenMqttAdminResponse) unlistenMqttAdminResponse();
   if (unlistenMqttOtaStatus) unlistenMqttOtaStatus();
   if (unlistenMqttConfig) unlistenMqttConfig();
-  if (isNetworkUdpMonitoring.value) {
-    invoke('stop_network_udp_monitor').catch(() => {});
-  }
+  if (isNetworkUdpMonitoring.value) void stopNetworkUdpMonitor();
 });
 
 function formatLabel(key: string) {
@@ -6686,12 +6674,6 @@ const fleetServerStatusComputed = computed<FleetServerStatus>(() => ({
   networkStatusMessage: networkStatusMessage.value
 }));
 
-const fleetUdpLogsComputed = computed<FleetUdpLogs>(() => ({
-  isMonitoring: isNetworkUdpMonitoring.value,
-  target: networkUdpTarget.value,
-  logs: filteredNetworkLogs.value
-}));
-
 const gatewayEventsComputed = computed(() => ({
   events: gatewayEvents.value,
   status: gatewayEventsStatus.value,
@@ -6710,6 +6692,66 @@ const gatewaySessionTargetKey = computed(() =>
     ? gatewaySessionMqttGatewayChipId.value
     : gatewaySessionSerialPort.value
 );
+
+const logAvailableSourcesComputed = computed(() => {
+  const target = gatewaySessionTargetKey.value;
+  const gateway = target ? [{
+    id: fleetTransport.value === 'serial' ? `serial:${target}` : `mqtt:${target}`,
+    label: fleetTransport.value === 'serial' ? `Gateway · USB ${target}` : `Gateway · MQTT lrs-${target}`,
+  }] : [];
+  const remotes = loraInventory.value.map(device => ({
+    id: `remote:${target}:${device.address}`,
+    label: `Remote ${device.address}${device.chip_id ? ` · lrs-${device.chip_id}` : ''}`,
+    disabled: !target || !device.wifi_connected || !device.ip,
+    reason: !target ? 'select a gateway first' : !device.wifi_connected || !device.ip ? 'WiFi/IP unavailable' : '',
+  }));
+  return [...gateway, ...remotes];
+});
+
+function openGatewayLogs() {
+  const target = gatewaySessionTargetKey.value;
+  if (!target) { notify('Select a gateway first'); return; }
+  const sourceId = fleetTransport.value === 'serial' ? `serial:${target}` : `mqtt:${target}`;
+  logSession.registerSource(sourceId, fleetTransport.value === 'serial' ? `USB gateway · ${target}` : `MQTT gateway · lrs-${target}`);
+  logSession.selectOnly(sourceId);
+  activeMode.value = 'logs';
+  if (fleetTransport.value === 'serial') {
+    if (!isMonitoring.value) void startSerialMonitor(target, false);
+  } else {
+    void triggerGatewayUdpLogging();
+  }
+}
+
+function openRemoteLogs(device: LoraInventoryDevice) {
+  const target = gatewaySessionTargetKey.value;
+  if (!target || !device.wifi_connected || !device.ip) {
+    notify(!target ? 'Select a gateway first' : `Remote ${device.address} needs active WiFi and an IP address for UDP logs`);
+    return;
+  }
+  const sourceId = `remote:${target}:${device.address}`;
+  logSession.registerSource(sourceId, `Remote ${device.address}${device.chip_id ? ` · lrs-${device.chip_id}` : ''}`);
+  logSession.selectOnly(sourceId);
+  activeMode.value = 'logs';
+  void triggerRemoteUdpLogging(device);
+}
+
+function selectLogSource(sourceId: string) {
+  if (!sourceId) return;
+  if (sourceId.startsWith('serial:') || sourceId.startsWith('mqtt:')) {
+    openGatewayLogs();
+    return;
+  }
+  const parts = sourceId.split(':');
+  const address = Number(parts[parts.length - 1]);
+  const device = loraInventory.value.find(item => item.address === address);
+  if (device) openRemoteLogs(device);
+}
+
+watch(gatewaySessionTargetKey, (nextTarget, previousTarget) => {
+  if (previousTarget && nextTarget !== previousTarget && isNetworkUdpMonitoring.value) {
+    void stopNetworkUdpMonitor();
+  }
+});
 const gatewaySessionAdminPassword = computed(() =>
   adminPasswordForPort(gatewaySessionTargetKey.value)
 );
@@ -7285,7 +7327,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
       </div>
     </Teleport>
 
-    <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
+    <div :class="['grid gap-3 flex-1 min-h-0 transition-all duration-500', activityFullscreen || activeMode === 'network' || activeMode === 'monitor' || activeMode === 'logs' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2']">
       <!-- Log Panel -->
       <ActivityPanel
         ref="activityPanelRef"
@@ -7416,6 +7458,22 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @gateway-events-copy="copyGatewayEvents"
       />
 
+      <LogsMode
+        v-if="activeMode === 'logs'"
+        v-model:selected-source-ids="logSession.selectedSourceIds.value"
+        v-model:layout="logSession.layout.value"
+        v-model:filter="logSession.filter.value"
+        :records="logSession.visibleRecords.value"
+        :sources="logSession.sourceOptions.value"
+        :available-sources="logAvailableSourcesComputed"
+        :status="`${logSession.records.value.length} retained record${logSession.records.value.length === 1 ? '' : 's'} · bounded to 2,000`"
+        @copy="copyLogs"
+        @clear="logSession.clear"
+        @export="exportLogs"
+        @stop="stopNetworkUdpMonitor"
+        @select-source="selectLogSource"
+      />
+
       <MqttConnectionSettingsModal
         v-model="showMqttConnectionSettings"
         v-model:draft="sessionMqttDraftState"
@@ -7429,24 +7487,14 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         v-if="activeMode === 'network'"
         v-model="fleetConfigComputed"
         v-model:active-dropdown-address="activeDropdownAddress"
-        v-model:network-udp-logs-expanded="networkUdpLogsExpanded"
-        v-model:gateway-events-expanded="fleetGatewayEventsExpanded"
-        v-model:gateway-events-include-log-lines="fleetGatewayEventsIncludeLogLines"
         :rows="fleetDisplayRows"
         :candidates="fleetDisplayCandidates"
         :gateway="fleetGatewayStatusComputed"
         :server="fleetServerStatusComputed"
-        :udp-logs="fleetUdpLogsComputed"
-        :gateway-events="gatewayEventsComputed"
         :transport-state="fleetTransportStateComputed"
         :inventory-summary="fleetInventorySummaryComputed"
         :candidate-summary="fleetCandidateSummaryComputed"
         @toggle-row-selection="handleToggleRowSelection"
-        @udp-logging-start="triggerGatewayUdpLogging"
-        @udp-logging-stop="stopNetworkUdpMonitor"
-        @udp-logs-copy="copyNetworkUdpLog"
-        @gateway-events-clear="clearGatewayEvents"
-        @gateway-events-copy="copyGatewayEvents"
         @lora-inventory-debug-copy="copyLoraInventoryDebug"
         @firmware-fetch="fetchFirmware"
         @gateway-identify="triggerIdentify"

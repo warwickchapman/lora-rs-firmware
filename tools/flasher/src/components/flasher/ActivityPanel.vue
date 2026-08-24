@@ -97,7 +97,7 @@ defineExpose({
 
 <template>
   <!-- Log Panel -->
-  <div v-if="activeMode !== 'network' && activeMode !== 'monitor'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
+  <div v-if="activeMode !== 'network' && activeMode !== 'monitor' && activeMode !== 'logs'" :class="['glass-card p-3 flex flex-col gap-2 text-left overflow-hidden h-full']">
     <!-- New Bulk Operations Status Grid -->
     <div v-if="activeMode === 'serial' && bulkState.bulkMode" class="flex flex-col gap-3 h-full min-h-0 overflow-hidden">
       <div class="flex items-center justify-between border-b border-slate-700/80 pb-2">

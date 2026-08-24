@@ -41,7 +41,7 @@ Important ESP8266 constraints:
 - LittleFS persistent settings.
 - Optional MQTT bridge (STA mode).
 - OTA support in STA mode.
-- Structured logs available through serial, optional temporary UDP mirroring, and Flasher Monitor/Fleet views.
+- Structured logs available through serial and optional temporary UDP mirroring in Flasher's dedicated Logs view.
 - DS18B20 support (local + remote telemetry over LoRa).
 
 ## 4. Networking and Access
@@ -53,6 +53,7 @@ Flasher tabs:
 - Provision
 - Fleet
 - Monitor
+- Logs
 - Settings
 
 Minimum required settings:
@@ -140,9 +141,7 @@ Flasher status and Monitor/Fleet views provide:
 
 MQTT retained peer values are displayed as cached state, but their replay on connection is not treated as a fresh remote check-in. Row Age advances from explicit gateway age data or live MQTT updates.
 
-Logs:
-- USB serial activity log
-- optional temporary UDP log mirroring from Flasher/Fleet
+Logs are a bounded, best-effort diagnostic view. Gateway and remote Actions open Logs with the relevant source selected. It supports focused, stacked, and merged source views, filters, Copy, Clear, and JSONL export. USB uses Flasher's coordinated serial stream; MQTT gateway and WiFi remotes use Flasher's single temporary UDP listener. Missing UDP lines are not health or control truth, and forwarding expires automatically if it cannot be explicitly stopped.
 
 ## 13. Provisioning and Sticker Data
 Provisioning tooling:

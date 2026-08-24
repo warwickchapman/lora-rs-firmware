@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue';
+import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue';
 
 export interface FleetConfig {
   region: string;
@@ -43,28 +43,6 @@ export interface FleetServerStatus {
   localOption: string;
   isFetchingFirmware: boolean;
   networkStatusMessage: string;
-}
-
-export interface FleetUdpLogs {
-  isMonitoring: boolean;
-  target: string | null;
-  logs: string[];
-}
-
-export interface GatewayEventDisplayRecord {
-  ms: number;
-  event: string;
-  rssi: number;
-  counter: number;
-  state: number;
-  raw: string;
-  level: 'info' | 'warn' | 'error' | 'crash' | 'reset' | 'log_line' | 'raw';
-}
-
-export interface GatewayEventsState {
-  events: GatewayEventDisplayRecord[];
-  status: string;
-  isLoading: boolean;
 }
 
 export interface MqttGatewayOption {
@@ -142,17 +120,12 @@ export interface FleetCandidateActionPayload {
 
 const config = defineModel<FleetConfig>({ required: true });
 const activeDropdownAddress = defineModel<number | string | null>('activeDropdownAddress', { required: true });
-const networkUdpLogsExpanded = defineModel<boolean>('networkUdpLogsExpanded', { required: true });
-const gatewayEventsExpanded = defineModel<boolean>('gatewayEventsExpanded', { required: true });
-const gatewayEventsIncludeLogLines = defineModel<boolean>('gatewayEventsIncludeLogLines', { required: true });
 
-const props = defineProps<{
+defineProps<{
   rows: FleetDisplayRow[];
   candidates: FleetCandidateDisplayRow[];
   gateway: FleetGatewayStatus;
   server: FleetServerStatus;
-  udpLogs: FleetUdpLogs;
-  gatewayEvents: GatewayEventsState;
   transportState: FleetTransportState;
   inventorySummary: FleetInventorySummary;
   candidateSummary: FleetCandidateSummary;
@@ -160,11 +133,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle-row-selection', address: number | string, selected: boolean): void;
-  (e: 'udp-logging-start'): void;
-  (e: 'udp-logging-stop'): void;
-  (e: 'udp-logs-copy'): void;
-  (e: 'gateway-events-clear'): void;
-  (e: 'gateway-events-copy', includeLogLines: boolean): void;
   (e: 'lora-inventory-debug-copy'): void;
   (e: 'firmware-fetch'): void;
   (e: 'gateway-identify'): void;
@@ -184,7 +152,6 @@ const emit = defineEmits<{
   (e: 'candidate-adopt', payload: FleetCandidateActionPayload): void;
 }>();
 
-const networkUdpLogContainer = ref<HTMLDivElement | null>(null);
 const actionMenuTrigger = ref<HTMLElement | null>(null);
 const actionMenuStyle = ref<Record<string, string>>({ visibility: 'hidden' });
 
@@ -236,16 +203,6 @@ onUnmounted(() => {
   window.removeEventListener('scroll', positionActionMenu, true);
 });
 
-function scrollNetworkUdpToBottom() {
-  if (networkUdpLogContainer.value) {
-    networkUdpLogContainer.value.scrollTop = networkUdpLogContainer.value.scrollHeight;
-  }
-}
-
-watch(() => props.udpLogs.logs.length, () => {
-  nextTick(() => scrollNetworkUdpToBottom());
-});
-
 const computedRegion = computed({
   get: () => config.value.region,
   set: (val) => { config.value = { ...config.value, region: val }; }
@@ -255,31 +212,6 @@ const computedSelectedVersion = computed({
   set: (val) => { config.value = { ...config.value, selectedVersion: val }; }
 });
 
-const visibleGatewayEvents = computed(() => {
-  if (gatewayEventsIncludeLogLines.value) return props.gatewayEvents.events;
-  return props.gatewayEvents.events.filter(event => event.level !== 'log_line');
-});
-
-function toggleNetworkUdpLogsExpanded() {
-  networkUdpLogsExpanded.value = !networkUdpLogsExpanded.value;
-  nextTick(() => scrollNetworkUdpToBottom());
-}
-
-function eventLevelClass(event: GatewayEventDisplayRecord): string {
-  if (event.level === 'crash' || event.level === 'error') return 'text-rose-300';
-  if (event.level === 'reset') return 'text-orange-300';
-  if (event.level === 'warn') return 'text-amber-300';
-  if (event.level === 'log_line') return 'text-slate-300';
-  if (event.level === 'raw') return 'text-slate-500';
-  const name = event.event || '';
-  if (name.includes('timeout') || name.includes('_fail') || name.includes('failed') || name.includes('_bad')) {
-    return 'text-amber-300';
-  }
-  if (name.includes('maint_') || name.includes('fleet_scan') || name.includes('ota_')) {
-    return 'text-cyan-300';
-  }
-  return 'text-slate-300';
-}
 </script>
 
 <template>
@@ -316,14 +248,6 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           <p class="mt-1 text-xs text-slate-400 max-w-3xl">
             {{ gateway.statusLabel }} · {{ server.statusLine }} · {{ server.progressLabel }}
           </p>
-        </div>
-        <div class="flex flex-wrap items-center justify-end gap-3">
-          <button
-            @click="udpLogs.isMonitoring ? emit('udp-logging-stop') : emit('udp-logging-start')"
-            class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
-          >
-            <span>{{ udpLogs.isMonitoring ? 'Stop UDP Listener' : 'Start UDP Listener' }}</span>
-          </button>
         </div>
       </div>
 
@@ -367,12 +291,6 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           <div class="mt-1 text-xs text-slate-500">{{ gateway.summary }}</div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button
-            @click="gatewayEventsExpanded = !gatewayEventsExpanded"
-            :class="['glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold', gatewayEventsExpanded ? 'border-cyan-500/40 text-cyan-200' : 'text-slate-300']"
-          >
-            {{ gatewayEventsExpanded ? 'Hide events' : 'Events' }}
-          </button>
           <button
             @click="emit('gateway-identify')"
             :disabled="gateway.isIdentifyDisabled"
@@ -745,72 +663,6 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
             </tr>
           </tbody>
         </table>
-      </div>
-      <div v-if="gatewayEventsExpanded" class="shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3">
-        <div class="mb-2 flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <div class="truncate text-xs font-bold text-slate-300">Gateway events</div>
-            <div class="mt-0.5 text-[10px] text-slate-600">{{ gatewayEvents.status }}</div>
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex h-8 items-center gap-1.5 rounded border border-slate-700/70 px-2 text-[10px] font-bold text-slate-400">
-              <input v-model="gatewayEventsIncludeLogLines" type="checkbox" class="accent-cyan-500">
-              Log lines
-            </label>
-            <button
-              @click="emit('lora-inventory-debug-copy')"
-              class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold"
-            >
-              Copy inventory
-            </button>
-            <button
-              @click="emit('gateway-events-copy', gatewayEventsIncludeLogLines)"
-              :disabled="visibleGatewayEvents.length === 0"
-              class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
-            >
-              Copy
-            </button>
-            <button
-              @click="emit('gateway-events-clear')"
-              :disabled="gatewayEvents.events.length === 0"
-              class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-        <div class="max-h-36 overflow-auto custom-scrollbar rounded border border-slate-800 bg-slate-950/60 p-2 font-mono text-[10px] leading-tight">
-          <div v-for="(event, i) in visibleGatewayEvents.slice(-64)" :key="`${event.ms}-${i}`" class="grid grid-cols-[64px_minmax(0,1fr)_64px_84px_52px] gap-2 border-b border-slate-900/70 py-1 last:border-b-0">
-            <span class="text-slate-500">{{ event.ms }}ms</span>
-            <span :class="['truncate', eventLevelClass(event)]" :title="event.raw">{{ event.event || '-' }}</span>
-            <span class="text-slate-500">rssi {{ event.rssi }}</span>
-            <span class="text-slate-500">ctr {{ event.counter }}</span>
-            <span class="text-slate-500">st {{ event.state }}</span>
-          </div>
-          <div v-if="visibleGatewayEvents.length === 0" class="text-slate-600">Firmware event logs captured during Fleet/Monitor serial activity will appear here.</div>
-        </div>
-      </div>
-      <div
-        v-if="udpLogs.isMonitoring"
-        :class="networkUdpLogsExpanded ? 'fixed inset-4 z-40 flex flex-col rounded-md border border-slate-700 bg-slate-950 p-4 shadow-2xl' : 'shrink-0 rounded-md border border-slate-800 bg-slate-950/40 p-3'"
-      >
-        <div class="mb-2 flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <div class="truncate text-xs font-bold text-slate-300">UDP logs · {{ udpLogs.target || 'Fleet' }}</div>
-            <div class="mt-0.5 text-[10px] text-slate-600">{{ udpLogs.logs.length }} lines · following latest</div>
-          </div>
-          <div class="flex shrink-0 items-center gap-2">
-            <button @click="emit('udp-logs-copy')" :disabled="udpLogs.logs.length === 0" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-50">Copy</button>
-            <button @click="toggleNetworkUdpLogsExpanded" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">
-              {{ networkUdpLogsExpanded ? 'Collapse' : 'Full screen' }}
-            </button>
-            <button @click="emit('udp-logging-stop')" class="glass-input m-0 h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Stop logs</button>
-          </div>
-        </div>
-        <div ref="networkUdpLogContainer" :class="['overflow-auto custom-scrollbar font-mono text-[10px] leading-tight text-slate-400', networkUdpLogsExpanded ? 'min-h-0 flex-1 rounded border border-slate-800 bg-slate-950/60 p-2' : 'max-h-44']">
-          <div v-for="(log, i) in udpLogs.logs.slice(-200)" :key="i">{{ log }}</div>
-          <div v-if="udpLogs.logs.length === 0" class="text-slate-600">Waiting for UDP log lines...</div>
-        </div>
       </div>
     </div>
 

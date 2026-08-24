@@ -27,12 +27,12 @@ const isTogglingWindowMode = ref(false);
 const WINDOW_MODE_KEY = 'flasher.windowMode';
 const MODE_STORAGE_KEY = 'thanda-flasher-active-mode';
 
-type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'settings';
+type ActiveMode = 'pair' | 'serial' | 'network' | 'monitor' | 'logs' | 'settings';
 
 function initialActiveMode(): ActiveMode {
   try {
     const saved = localStorage.getItem(MODE_STORAGE_KEY);
-    if (saved === 'pair' || saved === 'serial' || saved === 'network' || saved === 'monitor' || saved === 'settings') return saved;
+    if (saved === 'pair' || saved === 'serial' || saved === 'network' || saved === 'monitor' || saved === 'logs' || saved === 'settings') return saved;
     return 'serial';
   } catch {
     return 'serial';
@@ -78,7 +78,8 @@ const navItems: NavItem[] = [
   { mode: 'pair', label: 'Provision', shortcut: '2' },
   { mode: 'network', label: 'Fleet', shortcut: '3' },
   { mode: 'monitor', label: 'Monitor', shortcut: '4' },
-  { mode: 'settings', label: 'Settings', shortcut: '5' }
+  { mode: 'logs', label: 'Logs', shortcut: '5' },
+  { mode: 'settings', label: 'Settings', shortcut: '6' }
 ];
 
 async function fetchVersion() {
@@ -226,7 +227,7 @@ function handleKeyDown(event: KeyboardEvent) {
   // Do not trigger on Shift or Alt
   if (event.shiftKey || event.altKey) return;
 
-  // Match key 1-5
+  // Match navigation shortcuts.
   const item = navItems.find((i) => i.shortcut === event.key);
   if (item) {
     event.preventDefault();
@@ -274,7 +275,7 @@ watch(activeMode, (mode) => {
           :key="item.mode"
           @click="activeMode = item.mode"
           :class="[
-            'm-0 h-8 w-1/5 rounded-none px-3 text-xs font-semibold transition-colors shadow-none',
+            'm-0 h-8 flex-1 rounded-none px-3 text-xs font-semibold transition-colors shadow-none',
             index < navItems.length - 1 ? 'border-r border-slate-800' : '',
             activeMode === item.mode ? 'bg-cyan-700 text-white' : 'bg-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-100'
           ]"

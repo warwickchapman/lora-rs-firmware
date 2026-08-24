@@ -78,7 +78,10 @@ Monitor is for gateway diagnostics over USB serial.
 - It requires a TX/gateway USB device.
 - It shows gateway health and the gateway peer cache, including remote input,
   temperature, and tank telemetry when reported.
-- It can start temporary UDP logs for WiFi-connected devices.
+
+## Logs
+
+Use **Fleet > Actions > View Logs** for a gateway or WiFi-connected remote. Logs can focus one source, stack selected sources, or merge them by receive time. Use filters to show all lines, parsed events, or warnings/errors, then Copy, Clear, or export the bounded session as JSONL. USB gateway logs use the existing coordinated serial stream; MQTT gateway and remote logs use temporary UDP forwarding. UDP is best-effort: a missing line must never be treated as device health, relay state, input state, or a failed command. Leaving Logs does not stop capture; use **Stop forwarding** when finished.
 
 ## Gateway Session Connection & Local Broker
 Transport communication across Fleet, Monitor, and Settings is unified under the global **Gateway Session Connection** banner at the top of the interface:
