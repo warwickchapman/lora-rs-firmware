@@ -8,15 +8,16 @@
 - Serial Admin Phase 1A is implemented: firmware exposes `status`, authenticated `get_config`, authenticated `set_config`, and authenticated `factory_reset`; Flasher Flash mode exposes local status/config/reboot/factory-reset controls over the `LRS:` serial admin protocol.
 - Flasher Fleet mode provides a temporary local firmware file server plus per-device UDP-log actions, with OTA and UDP log-control commands available through serial/MQTT and gateway-mediated LoRa admin where the target remote already has WiFi.
 - OTA pull now requires a 64-character SHA256. Gateway-mediated LoRa OTA sends the digest over encrypted LoRa control before the remote downloads `/firmware.bin`, and firmware verifies the HTTP stream before finalizing the update.
-- Flasher Fleet mode reads the TX/gateway-owned peer cache over serial admin; a selected, commissioned USB gateway can explicitly scan remotes over encrypted LoRa maintenance-status packets and render a dense device table.
+- Flasher Fleet mode reads the TX/gateway-owned peer cache and progressively refreshes configured remotes over encrypted LoRa maintenance-status packets while Fleet or Monitor is observed.
 - Local maintenance uses Flasher over USB serial admin.
 
 ## Admin and Fleet Roadmap
+- Add **Find unlisted remotes** to Provision/recovery as an explicit address-range discovery action for same-key devices that are not in the gateway peer table. Keep discovery separate from normal Fleet refresh so an observed fleet never probes unused addresses continuously.
 - Extend Fleet inventory actions on top of the bounded maintenance-status packet for remaining remote WiFi/config/reboot actions that use the reported IP/connectivity state.
 - Add bulk OTA only after the one-device Flasher Fleet flow has enough hardware soak time.
 - Add MQTT admin request/reply topics for online device status/config actions with broker ACL guidance and non-retained secret handling.
 - Default versioned maintenance debug telemetry to disabled once an explicit device debug mode exists; for pre-release diagnostics it is currently enabled by default so Flasher/Fleet can collect heap, fragmentation, relay feedback, and uptime from remotes.
-- Expand gateway-mediated LoRa admin allowlist for remote status, identify, sensor config, WiFi provision/enable/disable, reboot, guarded factory reset, and OTA-pull trigger where the payload can fit safely.
+- Expand gateway-mediated LoRa admin allowlist for remaining remote status and WiFi configuration actions where the payload can fit safely.
 - Add staged gateway workflows for remote address, role, mode, fleet key, and shared radio parameter changes so a bad direct write cannot strand field devices.
 
 ## Sensors Roadmap (ESP8266 Track)
@@ -144,10 +145,6 @@
 - Broadcast WiFi provisioning (current feature; keep as anchor item).
 - Add fleet WiFi provisioning acknowledgements/status tracking (LoRa per-device ACK + optional WiFi join result) so UI can show `sent/acked/connected/failed` instead of broadcast-send-only feedback.
 - Add fleet-wide remote factory reset for `selected` or `all` devices, with `keep fleet key` option.
-- Add remote unit `Identify` action so a gateway can request a specific remote to flash its LED for physical identification.
-- Expose `Identify` from `Fleet > Devices` and via MQTT command path.
-- Keep the current Identify pattern reserved and consistent across firmware and Flasher UI: three fast flashes, pause, three fast flashes.
-- Verify remote Identify uses the same higher-priority temporary LED mode so it remains visually distinct from normal RSSI / link-state indication.
 - Add staged fleet key rotation workflow.
 - Add broadcast poll / discovery refresh.
 - Add fleet-wide schedule defaults push.

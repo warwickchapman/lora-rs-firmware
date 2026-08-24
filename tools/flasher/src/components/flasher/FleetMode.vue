@@ -39,9 +39,6 @@ export interface FleetServerStatus {
   isServerOn: boolean;
   serverFilename: string | null;
   serverUrl: string | null;
-  isLoraInventoryScanning: boolean;
-  scanDisabled: boolean;
-  scanLabel: string;
   statusLine: string;
   progressLabel: string;
   isServerStarting: boolean;
@@ -105,6 +102,8 @@ export interface FleetDisplayRow {
   wifi_connected?: boolean;
   pending_power_save_listen_only?: boolean;
   power_save_listen_only?: boolean;
+  power_save_active?: boolean;
+  identifyPending: boolean;
   ip?: string;
   relayLabel: string;
   inputLabel: string;
@@ -164,8 +163,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle-row-selection', address: number | string, selected: boolean): void;
-  (e: 'scan-start'): void;
-  (e: 'scan-cancel'): void;
   (e: 'server-start'): void;
   (e: 'server-stop'): void;
   (e: 'udp-logging-start'): void;
@@ -184,6 +181,7 @@ const emit = defineEmits<{
   (e: 'remote-flash', address: number | string): void;
   (e: 'remote-settings', address: number | string): void;
   (e: 'remote-reboot', address: number | string): void;
+  (e: 'remote-identify', address: number | string): void;
   (e: 'remote-view-logs', address: number | string): void;
   (e: 'remote-forget', address: number | string): void;
   (e: 'remote-factory-reset', address: number | string): void;
@@ -328,13 +326,6 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           <span :class="['rounded border px-2 py-1 text-[10px] font-bold', server.isServerOn ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
             Firmware server {{ server.isServerOn ? 'on' : 'off' }}
           </span>
-          <button
-            @click="server.isLoraInventoryScanning ? emit('scan-cancel') : emit('scan-start')"
-            :disabled="server.scanDisabled"
-            class="primary-btn m-0 h-10 px-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-          >
-            {{ server.scanLabel }}
-          </button>
           <button
             @click="server.isServerOn ? emit('server-stop') : emit('server-start')"
             :disabled="server.isServerStarting"
@@ -733,6 +724,14 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                     >
                       🔄 Reboot
+                    </button>
+                    <button
+                      @click="emit('remote-identify', device.address); activeDropdownAddress = null"
+                      :disabled="device.power_save_active || device.identifyPending"
+                      class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none disabled:opacity-40"
+                      :title="device.power_save_active ? 'Unavailable while Power Save is active' : (device.identifyPending ? 'Waiting for remote acknowledgement' : 'Flash the remote status LED')"
+                    >
+                      💡 Flash LED
                     </button>
                     <button
                       @click="emit('remote-view-logs', device.address); activeDropdownAddress = null"

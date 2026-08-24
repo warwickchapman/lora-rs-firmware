@@ -43,6 +43,10 @@ export function shouldClearScanStateOnTimeout(
   return (nowMs - scanActiveSinceMs) > scanStaleThresholdMs;
 }
 
+export function observedInventoryRefreshMode(discoveryActive: boolean): 'cache_only' | 'forced' {
+  return discoveryActive ? 'cache_only' : 'forced';
+}
+
 export function useFleetInventoryPolling(options: UseFleetInventoryPollingOptions) {
   const networkInventoryPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
   const networkInventoryPollMode = ref<'cache' | 'scan' | null>(null);

@@ -270,6 +270,19 @@ class NodeStateMachine {
     uint32_t deadline_ms = 0;
   };
   RemoteFactoryResetStatusRecord getRemoteFactoryResetStatus(uint8_t address) const;
+  struct RemoteIdentifyStatusRecord {
+    uint8_t dst = 0;
+    uint8_t stage = 0; // 0 idle, 1 sending, 2 awaiting_ack, 3 confirmed, 4 unconfirmed, 5 unavailable_power_save
+    uint8_t retry_count = 0;
+    uint8_t duration_seconds = 0;
+    uint32_t transaction_id = 0;
+    uint32_t deadline_ms = 0;
+  };
+  bool sendPeerIdentify(uint8_t dstAddress, uint32_t durationMs = kIdentifyLedDurationMs);
+  bool isIdentifyTxActive() const {
+    return identify_tx_.stage == 1 || identify_tx_.stage == 2;
+  }
+  RemoteIdentifyStatusRecord getRemoteIdentifyStatus(uint8_t address) const;
   bool sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey);
   bool hasPendingFleetKeyChange() const;
   bool consumePendingFleetKeyChange(char *keyDest, size_t keySize, uint8_t &src);
@@ -530,6 +543,17 @@ class NodeStateMachine {
   };
   RemoteFactoryResetStatusRecord factory_reset_tx_{};
   FactoryResetRxStatus factory_reset_rx_status_{};
+  struct IdentifyRxStatus {
+    bool valid = false;
+    bool pending = false;
+    uint8_t dst = 0;
+    uint8_t result = 0;
+    uint8_t duration_seconds = 0;
+    uint32_t transaction_id = 0;
+    uint32_t next_tx_ms = 0;
+  };
+  RemoteIdentifyStatusRecord identify_tx_{};
+  IdentifyRxStatus identify_rx_status_{};
 
   uint32_t ota_silence_until_ms_ = 0;
   bool ota_pull_active_ = false;
@@ -647,6 +671,8 @@ class NodeStateMachine {
   void tickPendingOtaPullControl(uint32_t now);
   void tickPendingFactoryResetControl(uint32_t now);
   void tickPendingFactoryResetStatus(uint32_t now);
+  void tickPendingIdentifyControl(uint32_t now);
+  bool tickPendingIdentifyStatus(uint32_t now);
   void tickPendingReaddressStatus(uint32_t now);
   bool tickPendingOtaPullAcceptedAck(uint32_t now);
   bool sendQueuedOtaPullControlFrame();
@@ -681,6 +707,7 @@ class NodeStateMachine {
   bool handleOtaPullStatusFrame(const ProtocolMessage &msg);
   bool handleFactoryResetFrame(const ProtocolMessage &msg);
   bool handleFactoryResetStatusFrame(const ProtocolMessage &msg);
+  bool handleIdentifyFrame(const ProtocolMessage &msg);
   bool handleReaddressStatusFrame(const ProtocolMessage &msg);
   bool handleRebootFrame(const ProtocolMessage &msg);
   bool handleSensorConfigFrame(const ProtocolMessage &msg);

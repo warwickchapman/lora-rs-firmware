@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref } from 'vue';
 import {
   useFleetInventoryPolling,
+  observedInventoryRefreshMode,
   shouldAutoLoadFleetCache,
   shouldClearScanStateOnTimeout,
 } from './useFleetInventoryPolling';
@@ -27,7 +28,7 @@ describe('useFleetInventoryPolling', () => {
       isLoraInventoryScanning,
       refreshGatewaySnapshot: refresh,
       fleetScanPollIntervalMs: 1200,
-      fleetCachePollIntervalMs: 5000
+      fleetCachePollIntervalMs: 10000
     });
   };
 
@@ -81,7 +82,7 @@ describe('useFleetInventoryPolling', () => {
     expect(polling.networkInventoryPollTimer.value).not.toBeNull();
     expect(polling.networkInventoryPollMode.value).toBe('cache');
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(refreshCalls).toEqual([
       { port: 'abc12345', background: true, source: 'fleet' }
     ]);
@@ -95,15 +96,15 @@ describe('useFleetInventoryPolling', () => {
     const polling = createPolling(slowRefresh);
     polling.startFleetCachePolling();
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(slowRefresh).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(20000);
     expect(slowRefresh).toHaveBeenCalledTimes(1);
 
     finishRefresh?.();
     await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(slowRefresh).toHaveBeenCalledTimes(2);
   });
 
@@ -147,6 +148,13 @@ describe('useFleetInventoryPolling', () => {
 
     polling.stopLoraInventoryPolling(true);
     expect(isLoraInventoryScanning.value).toBe(false);
+  });
+});
+
+describe('observedInventoryRefreshMode', () => {
+  it('forces one configured-peer refresh unless explicit discovery owns RF', () => {
+    expect(observedInventoryRefreshMode(false)).toBe('forced');
+    expect(observedInventoryRefreshMode(true)).toBe('cache_only');
   });
 });
 

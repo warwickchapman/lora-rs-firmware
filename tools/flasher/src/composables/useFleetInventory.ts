@@ -11,7 +11,6 @@ export interface UseFleetInventoryOptions {
   otaQueue: Ref<LoraInventoryDevice[]>;
   selectedFirmwareCandidateVersion: () => string | null;
   fleetClockMs: Ref<number>;
-  isLoraInventoryScanning: Ref<boolean>;
   canonicalChipId: (raw: string | undefined | null) => string;
   normalizeRole: (role: string | undefined | null) => string;
   parseVersion: (v: string) => ParsedVersion | null;
@@ -34,7 +33,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
   const loraInventoryScan = ref<LoraInventoryStatus['scan'] | null>(null);
   const loraCandidates = ref<LoraAdoptionCandidate[]>([]);
   const fleetRowHistory = ref<Record<number, any>>({});
-  const fleetForceScanCooldownUntilMs = ref(0);
   const telemetryCache = ref<Record<string, TelemetryCacheEntry>>({});
   const maintDeferredReason = ref<string | null>(null);
 
@@ -358,7 +356,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
         const ageMs = c.age_ms ?? 0;
         return ageMs < CANDIDATE_RECENT_IDENTITY_MS
           ? 'retrying identity'
-          : 'identity unavailable — rescan';
+          : 'identity unavailable — awaiting refresh';
       }
     }
     return c.state;
@@ -393,26 +391,10 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     return loraInventory.value.some(d => !!d.ip);
   });
 
-  const fleetForceScanCooldownRemainingMs = computed(() =>
-    Math.max(0, fleetForceScanCooldownUntilMs.value - options.fleetClockMs.value)
-  );
-
-  const fleetForceScanLabel = computed(() => {
-    if (options.isLoraInventoryScanning.value) return 'Stop scan';
-    const remaining = Math.ceil(fleetForceScanCooldownRemainingMs.value / 1000);
-    return remaining > 0 ? `Scan ${remaining}s` : 'Scan';
-  });
-
   const loraInventoryProgressLabel = computed(() => {
     const scan = loraInventoryScan.value;
-    if (!scan) return 'Idle';
-    if (scan.active) {
-      return 'Scanning configured remotes and same-key candidates...';
-    }
-    if (!scan.sent) {
-      return 'Observing fleet; missing inventory details hydrate progressively';
-    }
-    return `Scan finished, ${scan.sent || 0} probes sent; identity and WiFi details may still be pending`;
+    if (scan?.active) return 'Device discovery is running; normal inventory refresh is deferred';
+    return 'Observing fleet; operational state and inventory details refresh progressively';
   });
 
   const remotesAndCandidatesStatusLine = computed(() => {
@@ -526,10 +508,7 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       return;
     }
 
-    let recognizedUpdate = false;
-
     if (f === 'relay') {
-      recognizedUpdate = true;
       if (val === '' || val === null || val === undefined) {
         cacheEntry.device.relay_state = undefined;
       } else {
@@ -537,7 +516,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
     else if (f === 'input') {
-      recognizedUpdate = true;
       if (val === '' || val === null || val === undefined) {
         cacheEntry.device.input_state_known = false;
         cacheEntry.device.input_state = undefined;
@@ -546,25 +524,22 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
         cacheEntry.device.input_state_known = true;
       }
     }
-    else if (f === 'rssi' || f === 'uplink_rssi_dbm') { recognizedUpdate = true; cacheEntry.device.rssi = Number(val); }
+    else if (f === 'rssi' || f === 'uplink_rssi_dbm') { cacheEntry.device.rssi = Number(val); }
     else if (f === 'wifi_rssi_dbm') {
-      recognizedUpdate = true;
       cacheEntry.device.wifi_rssi_dbm = (val === '' || val === null || val === undefined || val === '0' || val === 0)
         ? undefined
         : Number(val);
     }
-    else if (f === 'fw_version') { recognizedUpdate = true; cacheEntry.device.fw_version = String(val); }
+    else if (f === 'fw_version') { cacheEntry.device.fw_version = String(val); }
     else if (f === 'chip_id') {
-      recognizedUpdate = true;
       const canonicalVal = options.canonicalChipId(String(val));
       cacheEntry.device.chip_id = canonicalVal;
       cacheEntry.chip_id = canonicalVal;
     }
-    else if (f === 'uptime_ms') { recognizedUpdate = true; cacheEntry.device.uptime_ms = Number(val); }
-    else if (f === 'role') { recognizedUpdate = true; cacheEntry.device.role = options.normalizeRole(String(val)); }
-    else if (f === 'mode') { recognizedUpdate = true; cacheEntry.device.mode = String(val); }
+    else if (f === 'uptime_ms') { cacheEntry.device.uptime_ms = Number(val); }
+    else if (f === 'role') { cacheEntry.device.role = options.normalizeRole(String(val)); }
+    else if (f === 'mode') { cacheEntry.device.mode = String(val); }
     else if (f === 'wifi_connected') {
-      recognizedUpdate = true;
       if (val === '' || val === null || val === undefined) {
         cacheEntry.device.wifi_connected_known = false;
         cacheEntry.device.wifi_connected = undefined;
@@ -574,23 +549,27 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
     else if (f === 'ip') {
-      recognizedUpdate = true;
       cacheEntry.device.ip = (val === '' || val === null || val === undefined || val === '0.0.0.0')
         ? undefined
         : String(val);
     }
     else if (f === 'power_save_listen_only') {
-      recognizedUpdate = true;
       cacheEntry.device.power_save_listen_only = val === '1' || val === 1 || val === true;
     }
     else if (f === 'power_save_active') {
-      recognizedUpdate = true;
       cacheEntry.device.power_save_active = val === '1' || val === 1 || val === true;
+    }
+    else if (f === 'last_seen_age_s') {
+      const ageSeconds = Number(val);
+      if (Number.isFinite(ageSeconds) && ageSeconds >= 0) {
+        if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
+        fleetRowHistory.value[address].lastTelemetryTimestamp =
+          options.fleetClockMs.value - (ageSeconds * 1000);
+      }
     }
     else if (f.startsWith('sensor/')) {
       const sensorParts = f.split('/');
       if (sensorParts.length >= 4) {
-        recognizedUpdate = true;
         const kind = sensorParts[1] as any;
         const instance = Number(sensorParts[2]) || 0;
         const prop = sensorParts[3];
@@ -607,10 +586,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
               return row;
             });
           }
-          if (payload.retain !== true) {
-            if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
-            fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
-          }
           return;
         }
         if (!cacheEntry.sensors[sKey]) {
@@ -625,13 +600,9 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
 
-    // A broker replay carries cached values but is not evidence that the
-    // remote just checked in. MQTT sets retain=false for live delivery to an
-    // existing subscription, so only live messages advance row freshness.
-    if (recognizedUpdate && payload.retain !== true) {
-      if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
-      fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
-    }
+    // The gateway may republish a whole cached peer row after one peer changes,
+    // so receipt time for relay, sensor, or metadata leaves is not remote
+    // freshness. Only the peer's explicit last_seen_age_s establishes Age.
 
     let dev = findInventoryRow(address, cacheEntry);
 
@@ -667,7 +638,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     loraInventoryScan.value = null;
     loraCandidates.value = [];
     fleetRowHistory.value = {};
-    fleetForceScanCooldownUntilMs.value = 0;
     telemetryCache.value = {};
     maintDeferredReason.value = null;
   }
@@ -677,7 +647,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     loraInventoryScan,
     loraCandidates,
     fleetRowHistory,
-    fleetForceScanCooldownUntilMs,
     classifyFleetRow,
     rowFreshness,
     candidateStateText,
@@ -686,8 +655,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     fleetRowStatusLabel,
     fleetRowStatusTitle,
     loraInventoryProgressLabel,
-    fleetForceScanCooldownRemainingMs,
-    fleetForceScanLabel,
     remotesAndCandidatesStatusLine,
     selectedLoraInventoryCount,
     hasAnyRemoteIp,

@@ -14,7 +14,7 @@ Use the desktop Flasher app for local setup and maintenance:
 
 - Flash firmware over USB serial.
 - Provision a TX/gateway and remotes.
-- Scan Fleet inventory through a USB-connected gateway.
+- Observe a progressively refreshed Fleet through a USB or MQTT gateway.
 - Monitor gateway/remote health.
 - Edit local device Settings over USB serial admin.
 - Trigger OTA pull for WiFi-connected devices from Fleet.
@@ -30,7 +30,7 @@ Normal local maintenance is performed with Flasher over USB serial.
    - For one transmitter and one or more receivers, provision the TX/gateway first, then remotes.
 5. In `Provision`, configure the TX/gateway with fleet key, role, address, and WiFi.
 6. Power factory remotes, scan from the gateway, and provision selected devices.
-7. In `Fleet`, scan the gateway peer cache and verify remotes appear with current identity/status.
+7. Open `Fleet` and verify that configured remotes appear immediately and progressively report current identity/status.
 8. In `Monitor`, confirm relay, input, WiFi, MQTT, heap, and link status.
 
 Recommended defaults:
@@ -65,7 +65,7 @@ Recovery is performed remotely over LoRa. To wake a node back to Full Power, sen
 ## Fleet
 Fleet uses a USB-connected TX/gateway as the source of truth.
 
-- `Scan Fleet` reads the gateway-owned peer cache and sends bounded LoRa probes.
+- Fleet reads the gateway-owned peer cache immediately and refreshes one configured remote at a time while the view remains open.
 - The gateway row is separate from remote rows.
 - Remote rows show identity, firmware, role, WiFi/IP, MQTT, sensors, uptime, RSSI, age, and OTA eligibility.
 - `Flash` on a remote row triggers OTA pull over WiFi; firmware bytes are not carried over LoRa.

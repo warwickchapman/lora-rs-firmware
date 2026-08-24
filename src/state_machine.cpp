@@ -1,6 +1,7 @@
 #include "state_machine.h"
 
 #include "factory_reset_transaction_helper.h"
+#include "identify_transaction_helper.h"
 #include "ota_handoff_helper.h"
 #include "readdress_transaction_helper.h"
 
@@ -70,6 +71,8 @@ constexpr uint8_t kFactoryResetKeepWifiFlag = 0x02;
 constexpr uint32_t kFactoryResetAckTimeoutMs = 4000;
 constexpr uint32_t kFactoryResetStatusSpacingMs = 250;
 constexpr uint8_t kFactoryResetStatusCopies = 2;
+constexpr uint32_t kIdentifyAckTimeoutMs = 4000;
+constexpr uint32_t kIdentifyRetrySpacingMs = 250;
 constexpr uint8_t kReaddressStatusCommitted = readdress_transaction::kResultCommitted;
 constexpr uint8_t kReaddressStatusSaveFailed = readdress_transaction::kResultSaveFailed;
 constexpr uint32_t kReaddressAckTimeoutMs = 4000;
@@ -303,6 +306,8 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
   factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
   factory_reset_rx_status_ = FactoryResetRxStatus{};
+  identify_tx_ = RemoteIdentifyStatusRecord{};
+  identify_rx_status_ = IdentifyRxStatus{};
   adoption_tx_ = RemoteAdoptionStatusRecord{};
   confirmed_adoption_pending_ = false;
   readdress_rx_status_ = ReaddressRxStatus{};
@@ -409,6 +414,8 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   for (RemoteOtaStatusRecord &status : remote_ota_status_) status = RemoteOtaStatusRecord{};
   factory_reset_tx_ = RemoteFactoryResetStatusRecord{};
   factory_reset_rx_status_ = FactoryResetRxStatus{};
+  identify_tx_ = RemoteIdentifyStatusRecord{};
+  identify_rx_status_ = IdentifyRxStatus{};
   if (adoption_tx_.stage != 3) {
     adoption_tx_ = RemoteAdoptionStatusRecord{};
     confirmed_adoption_pending_ = false;
@@ -1462,6 +1469,77 @@ void NodeStateMachine::tickPendingFactoryResetStatus(uint32_t now) {
   }
 }
 
+void NodeStateMachine::tickPendingIdentifyControl(uint32_t now) {
+  if (identify_tx_.stage == 2) {
+    if (static_cast<int32_t>(now - identify_tx_.deadline_ms) < 0) return;
+    if (identify_transaction::shouldRetryAfterTimeout(identify_tx_.retry_count)) {
+      identify_tx_.retry_count = 1;
+      identify_tx_.stage = 1;
+      identify_tx_.deadline_ms = now;
+      lrslog::event("identify_peer_retry", 0, identify_tx_.transaction_id,
+                    identify_tx_.dst);
+    } else {
+      identify_tx_.stage = 4;
+      lrslog::event("identify_peer_unconfirmed", 0, identify_tx_.transaction_id,
+                    identify_tx_.dst);
+    }
+    return;
+  }
+  if (identify_tx_.stage != 1 ||
+      static_cast<int32_t>(now - identify_tx_.deadline_ms) < 0 ||
+      !radioTxBudgetAvailable()) {
+    return;
+  }
+
+  uint8_t payload[12]{};
+  payload[0] = identify_transaction::kMagic0;
+  payload[1] = identify_transaction::kMagic1;
+  payload[2] = identify_transaction::kOpRequest;
+  payload[3] = static_cast<uint8_t>(identify_tx_.transaction_id & 0xFFU);
+  payload[4] = static_cast<uint8_t>((identify_tx_.transaction_id >> 8U) & 0xFFU);
+  payload[5] = static_cast<uint8_t>((identify_tx_.transaction_id >> 16U) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((identify_tx_.transaction_id >> 24U) & 0xFFU);
+  payload[7] = identify_tx_.duration_seconds;
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::Identify, last_counter_, runtime_.local_address,
+                       identify_tx_.dst, payload)) {
+    identify_tx_.deadline_ms = now + kIdentifyRetrySpacingMs;
+    return;
+  }
+  markRadioTxSentThisTick();
+  last_tx_ms_ = now;
+  identify_tx_.stage = 2;
+  identify_tx_.deadline_ms = now + kIdentifyAckTimeoutMs;
+}
+
+bool NodeStateMachine::tickPendingIdentifyStatus(uint32_t now) {
+  if (!identify_rx_status_.pending) return false;
+  if (static_cast<int32_t>(now - identify_rx_status_.next_tx_ms) < 0) return true;
+  if (!radioTxBudgetAvailable()) return true;
+
+  uint8_t payload[12]{};
+  payload[0] = identify_transaction::kMagic0;
+  payload[1] = identify_transaction::kMagic1;
+  payload[2] = identify_rx_status_.result;
+  payload[3] = static_cast<uint8_t>(identify_rx_status_.transaction_id & 0xFFU);
+  payload[4] = static_cast<uint8_t>((identify_rx_status_.transaction_id >> 8U) & 0xFFU);
+  payload[5] = static_cast<uint8_t>((identify_rx_status_.transaction_id >> 16U) & 0xFFU);
+  payload[6] = static_cast<uint8_t>((identify_rx_status_.transaction_id >> 24U) & 0xFFU);
+  payload[7] = identify_rx_status_.duration_seconds;
+
+  last_counter_++;
+  if (!radio_->sendRaw(MessageType::Identify, last_counter_, runtime_.local_address,
+                       identify_rx_status_.dst, payload)) {
+    identify_rx_status_.next_tx_ms = now + kIdentifyRetrySpacingMs;
+    return true;
+  }
+  markRadioTxSentThisTick();
+  last_tx_ms_ = now;
+  identify_rx_status_.pending = false;
+  return true;
+}
+
 void NodeStateMachine::tickPendingReaddressStatus(uint32_t now) {
   if (!readdress_rx_status_.active) return;
   if (static_cast<int32_t>(now - readdress_rx_status_.next_tx_ms) < 0) return;
@@ -1900,6 +1978,35 @@ void NodeStateMachine::completeConfirmedPeerFactoryReset(uint32_t transactionId,
 NodeStateMachine::RemoteFactoryResetStatusRecord NodeStateMachine::getRemoteFactoryResetStatus(uint8_t address) const {
   if (factory_reset_tx_.dst != address) return RemoteFactoryResetStatusRecord{};
   return factory_reset_tx_;
+}
+
+bool NodeStateMachine::sendPeerIdentify(uint8_t dstAddress, uint32_t durationMs) {
+  if (!runtime_.role_tx || radio_ == nullptr || dstAddress == 0 || dstAddress == 255) return false;
+  if (hasPendingPeerControl() || isGroupActive() || hasPendingManagementTransaction()) return false;
+
+  uint32_t durationSeconds = (durationMs + 999U) / 1000U;
+  if (durationSeconds < identify_transaction::kMinDurationSeconds) {
+    durationSeconds = identify_transaction::kMinDurationSeconds;
+  }
+  if (durationSeconds > identify_transaction::kMaxDurationSeconds) {
+    durationSeconds = identify_transaction::kMaxDurationSeconds;
+  }
+  uint32_t transactionId = millis() ^ last_counter_ ^
+                           (static_cast<uint32_t>(dstAddress) << 24U);
+  if (transactionId == 0) transactionId = 1;
+
+  identify_tx_ = RemoteIdentifyStatusRecord{};
+  identify_tx_.dst = dstAddress;
+  identify_tx_.duration_seconds = static_cast<uint8_t>(durationSeconds);
+  identify_tx_.transaction_id = transactionId;
+  identify_tx_.stage = 1;
+  identify_tx_.deadline_ms = millis();
+  return true;
+}
+
+NodeStateMachine::RemoteIdentifyStatusRecord NodeStateMachine::getRemoteIdentifyStatus(uint8_t address) const {
+  if (identify_tx_.dst != address) return RemoteIdentifyStatusRecord{};
+  return identify_tx_;
 }
 
 bool NodeStateMachine::isAuthorizedMqttController(uint8_t src) const {
@@ -3230,7 +3337,7 @@ bool NodeStateMachine::hasPendingPeerControl() const {
 
 bool NodeStateMachine::hasPendingManagementTransaction() const {
   return (factory_reset_tx_.stage >= 1 && factory_reset_tx_.stage <= 3) ||
-         ota_pull_tx_.active || isAdoptionTxActive();
+         ota_pull_tx_.active || isAdoptionTxActive() || isIdentifyTxActive();
 }
 
 void NodeStateMachine::tickOperationalRefresh(uint32_t now) {
@@ -3390,6 +3497,7 @@ void NodeStateMachine::tickTransmitter() {
   tickPendingFactoryResetControl(now);
   tickPendingOtaPullControl(now);
   if (isAdoptionTxActive()) tickCandidatesAndAdoption(now);
+  tickPendingIdentifyControl(now);
   if (hasPendingManagementTransaction()) return;
 
   tickOperationalRefresh(now);
@@ -3474,6 +3582,7 @@ void NodeStateMachine::tickReceiver() {
   tickPendingReaddressStatus(now);
   if (readdress_rx_status_.active) return;
   if (tickPendingOtaPullAcceptedAck(now)) return;
+  if (tickPendingIdentifyStatus(now)) return;
   if (tickDeferredObservability()) return;
   sendSensorStatePush(now);
 }
@@ -3546,6 +3655,7 @@ void NodeStateMachine::tickReceive() {
   const bool isOtaPullStatus = (msg.type == MessageType::OtaPullStatus);
   const bool isFactoryReset = (msg.type == MessageType::FactoryReset);
   const bool isFactoryResetStatus = (msg.type == MessageType::FactoryResetStatus);
+  const bool isIdentify = (msg.type == MessageType::Identify);
   const bool isReaddress = (msg.type == MessageType::Readdress);
   const bool isReaddressStatus = (msg.type == MessageType::ReaddressStatus);
   const bool isMaintenance = (msg.type == MessageType::MaintenanceRequest ||
@@ -3577,7 +3687,7 @@ void NodeStateMachine::tickReceive() {
   const bool isFleetKeyControl = (msg.type == MessageType::FleetKeyControl);
   if ((isUdpLogControl || isOtaPullControl || isOtaPullStatus || isFactoryReset ||
        isFactoryResetStatus || isReaddressStatus || isReboot || isSensorConfig ||
-       isFleetKeyControl) && msg.dst != runtime_.local_address) {
+       isFleetKeyControl || isIdentify) && msg.dst != runtime_.local_address) {
     lrslog::event("rx_wrong_address", msg.rssi, msg.counter, msg.relay_state);
     return;
   }
@@ -3618,6 +3728,8 @@ void NodeStateMachine::tickReceive() {
       // endpoint; the device still downloads the binary over WiFi.
     } else if (msg.type == MessageType::FactoryReset) {
       // Same-key factory reset is allowed.
+    } else if (msg.type == MessageType::Identify) {
+      // Same-key targeted LED identification is allowed.
     } else if (msg.type == MessageType::Reboot) {
       // Same-key remote reboot.
     } else if (msg.type == MessageType::SensorConfig) {
@@ -3632,7 +3744,8 @@ void NodeStateMachine::tickReceive() {
 
   const bool trustedReplaySource = isTrustedReplaySource(msg.src, isWifiProvision || isWifiControl || isUdpLogControl ||
                                                                   isOtaPullControl || isFactoryReset || isFactoryResetStatus || isMaintenance ||
-                                                                  isReboot || isSensorConfig || isFleetKeyControl || isReaddress || isReaddressStatus);
+                                                                  isReboot || isSensorConfig || isFleetKeyControl || isReaddress || isReaddressStatus ||
+                                                                  isIdentify);
   if (!shouldAcceptReplayAndUpdate(msg, trustedReplaySource)) {
     return;
   }
@@ -3673,6 +3786,10 @@ void NodeStateMachine::tickReceive() {
   }
   if (isFactoryResetStatus) {
     handleFactoryResetStatusFrame(msg);
+    return;
+  }
+  if (isIdentify) {
+    handleIdentifyFrame(msg);
     return;
   }
   if (isReaddressStatus) {
@@ -4387,6 +4504,64 @@ bool NodeStateMachine::handleFactoryResetStatusFrame(const ProtocolMessage &msg)
   factory_reset_tx_.stage = 3;
   lrslog::event("factory_reset_peer_confirming", msg.rssi, transactionId,
                 factory_reset_tx_.dst);
+  return true;
+}
+
+bool NodeStateMachine::handleIdentifyFrame(const ProtocolMessage &msg) {
+  const uint8_t *payload = msg.raw_payload;
+  if (payload[0] != identify_transaction::kMagic0 ||
+      payload[1] != identify_transaction::kMagic1) {
+    return false;
+  }
+  const uint8_t op = payload[2];
+  const uint32_t transactionId = static_cast<uint32_t>(payload[3]) |
+                                 (static_cast<uint32_t>(payload[4]) << 8U) |
+                                 (static_cast<uint32_t>(payload[5]) << 16U) |
+                                 (static_cast<uint32_t>(payload[6]) << 24U);
+  const uint8_t durationSeconds = payload[7];
+  if (transactionId == 0 || !identify_transaction::validDuration(durationSeconds)) {
+    return false;
+  }
+
+  if (runtime_.role_tx) {
+    if (identify_tx_.stage != 2 ||
+        !identify_transaction::matchesStatus(
+            identify_tx_.dst, msg.src, identify_tx_.transaction_id, transactionId,
+            identify_tx_.duration_seconds, durationSeconds, op)) {
+      lrslog::event("identify_status_ignored", msg.rssi, transactionId, msg.src);
+      return false;
+    }
+    identify_tx_.stage = op == identify_transaction::kResultAccepted ? 3 : 5;
+    lrslog::event(op == identify_transaction::kResultAccepted
+                      ? "identify_peer_confirmed"
+                      : "identify_peer_power_save",
+                  msg.rssi, transactionId, msg.src);
+    return true;
+  }
+
+  if (op != identify_transaction::kOpRequest) return false;
+  if (identify_rx_status_.valid && identify_rx_status_.dst == msg.src &&
+      identify_rx_status_.transaction_id == transactionId &&
+      identify_rx_status_.duration_seconds == durationSeconds) {
+    identify_rx_status_.pending = true;
+    identify_rx_status_.next_tx_ms = millis() + runtime_utils::kGroupAckLeadMs;
+    lrslog::event("identify_rx_duplicate", msg.rssi, transactionId, msg.src);
+    return true;
+  }
+
+  identify_rx_status_ = IdentifyRxStatus{};
+  identify_rx_status_.valid = true;
+  identify_rx_status_.pending = true;
+  identify_rx_status_.dst = msg.src;
+  identify_rx_status_.transaction_id = transactionId;
+  identify_rx_status_.duration_seconds = durationSeconds;
+  identify_rx_status_.result = power_save_active_
+      ? identify_transaction::kResultPowerSave
+      : identify_transaction::kResultAccepted;
+  identify_rx_status_.next_tx_ms = millis() + runtime_utils::kGroupAckLeadMs;
+  if (!power_save_active_) {
+    triggerIdentify(static_cast<uint32_t>(durationSeconds) * 1000U);
+  }
   return true;
 }
 

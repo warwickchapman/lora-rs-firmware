@@ -68,9 +68,10 @@ Minimum required settings:
 
 Fleet workflow:
 - `Fleet > Manage > LoRa`: discovery + provisioning for factory devices.
-- `Fleet > Devices`: peer scan defaults to `1..32` (manual max `254`) and shows cached known peers immediately.
+- `Fleet > Devices`: configured remotes appear from the gateway cache immediately and refresh progressively while Fleet is open.
 - `Fleet > Manage > WiFi`: send WiFi credentials to all known peers or target a single peer with optional override credentials.
-- Selecting an available USB or MQTT gateway activates Fleet automatically. Flasher reads the compact gateway summary, then hydrates one bounded peer detail at a time; no separate Load step is required.
+- Selecting an available USB or MQTT gateway activates Fleet automatically. Flasher reads the compact gateway summary, then refreshes one configured peer at a time at a responsible RF cadence; no separate Load or Scan step is required.
+- A remote's **Actions > Flash LED** asks the selected USB or MQTT gateway to run the normal three-flash/pause/three-flash identification pattern on that remote. Flasher reports **acknowledged; flashing**, **not confirmed**, or **unavailable in Power Save**; an acknowledgement confirms that the remote accepted the request, not that an operator physically saw the LED.
 
 Addressing and mode/role together define effective behavior and control ownership.
 

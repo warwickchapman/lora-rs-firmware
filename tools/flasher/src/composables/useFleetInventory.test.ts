@@ -7,7 +7,6 @@ describe('useFleetInventory', () => {
   let otaQueue = ref<LoraInventoryDevice[]>([]);
   let selectedFwCandidateVersion = ref<string | null>('1.0.0');
   let fleetClockMs = ref(Date.now());
-  let isLoraInventoryScanning = ref(false);
 
   const normalizeChipId = (raw: string | undefined | null) => {
     if (!raw) return '';
@@ -59,7 +58,6 @@ describe('useFleetInventory', () => {
       otaQueue,
       selectedFirmwareCandidateVersion: () => selectedFwCandidateVersion.value,
       fleetClockMs,
-      isLoraInventoryScanning,
       canonicalChipId,
       normalizeRole,
       parseVersion,
@@ -352,11 +350,11 @@ describe('useFleetInventory', () => {
 
     // Test loraInventoryProgressLabel
     fleet.loraInventoryScan.value = null;
-    expect(fleet.loraInventoryProgressLabel.value).toBe('Idle');
+    expect(fleet.loraInventoryProgressLabel.value).toBe('Observing fleet; operational state and inventory details refresh progressively');
     fleet.loraInventoryScan.value = { active: true, start_address: 1, end_address: 10, next_address: 1, sent: 0, now_ms: 0 };
-    expect(fleet.loraInventoryProgressLabel.value).toBe('Scanning configured remotes and same-key candidates...');
+    expect(fleet.loraInventoryProgressLabel.value).toBe('Device discovery is running; normal inventory refresh is deferred');
     fleet.loraInventoryScan.value = { active: false, start_address: 1, end_address: 10, next_address: 10, sent: 8, now_ms: 0 };
-    expect(fleet.loraInventoryProgressLabel.value).toBe('Scan finished, 8 probes sent; identity and WiFi details may still be pending');
+    expect(fleet.loraInventoryProgressLabel.value).toBe('Observing fleet; operational state and inventory details refresh progressively');
   });
 
   it('caches MQTT telemetry when no row exists, merges it on mergeInventoryRows, clears it on clear, and ignores commands', () => {
@@ -539,10 +537,10 @@ describe('useFleetInventory', () => {
     expect(fleet.loraInventory.value[0].wifi_rssi_dbm).toBeUndefined(); // history cleared
   });
 
-  it('MQTT cache refresh takes precedence over an older inventory age', () => {
+  it('MQTT cached values do not overwrite an inventory age', () => {
     const fleet = createFleet();
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 1000 }]);
-    // Live MQTT telemetry is newer than the inventory snapshot and resets Age.
+    // Cached field publication updates RSSI but is not remote freshness.
     fleet.applyTelemetryUpdate({
       gateway_id: 'lrs-00001234',
       address: 1,
@@ -552,11 +550,11 @@ describe('useFleetInventory', () => {
     // Trigger merge which invokes applyCacheToRow
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 1500 }]);
     const row = fleet.loraInventory.value[0];
-    expect(row.age_ms).toBe(0); // live MQTT telemetry is newer than the inventory snapshot
+    expect(row.age_ms).toBe(1000);
     expect(row.rssi).toBe(-50); // cache applied
   });
 
-  it('applyTelemetryUpdate updates lastTelemetryTimestamp for non-retained updates', () => {
+  it('does not treat a live cached-value publication as a remote check-in', () => {
     const fleet = createFleet();
     fleetClockMs.value = 10000;
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
@@ -568,7 +566,7 @@ describe('useFleetInventory', () => {
       value: '1',
       retain: false
     });
-    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(10000);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
   });
 
   it('applyTelemetryUpdate does not treat retained broker replay as a fresh check-in', () => {
@@ -603,7 +601,7 @@ describe('useFleetInventory', () => {
     expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 12000)).toBe(9000);
   });
 
-  it('keeps a newer live MQTT timestamp instead of reusing an older inventory age', () => {
+  it('uses each peer last_seen_age_s as MQTT freshness authority', () => {
     const fleet = createFleet();
     fleetClockMs.value = 1000000;
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 160000 }]);
@@ -612,16 +610,30 @@ describe('useFleetInventory', () => {
     fleet.applyTelemetryUpdate({
       gateway_id: 'lrs-00001234',
       address: 1,
-      field: 'relay',
-      value: '1',
+      field: 'last_seen_age_s',
+      value: '5',
       retain: false
     });
 
     fleetClockMs.value = 1205000;
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 160000 }]);
 
-    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(1200000);
-    expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 1205000)).toBe(5000);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(1195000);
+    expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 1205000)).toBe(10000);
+  });
+
+  it('keeps MQTT Age independent for each remote', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 100000;
+    fleet.mergeInventoryRows([
+      { address: 1, chip_id: 'abcde123' },
+      { address: 2, chip_id: 'abcde124' }
+    ]);
+    fleet.applyTelemetryUpdate({ gateway_id: 'lrs-00001234', address: 1, field: 'last_seen_age_s', value: '7', retain: false });
+    fleet.applyTelemetryUpdate({ gateway_id: 'lrs-00001234', address: 2, field: 'last_seen_age_s', value: '41', retain: false });
+
+    expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 102000)).toBe(9000);
+    expect(calculateDynamicAgeMs(fleet.loraInventory.value[1], fleet.fleetRowHistory.value[2], 102000)).toBe(43000);
   });
 
   it('rebases Age when a newer serial peer detail snapshot arrives', () => {
@@ -640,7 +652,7 @@ describe('useFleetInventory', () => {
     expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(19500);
   });
 
-  it('applyTelemetryUpdate updates lastTelemetryTimestamp for non-retained sensor clears', () => {
+  it('does not treat sensor value publications or clears as remote check-ins', () => {
     const fleet = createFleet();
     fleetClockMs.value = 10000;
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
@@ -651,7 +663,7 @@ describe('useFleetInventory', () => {
       value: '22',
       retain: false
     });
-    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(10000);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
 
     fleetClockMs.value = 20000;
     fleet.applyTelemetryUpdate({
@@ -661,7 +673,7 @@ describe('useFleetInventory', () => {
       value: '', // clear
       retain: false
     });
-    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(20000);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
   });
 
   it('remotesAndCandidatesStatusLine reflects maintDeferredReason', () => {

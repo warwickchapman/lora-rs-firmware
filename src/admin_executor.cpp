@@ -1087,6 +1087,81 @@ void AdminExecutor::handleIdentify(JsonDocument &doc, ResponseWriter writer) {
            static_cast<unsigned long>(durationMs));
 }
 
+void AdminExecutor::handleRemoteIdentify(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_identify", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_identify", "runtime_unavailable", id, writer);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | doc["target_address"] | 0;
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
+    sendError("remote_identify", "invalid_address", id, writer);
+    return;
+  }
+  uint32_t durationMs = doc["duration_ms"] | NodeStateMachine::kIdentifyLedDurationMs;
+  if (durationMs < 1000U) durationMs = 1000U;
+  if (durationMs > 30000U) durationMs = 30000U;
+  if (sm_->isFactoryResetTxActive() || sm_->isOtaPullTxActive() ||
+      sm_->isAdoptionTxActive() || sm_->isIdentifyTxActive()) {
+    sendError("remote_identify", "gateway_busy", id, writer);
+    return;
+  }
+  if (!sm_->sendPeerIdentify(static_cast<uint8_t>(rawAddr), durationMs)) {
+    sendError("remote_identify", "send_failed", id, writer);
+    return;
+  }
+
+  const NodeStateMachine::RemoteIdentifyStatusRecord rec =
+      sm_->getRemoteIdentifyStatus(static_cast<uint8_t>(rawAddr));
+  JsonDocument out;
+  out["cmd"] = "remote_identify";
+  if (id[0] != '\0') out["id"] = id;
+  out["addr"] = rawAddr;
+  out["duration_ms"] = static_cast<uint32_t>(rec.duration_seconds) * 1000U;
+  out["transaction_id"] = rec.transaction_id;
+  out["stage"] = "sending";
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleRemoteIdentifyStatus(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("remote_identify_status", "auth_failed", id, writer);
+    return;
+  }
+  if (sm_ == nullptr) {
+    sendError("remote_identify_status", "runtime_unavailable", id, writer);
+    return;
+  }
+  const int rawAddr = doc["addr"] | doc["address"] | 0;
+  if (rawAddr < runtime_utils::kMinAddress || rawAddr > runtime_utils::kMaxAddress) {
+    sendError("remote_identify_status", "invalid_address", id, writer);
+    return;
+  }
+
+  const NodeStateMachine::RemoteIdentifyStatusRecord rec =
+      sm_->getRemoteIdentifyStatus(static_cast<uint8_t>(rawAddr));
+  const char *stage = "idle";
+  if (rec.stage == 1) stage = "sending";
+  else if (rec.stage == 2) stage = "awaiting_ack";
+  else if (rec.stage == 3) stage = "confirmed";
+  else if (rec.stage == 4) stage = "unconfirmed";
+  else if (rec.stage == 5) stage = "unavailable_power_save";
+
+  JsonDocument out;
+  out["cmd"] = "remote_identify_status";
+  if (id[0] != '\0') out["id"] = id;
+  out["addr"] = rec.dst;
+  out["duration_ms"] = static_cast<uint32_t>(rec.duration_seconds) * 1000U;
+  out["transaction_id"] = rec.transaction_id;
+  out["stage"] = stage;
+  sendOk(out, writer);
+}
+
 void AdminExecutor::handleStartLoraInventory(JsonDocument &doc, ResponseWriter writer) {
   const char *id = requestId(doc);
   if (!requireAdmin(doc)) {
@@ -1667,7 +1742,7 @@ void AdminExecutor::handleRemoteOtaPull(JsonDocument &doc, ResponseWriter writer
   }
 
   if (sm_->isOtaPullTxActive() || sm_->isFactoryResetTxActive() ||
-      sm_->isAdoptionTxActive()) {
+      sm_->isAdoptionTxActive() || sm_->isIdentifyTxActive()) {
     sendError("remote_ota_pull", "gateway_busy", id, writer);
     return;
   }
@@ -1910,7 +1985,7 @@ void AdminExecutor::handleRemoteFactoryReset(JsonDocument &doc, ResponseWriter w
   const bool keepWifi = doc["keep_wifi_credentials"] | doc["keep_wifi"] | false;
 
   if (sm_->isFactoryResetTxActive() || sm_->isOtaPullTxActive() ||
-      sm_->isAdoptionTxActive()) {
+      sm_->isAdoptionTxActive() || sm_->isIdentifyTxActive()) {
     sendError("remote_factory_reset", "gateway_busy", id, writer);
     return;
   }
@@ -2211,6 +2286,14 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     handleIdentify(doc, writer);
     return;
   }
+  if (strcmp(cmd, "remote_identify") == 0) {
+    handleRemoteIdentify(doc, writer);
+    return;
+  }
+  if (strcmp(cmd, "remote_identify_status") == 0) {
+    handleRemoteIdentifyStatus(doc, writer);
+    return;
+  }
 
   if (strcmp(cmd, "start_lora_inventory") == 0) {
     handleStartLoraInventory(doc, writer);
@@ -2436,7 +2519,7 @@ void AdminExecutor::handleAdoptCandidate(JsonDocument &doc, ResponseWriter write
   }
 
   if (sm_->isAdoptionTxActive() || sm_->isFactoryResetTxActive() ||
-      sm_->isOtaPullTxActive()) {
+      sm_->isOtaPullTxActive() || sm_->isIdentifyTxActive()) {
     sendError(cmd, "gateway_busy", id, writer);
     return;
   }

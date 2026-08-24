@@ -7,7 +7,6 @@ describe('useFleetInventory Age Ticking', () => {
   let otaQueue = ref<LoraInventoryDevice[]>([]);
   let selectedFwCandidateVersion = ref<string | null>('1.0.0');
   let fleetClockMs = ref(1000000);
-  let isLoraInventoryScanning = ref(false);
 
   const dummyHelpers = {
     canonicalChipId: (id: string | null | undefined) => id || '',
@@ -21,7 +20,6 @@ describe('useFleetInventory Age Ticking', () => {
       otaQueue,
       selectedFirmwareCandidateVersion: () => selectedFwCandidateVersion.value,
       fleetClockMs,
-      isLoraInventoryScanning,
       ...dummyHelpers,
       activeGatewayId: () => 'gateway-1'
     });

@@ -21,6 +21,7 @@ enum class MessageType : uint8_t {
   OtaPullStatus = 'N',
   FactoryReset = 'E',
   FactoryResetStatus = 'F',
+  Identify = 'I',
   Provisioning = 'V',
   Reboot = 'B',
   SensorConfig = 'K',

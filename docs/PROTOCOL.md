@@ -29,6 +29,7 @@ Packed fields:
 - `OtaPullStatus` (`'N'`)
 - `FactoryReset` (`'E'`)
 - `FactoryResetStatus` (`'F'`)
+- `Identify` (`'I'`)
 - `Readdress` (`'D'`)
 - `ReaddressStatus` (`'G'`)
 - `Provisioning` (`'V'`)
@@ -67,6 +68,7 @@ Notes:
 - Internet-connected nodes fetch NTP time and include `unix_time_s` in outbound frames.
 - Peers accept `unix_time_s` for local sync only when `flags.bit0` (`time_authoritative`) is set.
 - Some message types (`WifiProvision`, `FactoryReset`) reuse the same encrypted 12-byte payload slot with custom byte layouts.
+- `Identify` also uses the raw 12-byte payload while retaining the normal encryption, authentication, addressing, and replay protection.
 - Firmware implements this via a raw-payload send path (`sendRaw`) that preserves the same frame size, crypto, MAC, and replay protection.
 
 ## Crypto
@@ -125,7 +127,7 @@ Otherwise packet is dropped and logged.
 - RX may also send unsolicited `PollResponse` (push-on-change mode) to report local input changes without an explicit poll.
 - RX nodes with enabled sensors may send unsolicited `MaintenanceStatus` sensor pages to the gateway at a conservative 60-second operational cadence. This is sensor-state reporting, not a gateway-owned diagnostic sweep.
 - When gateway MQTT remote polling is enabled, each remote `PollResponse` carries current relay/input state. A remote with enabled temperature or tank sensors then queues the same bounded sensor pages used by an explicit Fleet peer refresh. This does not add diagnostics, heap data, or a second sensor protocol.
-- TX/gateway firmware must not run perpetual maintenance sweeps for Fleet/Monitor freshness. Fleet scans, diagnostics, and inventory enrichment are explicit low-priority observability work and must yield to relay/input control.
+- TX/gateway firmware must not run headless maintenance sweeps for Fleet/Monitor freshness. Inventory enrichment runs only while Fleet or Monitor is explicitly observed; address-range discovery and diagnostics remain operator-initiated. All observability work must yield to relay/input control.
 - TX applies relay state from a command ACK immediately. A missed command ACK invalidates that relay state until a later ACK, normal status, or identity page confirms it; Fleet must show this as unknown rather than `Off`.
 - TX accepts ACK only when the embedded acknowledged counter matches the currently pending command.
 
@@ -169,6 +171,10 @@ dry-contact state in firmware or Fleet cache.
 - The gateway permits one reset transaction at a time and retransmits the same transaction once when confirmation is absent. Each RF attempt uses a fresh packet counter while retaining the same reset transaction ID.
 - After validating the request, the remote persists the requested reset configuration. It sends two staggered `FactoryResetStatus` (`'F'`) frames under the current Fleet Key before rebooting. The status carries `committed` or `save_failed`, echoes the option flags, and echoes the transaction ID.
 - A gateway accepts reset status only when source address, transaction ID, flags, and live awaiting transaction all match. A confirmed full reset removes and saves the peer record; a keep-Fleet reset retains it. Missing or invalid confirmation never removes the peer.
+- `Identify` (`'I'`) is a targeted, authenticated request/response transaction. Payload `b0..b1` is the Identify magic, `b2` is `request`, `accepted`, or `power_save_unavailable`, `b3..b6` is the 32-bit transaction ID, and `b7` is the requested duration in seconds (`1..30`).
+- The gateway permits one Identify transaction at a time, retries the identical logical request once after a four-second timeout, and accepts only a status matching source, transaction ID, and duration. A remote starts the existing three-flash/pause/three-flash pattern once; a duplicate request resends status without restarting the pattern. An active Power Save remote returns `power_save_unavailable` and does not light the LED.
+- Identify is management traffic: relay/group control and transactional relay retries are serviced first, while routine operational polling, maintenance, scans, and diagnostics wait for the short Identify transaction to settle.
+- Host control uses the password-gated `remote_identify` command with `addr` and optional `duration_ms`; the response supplies the effective duration and `transaction_id`. The host then polls `remote_identify_status` for that address and accepts a terminal result only when both address and transaction ID match. These compact commands use the normal serial-admin or MQTT-admin gateway transport; MQTT does not add a separate Identify topic or RF mechanism.
 - `Readdress` (`'D'`) starts one correlated adoption transaction. Payload `b0..b2` carries the 24-bit chip ID, `b3` the assigned address, and `b4..b7` the 32-bit transaction ID. The gateway permits one adoption at a time and retries the same transaction once.
 - Manual Forget changes gateway state only: after the peer record is removed and saved, its known chip ID is copied into the bounded volatile candidate table. The remote retains its Fleet Key, address, controller address, configuration, and live replay counter. A gateway reboot loses this candidate hint and normal same-key maintenance identity discovery is used again.
 - The remote persists and applies the assigned address before sending two staggered `ReaddressStatus` (`'G'`) frames. Status echoes chip ID, address, and transaction ID in `b0..b7`; `b8` is `committed` or `save_failed`. Duplicate and already-applied requests resend the stored result without another flash write.
@@ -177,7 +183,7 @@ dry-contact state in firmware or Fleet cache.
 - `SensorConfig` (`'K'`) carries a compact magic-value command payload that updates remote DS18B20 and tank-sensor enablement.
 - `FleetKeyControl` (`'Z'`) performs targeted same-key Fleet Key rollover using segmented `start`, `data`, and `commit` packets. The old fleet key authenticates the rollover command; the target switches to the new key only after a complete transfer and commit validation.
 
-- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, `FactoryReset`, `FactoryResetStatus`, and `ReaddressStatus` must be addressed to the target device's LoRa address. `Readdress` remains chip-scoped so an exact retry still reaches a remote after it has committed its new address.
+- `Reboot`, `SensorConfig`, `FleetKeyControl`, `OtaPullControl`, `UdpLogControl`, `FactoryReset`, `FactoryResetStatus`, `Identify`, and `ReaddressStatus` must be addressed to the target device's LoRa address. `Readdress` remains chip-scoped so an exact retry still reaches a remote after it has committed its new address.
 - Broadcast is reserved for controlled provisioning-style flows. Do not use broadcast for destructive or lockout-prone maintenance commands.
 - Operators should verify the target identity in Flasher Fleet before sending reboot, sensor config, Fleet Key, OTA, factory-reset, or UDP log control commands.
 
@@ -219,7 +225,7 @@ Release firmware also carries a release-owned Flasher compatibility revision. Se
 
 Gateway-mediated remote OTA requires digest-capable firmware on both the USB gateway and target remote; older one-packet OTA trigger firmware will not interoperate with the SHA256-segmented trigger.
 
-Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset`/`FactoryResetStatus`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
+Within the current 12-byte protocol generation, `WifiProvision`/`WifiControl`/`OtaPullControl`/`FactoryReset`/`FactoryResetStatus`/`Identify`/`Reboot`/`SensorConfig`/`FleetKeyControl` do not change frame size; they only define additional message types and alternate payload semantics.
 
 Any future change that changes packet size, encrypted payload layout, replay behavior, addressing rules, or Fleet Key derivation is a breaking protocol change and should use a major version boundary or explicit protocol-version signaling.
 
@@ -285,9 +291,9 @@ To allow remote gateway control over LAN or cloud networks:
   - The gateway must not build a complete host-facing table in firmware. The host is responsible for progressively assembling Fleet/Monitor views from compact summary responses, retained telemetry, and explicit one-peer/detail reads.
   - Gateway command responses must remain small enough to avoid heap fragmentation, large temporary `String` buffers, and long serial/MQTT stalls.
   - `lora_inventory_status` returns only the Fleet seed list (`address`, `role`, `mode`, and `chip_id` when cached) plus scan/candidate metadata. It must not serialize full telemetry for every peer.
-  - Fleet/Monitor cache reads renew a short `observe_operational_state` lease. While a view is active, Flasher progressively reads one cached peer detail at a time and requests maintenance once per session for each peer still missing Identity or Version data. This bounded initial hydration is identical over Serial and MQTT; it does not become a recurring maintenance sweep. The gateway's shared operational cursor independently refreshes compact relay/input state while that lease or persistent headless polling is active.
+  - Fleet/Monitor cache reads renew a short `observe_operational_state` lease. While either view is active, Flasher uses one host-side cursor to request maintenance from one configured peer every ten seconds, then reads that peer's bounded cache record. This recurring observed-only inventory refresh is identical over Serial and MQTT, never catches up in a burst, and stops with the view. The gateway's shared operational cursor independently refreshes compact relay/input state while that lease or persistent headless polling is active.
   - Explicit workflows such as post-OTA version confirmation may request one remote's maintenance pages with `refresh_lora_peer`, then fetch that peer's detailed cached state with `lora_inventory_peer`. Heap/free-block/fragmentation/debug uptime remain a separate explicit diagnostics request.
-  - After an explicit Fleet scan, Flasher reads all cached peer details and retries maintenance once only for peers still missing Identity or Version data. Scan remains the explicit retry mechanism after the observed session's one-shot hydration has been exhausted.
+  - Address-range discovery is not part of normal Fleet refresh. The gateway retains bounded scan/candidate protocol support for explicit provisioning or recovery tools, while Fleet and Monitor target only configured peer addresses.
   - MQTT Fleet clients use the same seed-list and bounded `lora_inventory_peer` detail model as USB Serial for identity, firmware, connectivity, control state, uptime, and RSSI. Sensors remain on their bounded per-sensor retained leaves rather than being duplicated into the MQTT detail response. Retained peer topics populate cached values immediately, but a retained replay is not a fresh remote check-in; only live MQTT delivery or a gateway detail carrying `age_ms` establishes freshness. The firmware MQTT client still enforces a strict `1024`-byte packet size ceiling, so MQTT peer details exclude sensors and the optional diagnostic expansion, same-key discovery candidates are capped at at most 4 entries, heavy timestamps remain omitted from the multi-peer summary, and `candidate_total`/`candidate_truncated` expose candidate truncation. Similarly, `provisioning_status` responses use a compact array schema over MQTT (`devices` as `[["chip_id", current_address, assigned_address, rssi, "state", fw_major, fw_minor, fw_patch, fw_build], ...]`), and verbose debug logs are pruned.
 
 ## UDP Mirroring Controls

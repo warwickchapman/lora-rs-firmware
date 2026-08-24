@@ -63,6 +63,8 @@ private:
   void handleConfigureWifi(JsonDocument &doc, ResponseWriter writer);
   void handleProvisionFleetWifi(JsonDocument &doc, ResponseWriter writer);
   void handleIdentify(JsonDocument &doc, ResponseWriter writer);
+  void handleRemoteIdentify(JsonDocument &doc, ResponseWriter writer);
+  void handleRemoteIdentifyStatus(JsonDocument &doc, ResponseWriter writer);
   void handleStartLoraInventory(JsonDocument &doc, ResponseWriter writer);
   void handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter writer, bool isMqtt = false);
   void handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter writer, bool isMqtt = false);
