@@ -1,4 +1,5 @@
 use tauri::State;
+use serde_json::Value;
 use crate::services::diagnostics::{CaptureAnomalies, CaptureTimeline, DiagnosticCapture, DiagnosticInput, DiagnosticSnapshot, DiagnosticStore};
 
 /// UI-facing read of the same bounded store that the future MCP bridge will use.
@@ -44,3 +45,7 @@ pub async fn ota_capture_timeline(store: State<'_, DiagnosticStore>, id: String)
 pub async fn ota_capture_anomalies(store: State<'_, DiagnosticStore>, id: String) -> Result<CaptureAnomalies, String> {
     store.anomalies(&id).await
 }
+#[tauri::command]
+pub async fn publish_support_snapshot(store: State<'_, DiagnosticStore>, snapshot: Value) -> Result<(), String> { store.set_support_snapshot(snapshot).await; Ok(()) }
+#[tauri::command]
+pub async fn flasher_support_snapshot(store: State<'_, DiagnosticStore>) -> Result<Value, String> { Ok(store.support_snapshot().await) }

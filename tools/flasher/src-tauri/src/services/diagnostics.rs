@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -72,6 +73,7 @@ struct DiagnosticStoreInner {
     next_sequence: u64,
     events: VecDeque<DiagnosticEvent>,
     captures: VecDeque<DiagnosticCapture>,
+    support_snapshot: Value,
 }
 
 impl Default for DiagnosticStore {
@@ -82,6 +84,7 @@ impl Default for DiagnosticStore {
                 next_sequence: 1,
                 events: VecDeque::new(),
                 captures: VecDeque::new(),
+                support_snapshot: json!({"status":"Flasher has not published support state yet."}),
             })),
         }
     }
@@ -169,6 +172,9 @@ impl DiagnosticStore {
         }
         Ok(CaptureAnomalies { capture_id: id.to_string(), anomalies })
     }
+
+    pub async fn set_support_snapshot(&self, snapshot: Value) { self.inner.lock().await.support_snapshot = snapshot; }
+    pub async fn support_snapshot(&self) -> Value { self.inner.lock().await.support_snapshot.clone() }
 }
 
 fn redact_and_bound(raw: &str) -> String {

@@ -171,6 +171,8 @@ pub fn run() {
             crate::commands::diagnostics::record_diagnostic_event,
             crate::commands::diagnostics::ota_capture_timeline,
             crate::commands::diagnostics::ota_capture_anomalies,
+            crate::commands::diagnostics::publish_support_snapshot,
+            crate::commands::diagnostics::flasher_support_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
