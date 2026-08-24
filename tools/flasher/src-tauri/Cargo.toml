@@ -4,6 +4,7 @@ version = "0.10.5-dev.35"
 description = "Desktop flasher for Thanda LoRa devices with serial auto-detection, firmware release download, and guided ESP8266 flashing."
 authors = ["Warwick Chapman"]
 edition = "2021"
+default-run = "thanda-lora-flasher"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
