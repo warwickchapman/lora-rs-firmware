@@ -62,6 +62,18 @@ The TX/gateway owns the peer runtime cache. While Fleet or Monitor is observed, 
 
 Logs is an application-level diagnostic session, not Fleet health data. It stores a bounded in-memory set of normalized records, supports focused, stacked, and merged views, plus All/Events/Warnings & Errors filters, Copy, Clear, and JSONL export. Gateway and remote **Actions > View Logs** select the source and request temporary forwarding only when required. Remote forwarding enables are sequential and low priority; relay control, provisioning, OTA, and same-port USB work take priority. Leaving Logs does not stop a session. Stop, expiry, gateway/transport change, and application closure release the listener and request forwarding shutdown where the original authenticated target is still available; otherwise firmware's bounded TTL is the final cleanup. Lost UDP lines are best-effort diagnostics, not proof of an offline device.
 
+### Read-only Codex diagnostics MCP (development)
+
+Flasher owns a local-user-only diagnostic socket while it is running. Its companion exposes bounded OTA captures, timelines, anomalies, and raw host evidence only; it never owns a port/listener or sends a device command.
+
+```toml
+[mcp_servers.flasherDiagnostics]
+command = "cargo"
+args = ["run", "--quiet", "--manifest-path", "/absolute/path/to/lora_rs/tools/flasher/src-tauri/Cargo.toml", "--bin", "flasher_diagnostics_mcp"]
+```
+
+Start Flasher first and open a new Codex task after registering the server. The companion fails closed if Flasher is unavailable. Packaging it for release is a separate follow-up.
+
 ### Navigation and resource ownership
 
 Changing tabs never cancels Provision, relay control, a queued/active OTA, MQTT connection, or an explicit Logs session. Fleet and Monitor are different: their periodic refresh is an observer lease and intentionally ends when their view closes, so it cannot create background LoRa traffic after the operator leaves the view. The retained cache and completed results remain visible when the operator returns.
