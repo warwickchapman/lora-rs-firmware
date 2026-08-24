@@ -168,6 +168,8 @@ pub fn run() {
             crate::commands::diagnostics::diagnostic_captures,
             crate::commands::diagnostics::update_ota_capture_transfer,
             crate::commands::diagnostics::record_diagnostic_event,
+            crate::commands::diagnostics::ota_capture_timeline,
+            crate::commands::diagnostics::ota_capture_anomalies,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

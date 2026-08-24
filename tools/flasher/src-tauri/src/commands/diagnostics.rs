@@ -1,5 +1,5 @@
 use tauri::State;
-use crate::services::diagnostics::{DiagnosticCapture, DiagnosticInput, DiagnosticSnapshot, DiagnosticStore};
+use crate::services::diagnostics::{CaptureAnomalies, CaptureTimeline, DiagnosticCapture, DiagnosticInput, DiagnosticSnapshot, DiagnosticStore};
 
 /// UI-facing read of the same bounded store that the future MCP bridge will use.
 #[tauri::command]
@@ -33,4 +33,14 @@ pub async fn update_ota_capture_transfer(store: State<'_, DiagnosticStore>, id: 
 pub async fn record_diagnostic_event(store: State<'_, DiagnosticStore>, input: DiagnosticInput) -> Result<(), String> {
     store.record(input.source, input.transport, input.event, input.raw, input.operation_id).await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn ota_capture_timeline(store: State<'_, DiagnosticStore>, id: String) -> Result<CaptureTimeline, String> {
+    store.timeline(&id).await
+}
+
+#[tauri::command]
+pub async fn ota_capture_anomalies(store: State<'_, DiagnosticStore>, id: String) -> Result<CaptureAnomalies, String> {
+    store.anomalies(&id).await
 }

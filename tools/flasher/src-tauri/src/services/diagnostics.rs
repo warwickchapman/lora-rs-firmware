@@ -28,6 +28,18 @@ pub struct DiagnosticSnapshot {
     pub events: Vec<DiagnosticEvent>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct CaptureTimeline {
+    pub capture: DiagnosticCapture,
+    pub events: Vec<DiagnosticEvent>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CaptureAnomalies {
+    pub capture_id: String,
+    pub anomalies: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DiagnosticCapture {
     pub id: String,
@@ -129,6 +141,34 @@ impl DiagnosticStore {
         capture.transfer_id = Some(transfer_id);
         Ok(())
     }
+
+    pub async fn timeline(&self, id: &str) -> Result<CaptureTimeline, String> {
+        let inner = self.inner.lock().await;
+        let capture = inner.captures.iter().find(|capture| capture.id == id).cloned()
+            .ok_or_else(|| "diagnostic capture not found".to_string())?;
+        // Events without an operation ID are passive network evidence. Preserve them
+        // in the bounded time window rather than pretending they are authoritative.
+        let events = inner.events.iter().filter(|event| event.sequence >= capture.started_sequence).cloned().collect();
+        Ok(CaptureTimeline { capture, events })
+    }
+
+    pub async fn anomalies(&self, id: &str) -> Result<CaptureAnomalies, String> {
+        let timeline = self.timeline(id).await?;
+        let own = timeline.events.iter().filter(|event| event.operation_id.as_deref() == Some(id));
+        let events: Vec<&str> = own.map(|event| event.event.as_str()).collect();
+        let has = |name: &str| events.iter().any(|event| *event == name);
+        let mut anomalies = Vec::new();
+        if has("ota_command_accepted") && !has("ota_downloading") && !has("ota_failed") && !has("ota_unconfirmed") {
+            anomalies.push("gateway accepted command but no manifest acceptance evidence".into());
+        }
+        if has("ota_downloading") && !has("ota_updated") && !has("ota_failed") && !has("ota_no_reboot") {
+            anomalies.push("manifest accepted but no terminal update evidence yet".into());
+        }
+        if has("ota_updated") && !has("ota_downloading") {
+            anomalies.push("version confirmation without recorded manifest acceptance".into());
+        }
+        Ok(CaptureAnomalies { capture_id: id.to_string(), anomalies })
+    }
 }
 
 fn redact_and_bound(raw: &str) -> String {
@@ -154,5 +194,13 @@ mod tests {
         assert_eq!(events[0].sequence, 1);
         assert!(events[0].raw.contains("password=<redacted>"));
         assert!(!events[0].raw.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn identifies_missing_manifest_after_command_acceptance() {
+        let store = DiagnosticStore::default();
+        let capture = store.begin_capture(DiagnosticCapture { id: "capture".into(), started_sequence: 0, started_unix_ms: 0, gateway_chip_id: "gw".into(), remote_address: Some(1), remote_chip_id: None, transfer_id: None, target_version: "0.10.5".into(), firmware_sha256: "hash".into() }).await;
+        store.record("gateway", "usb", "ota_command_accepted", "", Some(capture.id.clone())).await;
+        assert_eq!(store.anomalies(&capture.id).await.unwrap().anomalies.len(), 1);
     }
 }
