@@ -6,6 +6,36 @@
 - Maintain documentation and human-readable changelog entries when behavior changes.
 - Do not discard uncommitted work. Inspect `git status --short` before editing.
 
+## Task Focus and Commit Hygiene
+
+Keep each implementation focus coherent so its code, tests, documentation, version
+change, and commit can be reviewed as one constrained unit.
+
+- Before starting edits for a new focus area, and before returning to an earlier
+  focus area, inspect the current worktree and state explicitly whether the active
+  work is implemented, tested, hardware-confirmed where relevant, and committed.
+- If the current focus still has uncommitted, incomplete, or unconfirmed work, do
+  not silently begin another implementation. Explain the conflict and recommend
+  completing the current test/confirmation/commit gate first.
+- If the new request is independent and benefits from separate context, invite the
+  user to open a new Codex task. A new task improves conversational context but does
+  not make a shared dirty worktree safe; it should use a clean tree or a separate
+  worktree before editing.
+- If the new request should remain in this task, offer to record it in `TODO.md` or
+  the active plan and continue with the current focus. Do not implement the logged
+  request until the user explicitly chooses to switch despite the warning or the
+  current focus reaches a clean handoff point.
+- Read-only questions may be answered during an active implementation when they do
+  not alter files or derail completion. If the answer leads to a proposed change,
+  treat that change as a new focus and apply this gate before editing.
+- When the user explicitly chooses to switch focus, first summarize which existing
+  files and verification remain associated with the suspended focus. Keep later
+  commits scoped by exact paths or hunks; never fold unrelated suspended work into
+  the new commit merely because it shares documentation or version files.
+- Shared files such as `CHANGELOG.md`, `VERSION`, and broad documentation are not a
+  reason to combine features. Reconcile and stage their relevant hunks only when
+  preparing the corresponding constrained commit.
+
 ## Control Priority Rule
 
 Relay/input control is the product. Fleet, Monitor, inventory, diagnostics, firmware
@@ -87,5 +117,4 @@ When reviewing an implementation against an approved plan:
 
 - As the final step of every release, prepare a short release announcement.
 - The announcement must include a plain English summary of the changelog and a direct link to the published release in the public repository (`warwickchapman/lora-rs-firmware`). The main repository (`warwickchapman/lora-rs`) is private and must not be linked in announcements.
-
 
