@@ -32,11 +32,14 @@ operational gateway:
 Fleet mode is a LoRa/MQTT admin helper:
 
 - shares one persistent Gateway Session with Monitor, with an explicit USB Serial Gateway, Remote MQTT Broker, or Local MQTT Broker transport and gateway target
-- opens that Gateway Session from the compact Connections control in the application header instead of reserving vertical Fleet/Monitor space; the control separately indicates the selected task target and shared MQTT broker state
+- opens that Gateway Session from the compact Connections control in the application header instead of reserving vertical Fleet/Monitor space; its labelled **S** (Serial) and **M** (MQTT) tags show both transport states, with the selected transport bold and an available background transport muted
 - automatically closes the Connections popover when a newly selected gateway becomes active, but leaves it open on failures and while connection settings are being edited
 - keeps broker connection state separate from the selected operational transport, allowing MQTT Settings work to remain connected while Fleet/Monitor uses USB serial
 - immediately connects with the saved parameters when Remote MQTT Broker is selected, or starts and connects the local service when Local MQTT Broker is selected; Connection settings is the fallback for errors or edits
+- applies that same automatic activation when a saved Remote or Local MQTT selection is restored at startup, after broker event listeners and current backend state are hydrated
+- remembers the operational MQTT gateway separately for each broker host, port, topic root, and username; restores the matching target on reconnect, selects a sole discovered gateway automatically when the saved target is absent, and requires an explicit choice when several unmatched gateways are available
 - changes gateway context without automatically scanning LoRa or loading diagnostics; those observability actions remain operator initiated
+- reads the selected gateway's existing peer cache when the Fleet session becomes usable, without starting a LoRa scan or requesting per-peer LoRa refreshes; Scan remains the explicit probe action
 - loads the selected gateway, including the factory-derived or entered admin password needed for Fleet actions
 - keeps the gateway visible as its own Fleet panel with load, identify, and USB flash actions, while remote counts remain remote-only
 - reads the TX/gateway-owned peer cache over serial admin

@@ -9,6 +9,41 @@ export interface MqttDraftState {
   showPass: boolean;
 }
 
+export interface MqttBrokerIdentity {
+  host: string;
+  port: number;
+  topicRoot: string;
+  user: string;
+}
+
+export interface MqttGatewaySelectionDecision {
+  chipId: string;
+  automatic: boolean;
+}
+
+export function mqttBrokerSelectionKey(identity: MqttBrokerIdentity): string {
+  const host = identity.host.trim().toLowerCase();
+  const port = Number(identity.port || 1883);
+  const topicRoot = identity.topicRoot.trim().replace(/^\/+|\/+$/g, '') || 'lora';
+  const user = identity.user.trim();
+  return JSON.stringify([host, port, topicRoot, user]);
+}
+
+export function chooseMqttGatewaySelection(
+  preferredChipId: string,
+  currentChipId: string,
+  discoveredChipIds: string[],
+): MqttGatewaySelectionDecision | null {
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/^lrs-/, '');
+  const discovered = Array.from(new Set(discoveredChipIds.map(normalize).filter(Boolean)));
+  const preferred = normalize(preferredChipId);
+  const current = normalize(currentChipId);
+  if (preferred && discovered.includes(preferred)) return { chipId: preferred, automatic: false };
+  if (current && discovered.includes(current)) return { chipId: current, automatic: false };
+  if (discovered.length === 1) return { chipId: discovered[0], automatic: true };
+  return null;
+}
+
 interface MqttConnectionOverride {
   host: string;
   port: number;
@@ -286,6 +321,14 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
     }
   }
 
+  async function activateConfiguredSessionTransport() {
+    if (sessionConnectionType.value === 'mqtt') {
+      await connectConfiguredSessionMqtt();
+    } else if (sessionConnectionType.value === 'local_broker') {
+      await startAndConnectLocalBroker();
+    }
+  }
+
   function adoptSessionMqttFromStatus(st: { mqtt?: { host?: string; port?: number; topic_root?: string } } | null) {
     if (!st?.mqtt) return;
     sessionMqttHost.value = st.mqtt.host || sessionMqttHost.value;
@@ -378,6 +421,7 @@ export function useMqttConnection(options: UseMqttConnectionOptions) {
     mqttSettingsState,
     connectSessionMqtt,
     connectConfiguredSessionMqtt,
+    activateConfiguredSessionTransport,
     disconnectSessionMqtt,
     startLocalMqttBroker,
     applyLocalBrokerToMqttConfig,

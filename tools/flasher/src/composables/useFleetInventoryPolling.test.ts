@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ref } from 'vue';
-import { useFleetInventoryPolling, shouldClearScanStateOnTimeout } from './useFleetInventoryPolling';
+import {
+  useFleetInventoryPolling,
+  shouldAutoLoadFleetCache,
+  shouldClearScanStateOnTimeout,
+} from './useFleetInventoryPolling';
 
 describe('useFleetInventoryPolling', () => {
   let activeMode = ref('network');
@@ -151,5 +155,61 @@ describe('shouldClearScanStateOnTimeout', () => {
 
   it('returns true just past threshold (75001ms)', () => {
     expect(shouldClearScanStateOnTimeout(true, NOW - 75001, NOW)).toBe(true);
+  });
+});
+
+describe('shouldAutoLoadFleetCache', () => {
+  const readySerial = {
+    activeMode: 'network',
+    target: '/dev/cu.usbserial-10',
+    transport: 'serial' as const,
+    mqttConnected: false,
+    mqttGatewayDiscovered: false,
+    serialTargetAvailable: true,
+    changeBlocked: false,
+    loadedTarget: '',
+    attemptedTarget: '',
+  };
+
+  it('loads a selected serial gateway cache without requiring Scan', () => {
+    expect(shouldAutoLoadFleetCache(readySerial)).toBe(true);
+  });
+
+  it('waits for a saved serial target to appear in the current port list', () => {
+    expect(shouldAutoLoadFleetCache({
+      ...readySerial,
+      serialTargetAvailable: false,
+    })).toBe(false);
+  });
+
+  it('waits until the selected MQTT gateway is connected and discovered', () => {
+    const mqttState = {
+      ...readySerial,
+      target: '0030eb55',
+      transport: 'mqtt' as const,
+    };
+    expect(shouldAutoLoadFleetCache(mqttState)).toBe(false);
+    expect(shouldAutoLoadFleetCache({ ...mqttState, mqttConnected: true })).toBe(false);
+    expect(shouldAutoLoadFleetCache({
+      ...mqttState,
+      mqttConnected: true,
+      mqttGatewayDiscovered: true,
+    })).toBe(true);
+  });
+
+  it('does not reload an already loaded target or run outside Fleet', () => {
+    expect(shouldAutoLoadFleetCache({
+      ...readySerial,
+      loadedTarget: readySerial.target,
+    })).toBe(false);
+    expect(shouldAutoLoadFleetCache({
+      ...readySerial,
+      attemptedTarget: readySerial.target,
+    })).toBe(false);
+    expect(shouldAutoLoadFleetCache({ ...readySerial, activeMode: 'monitor' })).toBe(false);
+  });
+
+  it('waits while a guarded transaction blocks gateway changes', () => {
+    expect(shouldAutoLoadFleetCache({ ...readySerial, changeBlocked: true })).toBe(false);
   });
 });

@@ -11,6 +11,27 @@ export interface UseFleetInventoryPollingOptions {
   fleetCachePollIntervalMs?: number;
 }
 
+export interface AutoLoadFleetCacheState {
+  activeMode: string;
+  target: string;
+  transport: 'serial' | 'mqtt';
+  mqttConnected: boolean;
+  mqttGatewayDiscovered: boolean;
+  serialTargetAvailable: boolean;
+  changeBlocked: boolean;
+  loadedTarget: string;
+  attemptedTarget: string;
+}
+
+export function shouldAutoLoadFleetCache(state: AutoLoadFleetCacheState): boolean {
+  if (state.activeMode !== 'network' || !state.target || state.changeBlocked) return false;
+  if (state.loadedTarget === state.target || state.attemptedTarget === state.target) return false;
+  if (state.transport === 'mqtt') {
+    return state.mqttConnected && state.mqttGatewayDiscovered;
+  }
+  return state.serialTargetAvailable;
+}
+
 export function shouldClearScanStateOnTimeout(
   isScanning: boolean,
   scanActiveSinceMs: number,

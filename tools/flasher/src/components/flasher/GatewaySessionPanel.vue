@@ -185,9 +185,15 @@ function updateTransport(event: Event) {
           <option value="" disabled>Select MQTT gateway</option>
           <option v-for="gateway in transportState.mqttGatewayOptions" :key="gateway.chip_id" :value="gateway.chip_id">{{ gateway.label }}</option>
           <option v-if="selectedMqttGatewayChipId && !transportState.isSelectedMqttGatewayDiscovered" :value="selectedMqttGatewayChipId">
-            Waiting: lrs-{{ selectedMqttGatewayChipId }}
+            Unavailable: lrs-{{ selectedMqttGatewayChipId }}
           </option>
         </select>
+        <span
+          v-if="form.transport !== 'serial' && transportState.mqttGatewayOptions.length > 0 && selectedMqttGatewayChipId && !transportState.isSelectedMqttGatewayDiscovered"
+          class="text-[10px] text-amber-300"
+        >
+          The saved gateway is not present on this broker. Select a discovered gateway above.
+        </span>
       </div>
 
       <div class="flex min-w-0 flex-col gap-1.5 text-xs">
@@ -245,10 +251,10 @@ function updateTransport(event: Event) {
         </div>
       </label>
       <div class="flex flex-wrap items-center gap-2 md:col-span-2 xl:col-span-5">
-        <button @click="emit('connect-mqtt')" :disabled="!mqttDraftHost || displayState.mqttConnectionState === 'connecting'" class="primary-btn h-8 px-3 text-xs disabled:opacity-50">
+        <button @click="emit('connect-mqtt')" :disabled="!mqttDraftHost || displayState.mqttConnectionState === 'connecting'" class="primary-btn h-9 min-h-9 px-3 py-0 text-xs leading-none disabled:opacity-50">
           {{ displayState.mqttConnectionState === 'connected' ? 'Save and reconnect' : displayState.mqttConnectionState === 'connecting' ? 'Connecting...' : 'Connect' }}
         </button>
-        <button @click="emit('disconnect-mqtt')" :disabled="displayState.mqttConnectionState !== 'connected'" class="glass-input h-8 px-3 text-xs disabled:opacity-50">Disconnect</button>
+        <button @click="emit('disconnect-mqtt')" :disabled="displayState.mqttConnectionState !== 'connected'" class="glass-input h-9 min-h-9 px-3 py-0 text-xs leading-none disabled:opacity-50">Disconnect</button>
         <span v-if="displayState.mqttError" class="text-xs text-rose-300">{{ displayState.mqttError }}</span>
       </div>
     </div>

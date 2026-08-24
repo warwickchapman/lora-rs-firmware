@@ -7,6 +7,8 @@ import Flasher from './components/Flasher.vue';
 import {
   EMPTY_CONNECTION_SUMMARY,
   connectionSummaryTitle,
+  connectionTransportTitle,
+  type ConnectionIndicatorState,
   type ConnectionHeaderSummary,
 } from './composables/connectionsDisplay';
 
@@ -39,6 +41,31 @@ function initialActiveMode(): ActiveMode {
 
 const activeMode = ref<ActiveMode>(initialActiveMode());
 const connectionButtonTitle = computed(() => connectionSummaryTitle(connectionSummary.value));
+const serialTagTitle = computed(() => connectionTransportTitle(
+  'Serial',
+  connectionSummary.value.serial,
+  connectionSummary.value.activeTransport === 'serial',
+));
+const mqttTagTitle = computed(() => connectionTransportTitle(
+  'MQTT',
+  connectionSummary.value.mqtt,
+  connectionSummary.value.activeTransport === 'mqtt',
+));
+
+function connectionTagClasses(state: ConnectionIndicatorState, active: boolean): string[] {
+  const palette = state === 'active'
+    ? 'border-emerald-500/70 bg-emerald-500/20 text-emerald-300'
+    : state === 'partial'
+      ? 'border-amber-500/70 bg-amber-500/20 text-amber-300'
+      : state === 'error'
+        ? 'border-rose-500/70 bg-rose-500/20 text-rose-300'
+        : 'border-slate-600 bg-slate-800/70 text-slate-400';
+  return [
+    'flex h-5 min-w-5 items-center justify-center rounded border px-1 text-[10px] leading-none transition-opacity',
+    palette,
+    active ? 'font-black opacity-100 ring-1 ring-white/15' : 'font-semibold opacity-45',
+  ];
+}
 
 interface NavItem {
   mode: ActiveMode;
@@ -272,24 +299,14 @@ watch(activeMode, (mode) => {
             <path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15"></path>
             <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15"></path>
           </svg>
-          <span :class="[
-            'h-2 w-2 rounded-full',
-            connectionSummary.state === 'active' ? 'bg-emerald-400' :
-            connectionSummary.state === 'partial' ? 'bg-amber-400 animate-pulse' :
-            connectionSummary.state === 'error' ? 'bg-rose-500 animate-pulse' :
-            'bg-slate-500'
-          ]"></span>
           <span
-            v-if="connectionSummary.brokerRelevant"
-            :class="[
-              'h-1.5 w-1.5 rounded-full',
-              connectionSummary.brokerState === 'connected' ? 'bg-emerald-400' :
-              connectionSummary.brokerState === 'connecting' ? 'bg-amber-400 animate-pulse' :
-              connectionSummary.brokerState === 'error' ? 'bg-rose-500 animate-pulse' :
-              'bg-slate-600'
-            ]"
-            title="Shared MQTT broker"
-          ></span>
+            :class="connectionTagClasses(connectionSummary.serial.state, connectionSummary.activeTransport === 'serial')"
+            :title="serialTagTitle"
+          >S</span>
+          <span
+            :class="connectionTagClasses(connectionSummary.mqtt.state, connectionSummary.activeTransport === 'mqtt')"
+            :title="mqttTagTitle"
+          >M</span>
         </button>
         <button
           @click="toggleWindowMode"

@@ -1,5 +1,10 @@
 export type ConnectionIndicatorState = 'active' | 'partial' | 'offline' | 'error';
-export type BrokerIndicatorState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface ConnectionTransportSummary {
+  state: ConnectionIndicatorState;
+  stateLabel: string;
+  targetLabel: string;
+}
 
 export interface ConnectionHeaderSummary {
   contextLabel: string;
@@ -7,8 +12,9 @@ export interface ConnectionHeaderSummary {
   targetLabel: string;
   state: ConnectionIndicatorState;
   stateLabel: string;
-  brokerState: BrokerIndicatorState;
-  brokerRelevant: boolean;
+  activeTransport: 'serial' | 'mqtt';
+  serial: ConnectionTransportSummary;
+  mqtt: ConnectionTransportSummary;
 }
 
 export const EMPTY_CONNECTION_SUMMARY: ConnectionHeaderSummary = {
@@ -17,15 +23,33 @@ export const EMPTY_CONNECTION_SUMMARY: ConnectionHeaderSummary = {
   targetLabel: 'No target selected',
   state: 'offline',
   stateLabel: 'No target',
-  brokerState: 'disconnected',
-  brokerRelevant: false,
+  activeTransport: 'serial',
+  serial: {
+    state: 'offline',
+    stateLabel: 'No serial target',
+    targetLabel: 'No target selected',
+  },
+  mqtt: {
+    state: 'offline',
+    stateLabel: 'Disconnected',
+    targetLabel: 'No broker configured',
+  },
 };
 
 export function connectionSummaryTitle(summary: ConnectionHeaderSummary): string {
   const target = summary.targetLabel || 'No target selected';
   const transport = summary.transportLabel ? `${summary.transportLabel} · ` : '';
-  const broker = summary.brokerRelevant ? ` · MQTT ${summary.brokerState}` : '';
-  return `${summary.contextLabel}: ${transport}${target} · ${summary.stateLabel}${broker}`;
+  return `${summary.contextLabel}: ${transport}${target} · ${summary.stateLabel} · ` +
+    `S ${summary.serial.stateLabel} · M ${summary.mqtt.stateLabel}`;
+}
+
+export function connectionTransportTitle(
+  label: 'Serial' | 'MQTT',
+  transport: ConnectionTransportSummary,
+  active: boolean,
+): string {
+  const target = transport.targetLabel ? ` — ${transport.targetLabel}` : '';
+  return `${label}: ${transport.stateLabel}${target} (${active ? 'selected' : 'background'})`;
 }
 
 export function shouldAutoCollapseConnections(

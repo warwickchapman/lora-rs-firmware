@@ -10,12 +10,17 @@ import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState, applySeedWhitelist } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
-import { useMqttConnection } from '../composables/useMqttConnection';
+import {
+  chooseMqttGatewaySelection,
+  mqttBrokerSelectionKey,
+  useMqttConnection,
+} from '../composables/useMqttConnection';
 import {
   EMPTY_CONNECTION_SUMMARY,
   shouldAutoCollapseConnections,
   type ConnectionHeaderSummary,
   type ConnectionIndicatorState,
+  type ConnectionTransportSummary,
 } from '../composables/connectionsDisplay';
 import FleetMode from './flasher/FleetMode.vue';
 import type {
@@ -32,7 +37,11 @@ import type {
   MqttGatewayOption
 } from './flasher/FleetMode.vue';
 import { LoraInventoryDevice, LoraAdoptionCandidate, LoraAdoptionStatus, LoraInventoryStatus, LoraInventoryPeerStatus, SensorReading } from '../types/fleet';
-import { useFleetInventoryPolling, shouldClearScanStateOnTimeout } from '../composables/useFleetInventoryPolling';
+import {
+  useFleetInventoryPolling,
+  shouldAutoLoadFleetCache,
+  shouldClearScanStateOnTimeout,
+} from '../composables/useFleetInventoryPolling';
 import { useFleetOta } from '../composables/useFleetOta';
 import { useFirmwareServer, FirmwareServerInfo, NetworkInterface } from '../composables/useFirmwareServer';
 import ActivityPanel from './flasher/ActivityPanel.vue';
@@ -692,6 +701,7 @@ const {
   showSessionConfigPanel,
   sessionMqttHost,
   sessionMqttPort,
+  sessionMqttUser,
   sessionMqttTopicRoot,
   sessionMqttConnected,
   sessionMqttConnectionState,
@@ -701,7 +711,7 @@ const {
   localBrokerState,
   mqttSettingsState,
   connectSessionMqtt,
-  connectConfiguredSessionMqtt,
+  activateConfiguredSessionTransport,
   disconnectSessionMqtt,
   startAndConnectLocalBroker,
   adoptSessionMqttFromStatus,
@@ -729,6 +739,14 @@ const pairTransport = ref<'serial' | 'mqtt'>('serial');
 const pairGatewayLoaded = ref(false);
 const mqttGateways = ref<Record<string, any>>({});
 const lastMqttDiscoveryMs = ref<Record<string, number>>({});
+const mqttGatewaySelectionsByBroker = ref<Record<string, string>>({});
+const mqttGatewaySelectionSettleTimer = ref<ReturnType<typeof window.setTimeout> | null>(null);
+const currentMqttBrokerSelectionKey = computed(() => mqttBrokerSelectionKey({
+  host: sessionMqttHost.value,
+  port: sessionMqttPort.value,
+  topicRoot: sessionMqttTopicRoot.value,
+  user: sessionMqttUser.value,
+}));
 // Provisioning target (legacy names retained locally to keep its workflow independent).
 const selectedMqttGatewayChipId = ref('');
 const selectedMqttManualChipId = ref('');
@@ -786,6 +804,34 @@ const isGatewaySessionMqttGatewayDiscovered = computed(() => {
 const isSettingsMqttGatewayDiscovered = computed(() => {
   return !!settingsMqttGatewayChipId.value && settingsMqttGatewayChipId.value in mqttGateways.value;
 });
+
+function reconcileGatewaySessionMqttSelection() {
+  const brokerKey = currentMqttBrokerSelectionKey.value;
+  const decision = chooseMqttGatewaySelection(
+    mqttGatewaySelectionsByBroker.value[brokerKey] || '',
+    gatewaySessionMqttGatewayChipId.value,
+    Object.keys(mqttGateways.value),
+  );
+  if (!decision || decision.chipId === gatewaySessionMqttGatewayChipId.value) return;
+  gatewaySessionMqttGatewayChipId.value = decision.chipId;
+  mqttGatewaySelectionsByBroker.value = {
+    ...mqttGatewaySelectionsByBroker.value,
+    [brokerKey]: decision.chipId,
+  };
+  if (decision.automatic) {
+    notify(`Selected the only gateway available on this broker: lrs-${decision.chipId}.`);
+  }
+}
+
+function scheduleGatewaySessionMqttSelectionReconcile() {
+  if (mqttGatewaySelectionSettleTimer.value) {
+    window.clearTimeout(mqttGatewaySelectionSettleTimer.value);
+  }
+  mqttGatewaySelectionSettleTimer.value = window.setTimeout(() => {
+    mqttGatewaySelectionSettleTimer.value = null;
+    reconcileGatewaySessionMqttSelection();
+  }, 750);
+}
 
 // Watcher to keep the manual input field synchronized if a discovered option is selected
 watch(selectedMqttGatewayChipId, (newVal) => {
@@ -963,6 +1009,8 @@ watch(loraAdoptionStatus, status => {
 const lastLoraInventoryStatus = ref<LoraInventoryStatus | null>(null);
 const lastLoraInventoryStatusAtMs = ref(0);
 const lastLoraInventoryStatusPort = ref('');
+const fleetCacheLoadedTargetKey = ref('');
+const fleetCacheAutoLoadAttemptKey = ref('');
 const lastLoraInventoryPeerStatusByAddress = ref<Record<number, LoraInventoryPeerStatus>>({});
 const fleetInventoryHydrateCursor = ref(0);
 const activeGatewaySessionKey = ref('');
@@ -1040,7 +1088,7 @@ const {
   refreshLoraPeerCommand: async (address: number) => {
     const { port } = fleetGatewayCommandTarget();
     if (!port) return;
-    await refreshLoraInventoryPeers(port, [address], true, 'fleet');
+    await refreshLoraInventoryPeers(port, [address], true, 'fleet', true);
   },
   notify,
   pushNetworkLog,
@@ -1797,6 +1845,7 @@ const fleetScanDisabled = computed(() =>
   isNetworkGatewayLoading.value ||
   isLoraInventoryScanStarting.value ||
   !selectedPort.value ||
+  (fleetTransport.value === 'mqtt' && (!sessionMqttConnected.value || !isGatewaySessionMqttGatewayDiscovered.value)) ||
   (!isLoraInventoryScanning.value && fleetForceScanCooldownRemainingMs.value > 0)
 );
 
@@ -2292,20 +2341,35 @@ function loadGatewaySessionPreferences() {
       mqttHost: string;
       mqttPort: number;
       mqttTopicRoot: string;
+      mqttUser: string;
+      mqttGatewaySelectionsByBroker: Record<string, string>;
     }>;
     if (saved.transport === 'serial' || saved.transport === 'mqtt' || saved.transport === 'local_broker') {
       sessionConnectionType.value = saved.transport;
     }
     if (typeof saved.serialPort === 'string') gatewaySessionSerialPort.value = saved.serialPort;
-    if (typeof saved.mqttGatewayChipId === 'string') gatewaySessionMqttGatewayChipId.value = saved.mqttGatewayChipId;
     if (typeof saved.mqttHost === 'string') sessionMqttHost.value = saved.mqttHost;
     if (Number.isInteger(saved.mqttPort)) sessionMqttPort.value = Number(saved.mqttPort);
     if (typeof saved.mqttTopicRoot === 'string') sessionMqttTopicRoot.value = saved.mqttTopicRoot;
+    if (typeof saved.mqttUser === 'string') sessionMqttUser.value = saved.mqttUser;
+    const brokerKey = mqttBrokerSelectionKey({
+      host: typeof saved.mqttHost === 'string' ? saved.mqttHost : sessionMqttHost.value,
+      port: Number.isInteger(saved.mqttPort) ? Number(saved.mqttPort) : sessionMqttPort.value,
+      topicRoot: typeof saved.mqttTopicRoot === 'string' ? saved.mqttTopicRoot : sessionMqttTopicRoot.value,
+      user: typeof saved.mqttUser === 'string' ? saved.mqttUser : sessionMqttUser.value,
+    });
+    if (saved.mqttGatewaySelectionsByBroker && typeof saved.mqttGatewaySelectionsByBroker === 'object') {
+      mqttGatewaySelectionsByBroker.value = { ...saved.mqttGatewaySelectionsByBroker };
+    } else if (typeof saved.mqttGatewayChipId === 'string' && saved.mqttGatewayChipId) {
+      mqttGatewaySelectionsByBroker.value = { [brokerKey]: saved.mqttGatewayChipId };
+    }
+    gatewaySessionMqttGatewayChipId.value = mqttGatewaySelectionsByBroker.value[brokerKey] || '';
     sessionMqttDraftState.value = {
       ...sessionMqttDraftState.value,
       host: typeof saved.mqttHost === 'string' ? saved.mqttHost : sessionMqttDraftState.value.host,
       port: Number.isInteger(saved.mqttPort) ? Number(saved.mqttPort) : sessionMqttDraftState.value.port,
       topicRoot: typeof saved.mqttTopicRoot === 'string' ? saved.mqttTopicRoot : sessionMqttDraftState.value.topicRoot,
+      user: typeof saved.mqttUser === 'string' ? saved.mqttUser : sessionMqttDraftState.value.user,
     };
   } catch {
     // Ignore invalid or unavailable storage; defaults remain usable.
@@ -2314,6 +2378,18 @@ function loadGatewaySessionPreferences() {
 
 function saveGatewaySessionPreferences() {
   try {
+    const brokerKey = mqttBrokerSelectionKey({
+      host: sessionMqttHost.value,
+      port: sessionMqttPort.value,
+      topicRoot: sessionMqttTopicRoot.value,
+      user: sessionMqttUser.value,
+    });
+    if (gatewaySessionMqttGatewayChipId.value) {
+      mqttGatewaySelectionsByBroker.value = {
+        ...mqttGatewaySelectionsByBroker.value,
+        [brokerKey]: gatewaySessionMqttGatewayChipId.value,
+      };
+    }
     localStorage.setItem(GATEWAY_SESSION_STORAGE_KEY, JSON.stringify({
       transport: sessionConnectionType.value,
       serialPort: gatewaySessionSerialPort.value,
@@ -2321,6 +2397,8 @@ function saveGatewaySessionPreferences() {
       mqttHost: sessionMqttDraftState.value.host,
       mqttPort: sessionMqttDraftState.value.port,
       mqttTopicRoot: sessionMqttDraftState.value.topicRoot,
+      mqttUser: sessionMqttDraftState.value.user,
+      mqttGatewaySelectionsByBroker: mqttGatewaySelectionsByBroker.value,
     }));
   } catch {
     // Ignore storage failures; the current session still works in memory.
@@ -3156,6 +3234,16 @@ async function loadNetworkGateway() {
   if (fleetTransport.value === 'mqtt') {
     const chipId = gatewaySessionMqttGatewayChipId.value;
     if (!chipId || isNetworkGatewayLoading.value) return;
+    if (!sessionMqttConnected.value) {
+      networkStatusMessage.value = 'MQTT broker is not connected.';
+      notify(networkStatusMessage.value);
+      return;
+    }
+    if (!isGatewaySessionMqttGatewayDiscovered.value) {
+      networkStatusMessage.value = `Selected gateway lrs-${chipId} is not available on this broker. Open Connections and choose a discovered gateway.`;
+      notify(networkStatusMessage.value);
+      return;
+    }
     isNetworkGatewayLoading.value = true;
     networkStatusMessage.value = `Loading MQTT gateway lrs-${chipId}...`;
     try {
@@ -3169,9 +3257,9 @@ async function loadNetworkGateway() {
           ssid: gw?.sta_ssid || state.deviceInfo?.ssid || ''
         };
       }
-      await refreshGatewaySnapshot(chipId, false, 'fleet');
+      await refreshGatewaySnapshot(chipId, false, 'fleet', false);
       networkStatusMessage.value = `Gateway loaded over MQTT; firmware ${gw?.fw_version || 'unknown'}.`;
-      startLoraInventoryPolling();
+      startFleetCachePolling();
     } catch (e) {
       networkStatusMessage.value = `MQTT Gateway load error: ${e}`;
       notify(networkStatusMessage.value);
@@ -3210,7 +3298,7 @@ async function loadNetworkGateway() {
       return;
     }
     networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
-    await refreshLoraInventoryStatus(false);
+    await refreshGatewaySnapshot(port, false, 'fleet', false);
     startFleetCachePolling();
   } catch (e) {
     networkStatusMessage.value = serialFeatureError('Gateway load', e);
@@ -3252,6 +3340,7 @@ function clearFleetGatewayCache() {
   isLoraInventoryScanning.value = false;
   isLoraInventoryScanStarting.value = false;
   fleetScanActiveSinceMs.value = 0;
+  fleetCacheLoadedTargetKey.value = '';
   stopLoraInventoryPolling(false);
 }
 
@@ -3297,13 +3386,19 @@ function scheduleFleetScanSettleRefresh(port: string) {
   }, FLEET_SCAN_SETTLE_REFRESH_MS);
 }
 
-async function refreshLoraInventoryPeers(port: string, addresses: number[], background: boolean, source: 'fleet' | 'monitor') {
+async function refreshLoraInventoryPeers(
+  port: string,
+  addresses: number[],
+  background: boolean,
+  source: 'fleet' | 'monitor',
+  requestRemoteRefresh = !background,
+) {
   const uniqueAddresses = Array.from(new Set(addresses.filter(address => Number.isFinite(address) && address >= 1 && address <= LRS_REMOTE_SCAN_CAP)))
     .sort((a, b) => a - b);
   const password = adminPasswordForPort(port);
   for (const address of uniqueAddresses) {
     try {
-      if (password) {
+      if (password && requestRemoteRefresh) {
         await sendEasyPairCommandOnPort(
           port,
           'refresh_lora_peer',
@@ -3460,7 +3555,12 @@ async function refreshMonitorData(background = false) {
   }
 }
 
-async function refreshGatewaySnapshot(port: string, background = true, source: 'fleet' | 'monitor' = 'monitor') {
+async function refreshGatewaySnapshot(
+  port: string,
+  background = true,
+  source: 'fleet' | 'monitor' = 'monitor',
+  requestRemoteRefresh = !background,
+) {
   if (!port) return;
   if (background && gatewaySnapshotPauseCount.value > 0) return;
 
@@ -3521,9 +3621,10 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       loraInventoryScan.value = inventory.scan || null;
       maintDeferredReason.value = inventory.maint_deferred_reason || null;
       mergeLoraInventorySeedRows(inventory.devices || []);
+      fleetCacheLoadedTargetKey.value = port;
       const hydrateAddress = nextFleetHydrateAddress(inventoryAddresses);
       if (hydrateAddress !== null) {
-        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'fleet');
+        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'fleet', requestRemoteRefresh);
       }
       loraCandidates.value = (inventory.candidates || []).map(c => deriveCandidateLocalTimestamp(c, fleetClockMs.value));
       candidateTotal.value = inventory.candidate_total || (inventory.candidates || []).length;
@@ -3552,7 +3653,7 @@ async function refreshGatewaySnapshot(port: string, background = true, source: '
       const monitorAddresses = (inventory.devices || []).map(device => device.address);
       const hydrateAddress = monitorTransport.value === 'serial' ? nextFleetHydrateAddress(monitorAddresses) : null;
       if (hydrateAddress !== null) {
-        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'monitor');
+        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'monitor', requestRemoteRefresh);
       }
       monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
     }
@@ -5976,6 +6077,7 @@ watch(activeMode, (mode) => {
 
   if (mode !== 'monitor') stopMonitorPolling();
   if (mode !== 'network') {
+    fleetCacheAutoLoadAttemptKey.value = '';
     stopLoraInventoryPolling(false);
   }
 });
@@ -6003,6 +6105,7 @@ watch(selectedPort, (port) => {
 });
 
 watch(gatewaySessionMqttGatewayChipId, () => {
+  fleetCacheAutoLoadAttemptKey.value = '';
   clearFleetGatewayCache();
   monitorFleetRows.value = [];
   selectedMonitorDeviceAddress.value = null;
@@ -6011,6 +6114,7 @@ watch(gatewaySessionMqttGatewayChipId, () => {
 });
 
 watch(fleetTransport, () => {
+  fleetCacheAutoLoadAttemptKey.value = '';
   clearFleetGatewayCache();
   monitorFleetRows.value = [];
   selectedMonitorDeviceAddress.value = null;
@@ -6030,6 +6134,7 @@ watch(sessionMqttConnectionState, (state, previousState) => {
     lastMqttDiscoveryMs.value = {};
   }
   if (sessionConnectionType.value !== 'serial' && state !== 'connected') {
+    fleetCacheAutoLoadAttemptKey.value = '';
     clearFleetGatewayCache();
     monitorFleetRows.value = [];
     selectedMonitorDeviceAddress.value = null;
@@ -6073,6 +6178,7 @@ watch(gatewayPortDeviceInfo, (info) => {
 
 watch(gatewaySessionSerialPort, (port) => {
   saveTabPort('network', port);
+  fleetCacheAutoLoadAttemptKey.value = '';
   clearFleetGatewayCache();
   monitorFleetRows.value = [];
   selectedMonitorDeviceAddress.value = null;
@@ -6086,13 +6192,13 @@ watch(
   { deep: true }
 );
 
+watch(currentMqttBrokerSelectionKey, brokerKey => {
+  gatewaySessionMqttGatewayChipId.value = mqttGatewaySelectionsByBroker.value[brokerKey] || '';
+});
+
 watch(sessionConnectionType, async (transport, previousTransport) => {
   if (!gatewaySessionAutoActionsReady.value || transport === previousTransport) return;
-  if (transport === 'mqtt') {
-    await connectConfiguredSessionMqtt();
-  } else if (transport === 'local_broker') {
-    await startAndConnectLocalBroker();
-  }
+  await activateConfiguredSessionTransport();
 });
 
 watch(flashSelectedPort, port => saveTabPort('serial', port));
@@ -6115,7 +6221,6 @@ onMounted(async () => {
   loadSavedTabPorts();
   loadGatewaySessionPreferences();
   await nextTick();
-  gatewaySessionAutoActionsReady.value = true;
   try {
     flasherAppVersion.value = await invoke<string>('get_app_version');
   } catch {
@@ -6243,6 +6348,7 @@ onMounted(async () => {
     if (!selectedMqttGatewayChipId.value) {
       selectedMqttGatewayChipId.value = payload.chip_id;
     }
+    scheduleGatewaySessionMqttSelectionReconcile();
     const state = serialDeviceState(payload.chip_id);
     if (state) {
       const staConnected = !!payload.sta_ip && payload.sta_ip !== '0.0.0.0';
@@ -6318,17 +6424,22 @@ onMounted(async () => {
     handleMqttAdminResponse(event.payload);
   });
 
-  invoke<any>('get_mqtt_state').then((state) => {
+  try {
+    const state = await invoke<any>('get_mqtt_state');
     hydrateMqttState(state);
-  }).catch((e) => {
+  } catch (e) {
     console.error('Failed to get MQTT state:', e);
-  });
+  }
 
-  invoke<number | null>('get_local_mqtt_broker_status').then((activePort) => {
+  try {
+    const activePort = await invoke<number | null>('get_local_mqtt_broker_status');
     hydrateLocalBrokerStatus(activePort);
-  }).catch((e) => {
+  } catch (e) {
     console.error('Failed to get local broker status:', e);
-  });
+  }
+
+  gatewaySessionAutoActionsReady.value = true;
+  await activateConfiguredSessionTransport();
 });
 
 watch(fleetGatewayFlashPhase, (newPhase) => {
@@ -6378,6 +6489,7 @@ onUnmounted(() => {
   stopMonitorPolling();
   if (fleetClockTimer.value) window.clearInterval(fleetClockTimer.value);
   if (fleetScanSettleTimer.value) window.clearTimeout(fleetScanSettleTimer.value);
+  if (mqttGatewaySelectionSettleTimer.value) window.clearTimeout(mqttGatewaySelectionSettleTimer.value);
   if (networkInterfaceInterval.value) window.clearInterval(networkInterfaceInterval.value);
   cleanupFleetOtaTimers();
   if (identifyTimer.value) window.clearTimeout(identifyTimer.value);
@@ -6650,6 +6762,24 @@ const gatewaySessionChangeDisabledReason = computed(() => {
   return '';
 });
 
+const fleetCacheAutoLoadStateComputed = computed(() => ({
+  activeMode: activeMode.value || '',
+  target: gatewaySessionTargetKey.value,
+  transport: fleetTransport.value,
+  mqttConnected: sessionMqttConnected.value,
+  mqttGatewayDiscovered: isGatewaySessionMqttGatewayDiscovered.value,
+  serialTargetAvailable: ports.value.some(port => port.port_name === gatewaySessionSerialPort.value),
+  changeBlocked: !!gatewaySessionChangeDisabledReason.value,
+  loadedTarget: fleetCacheLoadedTargetKey.value,
+  attemptedTarget: fleetCacheAutoLoadAttemptKey.value,
+}));
+
+watch(fleetCacheAutoLoadStateComputed, state => {
+  if (!shouldAutoLoadFleetCache(state)) return;
+  fleetCacheAutoLoadAttemptKey.value = state.target;
+  void loadNetworkGateway();
+}, { immediate: true });
+
 const gatewaySessionDisplayStateComputed = computed<GatewaySessionDisplayState>(() => {
   let state: GatewaySessionDisplayState['state'] = 'offline';
   let label = 'Offline';
@@ -6684,7 +6814,9 @@ const gatewaySessionDisplayStateComputed = computed<GatewaySessionDisplayState>(
     label = 'Select gateway';
   } else if (!isGatewaySessionMqttGatewayDiscovered.value) {
     state = 'partial';
-    label = 'Waiting for gateway';
+    label = mqttGatewayOptionsComputed.value.length > 0
+      ? 'Selected gateway unavailable'
+      : 'Waiting for gateway';
   } else if (sessionConnectionType.value === 'local_broker' && !gatewaySessionIsActive.value) {
     state = 'partial';
     label = 'Local broker not ready';
@@ -6723,6 +6855,35 @@ function contextualTargetState(
     : { state: 'partial', label: 'Target selected' };
 }
 
+function serialTransportSummary(target: string, ready: boolean): ConnectionTransportSummary {
+  if (!target) {
+    return { state: 'offline', stateLabel: 'No serial target', targetLabel: 'No target selected' };
+  }
+  if (ready) {
+    return { state: 'active', stateLabel: 'Ready', targetLabel: target };
+  }
+  if (ports.value.some(port => port.port_name === target)) {
+    return { state: 'partial', stateLabel: 'Detected, not ready', targetLabel: target };
+  }
+  return { state: 'offline', stateLabel: 'Disconnected', targetLabel: target };
+}
+
+function mqttBackgroundSummary(): ConnectionTransportSummary {
+  const targetLabel = sessionMqttHost.value
+    ? `${sessionMqttHost.value}:${sessionMqttPort.value}`
+    : 'No broker configured';
+  if (sessionMqttConnectionState.value === 'connected') {
+    return { state: 'active', stateLabel: 'Connected', targetLabel };
+  }
+  if (sessionMqttConnectionState.value === 'connecting') {
+    return { state: 'partial', stateLabel: 'Connecting', targetLabel };
+  }
+  if (sessionMqttConnectionState.value === 'error') {
+    return { state: 'error', stateLabel: 'Connection failed', targetLabel };
+  }
+  return { state: 'offline', stateLabel: 'Disconnected', targetLabel };
+}
+
 const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => {
   let contextLabel = 'Connection';
   let transportLabel = '';
@@ -6732,6 +6893,8 @@ const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => 
     label: 'No target',
   };
   let contextUsesMqtt = false;
+  let serialTarget = '';
+  let serialReady = false;
 
   if (activeMode.value === 'network' || activeMode.value === 'monitor') {
     contextLabel = activeMode.value === 'network' ? 'Fleet gateway' : 'Monitor gateway';
@@ -6748,6 +6911,8 @@ const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => 
       state: gatewaySessionDisplayStateComputed.value.state,
       label: gatewaySessionDisplayStateComputed.value.label,
     };
+    serialTarget = gatewaySessionSerialPort.value;
+    serialReady = portGatewayReady(serialTarget);
   } else if (activeMode.value === 'pair') {
     contextLabel = 'Provision target';
     contextUsesMqtt = pairTransport.value === 'mqtt';
@@ -6756,6 +6921,8 @@ const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => 
       ? (contextUsesMqtt ? `lrs-${pairGatewayKey.value}` : pairGatewayKey.value)
       : 'No gateway selected';
     targetState = contextualTargetState(pairGatewayKey.value, gatewayReady.value, contextUsesMqtt);
+    serialTarget = gatewaySelectedPort.value;
+    serialReady = portGatewayReady(serialTarget);
   } else if (activeMode.value === 'settings') {
     contextLabel = 'Settings target';
     contextUsesMqtt = settingsTransport.value === 'mqtt';
@@ -6767,6 +6934,8 @@ const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => 
       contextUsesMqtt ? isSettingsMqttGatewayDiscovered.value : !!serialDeviceState(target)?.deviceInfo,
       contextUsesMqtt,
     );
+    serialTarget = settingsSelectedPort.value;
+    serialReady = !!serialDeviceState(serialTarget)?.deviceInfo;
   } else {
     contextLabel = 'Flash target';
     transportLabel = 'USB Serial';
@@ -6776,7 +6945,12 @@ const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => 
       !!serialDeviceState(flashSelectedPort.value)?.deviceInfo,
       false,
     );
+    serialTarget = flashSelectedPort.value;
+    serialReady = !!serialDeviceState(serialTarget)?.deviceInfo;
   }
+
+  const backgroundSerial = serialTransportSummary(serialTarget, serialReady);
+  const backgroundMqtt = mqttBackgroundSummary();
 
   return {
     contextLabel,
@@ -6784,10 +6958,13 @@ const connectionHeaderSummaryComputed = computed<ConnectionHeaderSummary>(() => 
     targetLabel,
     state: targetState.state,
     stateLabel: targetState.label,
-    brokerState: sessionMqttConnectionState.value,
-    brokerRelevant: contextUsesMqtt ||
-      sessionConnectionType.value !== 'serial' ||
-      sessionMqttConnectionState.value !== 'disconnected',
+    activeTransport: contextUsesMqtt ? 'mqtt' : 'serial',
+    serial: contextUsesMqtt
+      ? backgroundSerial
+      : { ...backgroundSerial, state: targetState.state, stateLabel: targetState.label },
+    mqtt: contextUsesMqtt
+      ? { state: targetState.state, stateLabel: targetState.label, targetLabel }
+      : backgroundMqtt,
   };
 });
 
@@ -6844,7 +7021,7 @@ const gatewaySessionFormComputed = computed<GatewaySessionForm>({
 const fleetTransportStateComputed = computed<FleetTransportState>(() => ({
   fleetTransport: fleetTransport.value,
   hasSelectedGateway: fleetTransport.value === 'mqtt'
-    ? !!gatewaySessionMqttGatewayChipId.value
+    ? !!gatewaySessionMqttGatewayChipId.value && isGatewaySessionMqttGatewayDiscovered.value
     : !!gatewaySessionSerialPort.value
 }));
 
@@ -7100,15 +7277,15 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
             </span>
           </div>
 
-          <div v-if="connectionHeaderSummaryComputed.brokerRelevant" class="mt-3 flex items-center justify-between gap-3 rounded border border-slate-800 bg-slate-950/40 p-3 text-xs">
+          <div class="mt-3 flex items-center justify-between gap-3 rounded border border-slate-800 bg-slate-950/40 p-3 text-xs">
             <div class="flex min-w-0 items-center gap-2">
               <span :class="[
-                'h-2 w-2 shrink-0 rounded-full',
-                sessionMqttConnectionState === 'connected' ? 'bg-emerald-400' :
-                sessionMqttConnectionState === 'connecting' ? 'bg-amber-400 animate-pulse' :
-                sessionMqttConnectionState === 'error' ? 'bg-rose-500' :
-                'bg-slate-600'
-              ]"></span>
+                'flex h-5 min-w-5 shrink-0 items-center justify-center rounded border px-1 text-[10px] font-black leading-none',
+                sessionMqttConnectionState === 'connected' ? 'border-emerald-500/70 bg-emerald-500/20 text-emerald-300' :
+                sessionMqttConnectionState === 'connecting' ? 'border-amber-500/70 bg-amber-500/20 text-amber-300' :
+                sessionMqttConnectionState === 'error' ? 'border-rose-500/70 bg-rose-500/20 text-rose-300' :
+                'border-slate-600 bg-slate-800/70 text-slate-400'
+              ]">M</span>
               <span class="text-slate-400">Shared MQTT broker</span>
               <span class="font-bold text-slate-200">{{ sessionMqttConnectionState }}</span>
             </div>

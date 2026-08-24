@@ -1,6 +1,39 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ref } from 'vue';
-import { useMqttConnection } from './useMqttConnection';
+import {
+  chooseMqttGatewaySelection,
+  mqttBrokerSelectionKey,
+  useMqttConnection,
+} from './useMqttConnection';
+
+describe('broker-scoped gateway selection', () => {
+  it('builds a stable key from the broker connection identity', () => {
+    expect(mqttBrokerSelectionKey({
+      host: ' VENUS.local ',
+      port: 1883,
+      topicRoot: '/lora/',
+      user: 'operator',
+    })).toBe('["venus.local",1883,"lora","operator"]');
+  });
+
+  it('restores the gateway previously selected for this broker', () => {
+    expect(chooseMqttGatewaySelection('0030eb55', '', ['0048cb85', '0030eb55'])).toEqual({
+      chipId: '0030eb55',
+      automatic: false,
+    });
+  });
+
+  it('automatically selects the sole discovered gateway when the saved target is unavailable', () => {
+    expect(chooseMqttGatewaySelection('0030eb55', '0030eb55', ['0048cb85'])).toEqual({
+      chipId: '0048cb85',
+      automatic: true,
+    });
+  });
+
+  it('requires an explicit choice when several gateways are available and none matches', () => {
+    expect(chooseMqttGatewaySelection('0030eb55', '0030eb55', ['0048cb85', '00abcdef'])).toBeNull();
+  });
+});
 
 describe('useMqttConnection', () => {
   const mockNotify = vi.fn();
@@ -187,6 +220,54 @@ describe('useMqttConnection', () => {
       expect(mockInvoke).toHaveBeenCalledWith('start_local_mqtt_broker', { port: 1883 });
       expect(localBrokerRunning.value).toBe(true);
       expect(localBrokerLans.value).toEqual(['192.168.1.10']);
+    });
+
+    it('activates a restored remote MQTT transport without opening settings', async () => {
+      const mockInvoke = vi.fn().mockResolvedValue(true);
+      const connection = useMqttConnection(defaultOptions(mockInvoke));
+      connection.sessionConnectionType.value = 'mqtt';
+      connection.sessionMqttDraftState.value = {
+        host: 'remote.example',
+        port: 2883,
+        topicRoot: 'field',
+        user: 'operator',
+        pass: '',
+        showPass: false,
+      };
+
+      await connection.activateConfiguredSessionTransport();
+
+      expect(mockInvoke).toHaveBeenCalledWith('connect_mqtt_broker', {
+        config: expect.objectContaining({
+          host: 'remote.example',
+          port: 2883,
+          user: 'operator',
+          topic_root: 'field',
+        }),
+      });
+      expect(connection.sessionMqttConnected.value).toBe(true);
+      expect(connection.showMqttConnectionSettings.value).toBe(false);
+    });
+
+    it('activates a restored local MQTT transport by starting and connecting it', async () => {
+      const mockInvoke = vi.fn().mockImplementation((command: string) => {
+        if (command === 'start_local_mqtt_broker') return Promise.resolve(['192.168.1.10']);
+        return Promise.resolve(true);
+      });
+      const connection = useMqttConnection(defaultOptions(mockInvoke));
+      connection.sessionConnectionType.value = 'local_broker';
+
+      await connection.activateConfiguredSessionTransport();
+
+      expect(mockInvoke).toHaveBeenNthCalledWith(1, 'start_local_mqtt_broker', { port: 1883 });
+      expect(mockInvoke).toHaveBeenNthCalledWith(2, 'connect_mqtt_broker', {
+        config: expect.objectContaining({
+          host: '127.0.0.1',
+          port: 1883,
+        }),
+      });
+      expect(connection.localBrokerRunning.value).toBe(true);
+      expect(connection.sessionMqttConnected.value).toBe(true);
     });
 
     it('keeps remote broker parameters while connecting the local broker', async () => {
