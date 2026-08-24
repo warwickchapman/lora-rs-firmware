@@ -80,9 +80,10 @@ Changing tabs never cancels Provision, relay control, a queued/active OTA, MQTT 
 ### Monitor
 
 Monitor uses the same Gateway Session and selected gateway as Fleet. Its refresh
-loop starts only when the operator clicks Monitor and stops when the gateway context
-changes. Broker settings are available from the Gateway Session instead of being
-owned by the Monitor tab.
+loop starts automatically when the tab is observed and stops when the operator
+leaves it or the gateway context becomes unavailable. Refresh work remains
+low-priority and interruptible. Broker settings are available from the Gateway
+Session instead of being owned by the Monitor tab.
 
 ## Provision foundation
 

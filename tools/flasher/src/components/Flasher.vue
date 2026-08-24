@@ -613,7 +613,7 @@ const gatewayEventLastMsByPort = ref<Record<string, number>>({});
 const activeMonitorPort = ref('');
 const activeMonitorSsid = ref('');
 const networkStatusMessage = ref('Select a USB gateway to read its fleet cache.');
-const monitorStatusMessage = ref('Select a USB gateway and refresh monitor data.');
+const monitorStatusMessage = ref('Select a USB gateway to observe monitor data.');
 const monitorTransport = computed<'serial' | 'mqtt'>(() => {
   return sessionConnectionType.value === 'serial' ? 'serial' : 'mqtt';
 });
@@ -863,7 +863,6 @@ watch([pairGatewayKey, pairTransport], () => {
 const isMonitorRefreshing = ref(false);
 const isMonitorLoopRunning = ref(false);
 const monitorPollTimer = ref<ReturnType<typeof window.setInterval> | null>(null);
-const monitorAutoRefresh = ref(true);
 const gatewaySnapshotPauseCount = ref(0);
 const settingsTransport = computed<'serial' | 'mqtt'>(() => {
   return settingsConnectionType.value === 'serial' ? 'serial' : 'mqtt';
@@ -1071,7 +1070,6 @@ const DEVICE_INFO_ORDER: Array<keyof DeviceInfo> = [
 ];
 const MONITOR_AFTER_FLASH_STORAGE_KEY = 'lrs_flasher_monitor_after_flash';
 const ERASE_BEFORE_FLASH_STORAGE_KEY = 'lrs_flasher_erase_before_flash';
-const MONITOR_AUTO_REFRESH_STORAGE_KEY = 'lrs_flasher_monitor_auto_refresh';
 const GATEWAY_SESSION_STORAGE_KEY = 'lrs_flasher_gateway_session';
 const TAB_PORT_STORAGE_KEYS = {
   serial: 'lrs_flasher_flash_port',
@@ -1546,11 +1544,9 @@ const settingsWifiStateComputed = computed<SettingsWifiState>(() => ({
 
 const monitorFormComputed = computed<MonitorForm>({
   get: () => ({
-    monitorAutoRefresh: monitorAutoRefresh.value,
     selectedMonitorDeviceAddress: selectedMonitorDeviceAddress.value,
   }),
   set: (val) => {
-    monitorAutoRefresh.value = val.monitorAutoRefresh;
     selectedMonitorDeviceAddress.value = val.selectedMonitorDeviceAddress;
   }
 });
@@ -1561,13 +1557,9 @@ const monitorHeaderStateComputed = computed<MonitorHeaderState>(() => ({
   identifyAvailable: identifyAvailable.value,
   identifyDisabled: identifyDisabled.value,
   isIdentifying: isIdentifying.value,
-  isMonitorLoopRunning: isMonitorLoopRunning.value,
 }));
 
 const monitorTransportStateComputed = computed<MonitorTransportState>(() => ({
-  sessionTargetReady: monitorTransport.value === 'mqtt'
-    ? sessionMqttConnected.value && !!gatewaySessionMqttGatewayChipId.value && isGatewaySessionMqttGatewayDiscovered.value
-    : !!gatewaySessionSerialPort.value,
   transport: monitorTransport.value,
 }));
 
@@ -3715,11 +3707,9 @@ async function refreshGatewaySnapshot(
 function startMonitorPolling() {
   stopMonitorPolling();
   isMonitorLoopRunning.value = true;
-  if (monitorAutoRefresh.value) {
-    monitorPollTimer.value = window.setInterval(() => {
-      refreshMonitorData(true);
-    }, OBSERVED_INVENTORY_REFRESH_INTERVAL_MS);
-  }
+  monitorPollTimer.value = window.setInterval(() => {
+    refreshMonitorData(true);
+  }, OBSERVED_INVENTORY_REFRESH_INTERVAL_MS);
 }
 
 function stopMonitorPolling() {
@@ -3730,16 +3720,25 @@ function stopMonitorPolling() {
   }
 }
 
-function toggleMonitorLoop() {
-  if (isMonitorLoopRunning.value) {
-    stopMonitorPolling();
+const monitorSessionTargetReady = computed(() => monitorTransport.value === 'mqtt'
+  ? sessionMqttConnected.value && !!gatewaySessionMqttGatewayChipId.value && isGatewaySessionMqttGatewayDiscovered.value
+  : !!gatewaySessionSerialPort.value
+);
+
+function syncMonitorObservation() {
+  stopMonitorPolling();
+  if (activeMode.value !== 'monitor') return;
+  if (!monitorSessionTargetReady.value) {
+    monitorStatusMessage.value = monitorTransport.value === 'mqtt'
+      ? 'Waiting for a connected MQTT gateway.'
+      : 'Waiting for a USB gateway.';
     return;
   }
   startMonitorPolling();
-  refreshMonitorData(false).finally(() => {
-    if (!monitorAutoRefresh.value) stopMonitorPolling();
-  });
+  void refreshMonitorData(true);
 }
+
+watch(monitorSessionTargetReady, syncMonitorObservation);
 
 
 
@@ -6032,7 +6031,7 @@ watch(activeMode, (mode) => {
     });
   }
 
-  if (mode !== 'monitor') stopMonitorPolling();
+  syncMonitorObservation();
   if (mode !== 'network') {
     fleetCacheAutoLoadAttemptKey.value = '';
     stopLoraInventoryPolling(false);
@@ -6057,7 +6056,7 @@ watch(selectedPort, (port) => {
 
   if (activeMode.value === 'monitor') {
     monitorFleetRows.value = [];
-    stopMonitorPolling();
+    syncMonitorObservation();
   }
 });
 
@@ -6066,7 +6065,7 @@ watch(gatewaySessionMqttGatewayChipId, () => {
   clearFleetGatewayCache();
   monitorFleetRows.value = [];
   selectedMonitorDeviceAddress.value = null;
-  stopMonitorPolling();
+  syncMonitorObservation();
   activeGatewaySessionKey.value = '';
 });
 
@@ -6075,14 +6074,14 @@ watch(fleetTransport, () => {
   clearFleetGatewayCache();
   monitorFleetRows.value = [];
   selectedMonitorDeviceAddress.value = null;
-  stopMonitorPolling();
   activeGatewaySessionKey.value = '';
   networkStatusMessage.value = fleetTransport.value === 'mqtt'
     ? 'Select an MQTT gateway, then load its fleet cache.'
     : 'Select a USB gateway, then load its fleet cache.';
   monitorStatusMessage.value = monitorTransport.value === 'mqtt'
-    ? 'Select an MQTT gateway and start Monitor.'
-    : 'Select a USB gateway and start Monitor.';
+    ? 'Waiting for a connected MQTT gateway.'
+    : 'Waiting for a USB gateway.';
+  syncMonitorObservation();
 });
 
 watch(sessionMqttConnectionState, (state, previousState) => {
@@ -6095,7 +6094,7 @@ watch(sessionMqttConnectionState, (state, previousState) => {
     clearFleetGatewayCache();
     monitorFleetRows.value = [];
     selectedMonitorDeviceAddress.value = null;
-    stopMonitorPolling();
+    syncMonitorObservation();
     activeGatewaySessionKey.value = '';
   }
 });
@@ -6139,7 +6138,7 @@ watch(gatewaySessionSerialPort, (port) => {
   clearFleetGatewayCache();
   monitorFleetRows.value = [];
   selectedMonitorDeviceAddress.value = null;
-  stopMonitorPolling();
+  syncMonitorObservation();
   activeGatewaySessionKey.value = '';
 });
 
@@ -6217,12 +6216,8 @@ onMounted(async () => {
     if (savedErase === 'true' || savedErase === 'false') {
       eraseBeforeFlash.value = savedErase === 'true';
     }
-    const savedMonitorAutoRefresh = localStorage.getItem(MONITOR_AUTO_REFRESH_STORAGE_KEY);
-    if (savedMonitorAutoRefresh === 'true' || savedMonitorAutoRefresh === 'false') {
-      monitorAutoRefresh.value = savedMonitorAutoRefresh === 'true';
-    }
   } catch (_) {
-    // Ignore storage failures; checkbox defaults still work.
+    // Ignore storage failures; current defaults still work.
   }
   initializeRegion();
 
@@ -6432,21 +6427,6 @@ watch(eraseBeforeFlash, (next) => {
     localStorage.setItem(ERASE_BEFORE_FLASH_STORAGE_KEY, next ? 'true' : 'false');
   } catch (_) {
     // Ignore storage failures; current checkbox value still applies.
-  }
-});
-
-watch(monitorAutoRefresh, (enabled) => {
-  try {
-    localStorage.setItem(MONITOR_AUTO_REFRESH_STORAGE_KEY, enabled ? 'true' : 'false');
-  } catch (_) {
-    // Ignore storage failures; current checkbox value still applies.
-  }
-  if (!isMonitorLoopRunning.value) return;
-  if (enabled && activeMode.value === 'monitor' && selectedPort.value) {
-    startMonitorPolling();
-    refreshMonitorData(true);
-  } else {
-    stopMonitorPolling();
   }
 });
 
@@ -7451,7 +7431,6 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         :rows="monitorDisplayRowsComputed"
         :gateway-events="gatewayEventsComputed"
         @trigger-identify="triggerIdentify"
-        @toggle-monitor-loop="toggleMonitorLoop"
         @poll-selected-diagnostics="executeSelectedMonitorPollDiagnostics"
         @poll-device-diagnostics="handleMonitorPollDeviceDiagnostics"
         @gateway-events-clear="clearGatewayEvents"

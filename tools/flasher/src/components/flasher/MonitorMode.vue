@@ -2,7 +2,6 @@
 import { computed } from 'vue';
 
 export interface MonitorForm {
-  monitorAutoRefresh: boolean;
   selectedMonitorDeviceAddress: number | null;
 }
 
@@ -12,11 +11,9 @@ export interface MonitorHeaderState {
   identifyAvailable: boolean;
   identifyDisabled: boolean;
   isIdentifying: boolean;
-  isMonitorLoopRunning: boolean;
 }
 
 export interface MonitorTransportState {
-  sessionTargetReady: boolean;
   transport: 'serial' | 'mqtt';
 }
 
@@ -115,7 +112,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'trigger-identify'): void;
-  (e: 'toggle-monitor-loop'): void;
   (e: 'poll-selected-diagnostics'): void;
   (e: 'poll-device-diagnostics', address: number): void;
   (e: 'gateway-events-clear'): void;
@@ -123,10 +119,6 @@ const emit = defineEmits<{
 }>();
 
 // Computed bridges to avoid direct mutations in the child
-const computedMonitorAutoRefresh = computed({
-  get: () => form.value.monitorAutoRefresh,
-  set: (val) => { form.value = { ...form.value, monitorAutoRefresh: val }; }
-});
 const computedSelectedMonitorDeviceAddress = computed({
   get: () => form.value.selectedMonitorDeviceAddress,
   set: (val) => { form.value = { ...form.value, selectedMonitorDeviceAddress: val }; }
@@ -197,17 +189,6 @@ const visibleGatewayEvents = computed(() => {
               <path d="M8 14a6 6 0 1 1 8 0c-.8.65-1.15 1.25-1.28 2H9.28C9.15 15.25 8.8 14.65 8 14Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"></path>
               <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
             </svg>
-          </button>
-          <label class="flex items-center gap-2 text-xs text-slate-400">
-            <input v-model="computedMonitorAutoRefresh" type="checkbox" />
-            Auto refresh
-          </label>
-          <button
-            @click="emit('toggle-monitor-loop')"
-            :disabled="!transportState.sessionTargetReady"
-            class="primary-btn m-0 h-8 px-3 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-          >
-            {{ headerState.isMonitorLoopRunning ? 'Stop' : 'Monitor' }}
           </button>
         </div>
       </div>
@@ -373,7 +354,7 @@ const visibleGatewayEvents = computed(() => {
           </thead>
           <tbody>
             <tr v-if="rows.length === 0">
-              <td :colspan="fleetSummaryState.hasDiagnosticsData ? 15 : 13" class="px-3 py-8 text-center text-slate-600">Start Monitor to read the gateway peer cache.</td>
+              <td :colspan="fleetSummaryState.hasDiagnosticsData ? 15 : 13" class="px-3 py-8 text-center text-slate-600">Waiting for gateway peer data.</td>
             </tr>
             <tr v-for="device in rows" :key="device.address"
                 @click="computedSelectedMonitorDeviceAddress = device.address"
