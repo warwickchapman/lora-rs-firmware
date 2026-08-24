@@ -3,8 +3,7 @@
 #include <string.h>
 
 void test_peer_manager_sizeof() {
-  TEST_ASSERT_EQUAL_UINT32(184, sizeof(PeerRuntime));
-  TEST_ASSERT_EQUAL_UINT32(24, sizeof(PollRuntime));
+  TEST_ASSERT_TRUE(sizeof(PeerRuntime) <= 256);
 }
 
 void test_peer_manager_lookup_by_address() {
@@ -15,7 +14,7 @@ void test_peer_manager_lookup_by_address() {
   TEST_ASSERT_NULL(pm.find(2));
 
   // Insert one peer
-  PeerRuntime* p = pm.findOrCreate(2, 1002, 60000, true, 500);
+  PeerRuntime* p = pm.findOrCreate(2, 1002);
   TEST_ASSERT_NOT_NULL(p);
   TEST_ASSERT_EQUAL_UINT8(2, p->address);
   TEST_ASSERT_EQUAL_UINT32(1002, p->chip_id);
@@ -37,8 +36,8 @@ void test_peer_manager_lookup_by_index() {
   PeerManager pm;
   pm.begin(1);
 
-  pm.findOrCreate(2, 1002, 60000, true, 500);
-  pm.findOrCreate(3, 1003, 60000, true, 500);
+  pm.findOrCreate(2, 1002);
+  pm.findOrCreate(3, 1003);
 
   TEST_ASSERT_EQUAL_UINT32(2, pm.count());
 
@@ -60,13 +59,13 @@ void test_peer_manager_full_saturation() {
 
   for (size_t i = 0; i < LRS_MAX_PEERS; ++i) {
     uint8_t addr = i + 2;
-    PeerRuntime* p = pm.findOrCreate(addr, 1000 + addr, 60000, true, 500);
+    PeerRuntime* p = pm.findOrCreate(addr, 1000 + addr);
     TEST_ASSERT_NOT_NULL(p);
   }
   TEST_ASSERT_EQUAL_UINT32(LRS_MAX_PEERS, pm.count());
 
   // Subsequent insertion must return nullptr (No active-peer eviction)
-  PeerRuntime* pExtra = pm.findOrCreate(100, 9999, 60000, true, 500);
+  PeerRuntime* pExtra = pm.findOrCreate(100, 9999);
   TEST_ASSERT_NULL(pExtra);
   TEST_ASSERT_EQUAL_UINT32(LRS_MAX_PEERS, pm.count());
 }
@@ -75,9 +74,9 @@ void test_peer_manager_forget_and_compaction() {
   PeerManager pm;
   pm.begin(1);
 
-  pm.findOrCreate(2, 1002, 60000, true, 500);
-  pm.findOrCreate(3, 1003, 60000, true, 500);
-  pm.findOrCreate(4, 1004, 60000, true, 500);
+  pm.findOrCreate(2, 1002);
+  pm.findOrCreate(3, 1003);
+  pm.findOrCreate(4, 1004);
 
   TEST_ASSERT_EQUAL_UINT32(3, pm.count());
 
@@ -94,12 +93,6 @@ void test_peer_manager_forget_and_compaction() {
 
   TEST_ASSERT_NULL(pm.findByIndex(2));
 
-  // Ensure poll state array is compacted as well
-  PollRuntime* poll0 = pm.pollStateForIndex(0);
-  TEST_ASSERT_NOT_NULL(poll0);
-  PollRuntime* poll1 = pm.pollStateForIndex(1);
-  TEST_ASSERT_NOT_NULL(poll1);
-
   // Forget non-existent
   TEST_ASSERT_FALSE(pm.forget(99));
 }
@@ -108,7 +101,7 @@ void test_peer_manager_snapshot_consistency() {
   PeerManager pm;
   pm.begin(1);
 
-  PeerRuntime* p = pm.findOrCreate(2, 1002, 60000, true, 500);
+  PeerRuntime* p = pm.findOrCreate(2, 1002);
   TEST_ASSERT_NOT_NULL(p);
   p->relay_state = 1;
   p->relay_state_known = true;

@@ -19,7 +19,7 @@ constexpr char kPostOtaActionTmpPath[] = "/post_ota_action.tmp";
 constexpr char kPostOtaWifiFastMarkerPath[] = "/post_ota_wifi_fast";
 constexpr size_t kConfigMaxBytes = 8192;
 constexpr size_t kPostOtaActionMaxBytes = 256;
-constexpr uint16_t kConfigSchemaVersion = 5;
+constexpr uint16_t kConfigSchemaVersion = 6;
 constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
@@ -48,8 +48,8 @@ constexpr const char *kAllowedFields[] = {
     "heartbeat_ms",
     "heartbeat_enabled",
     "ack_timeout_ms",
-    "tx_mqtt_remote_polling_enabled",
-    "tx_mqtt_remote_default_poll_interval_ms",
+    "remote_refresh_enabled",
+    "remote_refresh_cycle_ms",
     "input_control_paired_lora_enabled",
     "tx_command_retry_timeout_ms",
     "rx_failsafe_mode",
@@ -313,8 +313,8 @@ bool ConfigStore::begin() {
   cfg_.heartbeat_ms = root["heartbeat_ms"] | 60000;
   cfg_.heartbeat_enabled = root["heartbeat_enabled"] | true;
   cfg_.ack_timeout_ms = root["ack_timeout_ms"] | 5000;
-  cfg_.tx_mqtt_remote_polling_enabled = root["tx_mqtt_remote_polling_enabled"] | false;
-  cfg_.tx_mqtt_remote_default_poll_interval_ms = root["tx_mqtt_remote_default_poll_interval_ms"] | 60000;
+  cfg_.remote_refresh_enabled = root["remote_refresh_enabled"] | false;
+  cfg_.remote_refresh_cycle_ms = root["remote_refresh_cycle_ms"] | 60000;
   cfg_.input_control_paired_lora_enabled = root["input_control_paired_lora_enabled"] | false;
   cfg_.tx_command_retry_timeout_ms = root["tx_command_retry_timeout_ms"] | 180000;
   cfg_.rx_failsafe_mode = root["rx_failsafe_mode"] | "hold_last";
@@ -385,6 +385,8 @@ bool ConfigStore::begin() {
   }
   if (cfg_.heartbeat_ms < 60000UL) cfg_.heartbeat_ms = 60000UL;
   if (cfg_.heartbeat_ms > 3600000UL) cfg_.heartbeat_ms = 3600000UL;
+  if (cfg_.remote_refresh_cycle_ms < 60000UL) cfg_.remote_refresh_cycle_ms = 60000UL;
+  if (cfg_.remote_refresh_cycle_ms > 3600000UL) cfg_.remote_refresh_cycle_ms = 3600000UL;
   if (cfg_.tx_command_retry_timeout_ms < 5000UL) cfg_.tx_command_retry_timeout_ms = 5000UL;
   if (cfg_.tx_command_retry_timeout_ms > 3600000UL) cfg_.tx_command_retry_timeout_ms = 3600000UL;
   cfg_.rx_failsafe_mode.trim();
@@ -459,8 +461,8 @@ bool ConfigStore::save() {
   doc["heartbeat_ms"] = cfg_.heartbeat_ms;
   doc["heartbeat_enabled"] = cfg_.heartbeat_enabled;
   doc["ack_timeout_ms"] = cfg_.ack_timeout_ms;
-  doc["tx_mqtt_remote_polling_enabled"] = cfg_.tx_mqtt_remote_polling_enabled;
-  doc["tx_mqtt_remote_default_poll_interval_ms"] = cfg_.tx_mqtt_remote_default_poll_interval_ms;
+  doc["remote_refresh_enabled"] = cfg_.remote_refresh_enabled;
+  doc["remote_refresh_cycle_ms"] = cfg_.remote_refresh_cycle_ms;
   doc["input_control_paired_lora_enabled"] = cfg_.input_control_paired_lora_enabled;
   doc["tx_command_retry_timeout_ms"] = cfg_.tx_command_retry_timeout_ms;
   doc["rx_failsafe_mode"] = cfg_.rx_failsafe_mode;
@@ -785,8 +787,8 @@ void ConfigStore::setDefaults() {
   cfg_.heartbeat_ms = 60000;
   cfg_.heartbeat_enabled = true;
   cfg_.ack_timeout_ms = 5000;
-  cfg_.tx_mqtt_remote_polling_enabled = false;
-  cfg_.tx_mqtt_remote_default_poll_interval_ms = 60000;
+  cfg_.remote_refresh_enabled = false;
+  cfg_.remote_refresh_cycle_ms = 60000;
   cfg_.input_control_paired_lora_enabled = true;
   cfg_.tx_command_retry_timeout_ms = 180000;
   cfg_.rx_failsafe_mode = "hold_last";

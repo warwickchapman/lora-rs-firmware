@@ -168,37 +168,6 @@ bool formatCanonicalPeerAddrSegment(char *out, size_t outLen, uint8_t addr, uint
 }
 
 
-bool parseSignedPayloadLong(const uint8_t *payload, unsigned int length, long &out) {
-  if (payload == nullptr) return false;
-  if (length == 0) {
-    out = 0;
-    return true;
-  }
-  if (length >= 24) return false;
-  char buf[24];
-  unsigned int n = 0;
-  for (unsigned int i = 0; i < length && n < (sizeof(buf) - 1); ++i) {
-    const char c = static_cast<char>(payload[i]);
-    if (c == '\r' || c == '\n' || c == '\t') continue;
-    buf[n++] = c;
-  }
-  while (n > 0 && buf[n - 1] == ' ') --n;
-  size_t start = 0;
-  while (start < n && buf[start] == ' ') ++start;
-  if (start > 0 && start < n) memmove(buf, buf + start, n - start);
-  if (start > 0) n = (start < n) ? (n - start) : 0;
-  buf[n] = '\0';
-  if (n == 0) {
-    out = 0;
-    return true;
-  }
-  char *end = nullptr;
-  long parsed = strtol(buf, &end, 10);
-  if (end == nullptr || *end != '\0') return false;
-  out = parsed;
-  return true;
-}
-
 bool parseBoolPayload(const uint8_t *payload, unsigned int length, bool &out) {
   if (payload == nullptr || length == 0 || length >= 32) return false;
   char buf[32];
@@ -395,7 +364,7 @@ void MqttBridge::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.local_address = cfg.local_address;
   runtime_.controller_address = cfg.controller_address;
   runtime_.mqtt_port = cfg.mqtt_port;
-  runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
+  runtime_.remote_refresh_enabled = cfg.remote_refresh_enabled;
 }
 
 void MqttBridge::advanceFibonacci() {
@@ -555,24 +524,9 @@ void MqttBridge::mqttCallback(char *topic, uint8_t *payload, unsigned int length
       return;
     }
 
-    if (strcmp(leaf, "poll_interval_s") == 0) {
-      long sec = 0;
-      if (!parseSignedPayloadLong(payload, length, sec)) return;
-      if (sec < 0) sec = 0;
-      if (sec > 0 && sec < 60) sec = 60;
-      if (sec > 3600) sec = 3600;
-      sm_->mqttSetPeerPollIntervalMs(addr, static_cast<uint32_t>(sec) * 1000U);
-      {
-        lrslog::event("mqtt_remote_poll_interval", 0, static_cast<uint32_t>(sec), addr);
-      }
-      return;
-    }
-
     if (strcmp(leaf, "poll_now") == 0) {
-      sm_->mqttPollPeerNow(addr);
-      {
-        lrslog::event("mqtt_remote_poll_now", 0, 0, addr);
-      }
+      const bool accepted = sm_->mqttPollPeerNow(addr);
+      lrslog::event(accepted ? "mqtt_remote_poll_now" : "mqtt_remote_poll_now_busy", 0, 0, addr);
       return;
     }
 
@@ -646,7 +600,7 @@ bool MqttBridge::clearPeerRetainedTopics(uint8_t addr, uint32_t passedChipId) {
       "relay",           "input",              "ack_state",
       "addr_hex",        "addr_dec",
       "uplink_rssi_dbm", "last_seen_ms",       "last_seen_age_s", "last_cmd_counter",
-      "poll_interval_s", "last_poll_tx_ms",    "poll_state",       "forget",           "poll_now",
+      "poll_state",      "forget",           "poll_now",
       "wifi",            "wifi_connected",     "uptime_ms",        "heap_free",        "heap_max_block",
       "heap_frag_pct",   "fw_version",         "ip",               "power_save_listen_only",
       "power_save_active", "chip_id",          "wifi_rssi_dbm"
@@ -741,7 +695,6 @@ bool MqttBridge::connectIfNeeded() {
     mqtt_client_.subscribe(topicBuf);
     char topic[kMqttTopicBufBytes];
     if (buildPeerTopic(topic, sizeof(topic), "+", "set/relay")) mqtt_client_.subscribe(topic);
-    if (buildPeerTopic(topic, sizeof(topic), "+", "poll_interval_s")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "poll_now")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "wifi")) mqtt_client_.subscribe(topic);
     if (buildPeerTopic(topic, sizeof(topic), "+", "forget")) mqtt_client_.subscribe(topic);
@@ -844,7 +797,7 @@ bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYie
   if (peerCache == nullptr) {
     return false;
   }
-  if (!runtime_.tx_mqtt_remote_polling_enabled) {
+  if (!runtime_.remote_refresh_enabled) {
     const bool changed =
         !peerCache->published_once || peerCache->last_seen_ms != node.last_seen_ms || peerCache->last_cmd_counter != node.last_cmd_counter;
     if (!changed) {
@@ -980,10 +933,6 @@ bool MqttBridge::publishPeerStatus(size_t peerIndex, uint8_t &publishOpsSinceYie
 
   snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_cmd_counter));
   if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_cmd_counter")) publishRetainedTopic(topic, numBuf);
-  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.poll_interval_ms / 1000U));
-  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_interval_s")) publishRetainedTopic(topic, numBuf);
-  snprintf(numBuf, sizeof(numBuf), "%lu", static_cast<unsigned long>(node.last_poll_tx_ms));
-  if (buildPeerTopic(topic, sizeof(topic), addrSeg, "last_poll_tx_ms")) publishRetainedTopic(topic, numBuf);
   if (buildPeerTopic(topic, sizeof(topic), addrSeg, "poll_state")) publishRetainedTopic(topic, node.poll_pending ? "pending" : "idle");
 
   if (!timedOut && node.last_seen_ms > 0 && node.maintenance_debug_known) {

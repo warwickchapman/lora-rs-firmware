@@ -30,10 +30,9 @@ struct PeerStatusSnapshot {
   bool downlink_rssi_valid = false;
   int downlink_rssi = -127;
   uint32_t last_seen_ms = 0;
+  uint32_t operational_updated_ms = 0;
   uint32_t last_cmd_counter = 0;
   PeerAckState ack_state = PeerAckState::Unknown;
-  uint32_t poll_interval_ms = 0;
-  uint32_t last_poll_tx_ms = 0;
   bool poll_pending = false;
   bool wifi_state_known = false;
   bool wifi_enabled = true;
@@ -74,6 +73,7 @@ struct PeerRuntime {
   bool downlink_rssi_valid = false;
   int downlink_rssi = -127;
   uint32_t last_seen_ms = 0;
+  uint32_t operational_updated_ms = 0;
   uint32_t last_cmd_counter = 0;
   PeerAckState ack_state = PeerAckState::Unknown;
   bool wifi_state_known = false;
@@ -112,16 +112,5 @@ struct PeerRuntime {
   uint32_t next_retry_ms = 0;
   uint32_t pending_counter = 0;
   uint32_t pending_deadline_ms = 0;
-  uint32_t poll_interval_ms = 0;
 };
 static_assert(sizeof(PeerRuntime) <= 256, "PeerRuntime exceeds budget; review field additions");
-
-struct PollRuntime {
-  uint32_t next_poll_ms = 0;
-  bool poll_pending = false;
-  uint8_t poll_retry_step = 0;
-  uint32_t poll_next_retry_ms = 0;
-  uint32_t poll_counter = 0;
-  uint32_t poll_deadline_ms = 0;
-  uint32_t last_poll_tx_ms = 0;
-};

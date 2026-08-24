@@ -7,7 +7,7 @@ import { buildChangedSettingsConfigPatch, buildSettingsConfigPatch, splitMqttSet
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
-import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState, applySeedWhitelist } from '../composables/useFleetInventory';
+import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState, applySeedWhitelist, missingInventoryDetailAddresses } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
 import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
 import {
@@ -255,8 +255,8 @@ interface SerialAdminConfig {
   heartbeat_ms?: number;
   heartbeat_enabled?: boolean;
   ack_timeout_ms?: number;
-  tx_mqtt_remote_polling_enabled?: boolean;
-  tx_mqtt_remote_default_poll_interval_ms?: number;
+  remote_refresh_enabled?: boolean;
+  remote_refresh_cycle_ms?: number;
   input_control_paired_lora_enabled?: boolean;
   tx_command_retry_timeout_ms?: number;
   rx_failsafe_mode?: string;
@@ -1013,6 +1013,7 @@ const fleetCacheLoadedTargetKey = ref('');
 const fleetCacheAutoLoadAttemptKey = ref('');
 const lastLoraInventoryPeerStatusByAddress = ref<Record<number, LoraInventoryPeerStatus>>({});
 const fleetInventoryHydrateCursor = ref(0);
+const observedInventoryRefreshAttempts = new Set<string>();
 const activeGatewaySessionKey = ref('');
 const gatewayUptimeHistory = ref<Record<string, number>>({});
 const gatewayUnexpectedReboots = ref<Record<string, GatewayUnexpectedRebootAlert>>({});
@@ -1088,7 +1089,7 @@ const {
   refreshLoraPeerCommand: async (address: number) => {
     const { port } = fleetGatewayCommandTarget();
     if (!port) return;
-    await refreshLoraInventoryPeers(port, [address], true, 'fleet', true);
+    await refreshLoraInventoryPeers(port, [address], true, 'fleet', 'forced');
   },
   notify,
   pushNetworkLog,
@@ -1363,10 +1364,12 @@ const isGatewayUpgradeAvailable = computed(() => {
   return compareParsedVersions(p1, p2) > 0;
 });
 const fleetGatewayReady = computed(() =>
-  !!gatewaySessionSerialPort.value &&
+  !!targetGatewayKey.value &&
   !!fleetGatewayIdentity.value &&
   !!fleetGatewayDevice.value?.adminSupported &&
-  !!adminPasswordForPort(gatewaySessionSerialPort.value)
+  !!adminPasswordForPort(targetGatewayKey.value) &&
+  (fleetTransport.value === 'serial' ||
+    (sessionMqttConnected.value && isGatewaySessionMqttGatewayDiscovered.value))
 );
 const fleetGatewayIsFactoryDefault = computed(() => {
   const st = fleetGatewayStatus.value;
@@ -1724,11 +1727,15 @@ function noteGatewayStatusForRebootDetection(out: SerialAdminStatus, port: strin
 
   const key = gatewayStatusAlertKey(port, out);
   const previousUptimeMs = gatewayUptimeHistory.value[key];
-  if (
+  const rebooted =
     previousUptimeMs !== undefined &&
-    uptimeMs + GATEWAY_UPTIME_ROLLBACK_GRACE_MS < previousUptimeMs &&
-    !isExpectedGatewayRebootPhase()
-  ) {
+    uptimeMs + GATEWAY_UPTIME_ROLLBACK_GRACE_MS < previousUptimeMs;
+  if (rebooted) {
+    // The gateway's volatile peer-detail cache was also reset. Allow the
+    // active observed session to hydrate each incomplete peer once again.
+    observedInventoryRefreshAttempts.clear();
+  }
+  if (rebooted && !isExpectedGatewayRebootPhase()) {
     gatewayUnexpectedReboots.value = {
       ...gatewayUnexpectedReboots.value,
       [key]: {
@@ -3151,8 +3158,8 @@ function normalizeSerialAdminConfig(raw: Partial<SerialAdminConfig> | null | und
     heartbeat_ms: numberValue(cfg.heartbeat_ms, 60000),
     heartbeat_enabled: boolValue(cfg.heartbeat_enabled, true),
     ack_timeout_ms: numberValue(cfg.ack_timeout_ms, 3000),
-    tx_mqtt_remote_polling_enabled: boolValue(cfg.tx_mqtt_remote_polling_enabled, false),
-    tx_mqtt_remote_default_poll_interval_ms: numberValue(cfg.tx_mqtt_remote_default_poll_interval_ms, 300000),
+    remote_refresh_enabled: boolValue(cfg.remote_refresh_enabled, false),
+    remote_refresh_cycle_ms: numberValue(cfg.remote_refresh_cycle_ms, 60000),
     input_control_paired_lora_enabled: boolValue(cfg.input_control_paired_lora_enabled, false),
     tx_command_retry_timeout_ms: numberValue(cfg.tx_command_retry_timeout_ms, 180000),
     rx_failsafe_mode: stringValue(cfg.rx_failsafe_mode, 'hold_last'),
@@ -3257,7 +3264,7 @@ async function loadNetworkGateway() {
           ssid: gw?.sta_ssid || state.deviceInfo?.ssid || ''
         };
       }
-      await refreshGatewaySnapshot(chipId, false, 'fleet', false);
+      await refreshGatewaySnapshot(chipId, false, 'fleet');
       networkStatusMessage.value = `Gateway loaded over MQTT; firmware ${gw?.fw_version || 'unknown'}.`;
       startFleetCachePolling();
     } catch (e) {
@@ -3298,7 +3305,7 @@ async function loadNetworkGateway() {
       return;
     }
     networkStatusMessage.value = `Gateway loaded on ${port}; firmware ${hello.fw_version || 'unknown'}.`;
-    await refreshGatewaySnapshot(port, false, 'fleet', false);
+    await refreshGatewaySnapshot(port, false, 'fleet');
     startFleetCachePolling();
   } catch (e) {
     networkStatusMessage.value = serialFeatureError('Gateway load', e);
@@ -3341,6 +3348,7 @@ function clearFleetGatewayCache() {
   isLoraInventoryScanStarting.value = false;
   fleetScanActiveSinceMs.value = 0;
   fleetCacheLoadedTargetKey.value = '';
+  observedInventoryRefreshAttempts.clear();
   stopLoraInventoryPolling(false);
 }
 
@@ -3382,22 +3390,55 @@ function scheduleFleetScanSettleRefresh(port: string) {
     fleetScanSettleTimer.value = null;
     const targetPort = fleetTransport.value === 'mqtt' ? gatewaySessionMqttGatewayChipId.value : gatewaySessionSerialPort.value;
     if (activeMode.value !== 'network' || port !== targetPort || isLoraInventoryScanning.value) return;
-    void refreshGatewaySnapshot(port, true, 'fleet');
+    void settleFleetScanDetails(port);
   }, FLEET_SCAN_SETTLE_REFRESH_MS);
 }
+
+async function settleFleetScanDetails(port: string) {
+  await refreshGatewaySnapshot(port, true, 'fleet');
+  const addresses = loraInventory.value.map(row => row.address);
+
+  // Read the gateway's cache first so UI hydration cannot be mistaken for an
+  // RF miss. Send one bounded retry only to genuinely incomplete remotes.
+  await refreshLoraInventoryPeers(port, addresses, true, 'fleet', 'cache_only');
+  const missing = missingInventoryDetailAddresses(loraInventory.value);
+  if (missing.length > 0) {
+    await refreshLoraInventoryPeers(port, missing, true, 'fleet', 'forced');
+  }
+}
+
+type InventoryRefreshMode = 'cache_only' | 'missing_once' | 'forced';
 
 async function refreshLoraInventoryPeers(
   port: string,
   addresses: number[],
   background: boolean,
   source: 'fleet' | 'monitor',
-  requestRemoteRefresh = !background,
+  refreshMode: InventoryRefreshMode,
 ) {
   const uniqueAddresses = Array.from(new Set(addresses.filter(address => Number.isFinite(address) && address >= 1 && address <= LRS_REMOTE_SCAN_CAP)))
     .sort((a, b) => a - b);
   const password = adminPasswordForPort(port);
   for (const address of uniqueAddresses) {
     try {
+      let peer: LoraInventoryPeerStatus | null = null;
+      if (refreshMode !== 'forced') {
+        peer = await sendEasyPairCommandOnPort<LoraInventoryPeerStatus>(
+          port,
+          'lora_inventory_peer',
+          { address },
+          3000,
+          { label: `Gateway peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
+        );
+      }
+
+      const refreshAttemptKey = `${port}:${address}`;
+      const missingObservedDetail = refreshMode === 'missing_once' &&
+        !!peer?.device &&
+        missingInventoryDetailAddresses([peer.device]).length > 0;
+      const requestRemoteRefresh = refreshMode === 'forced' ||
+        (missingObservedDetail && !observedInventoryRefreshAttempts.has(refreshAttemptKey));
+
       if (password && requestRemoteRefresh) {
         await sendEasyPairCommandOnPort(
           port,
@@ -3406,15 +3447,20 @@ async function refreshLoraInventoryPeers(
           2500,
           { label: `Refresh LoRa peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
         );
+        observedInventoryRefreshAttempts.add(refreshAttemptKey);
         await new Promise(resolve => setTimeout(resolve, FLEET_PEER_REFRESH_SETTLE_MS));
+        peer = null;
       }
-      const peer = await sendEasyPairCommandOnPort<LoraInventoryPeerStatus>(
-        port,
-        'lora_inventory_peer',
-        { address },
-        3000,
-        { label: `Gateway peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
-      );
+
+      if (!peer) {
+        peer = await sendEasyPairCommandOnPort<LoraInventoryPeerStatus>(
+          port,
+          'lora_inventory_peer',
+          { address },
+          3000,
+          { label: `Gateway peer ${address}`, priority: background ? 'background' : 'user', dropIfBusy: background }
+        );
+      }
       lastLoraInventoryPeerStatusByAddress.value[address] = peer;
       if (!peer.device) continue;
       if (source === 'fleet') {
@@ -3536,8 +3582,17 @@ async function refreshMonitorData(background = false) {
   if (monitorTransport.value === 'mqtt') {
     const chipId = gatewaySessionMqttGatewayChipId.value;
     if (!sessionMqttConnected.value || !chipId || !isGatewaySessionMqttGatewayDiscovered.value) return;
-    monitorFleetRows.value = mergeMonitorRows(loraInventory.value);
-    monitorStatusMessage.value = `Listening for MQTT telemetry from lrs-${normalizeChipId(chipId)}.`;
+    if (isMonitorRefreshing.value) return;
+    if (background && activeMode.value !== 'monitor') return;
+    isMonitorRefreshing.value = true;
+    try {
+      await refreshGatewaySnapshot(chipId, background, 'monitor');
+    } catch (e) {
+      monitorStatusMessage.value = `MQTT Monitor refresh failed: ${String(e || '')}`;
+      if (!background) notify(monitorStatusMessage.value);
+    } finally {
+      isMonitorRefreshing.value = false;
+    }
     return;
   }
   const port = gatewaySessionSerialPort.value;
@@ -3559,7 +3614,6 @@ async function refreshGatewaySnapshot(
   port: string,
   background = true,
   source: 'fleet' | 'monitor' = 'monitor',
-  requestRemoteRefresh = !background,
 ) {
   if (!port) return;
   if (background && gatewaySnapshotPauseCount.value > 0) return;
@@ -3602,6 +3656,21 @@ async function refreshGatewaySnapshot(
       return;
     }
 
+    const observerPassword = adminPasswordForPort(port);
+    if (observerPassword) {
+      try {
+        await sendEasyPairCommandOnPort(
+          port,
+          'observe_operational_state',
+          { admin_password: observerPassword, lease_s: 20 },
+          2500,
+          { label: 'Observe remote operational state', priority: background ? 'background' : 'user', dropIfBusy: background }
+        );
+      } catch (e) {
+        if (!background && !serialBackgroundSkipped(e)) throw e;
+      }
+    }
+
     const inventory = await sendEasyPairCommandOnPort<LoraInventoryStatus>(
       port,
       'lora_inventory_status',
@@ -3624,7 +3693,13 @@ async function refreshGatewaySnapshot(
       fleetCacheLoadedTargetKey.value = port;
       const hydrateAddress = nextFleetHydrateAddress(inventoryAddresses);
       if (hydrateAddress !== null) {
-        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'fleet', requestRemoteRefresh);
+        await refreshLoraInventoryPeers(
+          port,
+          [hydrateAddress],
+          background,
+          'fleet',
+          (scanActive || wasScanning) ? 'cache_only' : 'missing_once'
+        );
       }
       loraCandidates.value = (inventory.candidates || []).map(c => deriveCandidateLocalTimestamp(c, fleetClockMs.value));
       candidateTotal.value = inventory.candidate_total || (inventory.candidates || []).length;
@@ -3651,9 +3726,15 @@ async function refreshGatewaySnapshot(
     if (source === 'monitor' && port === targetMonitor) {
       mergeMonitorSeedRows(inventory.devices || []);
       const monitorAddresses = (inventory.devices || []).map(device => device.address);
-      const hydrateAddress = monitorTransport.value === 'serial' ? nextFleetHydrateAddress(monitorAddresses) : null;
+      const hydrateAddress = nextFleetHydrateAddress(monitorAddresses);
       if (hydrateAddress !== null) {
-        await refreshLoraInventoryPeers(port, [hydrateAddress], background, 'monitor', requestRemoteRefresh);
+        await refreshLoraInventoryPeers(
+          port,
+          [hydrateAddress],
+          background,
+          'monitor',
+          isLoraInventoryScanning.value ? 'cache_only' : 'missing_once'
+        );
       }
       monitorStatusMessage.value = `Updated ${new Date().toLocaleTimeString()} · ${monitorFleetRows.value.length} peer${monitorFleetRows.value.length === 1 ? '' : 's'} visible.`;
     }
@@ -3701,7 +3782,7 @@ async function withGatewayForeground<T>(port: string, work: () => Promise<T>): P
 function startMonitorPolling() {
   stopMonitorPolling();
   isMonitorLoopRunning.value = true;
-  if (monitorAutoRefresh.value && monitorTransport.value === 'serial') {
+  if (monitorAutoRefresh.value) {
     monitorPollTimer.value = window.setInterval(() => {
       refreshMonitorData(true);
     }, 5000);
@@ -6650,7 +6731,6 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
     badgeLabel: fleetGatewayBadgeLabel.value,
     statusLabel: fleetGatewayStatusLabel.value,
     summary: fleetGatewaySummary.value,
-    isLoading: isNetworkGatewayLoading.value,
     isIdentifyDisabled: identifyDisabled.value,
     isIdentifying: isIdentifying.value,
     isUpgradeAvailable: isGatewayUpgradeAvailable.value,
@@ -6735,6 +6815,9 @@ const gatewaySessionTargetKey = computed(() =>
     ? gatewaySessionMqttGatewayChipId.value
     : gatewaySessionSerialPort.value
 );
+const gatewaySessionAdminPassword = computed(() =>
+  adminPasswordForPort(gatewaySessionTargetKey.value)
+);
 
 const gatewaySessionIsActive = computed(() => {
   if (sessionConnectionType.value === 'serial') {
@@ -6768,6 +6851,7 @@ const fleetCacheAutoLoadStateComputed = computed(() => ({
   transport: fleetTransport.value,
   mqttConnected: sessionMqttConnected.value,
   mqttGatewayDiscovered: isGatewaySessionMqttGatewayDiscovered.value,
+  mqttAdminReady: !!gatewaySessionAdminPassword.value,
   serialTargetAvailable: ports.value.some(port => port.port_name === gatewaySessionSerialPort.value),
   changeBlocked: !!gatewaySessionChangeDisabledReason.value,
   loadedTarget: fleetCacheLoadedTargetKey.value,
@@ -6779,6 +6863,14 @@ watch(fleetCacheAutoLoadStateComputed, state => {
   fleetCacheAutoLoadAttemptKey.value = state.target;
   void loadNetworkGateway();
 }, { immediate: true });
+
+watch(gatewaySessionAdminPassword, (password, previousPassword) => {
+  if (password === previousPassword) return;
+  fleetCacheAutoLoadAttemptKey.value = '';
+  if (fleetCacheLoadedTargetKey.value === gatewaySessionTargetKey.value) {
+    fleetCacheLoadedTargetKey.value = '';
+  }
+});
 
 const gatewaySessionDisplayStateComputed = computed<GatewaySessionDisplayState>(() => {
   let state: GatewaySessionDisplayState['state'] = 'offline';
@@ -7019,10 +7111,7 @@ const gatewaySessionFormComputed = computed<GatewaySessionForm>({
 });
 
 const fleetTransportStateComputed = computed<FleetTransportState>(() => ({
-  fleetTransport: fleetTransport.value,
-  hasSelectedGateway: fleetTransport.value === 'mqtt'
-    ? !!gatewaySessionMqttGatewayChipId.value && isGatewaySessionMqttGatewayDiscovered.value
-    : !!gatewaySessionSerialPort.value
+  fleetTransport: fleetTransport.value
 }));
 
 const fleetInventorySummaryComputed = computed<FleetInventorySummary>(() => ({
@@ -7469,7 +7558,6 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @gateway-events-copy="copyGatewayEvents"
         @lora-inventory-debug-copy="copyLoraInventoryDebug"
         @firmware-fetch="fetchFirmware"
-        @gateway-load="loadNetworkGateway"
         @gateway-identify="triggerIdentify"
         @gateway-flash="flashFleetGateway"
         @gateway-settings="handleFleetGatewaySettings"

@@ -114,10 +114,10 @@ Otherwise packet is dropped and logged.
 - `Ack` carries the acknowledged command counter in payload bytes `b8..b11` (`unix_time_s` slot reused for ACK correlation).
 - RX sends `MqttStatus` for `Mqtt` with applied relay/input/temp state.
 - TX may send `PollRequest` to RX.
-- RX replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
+- RX waits 120 ms for gateway receive turnaround, then replies to `PollRequest` with `PollResponse` carrying relay/input/temp and telemetry fields.
 - TX may send `MaintenanceRequest` to RX.
 - TX sends `MaintenanceRequest` carrying the request version (set to `kMaintenancePayloadVersion`, i.e., `4`) in payload byte `b0` and diagnostics flag in `b1`.
-- RX replies to `MaintenanceRequest` with versioned `MaintenanceStatus` pages (using payload version `4`). This is not compatible with maintenance-page versions `2` or `3`; paired nodes must be upgraded together.
+- RX waits the same 120 ms receive-turnaround guard before the first Identity reply, then sends versioned `MaintenanceStatus` pages (using payload version `4`). This is not compatible with maintenance-page versions `2` or `3`; paired nodes must be upgraded together.
   - Page `0` (Identity) carries identity, connectivity, IP address, signed WiFi RSSI in `b6` (0 means unavailable), marked relay state in `b7` (`0xA0` = Off, `0xA1` = On), and the sampled dry-contact input state in flag bit `b2.7` (`0` = Open, `1` = Closed). A valid identity page makes both relay and input state known.
   - Page `3` (Version) carries the firmware build number and uptime.
   - Page `2` (Sensors) carries page-indexed generic sensor readings from the local `SensorRegistry` (up to 2 readings per 4-byte slot per page; packs `kind`, `instance`, `state` (0=Disabled, 1=Missing, 2=Fault, 3=Ok, 4=Overrange, 5=Waiting), `scale`, and clamped `int16` values).
@@ -190,18 +190,17 @@ dry-contact state in firmware or Fleet cache.
 - Peer status leaves include operational topics such as `relay`, `input`, `ack_state`, `sensor/<kind>/<instance>/value`, and `sensor/<kind>/<instance>/state`.
 - TX accepts peer command leaves under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/`:
   - `set/relay` — payload `1` or `0`, forwarded as LoRa `Mqtt` command
-  - `poll_interval_s`
   - `poll_now`
   - `wifi` (`1`/`0`, `on`/`off`, `enable`/`disable`, or JSON `{ "enabled": true|false }`)
   - `forget` (payload `1` removes node from TX runtime and clears retained peer subtree topics)
 - TX rejects destination `0x00` and `0xFF`.
 - On accepted peer `set/relay`, TX sends LoRa message type `Mqtt` with flag bit 0x04 (`kFlagMqttTransaction`) and a 32-bit `mqtt_command_id`.
-- RX replies with `MqttStatus` echoing flag 0x04 and `mqtt_command_id`. Gateway retries execute on a fixed firmware schedule (0, +500 ms, +1.5 s, +3.0 s, deadline at 5.5 s), emitting outcome events (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
-- TX also supports periodic polling by sending `PollRequest` and expecting `PollResponse` with the same counter.
+- RX replies with `MqttStatus` echoing flag 0x04 and `mqtt_command_id`. The scheduler sends immediately, then uses bounded retry delays of 500 ms, 1.5 s, and 3 s with a 5.5-second deadline, emitting outcome events (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
+- TX uses one bounded operational-refresh cursor for both configured headless polling and temporary Fleet/Monitor observation. A target fleet-cycle time is divided by the configured remote count (minimum one second between targets), only one poll may be in flight, and a fresh unsolicited operational report suppresses the redundant poll. Delayed work resumes from the current time; it never creates a catch-up burst.
+- `remote_refresh_enabled` enables the persistent headless consumer. `remote_refresh_cycle_ms` is the target time for one complete fleet cycle, not a per-peer interval. Fleet/Monitor renew the authenticated `observe_operational_state` lease for a 60-second target cycle while actively viewing a gateway; the lease expires automatically after 30 seconds or less when the viewer disappears.
+- `PollResponse` explicitly refreshes relay and input truth. Enabled sensor pages may follow at low priority. Identity, firmware, WiFi/IP, uptime, heap, and diagnostics are not part of this routine operational cycle.
 - TX publishes peer Wi-Fi enablement under `<root>/lrs-<tx_chipid>/peers/<NN_lrs-peer_chipid>/wifi` as retained `1`, `0`, or empty when unknown. Confirmed connection state is a separate retained `wifi_connected` leaf: `1`, `0`, or empty when the maintenance identity page has not established it. `ip` is published only when known and usable; an empty `ip` is not an offline indication.
-- Paired TX input-control waits for slotted ACKs after the broadcast
-  command, then polls missing remotes using `PollRequest` (visibility only, no late actuation) one at a time until the hard retry
-  deadline (`tx_command_retry_timeout_ms`). `flags.bit2` (0x04) on `PollRequest` means `b8..b11` (unixTimeS) carries a paired group command correlation id; matching `PollResponse` echoes it and must not set `time_authoritative`.
+- Paired TX input-control waits for slotted ACKs after the duplicate broadcast, then sends bounded idempotent direct `Change` retries only to missing remotes. Each retry retains the same logical command ID and actuates the requested state; an ordinary status poll can never manufacture command confirmation.
 
 > **Non-retained commands:** Do not publish retained messages to `set/relay` or `peers/.../set/relay`. MQTT brokers may replay retained command payloads on reconnect. Commands must be published as non-retained.
 
@@ -286,8 +285,10 @@ To allow remote gateway control over LAN or cloud networks:
   - The gateway must not build a complete host-facing table in firmware. The host is responsible for progressively assembling Fleet/Monitor views from compact summary responses, retained telemetry, and explicit one-peer/detail reads.
   - Gateway command responses must remain small enough to avoid heap fragmentation, large temporary `String` buffers, and long serial/MQTT stalls.
   - `lora_inventory_status` returns only the Fleet seed list (`address`, `role`, `mode`, and `chip_id` when cached) plus scan/candidate metadata. It must not serialize full telemetry for every peer.
-  - USB serial Fleet/Monitor clients may request a normal one-remote maintenance refresh with `refresh_lora_peer`, then fetch that peer's detailed cached state with `lora_inventory_peer`. Normal peer reads return operational state such as firmware, IP/WiFi, relay, input, sensors, uptime, and LoRa/WiFi RSSI for that one peer only. Heap/free-block/fragmentation/debug uptime are diagnostics and require an explicit diagnostics request.
-  - MQTT Fleet clients use the same seed-list model and decorate rows from retained peer telemetry topics. The firmware MQTT client still enforces a strict `1024`-byte packet size ceiling; same-key discovery candidates are capped at at most 4 entries over MQTT, heavy timestamps (`last_seen_ms`, `age_ms`) are omitted, and `candidate_total`/`candidate_truncated` expose the truncation state. Similarly, `provisioning_status` responses are optimized using a compact array-based schema over MQTT (`devices` as `[["chip_id", current_address, assigned_address, rssi, "state", fw_major, fw_minor, fw_patch, fw_build], ...]`), and verbose debug logs are pruned.
+  - Fleet/Monitor cache reads renew a short `observe_operational_state` lease. While a view is active, Flasher progressively reads one cached peer detail at a time and requests maintenance once per session for each peer still missing Identity or Version data. This bounded initial hydration is identical over Serial and MQTT; it does not become a recurring maintenance sweep. The gateway's shared operational cursor independently refreshes compact relay/input state while that lease or persistent headless polling is active.
+  - Explicit workflows such as post-OTA version confirmation may request one remote's maintenance pages with `refresh_lora_peer`, then fetch that peer's detailed cached state with `lora_inventory_peer`. Heap/free-block/fragmentation/debug uptime remain a separate explicit diagnostics request.
+  - After an explicit Fleet scan, Flasher reads all cached peer details and retries maintenance once only for peers still missing Identity or Version data. Scan remains the explicit retry mechanism after the observed session's one-shot hydration has been exhausted.
+  - MQTT Fleet clients use the same seed-list and bounded `lora_inventory_peer` detail model as USB Serial for identity, firmware, connectivity, control state, uptime, and RSSI. Sensors remain on their bounded per-sensor retained leaves rather than being duplicated into the MQTT detail response. Retained peer topics populate cached values immediately, but a retained replay is not a fresh remote check-in; only live MQTT delivery or a gateway detail carrying `age_ms` establishes freshness. The firmware MQTT client still enforces a strict `1024`-byte packet size ceiling, so MQTT peer details exclude sensors and the optional diagnostic expansion, same-key discovery candidates are capped at at most 4 entries, heavy timestamps remain omitted from the multi-peer summary, and `candidate_total`/`candidate_truncated` expose candidate truncation. Similarly, `provisioning_status` responses use a compact array schema over MQTT (`devices` as `[["chip_id", current_address, assigned_address, rssi, "state", fw_major, fw_minor, fw_patch, fw_build], ...]`), and verbose debug logs are pruned.
 
 ## UDP Mirroring Controls
 

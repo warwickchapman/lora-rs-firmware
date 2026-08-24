@@ -17,6 +17,7 @@ export interface AutoLoadFleetCacheState {
   transport: 'serial' | 'mqtt';
   mqttConnected: boolean;
   mqttGatewayDiscovered: boolean;
+  mqttAdminReady: boolean;
   serialTargetAvailable: boolean;
   changeBlocked: boolean;
   loadedTarget: string;
@@ -27,7 +28,7 @@ export function shouldAutoLoadFleetCache(state: AutoLoadFleetCacheState): boolea
   if (state.activeMode !== 'network' || !state.target || state.changeBlocked) return false;
   if (state.loadedTarget === state.target || state.attemptedTarget === state.target) return false;
   if (state.transport === 'mqtt') {
-    return state.mqttConnected && state.mqttGatewayDiscovered;
+    return state.mqttConnected && state.mqttGatewayDiscovered && state.mqttAdminReady;
   }
   return state.serialTargetAvailable;
 }
@@ -78,8 +79,14 @@ export function useFleetInventoryPolling(options: UseFleetInventoryPollingOption
     if (networkInventoryPollTimer.value && networkInventoryPollMode.value === 'cache') return;
     stopLoraInventoryPolling(false, false);
     networkInventoryPollMode.value = 'cache';
-    networkInventoryPollTimer.value = setInterval(() => {
-      refreshLoraInventoryStatus(true);
+    networkInventoryPollTimer.value = setInterval(async () => {
+      if (isFleetScanPollingActive.value) return;
+      isFleetScanPollingActive.value = true;
+      try {
+        await refreshLoraInventoryStatus(true);
+      } finally {
+        isFleetScanPollingActive.value = false;
+      }
     }, cacheInterval) as any;
   }
 

@@ -32,9 +32,9 @@ constexpr uint8_t kMaintenanceIdentityRelayMarker = 0xA0;
 constexpr uint32_t kAckRetryOneShotTimeoutMs = 350;
 constexpr uint32_t kAckRetryInterNodeGapMs = 20;
 constexpr uint32_t kWifiControlTimeoutMs = 300000U;
-constexpr uint32_t kDefaultRemotePollIntervalMs = 60000;
-constexpr uint32_t kMinRemotePollIntervalMs = 60000;
-constexpr uint32_t kMaxRemotePollIntervalMs = 3600000;
+constexpr uint32_t kObserverRefreshCycleMs = 60000;
+constexpr uint32_t kMaxObserverLeaseMs = 30000;
+constexpr uint32_t kMinOperationalRefreshStepMs = 1000;
 constexpr uint32_t kMinRetryTimeoutMs = 5000U;
 constexpr uint32_t kMaxRetryTimeoutMs = 3600000U;
 constexpr uint32_t kMinRxFailsafeTimeoutMs = 5000U;
@@ -222,21 +222,6 @@ void fillProvisionPayloadBytes(const ProtocolMessage &msg, uint8_t out[7]) {
   out[6] = static_cast<uint8_t>((msg.unix_time_s >> 24) & 0xFFU);
 }
 
-uint8_t encodeTempCode(bool valid, float celsius) {
-  if (!valid || !isfinite(celsius)) return 0xFF;
-  int t = static_cast<int>(roundf(celsius));
-  if (t < -127) t = -127;
-  if (t > 126) t = 126;
-  return static_cast<uint8_t>(static_cast<int8_t>(t));
-}
-
-TankSensorState decodeTankState(uint8_t raw) {
-  if (raw <= static_cast<uint8_t>(TankSensorState::Overrange)) {
-    return static_cast<TankSensorState>(raw);
-  }
-  return TankSensorState::Disabled;
-}
-
 RxFailsafeMode parseRxFailsafeMode(const String &rawMode) {
   String mode = rawMode;
   mode.trim();
@@ -246,14 +231,6 @@ RxFailsafeMode parseRxFailsafeMode(const String &rawMode) {
   return RxFailsafeMode::HoldLast;
 }
 
-uint32_t jitteredDelayMs(uint32_t baseMs, uint8_t pct) {
-  if (baseMs == 0 || pct == 0) return baseMs;
-  const uint32_t span = (baseMs * static_cast<uint32_t>(pct)) / 100U;
-  if (span == 0) return baseMs;
-  const long jitter = random(-static_cast<long>(span), static_cast<long>(span) + 1L);
-  const int64_t adjusted = static_cast<int64_t>(baseMs) + static_cast<int64_t>(jitter);
-  return (adjusted < 1) ? 1U : static_cast<uint32_t>(adjusted);
-}
 }
 
 bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
@@ -293,6 +270,7 @@ bool NodeStateMachine::begin(const Settings &cfg, RadioProtocol *radio) {
   rx_deferred_ack_dst_ = 0;
   rx_deferred_ack_relay_ = 0;
   rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+  rx_deferred_observability_due_ms_ = 0;
   rx_deferred_observability_dst_ = 0;
   rx_deferred_observability_diagnostics_ = false;
   rx_deferred_observability_rssi_ = -127;
@@ -397,6 +375,7 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   rx_deferred_ack_dst_ = 0;
   rx_deferred_ack_relay_ = 0;
   rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+  rx_deferred_observability_due_ms_ = 0;
   rx_deferred_observability_dst_ = 0;
   rx_deferred_observability_diagnostics_ = false;
   rx_deferred_observability_rssi_ = -127;
@@ -411,6 +390,13 @@ void NodeStateMachine::applyConfig(const Settings &cfg) {
   maintenance_sensor_dst_ = 0;
   maintenance_version_pending_ = false;
   maintenance_version_dst_ = 0;
+  observer_lease_until_ms_ = 0;
+  operational_refresh_next_ms_ = millis();
+  operational_poll_deadline_ms_ = 0;
+  operational_poll_counter_ = 0;
+  operational_refresh_cursor_ = 0;
+  operational_poll_address_ = 0;
+  explicit_poll_address_ = 0;
   peer_manager_.applyConfig(runtime_.local_address);
   fleet_scan_active_ = false;
   fleet_scan_next_ms_ = 0;
@@ -448,8 +434,8 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   runtime_.heartbeat_ms = cfg.heartbeat_ms;
   runtime_.heartbeat_enabled = cfg.heartbeat_enabled;
   runtime_.ack_timeout_ms = cfg.ack_timeout_ms;
-  runtime_.tx_mqtt_remote_polling_enabled = cfg.tx_mqtt_remote_polling_enabled;
-  runtime_.tx_mqtt_remote_default_poll_interval_ms = cfg.tx_mqtt_remote_default_poll_interval_ms;
+  runtime_.remote_refresh_enabled = cfg.remote_refresh_enabled;
+  runtime_.remote_refresh_cycle_ms = cfg.remote_refresh_cycle_ms;
   runtime_.input_control_paired_lora_enabled = cfg.input_control_paired_lora_enabled;
   runtime_.mqtt_control_enabled = cfg.mqtt_control_enabled;
   runtime_.rx_failsafe_mode = parseRxFailsafeMode(String(cfg.rx_failsafe_mode.c_str()));
@@ -459,9 +445,6 @@ void NodeStateMachine::refreshRuntimeCfg(const Settings &cfg) {
   if (runtime_.tx_command_retry_timeout_ms > kMaxRetryTimeoutMs) runtime_.tx_command_retry_timeout_ms = kMaxRetryTimeoutMs;
   if (runtime_.rx_failsafe_timeout_ms < kMinRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMinRxFailsafeTimeoutMs;
   if (runtime_.rx_failsafe_timeout_ms > kMaxRxFailsafeTimeoutMs) runtime_.rx_failsafe_timeout_ms = kMaxRxFailsafeTimeoutMs;
-  if (!runtime_.tx_mqtt_remote_polling_enabled) {
-    peer_manager_.freePollStorage();
-  }
 }
 
 bool NodeStateMachine::ensureProvisioningStorage() {
@@ -524,20 +507,15 @@ void NodeStateMachine::tick(bool powerSaveActive) {
   tickReceive();
 
   if (runtime_.role_tx) {
-    // A physical gateway input is relay control, not telemetry. Give a
-    // resulting group command the radio before maintenance pages can take the
-    // current tick's transmit budget.
-    if (tickGatewayControlPriority(now)) {
-      // Receive-side poll and maintenance replies are queued, never sent from
-      // tickReceive(). Drain one only after the control step left no active
-      // group window, then allow ordinary maintenance pages.
-      tickDeferredObservability();
-      tickPendingMaintenancePages();
-    }
+    // Physical control always gets the first chance at the radio. Every other
+    // gateway transmitter is ordered inside tickTransmitter().
+    tickGatewayControlPriority(now);
     tickTransmitter();
   } else {
-    tickPendingMaintenancePages();
     tickReceiver();
+    // Transaction ACKs, input pushes, and requested PollResponses are handled
+    // by tickReceiver() before low-priority sensor/inventory pages.
+    tickPendingMaintenancePages();
   }
   tickProvisioningTarget(now);
 
@@ -590,14 +568,18 @@ RxControlSource NodeStateMachine::lastRxControlSource() const { return last_rx_c
 size_t NodeStateMachine::peerCount() const { return peer_manager_.count(); }
 
 bool NodeStateMachine::peerByIndex(size_t index, PeerStatusSnapshot &out) const {
-  return peer_manager_.buildStatusSnapshot(index, out);
+  if (!peer_manager_.buildStatusSnapshot(index, out)) return false;
+  out.poll_pending = out.address == operational_poll_address_;
+  return true;
 }
 
 bool NodeStateMachine::peerByAddress(uint8_t address, PeerStatusSnapshot &out) const {
   for (size_t i = 0; i < peer_manager_.count(); ++i) {
     const PeerRuntime* item = peer_manager_.findByIndex(i);
     if (item && item->address == address) {
-      return peer_manager_.buildStatusSnapshot(i, out);
+      if (!peer_manager_.buildStatusSnapshot(i, out)) return false;
+      out.poll_pending = out.address == operational_poll_address_;
+      return true;
     }
   }
   return false;
@@ -908,6 +890,7 @@ void NodeStateMachine::updatePeerAckStatus(uint8_t src, uint8_t relayState, Peer
     node->relay_state = relayState ? 1 : 0;
     node->relay_state_known = true;
     node->last_seen_ms = millis();
+    node->operational_updated_ms = node->last_seen_ms;
     if (rssi != -127) {
       node->uplink_rssi = rssi;
     }
@@ -1135,7 +1118,7 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
   const uint32_t pendingId = (node != nullptr) ? node->pending_command_id : 0;
   auto plan = mqtt_transaction_helpers::planOutboundTransaction(node != nullptr, isPending, pendingId);
 
-  if (!plan.may_transmit) {
+  if (!plan.may_queue) {
     const uint32_t untrackedCmdId = generateMqttCommandId();
     lrslog::event("mqtt_remote_untracked", 0, untrackedCmdId, dstAddress);
     MqttBridge::publishCmdResult(
@@ -1147,13 +1130,9 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
   // 2. Generate fresh non-zero command ID for this transaction.
   const uint32_t commandId = generateMqttCommandId();
 
-  // 3. Attempt to send LoRa frame FIRST.
-  uint32_t sentCounter = 0;
-  if (!sendPeerMqttCommand(dstAddress, relayState, commandId, &sentCounter)) {
-    return false; // Leave old pending transaction untouched if radio send fails!
-  }
-
-  // 4. ONLY after send succeeds: if node had a previous pending transaction, mark it Superseded.
+  // Queue the transaction. The control-first scheduler owns every LoRa send,
+  // including the first attempt, so admin/MQTT callbacks cannot bypass an
+  // active receive window.
   if (plan.replaces_pending) {
     lrslog::event("mqtt_remote_superseded", 0, plan.superseded_command_id, node->pending_relay);
     MqttBridge::publishCmdResult(
@@ -1162,83 +1141,37 @@ bool NodeStateMachine::mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState)
   }
 
   const uint32_t now = millis();
-  auto commit = mqtt_transaction_helpers::commitOutboundTransaction(commandId, relayState, now);
+  auto commit = mqtt_transaction_helpers::createOutboundTransaction(commandId, relayState, now);
   node->pending = commit.is_pending;
   node->pending_command_id = commit.pending_command_id;
   node->pending_relay = commit.pending_relay;
   node->retry_step = commit.retry_step;
   node->next_retry_ms = commit.next_retry_ms;
-  node->pending_counter = sentCounter;
+  node->pending_counter = 0;
   node->pending_deadline_ms = commit.pending_deadline_ms;
   node->ack_state = commit.ack_state;
-
-  if (runtime_.tx_mqtt_remote_polling_enabled && node->poll_interval_ms == 0) {
-    uint32_t interval = runtime_.tx_mqtt_remote_default_poll_interval_ms;
-    if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
-    if (interval > kMaxRemotePollIntervalMs) interval = kMaxRemotePollIntervalMs;
-    node->poll_interval_ms = interval;
-    if (peer_manager_.ensurePollStorage()) {
-      PollRuntime *poll = peer_manager_.pollStateForPeer(node);
-      if (poll != nullptr) {
-        poll->next_poll_ms = now + interval;
-      }
-    }
-  }
-  node->ack_state = PeerAckState::Pending;
-  node->last_cmd_counter = sentCounter;
-  return true;
-}
-
-bool NodeStateMachine::mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs) {
-  if (!runtime_.role_tx) return false;
-  if (dstAddress == 0 || dstAddress == 255) return false;
-
-  PeerRuntime *node = findOrCreatePeer(dstAddress);
-  if (node == nullptr) return false;
-
-  if (pollIntervalMs > 0 && pollIntervalMs < kMinRemotePollIntervalMs) pollIntervalMs = kMinRemotePollIntervalMs;
-  if (pollIntervalMs > kMaxRemotePollIntervalMs) pollIntervalMs = kMaxRemotePollIntervalMs;
-  if (pollIntervalMs > 0) {
-    if (!peer_manager_.ensurePollStorage()) return false;
-  }
-  node->poll_interval_ms = pollIntervalMs;
-  PollRuntime *poll = peer_manager_.pollStateForPeer(node);
-  if (pollIntervalMs == 0) {
-    if (poll != nullptr) {
-      *poll = PollRuntime{};
-    }
-  } else if (poll != nullptr) {
-    poll->next_poll_ms = millis() + 1000;
-  }
   return true;
 }
 
 bool NodeStateMachine::mqttPollPeerNow(uint8_t dstAddress) {
   if (!runtime_.role_tx) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
+  if (!isConfiguredOperationalPeer(dstAddress)) return false;
+  if (explicit_poll_address_ != 0 && explicit_poll_address_ != dstAddress) return false;
+  explicit_poll_address_ = dstAddress;
+  return true;
+}
 
-  PeerRuntime *node = findOrCreatePeer(dstAddress);
-  if (node == nullptr) return false;
-  if (!peer_manager_.ensurePollStorage()) return false;
-  PollRuntime *poll = peer_manager_.pollStateForPeer(node);
-  if (poll == nullptr) return false;
-
-  uint32_t sentCounter = 0;
-  if (!sendPollRequest(dstAddress, &sentCounter)) return false;
-  const uint32_t now = millis();
-  const uint32_t pollResponseDeadlineMs = (runtime_.ack_timeout_ms >= 2000U) ? runtime_.ack_timeout_ms : 2000U;
-  poll->poll_pending = true;
-  poll->poll_counter = sentCounter;
-  poll->poll_deadline_ms = now + pollResponseDeadlineMs;
-  poll->last_poll_tx_ms = now;
-  if (node->poll_interval_ms > 0) {
-    poll->next_poll_ms = now + node->poll_interval_ms;
-  }
+bool NodeStateMachine::renewOperationalObserverLease(uint32_t leaseMs) {
+  if (!runtime_.role_tx) return false;
+  if (leaseMs == 0 || leaseMs > kMaxObserverLeaseMs) return false;
+  observer_lease_until_ms_ = millis() + leaseMs;
   return true;
 }
 
 bool NodeStateMachine::mqttSetPeerWifi(uint8_t dstAddress, bool enabled) {
   if (!runtime_.role_tx) return false;
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (!radioTxBudgetAvailable()) return false;
 
@@ -1267,6 +1200,7 @@ bool NodeStateMachine::mqttSetPeerWifi(uint8_t dstAddress, bool enabled) {
 
 bool NodeStateMachine::mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled, IPAddress host, uint16_t port, uint32_t ttlS) {
   if (!runtime_.role_tx) return false;
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (enabled && (port == 0 || host == IPAddress())) return false;
   if (radio_ == nullptr) return false;
@@ -1299,6 +1233,7 @@ bool NodeStateMachine::mqttSetPeerUdpLogControl(uint8_t dstAddress, bool enabled
 
 bool NodeStateMachine::sendBroadcastWifiDisable() {
   if (!runtime_.role_tx) return false;
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (!radioTxBudgetAvailable()) return false;
   last_counter_++;
   const uint32_t sentCounter = last_counter_;
@@ -1319,6 +1254,7 @@ bool NodeStateMachine::sendBroadcastWifiDisable() {
 bool NodeStateMachine::sendPeerOtaPullControl(uint8_t dstAddress, IPAddress host, uint16_t port,
                                               const char *sha256Hex) {
   if (!runtime_.role_tx) return false;
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (port == 0 || host == IPAddress()) return false;
   if (radio_ == nullptr) return false;
@@ -1770,6 +1706,7 @@ uint32_t NodeStateMachine::fleetWifiProvisionCooldownRemainingMs() const {
 }
 
 bool NodeStateMachine::sendPeerFleetKeyChange(uint8_t targetAddress, const String &newFleetKey) {
+  if (hasPendingPeerControl() || isGroupActive() || !radioTxBudgetAvailable()) return false;
   const size_t totalLen = static_cast<size_t>(newFleetKey.length());
   if (totalLen < admin_config_utils::kMinDeploymentKeyLen || totalLen > 64) return false;
 
@@ -1842,6 +1779,7 @@ bool NodeStateMachine::consumePendingFleetKeyChange(char *keyDest, size_t keySiz
 }
 
 bool NodeStateMachine::sendPeerReboot(uint8_t dstAddress) {
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (!runtime_.role_tx) return false;
   if (radio_ == nullptr) return false;
@@ -1868,6 +1806,7 @@ bool NodeStateMachine::consumePendingReboot() {
 }
 
 bool NodeStateMachine::sendPeerSensorConfig(uint8_t dstAddress, bool tempEnabled, bool tankEnabled, bool powerSaveEnabled, bool powerSaveBootGrace) {
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (!radioTxBudgetAvailable()) return false;
   if (!runtime_.role_tx) return false;
   if (radio_ == nullptr) return false;
@@ -1896,6 +1835,7 @@ bool NodeStateMachine::consumePendingSensorConfig(bool &tempEnabled, bool &tankE
 
 bool NodeStateMachine::sendPeerFactoryReset(uint8_t dstAddress, bool keepSharedFleetKey, bool keepWifiCredentials) {
   if (!runtime_.role_tx) return false;
+  if (hasPendingPeerControl() || isGroupActive()) return false;
   if (radio_ == nullptr) return false;
   if (dstAddress == 0 || dstAddress == 255) return false;
   if (isFactoryResetTxActive()) return false;
@@ -2003,13 +1943,7 @@ void NodeStateMachine::enterProvisioningQuietMode() {
     }
   }
   
-  uint32_t polls = 0;
-  for (size_t i = 0; i < peer_manager_.count(); ++i) {
-    const PollRuntime* poll = peer_manager_.pollStateForIndex(i);
-    if (poll && poll->poll_pending) {
-      polls++;
-    }
-  }
+  const uint32_t polls = operational_poll_address_ != 0 ? 1U : 0U;
 
   // 1. Cancel active fleet scan
   fleet_scan_active_ = false;
@@ -2031,6 +1965,9 @@ void NodeStateMachine::enterProvisioningQuietMode() {
   tx_state_sync_due_ms_ = 0;
   rx_deferred_ack_pending_ = false;
   rx_push_pending_ = false;
+  operational_poll_address_ = 0;
+  operational_poll_deadline_ms_ = 0;
+  explicit_poll_address_ = 0;
 
   // 5. Clear pending peer command and poll states (preserving identity/cache)
   peer_manager_.clearAllPending();
@@ -2653,11 +2590,7 @@ PeerRuntime *NodeStateMachine::findOrCreatePeer(uint8_t address) {
     }
   }
 
-  uint32_t interval = runtime_.tx_mqtt_remote_default_poll_interval_ms;
-  if (interval < kMinRemotePollIntervalMs) interval = kDefaultRemotePollIntervalMs;
-  if (interval > kMaxRemotePollIntervalMs) interval = kMaxRemotePollIntervalMs;
-
-  return peer_manager_.findOrCreate(address, chip_id, interval, runtime_.tx_mqtt_remote_polling_enabled, millis());
+  return peer_manager_.findOrCreate(address, chip_id);
 }
 
 bool NodeStateMachine::localOperationalSensorsEnabled() const {
@@ -2706,10 +2639,10 @@ bool NodeStateMachine::sendSensorStatePush(uint32_t now) {
   if (!localOperationalSensorsEnabled()) return false;
   if (maintenance_version_pending_ || maintenance_sensor_pending_ || maintenance_debug_pending_) return false;
   if (static_cast<int32_t>(now - rx_next_sensor_push_ms_) < 0) return false;
-  if (!sendMaintenanceStatus(runtime_.controller_address, false)) return false;
-
+  queueOperationalSensorPages(runtime_.controller_address);
+  if (!maintenance_sensor_pending_) return false;
   rx_next_sensor_push_ms_ = now + kOperationalSensorPushIntervalMs;
-  lrslog::event("rx_sensor_push", 0, last_counter_, runtime_.controller_address);
+  lrslog::event("rx_sensor_push_queued", 0, last_counter_, runtime_.controller_address);
   return true;
 }
 
@@ -2738,6 +2671,9 @@ void NodeStateMachine::queueDeferredObservability(DeferredObservabilityKind kind
   } else if (kind == DeferredObservabilityKind::Maintenance ||
              rx_deferred_observability_kind_ == DeferredObservabilityKind::None) {
     rx_deferred_observability_kind_ = kind;
+    // Direct requests need the same receive-turnaround guard as direct ACKs.
+    // Without it, the reply can finish while the gateway is leaving TX mode.
+    rx_deferred_observability_due_ms_ = millis() + kAckWindowGuardMs;
     rx_deferred_observability_dst_ = dstAddress;
     rx_deferred_observability_diagnostics_ = diagnostics;
     rx_deferred_observability_rssi_ = downlinkRssi;
@@ -2748,6 +2684,7 @@ void NodeStateMachine::queueDeferredObservability(DeferredObservabilityKind kind
 bool NodeStateMachine::tickDeferredObservability() {
   if (rx_deferred_ack_pending_ || isGroupActive() ||
       rx_deferred_observability_kind_ == DeferredObservabilityKind::None) return false;
+  if (static_cast<int32_t>(millis() - rx_deferred_observability_due_ms_) < 0) return false;
   bool sent = false;
   if (rx_deferred_observability_kind_ == DeferredObservabilityKind::Maintenance) {
     sent = sendMaintenanceStatus(rx_deferred_observability_dst_, rx_deferred_observability_diagnostics_);
@@ -2756,6 +2693,7 @@ bool NodeStateMachine::tickDeferredObservability() {
   }
   if (sent) {
     rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+    rx_deferred_observability_due_ms_ = 0;
     rx_deferred_observability_dst_ = 0;
     rx_deferred_observability_diagnostics_ = false;
     rx_deferred_observability_rssi_ = -127;
@@ -3172,6 +3110,7 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
       node->relay_state = reportedRelayState;
       node->relay_state_known = true;
     }
+    node->operational_updated_ms = millis();
     node->mqtt_state_known = true;
     node->mqtt_enabled = (flags & 0x04U) != 0U;
     node->mqtt_connected = (flags & 0x08U) != 0U;
@@ -3241,7 +3180,6 @@ bool NodeStateMachine::handleMaintenanceStatus(const ProtocolMessage &msg) {
 
 void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
   if (!runtime_.role_tx) return;
-  if (fleet_scan_active_) return;
   if (isGroupActive()) return;
   for (size_t i = 0; i < peer_manager_.count(); ++i) {
     PeerRuntime *node = peer_manager_.findByIndex(i);
@@ -3267,7 +3205,8 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
       return;
     }
 
-    auto retry = mqtt_transaction_helpers::prepareRetryAttempt(node->pending_command_id, node->retry_step, last_counter_ + 1);
+    auto retry = mqtt_transaction_helpers::prepareRetryAttempt(
+        node->pending_command_id, node->retry_step);
     uint32_t sentCounter = 0;
     if (sendPeerMqttCommand(node->address, node->pending_relay, retry.command_id, &sentCounter)) {
       node->retry_step = retry.next_step;
@@ -3281,52 +3220,91 @@ void NodeStateMachine::tickPeerMqttCommands(uint32_t now) {
   }
 }
 
-void NodeStateMachine::tickPeerPolling(uint32_t now) {
-  if (!runtime_.role_tx) return;
-  if (fleet_scan_active_) return;
-  if (isGroupActive()) return;
-  if (!runtime_.tx_mqtt_remote_polling_enabled) return;
-  if (!peer_manager_.ensurePollStorage()) return;
-
-  const uint32_t pollResponseDeadlineMs = (runtime_.ack_timeout_ms >= 2000U) ? runtime_.ack_timeout_ms : 2000U;
+bool NodeStateMachine::hasPendingPeerControl() const {
   for (size_t i = 0; i < peer_manager_.count(); ++i) {
-    PeerRuntime *node = peer_manager_.findByIndex(i);
-    PollRuntime *poll = peer_manager_.pollStateForIndex(i);
-    if (!node || !poll || node->poll_interval_ms == 0) continue;
-
-    if (poll->poll_pending && static_cast<int32_t>(now - poll->poll_deadline_ms) >= 0) {
-      poll->poll_pending = false;
-      lrslog::event("tx_poll_timeout", 0, poll->poll_counter, 0);
-      poll->next_poll_ms = now + node->poll_interval_ms;
-    }
-
-    // Keep exactly one in-flight poll per node to avoid overlap ambiguity.
-    if (poll->poll_pending) {
-      continue;
-    }
-
-    if (static_cast<int32_t>(now - poll->next_poll_ms) < 0) {
-      continue;
-    }
-    if (isGroupActive()) {
-      continue;
-    }
-    if (!radioTxBudgetAvailable()) {
-      return;
-    }
-
-    uint32_t sentCounter = 0;
-    if (sendPollRequest(node->address, &sentCounter)) {
-      poll->poll_pending = true;
-      poll->poll_counter = sentCounter;
-      poll->poll_deadline_ms = now + pollResponseDeadlineMs;
-      poll->last_poll_tx_ms = now;
-      poll->next_poll_ms = now + node->poll_interval_ms;
-    } else {
-      // Retry soon if radio send fails.
-      poll->next_poll_ms = now + 1000U;
-    }
+    const PeerRuntime *node = peer_manager_.findByIndex(i);
+    if (node != nullptr && node->pending) return true;
   }
+  return false;
+}
+
+bool NodeStateMachine::hasPendingManagementTransaction() const {
+  return (factory_reset_tx_.stage >= 1 && factory_reset_tx_.stage <= 3) ||
+         ota_pull_tx_.active || isAdoptionTxActive();
+}
+
+void NodeStateMachine::tickOperationalRefresh(uint32_t now) {
+  if (!runtime_.role_tx || settings_ == nullptr || isGroupActive()) return;
+
+  const bool observerActive = observer_lease_until_ms_ != 0 &&
+      static_cast<int32_t>(observer_lease_until_ms_ - now) > 0;
+  const bool periodicActive = runtime_.remote_refresh_enabled;
+  const uint32_t responseWindowMs = runtime_.ack_timeout_ms >= 2000U
+      ? runtime_.ack_timeout_ms : 2000U;
+
+  // Finish an already-sent poll even if its observer lease expired while the
+  // response window was open. Otherwise stale pending state would block every
+  // later low-priority sender indefinitely.
+  if (operational_poll_address_ != 0) {
+    if (static_cast<int32_t>(now - operational_poll_deadline_ms_) < 0) return;
+    lrslog::event("tx_poll_timeout", 0, operational_poll_counter_, operational_poll_address_);
+    operational_poll_address_ = 0;
+    operational_poll_deadline_ms_ = 0;
+    operational_refresh_next_ms_ = now;
+  }
+
+  if (!observerActive && !periodicActive && explicit_poll_address_ == 0) return;
+
+  uint32_t cycleMs = runtime_utils::operationalRefreshCycleMs(
+      observerActive, periodicActive,
+      runtime_.remote_refresh_cycle_ms,
+      kObserverRefreshCycleMs);
+  if (cycleMs < kObserverRefreshCycleMs) cycleMs = kObserverRefreshCycleMs;
+
+  const uint8_t peerCount = static_cast<uint8_t>(settings_->known_peer_count);
+  if (peerCount == 0) return;
+  const uint32_t stepMs = runtime_utils::operationalRefreshStepMs(
+      cycleMs, peerCount, kMinOperationalRefreshStepMs);
+
+  const bool explicitRequest = explicit_poll_address_ != 0;
+  if (!explicitRequest && static_cast<int32_t>(now - operational_refresh_next_ms_) < 0) return;
+
+  uint8_t address = explicit_poll_address_;
+  if (explicitRequest) {
+    explicit_poll_address_ = 0;
+  } else {
+    if (operational_refresh_cursor_ >= peerCount) operational_refresh_cursor_ = 0;
+    address = settings_->known_peer_addresses[operational_refresh_cursor_++];
+  }
+  if (address == 0 || address == 255) {
+    operational_refresh_next_ms_ = now + stepMs;
+    return;
+  }
+
+  PeerRuntime *node = findOrCreatePeer(address);
+  if (node == nullptr) {
+    operational_refresh_next_ms_ = now + stepMs;
+    return;
+  }
+  if (!explicitRequest && runtime_utils::operationalStateIsFresh(
+      now, node->operational_updated_ms, cycleMs)) {
+    operational_refresh_next_ms_ = now + stepMs;
+    return;
+  }
+  if (!radioTxBudgetAvailable()) {
+    if (explicitRequest) explicit_poll_address_ = address;
+    return;
+  }
+
+  uint32_t sentCounter = 0;
+  if (!sendPollRequest(address, &sentCounter)) {
+    if (explicitRequest) explicit_poll_address_ = address;
+    return;
+  }
+  operational_poll_address_ = address;
+  operational_poll_counter_ = sentCounter;
+  operational_poll_deadline_ms_ = now + responseWindowMs;
+  operational_refresh_next_ms_ = now + stepMs;
 }
 
 void NodeStateMachine::tickFleetScan(uint32_t now) {
@@ -3406,14 +3384,23 @@ void NodeStateMachine::tickTransmitter() {
     }
   }
 
+  tickPeerMqttCommands(now);
+  if (hasPendingPeerControl()) return;
+
   tickPendingFactoryResetControl(now);
   tickPendingOtaPullControl(now);
+  if (isAdoptionTxActive()) tickCandidatesAndAdoption(now);
+  if (hasPendingManagementTransaction()) return;
+
+  tickOperationalRefresh(now);
+  if (operational_poll_address_ != 0) return;
+
   tickMaintenanceRequestQueue(now);
   tickFleetScan(now);
-  tickPeerMqttCommands(now);
-  tickPeerPolling(now);
   tickCandidatesAndAdoption(now);
-  startupTxPhaseTrace("after_peer_polling");
+  tickDeferredObservability();
+  tickPendingMaintenancePages();
+  startupTxPhaseTrace("after_operational_refresh");
 
 
   if (!isGroupActive() && link_state_ == LinkState::WaitAck && (now - wait_ack_since_ms_) >= runtime_.ack_timeout_ms) {
@@ -3527,6 +3514,7 @@ static void updatePeerOperationalState(PeerRuntime& node, const ProtocolMessage&
   node.relay_state_known = true;
   node.input_state = radio_protocol_helpers::resolveInputState(msg.input_state, msg.sensor_mask, msg.sensor_digital0);
   node.input_state_known = true;
+  node.operational_updated_ms = millis();
   LRS_LOGI(LORA, "event=temp_gateway_peer_input_update addr=%u type=%u relay=%u input=%u sensor_mask=%u digital0=%u resolved_input=%u",
            msg.src,
            static_cast<unsigned>(msg.type),
@@ -3870,11 +3858,9 @@ void NodeStateMachine::tickReceive() {
           lrslog::event("mqtt_remote_status_rx", msg.rssi, msg.counter, msg.relay_state);
         }
       } else {
-        // Clear pending on any valid response from this node; retries can overlap counters.
-        PollRuntime *poll = peer_manager_.pollStateForPeer(node);
-        if (poll != nullptr) {
-          poll->poll_pending = false;
-          poll->next_poll_ms = millis() + node->poll_interval_ms;
+        if (operational_poll_address_ == msg.src) {
+          operational_poll_address_ = 0;
+          operational_poll_deadline_ms_ = 0;
         }
         lrslog::event("tx_poll_response", msg.rssi, msg.counter, msg.relay_state);
         
@@ -5357,5 +5343,4 @@ bool NodeStateMachine::handleReaddressStatusFrame(const ProtocolMessage &msg) {
 }
 
 size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
-size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
 size_t NodeStateMachine::replaySourceStateSize() { return sizeof(ReplaySourceState); }

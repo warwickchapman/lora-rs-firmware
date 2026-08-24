@@ -96,8 +96,8 @@ export interface LocalSerialAdminConfig {
   heartbeat_ms?: number;
   heartbeat_enabled?: boolean;
   ack_timeout_ms?: number;
-  tx_mqtt_remote_polling_enabled?: boolean;
-  tx_mqtt_remote_default_poll_interval_ms?: number;
+  remote_refresh_enabled?: boolean;
+  remote_refresh_cycle_ms?: number;
   input_control_paired_lora_enabled?: boolean;
   tx_command_retry_timeout_ms?: number;
   rx_failsafe_mode?: string;
@@ -353,9 +353,9 @@ const configGatewayControlMode = computed<'mqtt' | 'input' | null>({
     };
   }
 });
-const configMqttRemotePollingEnabled = computed({
-  get: () => config.value?.tx_mqtt_remote_polling_enabled ?? false,
-  set: (val) => { if (config.value) config.value = { ...config.value, tx_mqtt_remote_polling_enabled: val }; }
+const configRemoteRefreshEnabled = computed({
+  get: () => config.value?.remote_refresh_enabled ?? false,
+  set: (val) => { if (config.value) config.value = { ...config.value, remote_refresh_enabled: val }; }
 });
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
@@ -786,13 +786,13 @@ function handleManualMqttGatewayInput(val: string) {
                 <label class="self-center text-right font-semibold text-slate-300">Remote refresh</label>
                 <div class="flex flex-col gap-1">
                   <label class="flex items-center gap-2 text-slate-300">
-                    <input v-model="configMqttRemotePollingEnabled" type="checkbox" />
+                    <input v-model="configRemoteRefreshEnabled" type="checkbox" />
                     Refresh remote operational state
                   </label>
                   <div class="text-[10px] text-slate-500 leading-normal">Low-priority LoRa polling for confirmed remote relay and input state. Paused while control is active.</div>
                 </div>
-                <label class="self-center text-right font-semibold text-slate-300">Refresh sec</label>
-                <input :value="Math.round((config.tx_mqtt_remote_default_poll_interval_ms || 60000) / 1000)" @input="config.tx_mqtt_remote_default_poll_interval_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9" :disabled="!configMqttRemotePollingEnabled" title="Default interval between low-priority remote state refreshes." />
+                <label class="self-center text-right font-semibold text-slate-300">Fleet cycle sec</label>
+                <input :value="Math.round((config.remote_refresh_cycle_ms || 60000) / 1000)" @input="config.remote_refresh_cycle_ms = Number(($event.target as HTMLInputElement).value || 60) * 1000" type="number" min="60" max="3600" class="glass-input h-9" :disabled="!configRemoteRefreshEnabled" title="Target time for one low-priority operational refresh cycle across the configured fleet." />
                 <label class="self-center text-right font-semibold text-slate-300">MQTT user</label>
                 <input v-model="configMqttUser" class="glass-input h-9" />
                 <label class="self-center text-right font-semibold text-slate-300">New MQTT password</label>
@@ -1033,12 +1033,6 @@ function handleManualMqttGatewayInput(val: string) {
                       <span class="font-semibold text-slate-300">Control Remote Peer Relay</span>
                       <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/set/relay</code>
                       <span class="text-slate-400">Payload: <code class="text-slate-200">1</code> (ON) or <code class="text-slate-200">0</code> (OFF). Publish non-retained.</span>
-                    </div>
-
-                    <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">
-                      <span class="font-semibold text-slate-300">Peer Polling Interval (in seconds)</span>
-                      <code class="font-mono text-cyan-300">lora/lrs-&lt;chipid&gt;/peers/&lt;NN_lrs-peer_chipid&gt;/poll_interval_s</code>
-                      <span class="text-slate-400">Payload: integer seconds (e.g. <code class="text-slate-200">300</code>). Set 0 to disable regular telemetry polling.</span>
                     </div>
 
                     <div class="flex flex-col gap-1 border-t border-slate-800/50 pt-2">

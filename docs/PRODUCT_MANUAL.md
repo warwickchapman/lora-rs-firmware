@@ -70,6 +70,7 @@ Fleet workflow:
 - `Fleet > Manage > LoRa`: discovery + provisioning for factory devices.
 - `Fleet > Devices`: peer scan defaults to `1..32` (manual max `254`) and shows cached known peers immediately.
 - `Fleet > Manage > WiFi`: send WiFi credentials to all known peers or target a single peer with optional override credentials.
+- Selecting an available USB or MQTT gateway activates Fleet automatically. Flasher reads the compact gateway summary, then hydrates one bounded peer detail at a time; no separate Load step is required.
 
 Addressing and mode/role together define effective behavior and control ownership.
 
@@ -114,7 +115,7 @@ MQTT deployment note:
 Implemented now:
 - Generic, instance-aware `SensorRegistry` supporting up to 6 configured sensor slots.
 - Local environmental/measurement sensors (DS18B20 temperature, 4-20 mA tank level) and control inputs (dry contact).
-- Sensor status and readings carried over LoRa via paginated version 2 `MaintenanceStatus` telemetry.
+- Sensor status and readings carried over LoRa via paginated version 4 `MaintenanceStatus` telemetry.
 - Dynamic rendering of all reporting sensors in the Flasher Monitor/Fleet views and publication to the gateway MQTT registry topics (`sensor/<kind>/<instance>/value`).
 
 Planned (not yet implemented):
@@ -134,6 +135,8 @@ Flasher status and Monitor/Fleet views provide:
 - WiFi station state and RSSI
 - AP status
 - Sensor tiles (including dry-contact OPEN/CLOSED and local/remote temperature state)
+
+MQTT retained peer values are displayed as cached state, but their replay on connection is not treated as a fresh remote check-in. Row Age advances from explicit gateway age data or live MQTT updates.
 
 Logs:
 - USB serial activity log

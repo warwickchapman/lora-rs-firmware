@@ -30,8 +30,8 @@ struct Settings {
   uint32_t heartbeat_ms;
   bool heartbeat_enabled;
   uint32_t ack_timeout_ms;
-  bool tx_mqtt_remote_polling_enabled;
-  uint32_t tx_mqtt_remote_default_poll_interval_ms;
+  bool remote_refresh_enabled;
+  uint32_t remote_refresh_cycle_ms;
   bool input_control_paired_lora_enabled;
   uint32_t tx_command_retry_timeout_ms;
   FixedSettingString<16> rx_failsafe_mode;

@@ -14,7 +14,6 @@ export interface FleetGatewayStatus {
   badgeLabel: string;
   statusLabel: string;
   summary: string;
-  isLoading: boolean;
   isIdentifyDisabled: boolean;
   isIdentifying: boolean;
   isUpgradeAvailable: boolean;
@@ -81,7 +80,6 @@ export interface MqttGatewayOption {
 
 export interface FleetTransportState {
   fleetTransport: 'serial' | 'mqtt';
-  hasSelectedGateway: boolean;
 }
 
 export interface FleetInventorySummary {
@@ -177,7 +175,6 @@ const emit = defineEmits<{
   (e: 'gateway-events-copy', includeLogLines: boolean): void;
   (e: 'lora-inventory-debug-copy'): void;
   (e: 'firmware-fetch'): void;
-  (e: 'gateway-load'): void;
   (e: 'gateway-identify'): void;
   (e: 'gateway-flash'): void;
   (e: 'gateway-settings'): void;
@@ -399,13 +396,6 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
             :class="['glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold', gatewayEventsExpanded ? 'border-cyan-500/40 text-cyan-200' : 'text-slate-300']"
           >
             {{ gatewayEventsExpanded ? 'Hide events' : 'Events' }}
-          </button>
-          <button
-            @click="emit('gateway-load')"
-            :disabled="gateway.isLoading || !transportState.hasSelectedGateway"
-            class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60"
-          >
-            {{ gateway.isLoading ? 'Loading...' : 'Load gateway' }}
           </button>
           <button
             @click="emit('gateway-identify')"

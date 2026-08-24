@@ -29,7 +29,7 @@ struct MqttTransactionDecision {
 
 // Evaluates outbound transaction decision before sending airtime
 struct OutboundTransactionPlan {
-  bool may_transmit;
+  bool may_queue;
   MqttTransactionOutcome immediate_outcome;
   bool replaces_pending;
   uint32_t superseded_command_id;
@@ -40,7 +40,7 @@ OutboundTransactionPlan planOutboundTransaction(
     bool is_pending,
     uint32_t pending_command_id);
 
-// Commits state updates after a successful outbound Mqtt send
+// Creates scheduler-owned transaction state before the first RF attempt.
 struct TransactionCommitState {
   bool is_pending;
   uint32_t pending_command_id;
@@ -51,24 +51,22 @@ struct TransactionCommitState {
   PeerAckState ack_state;
 };
 
-TransactionCommitState commitOutboundTransaction(
+TransactionCommitState createOutboundTransaction(
     uint32_t command_id,
     uint8_t relay_state,
     uint32_t now_ms);
 
-// Prepares outbound retry attempt descriptor carrying fixed command_id, step progression, and fresh transport_counter
+// Prepares the next scheduler attempt while preserving the logical command ID.
 struct MqttRetryAttempt {
   uint32_t command_id;
   uint8_t current_step;
   uint8_t next_step;
-  uint32_t transport_counter;
   uint32_t next_delay_ms;
 };
 
 MqttRetryAttempt prepareRetryAttempt(
     uint32_t command_id,
-    uint8_t current_step,
-    uint32_t current_counter);
+    uint8_t current_step);
 
 // Evaluates whether an incoming MqttStatus frame correlates to a pending MQTT transaction.
 // Status correlates ONLY if kFlagMqttTransaction (0x04) is present in msg_flags and msg_command_id matches pending_command_id.

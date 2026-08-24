@@ -188,12 +188,10 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
       doc["heartbeat_enabled"],
       cfg.heartbeat_enabled);
   cfg.ack_timeout_ms = doc["ack_timeout_ms"] | cfg.ack_timeout_ms;
-  cfg.tx_mqtt_remote_polling_enabled = parseBoolField(
-      doc["tx_mqtt_remote_polling_enabled"],
-      cfg.tx_mqtt_remote_polling_enabled);
-  cfg.tx_mqtt_remote_default_poll_interval_ms =
-      doc["tx_mqtt_remote_default_poll_interval_ms"] |
-      cfg.tx_mqtt_remote_default_poll_interval_ms;
+  cfg.remote_refresh_enabled = parseBoolField(
+      doc["remote_refresh_enabled"], cfg.remote_refresh_enabled);
+  cfg.remote_refresh_cycle_ms =
+      doc["remote_refresh_cycle_ms"] | cfg.remote_refresh_cycle_ms;
   cfg.input_control_paired_lora_enabled = parseBoolField(
       doc["input_control_paired_lora_enabled"],
       cfg.input_control_paired_lora_enabled);
@@ -317,13 +315,11 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.ack_timeout_ms = kMinAckTimeoutMs;
   if (cfg.ack_timeout_ms > kMaxAckTimeoutMs)
     cfg.ack_timeout_ms = kMaxAckTimeoutMs;
-  if (cfg.tx_mqtt_remote_default_poll_interval_ms <
-      kMinTxPollDefaultIntervalMs) {
-    cfg.tx_mqtt_remote_default_poll_interval_ms = kMinTxPollDefaultIntervalMs;
+  if (cfg.remote_refresh_cycle_ms < kMinRemoteRefreshCycleMs) {
+    cfg.remote_refresh_cycle_ms = kMinRemoteRefreshCycleMs;
   }
-  if (cfg.tx_mqtt_remote_default_poll_interval_ms >
-      kMaxTxPollDefaultIntervalMs) {
-    cfg.tx_mqtt_remote_default_poll_interval_ms = kMaxTxPollDefaultIntervalMs;
+  if (cfg.remote_refresh_cycle_ms > kMaxRemoteRefreshCycleMs) {
+    cfg.remote_refresh_cycle_ms = kMaxRemoteRefreshCycleMs;
   }
   if (cfg.tx_command_retry_timeout_ms < 5000UL)
     cfg.tx_command_retry_timeout_ms = 5000UL;
@@ -1315,7 +1311,10 @@ void AdminExecutor::handleLoraInventoryStatus(JsonDocument &doc, ResponseWriter 
 void AdminExecutor::handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter writer, bool isMqtt) {
   const char *id = requestId(doc);
   const uint8_t addr = static_cast<uint8_t>(doc["address"] | 0);
-  const bool includeDiagnostics = doc["include_diagnostics"] | false;
+  // MQTT and Serial return the same bounded one-peer operational/inventory
+  // record. Keep the optional diagnostic expansion off MQTT so the response
+  // remains comfortably below the gateway's fixed MQTT packet budget.
+  const bool includeDiagnostics = !isMqtt && (doc["include_diagnostics"] | false);
   if (sm_ == nullptr) {
     sendError("lora_inventory_peer", "runtime_unavailable", id, writer);
     return;
@@ -1335,16 +1334,6 @@ void AdminExecutor::handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter wr
   const bool hasCached = sm_->peerByAddress(addr, p);
   JsonObject row = out["device"].to<JsonObject>();
   row["address"] = addr;
-
-  if (isMqtt) {
-    if (hasCached && p.chip_id != 0) {
-      char chipBuf[9];
-      snprintf(chipBuf, sizeof(chipBuf), "%06lx", static_cast<unsigned long>(p.chip_id & 0xFFFFFFUL));
-      row["chip_id"] = chipBuf;
-    }
-    sendOk(out, writer);
-    return;
-  }
 
   row["role"] = "remote";
   row["mode"] = "paired";
@@ -1403,7 +1392,11 @@ void AdminExecutor::handleLoraInventoryPeer(JsonDocument &doc, ResponseWriter wr
       row["input_state_known"] = true;
       row["input_state"] = p.input_state;
     }
-    if (p.sensors.count() > 0) {
+    // MQTT already carries sensors as bounded per-sensor retained leaves.
+    // Excluding the sensor array keeps the complete non-sensor peer response
+    // safely below PubSubClient's 1024-byte topic+payload buffer even when the
+    // registry contains all six sensor slots.
+    if (!isMqtt && p.sensors.count() > 0) {
       JsonArray sensorsArr = row["sensors"].to<JsonArray>();
       for (uint8_t j = 0; j < p.sensors.count(); ++j) {
         SensorReading r{};
@@ -1482,6 +1475,25 @@ void AdminExecutor::handleRefreshLoraPeer(JsonDocument &doc, ResponseWriter writ
     out["id"] = id;
   out["address"] = address;
   out["queued"] = true;
+  sendOk(out, writer);
+}
+
+void AdminExecutor::handleObserveOperationalState(JsonDocument &doc, ResponseWriter writer) {
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) {
+    sendError("observe_operational_state", "auth_failed", id, writer);
+    return;
+  }
+  const uint32_t leaseS = doc["lease_s"] | 20UL;
+  const uint32_t leaseMs = leaseS <= 30UL ? leaseS * 1000UL : 0UL;
+  if (sm_ == nullptr || !sm_->renewOperationalObserverLease(leaseMs)) {
+    sendError("observe_operational_state", "invalid_lease", id, writer);
+    return;
+  }
+  JsonDocument out;
+  out["cmd"] = "observe_operational_state";
+  if (id[0] != '\0') out["id"] = id;
+  out["lease_ms"] = leaseMs;
   sendOk(out, writer);
 }
 
@@ -2217,6 +2229,11 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
 
   if (strcmp(cmd, "refresh_lora_peer") == 0) {
     handleRefreshLoraPeer(doc, writer);
+    return;
+  }
+
+  if (strcmp(cmd, "observe_operational_state") == 0) {
+    handleObserveOperationalState(doc, writer);
     return;
   }
 

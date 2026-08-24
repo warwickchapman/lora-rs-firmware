@@ -81,10 +81,12 @@ Fleet/Provisioning implementation notes:
 - Fleet scans are explicit serial-admin commands sent to a selected USB TX/gateway.
 - EasyPair discovery collects chip IDs before allocation. At discovery completion, new devices are sorted by chip ID and assigned the lowest free addresses; a known chip reclaims its persisted address.
 - Fleet inventory reads the gateway-owned peer cache and can send bounded encrypted maintenance probes only when the operator explicitly asks.
-- The gateway does not run a perpetual round-robin maintenance sweep. Relay/input control owns LoRa airtime; Fleet/Monitor freshness is low-priority observability and must tolerate stale rows.
+- The gateway has one fixed-size operational-refresh cursor shared by two explicit consumers: persistent headless polling and a short authenticated lease renewed while Fleet or Monitor is active. The target fleet-cycle time is divided across configured remotes, fresh unsolicited operational reports suppress redundant polls, and delayed work never catches up in a burst.
+- The gateway does not run a perpetual maintenance or diagnostic sweep. Relay/input control owns LoRa airtime; Fleet/Monitor inventory enrichment is stale-tolerant and explicit.
 - Low-priority maintenance requests use a fixed, coalescing per-peer queue. They wait through control windows and send only when the radio is free; diagnostics upgrade a pending normal request for the same peer. Control broadcasts, ACKs, and control retries never enter this queue.
+- Direct maintenance and operational-poll replies wait 120 ms after request reception so the gateway is back in receive mode. After a Fleet scan, Flasher hydrates all cached rows before issuing one bounded maintenance retry only for genuinely incomplete Identity or Version state.
 - A paired group command sends two replay-identical broadcasts. A remote that accepts either copy applies relay state immediately, then reserves its radio until the 250 ms-plus-ranked-slot ACK is sent. During that reservation it may retain one coalesced maintenance or poll reply, but it must not transmit low-priority pages or operational pushes.
-- Maintenance payload version is `3`; the earlier version `2` identity layout is deliberately rejected because bytes `b6`/`b7` now represent WiFi RSSI and marked relay state. Upgrade a paired fleet together.
+- Maintenance payload version is `4`; earlier identity layouts are rejected because current identity pages explicitly carry WiFi RSSI, marked relay state, and dry-contact input state. Upgrade a paired fleet together.
 - Remotes push operational state instead: debounced dry-contact input changes send an unsolicited compact `PollResponse`, and remotes with enabled sensors send periodic operational sensor maintenance pages at a conservative 60-second cadence.
 
 ### Control-state contract
@@ -224,9 +226,7 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `poll_interval_s` | int | Configured poll interval in seconds (0 = disabled). |
 | `poll_state` | `idle`/`pending` | Whether a poll request is in flight. |
-| `last_poll_tx_ms` | int | `millis()` of last poll request sent. |
 | `last_seen_ms` | int | `millis()` of last received packet from peer. |
 | `last_seen_age_s` | int | Seconds since last received packet — recomputed every publish cycle. Use to detect stale peers without knowing gateway absolute time. |
 | `last_cmd_counter` | int | Monotonic command counter for change detection. |
@@ -251,7 +251,6 @@ Topic path uses zero-padded decimal address + chip_id (e.g. `peers/03_lrs-804a9c
 - Gateway `set/relay`: sets the gateway relay directly (payload `1` or `0`, **non-retained**).
 - TX can be commanded to control peers via:
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/set/relay` (payload `1` or `0`)
-  - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/poll_interval_s`
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/poll_now`
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/wifi` (payload `1`/`0`)
   - `<root>/lrs-<tx_chipid>/peers/<NN_lrs-chipid>/forget` (payload `1` removes runtime node and clears retained peer subtree topics)
@@ -268,17 +267,17 @@ Gateway control source:
 
 MQTT remote relay control:
 - `Mqtt` commands are short, correlated transactions using `kFlagMqttTransaction` (0x04) and a 32-bit `mqtt_command_id`.
-- TX retries `Mqtt` commands on a fixed 4-attempt schedule (`0, +500 ms, +1.5 s, +3.0 s`, deadline 5.5 s).
+- TX sends `Mqtt` commands immediately, then uses bounded retry delays of 500 ms, 1.5 s, and 3 s with a 5.5-second deadline.
 - RX replies with `MqttStatus` (`'S'`) echoing flag 0x04 and `mqtt_command_id`.
 - Gateway emits transaction outcomes (`Confirmed`, `Timeout`, `Mismatch`, `Untracked`, `Superseded`) to `<root>/event/cmd_result`.
 - TX polling uses `PollRequest` (`'P'`) / `PollResponse` (`'R'`) bounded by `ack_timeout_ms` (minimum 2000 ms).
 - TX scheduled polling controls:
-  - `tx_mqtt_remote_polling_enabled` (default `false`)
-  - `tx_mqtt_remote_default_poll_interval_ms` (default `60000`, enforced range `60000..3600000`)
-  - `poll_interval_s` MQTT command is clamped to `0` (disable) or `60..3600` seconds.
+  - `remote_refresh_enabled` (default `false`)
+  - `remote_refresh_cycle_ms` (default `60000`, enforced range `60000..3600000`) is the target duration of one fleet cycle.
+  - There is no per-peer polling configuration or heap-backed per-peer poll scheduler. `poll_now` remains an explicit one-peer operational query.
 - RX operational pushes:
   - Debounced local input changes send an unsolicited `PollResponse` immediately when radio budget is available.
-  - Enabled temperature/tank sensors send unsolicited sensor maintenance pages every 60 seconds.
+  - Enabled temperature/tank sensors send unsolicited sensor pages every 60 seconds without duplicating identity or version pages.
   - These pushes are operational state, not diagnostics; they exist so MQTT/Fleet can observe real relay/input/sensor state without the gateway continuously polling every remote.
 - Paired TX retry controls:
   - `tx_command_retry_timeout_ms` (default `180000`, enforced range `5000..3600000`)

@@ -329,6 +329,27 @@ bool tickCandidateProbe(
   }
 }
 
+uint32_t operationalRefreshCycleMs(bool observerActive, bool periodicActive,
+                                   uint32_t periodicCycleMs,
+                                   uint32_t observerCycleMs) {
+  if (!observerActive) return periodicActive ? periodicCycleMs : 0U;
+  if (!periodicActive || observerCycleMs <= periodicCycleMs) return observerCycleMs;
+  return periodicCycleMs;
+}
+
+uint32_t operationalRefreshStepMs(uint32_t cycleMs, uint8_t peerCount,
+                                  uint32_t minimumStepMs) {
+  if (cycleMs == 0 || peerCount == 0) return 0;
+  const uint32_t step = cycleMs / peerCount;
+  return step < minimumStepMs ? minimumStepMs : step;
+}
+
+bool operationalStateIsFresh(uint32_t now, uint32_t updatedMs,
+                             uint32_t cycleMs) {
+  return updatedMs != 0 && cycleMs != 0 &&
+         static_cast<uint32_t>(now - updatedMs) < cycleMs;
+}
+
 const char *const kDefaultDeploymentKey = "lora-default-passphrase";
 
 bool isDefaultDeploymentKey(const char *v) {

@@ -18,14 +18,14 @@ describe('useFleetInventoryPolling', () => {
     refreshCalls.push({ port, background, source });
   };
 
-  const createPolling = () => {
+  const createPolling = (refresh = refreshGatewaySnapshot) => {
     return useFleetInventoryPolling({
       activeMode,
       fleetTransport,
       gatewaySelectedPort,
       selectedMqttGatewayChipId,
       isLoraInventoryScanning,
-      refreshGatewaySnapshot,
+      refreshGatewaySnapshot: refresh,
       fleetScanPollIntervalMs: 1200,
       fleetCachePollIntervalMs: 5000
     });
@@ -85,6 +85,26 @@ describe('useFleetInventoryPolling', () => {
     expect(refreshCalls).toEqual([
       { port: 'abc12345', background: true, source: 'fleet' }
     ]);
+  });
+
+  it('cache polling never overlaps a slow progressive hydration', async () => {
+    let finishRefresh: (() => void) | undefined;
+    const slowRefresh = vi.fn(() => new Promise<void>(resolve => {
+      finishRefresh = resolve;
+    }));
+    const polling = createPolling(slowRefresh);
+    polling.startFleetCachePolling();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(slowRefresh).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(slowRefresh).toHaveBeenCalledTimes(1);
+
+    finishRefresh?.();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(slowRefresh).toHaveBeenCalledTimes(2);
   });
 
   it('cache polling does not start if mode is not network or no gateway is selected', () => {
@@ -165,6 +185,7 @@ describe('shouldAutoLoadFleetCache', () => {
     transport: 'serial' as const,
     mqttConnected: false,
     mqttGatewayDiscovered: false,
+    mqttAdminReady: false,
     serialTargetAvailable: true,
     changeBlocked: false,
     loadedTarget: '',
@@ -194,7 +215,14 @@ describe('shouldAutoLoadFleetCache', () => {
       ...mqttState,
       mqttConnected: true,
       mqttGatewayDiscovered: true,
+      mqttAdminReady: true,
     })).toBe(true);
+    expect(shouldAutoLoadFleetCache({
+      ...mqttState,
+      mqttConnected: true,
+      mqttGatewayDiscovered: true,
+      mqttAdminReady: false,
+    })).toBe(false);
   });
 
   it('does not reload an already loaded target or run outside Fleet', () => {

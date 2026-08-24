@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ref } from 'vue';
-import { useFleetInventory, applySeedWhitelist, calculateDynamicAgeMs } from './useFleetInventory';
+import { useFleetInventory, applySeedWhitelist, calculateDynamicAgeMs, missingInventoryDetailAddresses } from './useFleetInventory';
 import { LoraInventoryDevice, LoraAdoptionCandidate } from '../types/fleet';
 
 describe('useFleetInventory', () => {
@@ -542,7 +542,7 @@ describe('useFleetInventory', () => {
   it('MQTT cache refresh takes precedence over an older inventory age', () => {
     const fleet = createFleet();
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 1000 }]);
-    // A retained MQTT update is fresh gateway telemetry and must reset Age.
+    // Live MQTT telemetry is newer than the inventory snapshot and resets Age.
     fleet.applyTelemetryUpdate({
       gateway_id: 'lrs-00001234',
       address: 1,
@@ -571,7 +571,7 @@ describe('useFleetInventory', () => {
     expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(10000);
   });
 
-  it('applyTelemetryUpdate updates lastTelemetryTimestamp for retained gateway telemetry', () => {
+  it('applyTelemetryUpdate does not treat retained broker replay as a fresh check-in', () => {
     const fleet = createFleet();
     fleetClockMs.value = 10000;
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123' }]);
@@ -583,10 +583,27 @@ describe('useFleetInventory', () => {
       value: '1',
       retain: true
     });
-    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(10000);
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
   });
 
-  it('keeps a newer MQTT telemetry timestamp instead of reusing an older inventory age', () => {
+  it('retained broker replay preserves the age from a gateway peer detail', () => {
+    const fleet = createFleet();
+    fleetClockMs.value = 10000;
+    fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 7000 }]);
+
+    fleet.applyTelemetryUpdate({
+      gateway_id: 'lrs-00001234',
+      address: 1,
+      field: 'relay',
+      value: '1',
+      retain: true
+    });
+
+    expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBe(3000);
+    expect(calculateDynamicAgeMs(fleet.loraInventory.value[0], fleet.fleetRowHistory.value[1], 12000)).toBe(9000);
+  });
+
+  it('keeps a newer live MQTT timestamp instead of reusing an older inventory age', () => {
     const fleet = createFleet();
     fleetClockMs.value = 1000000;
     fleet.mergeInventoryRows([{ address: 1, chip_id: 'abcde123', age_ms: 160000 }]);
@@ -597,7 +614,7 @@ describe('useFleetInventory', () => {
       address: 1,
       field: 'relay',
       value: '1',
-      retain: true
+      retain: false
     });
 
     fleetClockMs.value = 1205000;
@@ -731,5 +748,24 @@ describe('useFleetInventory', () => {
     const row = fleet.loraInventory.value[0];
     expect(row.age_ms).toBeUndefined(); // Unknown age
     expect(fleet.fleetRowHistory.value[1].lastTelemetryTimestamp).toBeUndefined();
+  });
+
+  it('retries only remotes missing identity or version detail', () => {
+    const complete = {
+      address: 1,
+      fw_version: '0.10.5~24',
+      uptime_ms: 120000,
+      wifi_connected_known: true,
+      input_state_known: true,
+    } as LoraInventoryDevice;
+    const rows = [
+      complete,
+      { ...complete, address: 2, fw_version: '' },
+      { ...complete, address: 3, wifi_connected_known: false },
+      { ...complete, address: 4, input_state_known: false },
+      { ...complete, address: 5, uptime_ms: undefined },
+    ];
+
+    expect(missingInventoryDetailAddresses(rows)).toEqual([2, 3, 4, 5]);
   });
 });

@@ -14,7 +14,7 @@ OutboundTransactionPlan planOutboundTransaction(
   return {true, MqttTransactionOutcome::IgnoreObservabilityOnly, replaces, replaces ? pending_command_id : 0};
 }
 
-TransactionCommitState commitOutboundTransaction(
+TransactionCommitState createOutboundTransaction(
     uint32_t command_id,
     uint8_t relay_state,
     uint32_t now_ms) {
@@ -23,7 +23,7 @@ TransactionCommitState commitOutboundTransaction(
       command_id,
       static_cast<uint8_t>(relay_state ? 1 : 0),
       0, // retry_step
-      now_ms + calculateNextRetryDelayMs(0),
+      now_ms,
       now_ms + kMqttTransactionTimeoutMs,
       PeerAckState::Pending,
   };
@@ -31,11 +31,10 @@ TransactionCommitState commitOutboundTransaction(
 
 MqttRetryAttempt prepareRetryAttempt(
     uint32_t command_id,
-    uint8_t current_step,
-    uint32_t current_counter) {
+    uint8_t current_step) {
   uint8_t next_step = current_step + 1;
-  uint32_t delay_ms = calculateNextRetryDelayMs(next_step);
-  return {command_id, current_step, next_step, current_counter, delay_ms};
+  uint32_t delay_ms = calculateNextRetryDelayMs(current_step);
+  return {command_id, current_step, next_step, delay_ms};
 }
 
 const char* outcomeToString(MqttTransactionOutcome outcome) {

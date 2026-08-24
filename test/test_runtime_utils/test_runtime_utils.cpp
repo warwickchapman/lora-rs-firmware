@@ -8,7 +8,6 @@
 #include "radio_protocol.h"
 
 size_t NodeStateMachine::peerRuntimeSize() { return sizeof(PeerRuntime); }
-size_t NodeStateMachine::pollRuntimeSize() { return sizeof(PollRuntime); }
 size_t NodeStateMachine::replaySourceStateSize() { return sizeof(NodeStateMachine::ReplaySourceState); }
 
 void test_isValidRemotePeerIdentity() {
@@ -171,6 +170,18 @@ void test_group_broadcast_ack_lead_and_window() {
       runtime_utils::staggeredAckDelayMs(0, runtime_utils::kGroupAckSlotMs, 0,
                                          runtime_utils::kGroupAckLeadMs));
   TEST_ASSERT_EQUAL_UINT32(2760, runtime_utils::groupInitialAckWindowMs(12));
+}
+
+void test_operational_refresh_cycle_and_freshness() {
+  TEST_ASSERT_EQUAL_UINT32(60000, runtime_utils::operationalRefreshCycleMs(true, false, 300000, 60000));
+  TEST_ASSERT_EQUAL_UINT32(300000, runtime_utils::operationalRefreshCycleMs(false, true, 300000, 60000));
+  TEST_ASSERT_EQUAL_UINT32(60000, runtime_utils::operationalRefreshCycleMs(true, true, 300000, 60000));
+  TEST_ASSERT_EQUAL_UINT32(5000, runtime_utils::operationalRefreshStepMs(60000, 12, 1000));
+  TEST_ASSERT_EQUAL_UINT32(1000, runtime_utils::operationalRefreshStepMs(60000, 80, 1000));
+  TEST_ASSERT_EQUAL_UINT32(0, runtime_utils::operationalRefreshStepMs(60000, 0, 1000));
+  TEST_ASSERT_TRUE(runtime_utils::operationalStateIsFresh(100000, 50000, 60000));
+  TEST_ASSERT_FALSE(runtime_utils::operationalStateIsFresh(110000, 50000, 60000));
+  TEST_ASSERT_FALSE(runtime_utils::operationalStateIsFresh(100000, 0, 60000));
 }
 
 void test_gateway_scheduler_queues_receive_observability_until_control_is_idle() {
@@ -703,11 +714,9 @@ void test_mqtt_controller_authorization_mqtt_csv_extra_controller() {
 
 void test_struct_sizes() {
   size_t peerSize = NodeStateMachine::peerRuntimeSize();
-  size_t pollSize = NodeStateMachine::pollRuntimeSize();
   size_t replaySize = NodeStateMachine::replaySourceStateSize();
 
   printf("AUDIT_METRIC: sizeof(PeerRuntime) = %zu\n", peerSize);
-  printf("AUDIT_METRIC: sizeof(PollRuntime) = %zu\n", pollSize);
   printf("AUDIT_METRIC: sizeof(DiscoveryCandidate) = %zu\n", sizeof(DiscoveryCandidate));
   printf("AUDIT_METRIC: sizeof(ReplaySourceState) = %zu\n", replaySize);
 
@@ -870,57 +879,42 @@ void test_mqtt_transaction_decision_logic(void) {
 void test_mqtt_transaction_outcomes_and_boundaries(void) {
   using namespace mqtt_transaction_helpers;
 
-  // 1. Test Untracked produces may_transmit == false
+  // 1. An unknown peer cannot be queued.
   auto planUntracked = planOutboundTransaction(false, false, 0);
-  TEST_ASSERT_FALSE(planUntracked.may_transmit);
+  TEST_ASSERT_FALSE(planUntracked.may_queue);
   TEST_ASSERT_EQUAL(static_cast<uint8_t>(MqttTransactionOutcome::Untracked), static_cast<uint8_t>(planUntracked.immediate_outcome));
   TEST_ASSERT_FALSE(planUntracked.replaces_pending);
 
-  // 2. Test peer found without active pending -> may_transmit == true, replaces_pending == false
+  // 2. A known peer can be queued without replacing anything.
   auto planNew = planOutboundTransaction(true, false, 0);
-  TEST_ASSERT_TRUE(planNew.may_transmit);
+  TEST_ASSERT_TRUE(planNew.may_queue);
   TEST_ASSERT_FALSE(planNew.replaces_pending);
 
   // 3. Test successful replacement produces Superseded for existing pending_command_id
   const uint32_t oldCommandId = 5555;
   auto planReplace = planOutboundTransaction(true, true, oldCommandId);
-  TEST_ASSERT_TRUE(planReplace.may_transmit);
+  TEST_ASSERT_TRUE(planReplace.may_queue);
   TEST_ASSERT_TRUE(planReplace.replaces_pending);
   TEST_ASSERT_EQUAL(oldCommandId, planReplace.superseded_command_id);
 
-  // 4. Test commitOutboundTransaction and failed send behavior
+  // 4. Queued state is ready for an immediate scheduler attempt.
   const uint32_t nowMs = 10000;
-  uint32_t nodePendingId = oldCommandId;
-  bool sendSuccess = false; // Radio send fails
-  if (sendSuccess) {
-    if (planReplace.replaces_pending) {
-      // Superseded emitted for oldCommandId
-    }
-    auto commit = commitOutboundTransaction(9999, 1, nowMs);
-    nodePendingId = commit.pending_command_id;
-  }
-  // Because send failed, commitOutboundTransaction was NOT called, preserving old pending state
-  TEST_ASSERT_EQUAL(oldCommandId, nodePendingId);
-
-  // Test successful commit updates state fields correctly
-  auto commitSuccess = commitOutboundTransaction(9999, 1, nowMs);
+  auto commitSuccess = createOutboundTransaction(9999, 1, nowMs);
   TEST_ASSERT_TRUE(commitSuccess.is_pending);
   TEST_ASSERT_EQUAL(9999, commitSuccess.pending_command_id);
   TEST_ASSERT_EQUAL(1, commitSuccess.pending_relay);
   TEST_ASSERT_EQUAL(0, commitSuccess.retry_step);
-  TEST_ASSERT_EQUAL(nowMs + 500, commitSuccess.next_retry_ms);
+  TEST_ASSERT_EQUAL(nowMs, commitSuccess.next_retry_ms);
   TEST_ASSERT_EQUAL(nowMs + 5500, commitSuccess.pending_deadline_ms);
   TEST_ASSERT_EQUAL(static_cast<uint8_t>(PeerAckState::Pending), static_cast<uint8_t>(commitSuccess.ack_state));
 
-  // 5. Test outgoing retry descriptor preserves logical command ID while transport counter is fresh per attempt
+  // 5. Test outgoing retry descriptor preserves the logical command ID.
   const uint32_t logicalCmdId = 77777;
   for (uint8_t step = 0; step < 3; step++) {
-    uint32_t freshCounter = 200 + step;
-    auto retry = prepareRetryAttempt(logicalCmdId, step, freshCounter);
+    auto retry = prepareRetryAttempt(logicalCmdId, step);
     TEST_ASSERT_EQUAL(logicalCmdId, retry.command_id);
     TEST_ASSERT_EQUAL(step, retry.current_step);
     TEST_ASSERT_EQUAL(step + 1, retry.next_step);
-    TEST_ASSERT_EQUAL(freshCounter, retry.transport_counter);
   }
 
   // 6. Verify outcome string mapping for all states
@@ -938,35 +932,38 @@ void test_mqtt_transaction_exact_timing_schedule(void) {
   const uint32_t commandId = 424242;
   const uint8_t relayState = 1;
 
-  // Initial send at t = 0
+  // Initial scheduler attempt at t = 0
   uint32_t t = 0;
-  auto commit = commitOutboundTransaction(commandId, relayState, t);
+  auto commit = createOutboundTransaction(commandId, relayState, t);
 
-  TEST_ASSERT_EQUAL(0, t); // initial: 0
-  TEST_ASSERT_EQUAL(500, commit.next_retry_ms); // scheduled for retry 1 at 500
+  TEST_ASSERT_EQUAL(0, commit.next_retry_ms);
 
-  // Retry 1 at t = 500
-  t = commit.next_retry_ms;
-  TEST_ASSERT_EQUAL(500, t); // retry 1: 500
+  // First send schedules retry 1 for t = 500.
   uint8_t currentStep = commit.retry_step; // 0
-  auto retry1 = prepareRetryAttempt(commandId, currentStep, 101);
+  auto retry1 = prepareRetryAttempt(commandId, currentStep);
   TEST_ASSERT_EQUAL(0, retry1.current_step);
   TEST_ASSERT_EQUAL(1, retry1.next_step);
   uint32_t nextRetry1 = t + retry1.next_delay_ms;
-  TEST_ASSERT_EQUAL(2000, nextRetry1); // scheduled for retry 2 at 2,000
+  TEST_ASSERT_EQUAL(500, nextRetry1);
 
-  // Retry 2 at t = 2000
+  // Retry 1 at t = 500 schedules retry 2 for t = 2000.
   t = nextRetry1;
-  TEST_ASSERT_EQUAL(2000, t); // retry 2: 2,000
+  TEST_ASSERT_EQUAL(500, t);
   currentStep = retry1.next_step; // 1
-  auto retry2 = prepareRetryAttempt(commandId, currentStep, 102);
+  auto retry2 = prepareRetryAttempt(commandId, currentStep);
   TEST_ASSERT_EQUAL(1, retry2.current_step);
   TEST_ASSERT_EQUAL(2, retry2.next_step);
   uint32_t nextRetry2 = t + retry2.next_delay_ms;
-  TEST_ASSERT_EQUAL(5000, nextRetry2); // scheduled for retry 3 at 5,000
+  TEST_ASSERT_EQUAL(2000, nextRetry2);
 
-  // Retry 3 at t = 5000
+  // Retry 2 at t = 2000 schedules retry 3 for t = 5000.
   t = nextRetry2;
+  auto retry3 = prepareRetryAttempt(commandId, retry2.next_step);
+  const uint32_t nextRetry3 = t + retry3.next_delay_ms;
+  TEST_ASSERT_EQUAL(5000, nextRetry3);
+
+  // Retry 3 remains inside the hard deadline.
+  t = nextRetry3;
   TEST_ASSERT_EQUAL(5000, t); // retry 3: 5,000
   TEST_ASSERT_FALSE(isTransactionTimedOut(t, commit.pending_deadline_ms)); // active at 5000
 
@@ -996,6 +993,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_identity_input_state_flag);
   RUN_TEST(test_staggered_ack_delay_guards_first_peer);
   RUN_TEST(test_group_broadcast_ack_lead_and_window);
+  RUN_TEST(test_operational_refresh_cycle_and_freshness);
   RUN_TEST(test_gateway_scheduler_queues_receive_observability_until_control_is_idle);
   RUN_TEST(test_receive_side_poll_and_maintenance_observability_always_queue);
   RUN_TEST(test_mqtt_config_write_authorization_boundary);

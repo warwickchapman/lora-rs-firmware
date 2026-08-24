@@ -1,14 +1,7 @@
 #include "peer_manager.h"
-#include "runtime_utils.h"
-#include "logger.h"
-#include <new>
 
 PeerManager::PeerManager() {
   reset();
-}
-
-PeerManager::~PeerManager() {
-  freePollStorage();
 }
 
 void PeerManager::begin(uint8_t localAddress) {
@@ -25,7 +18,6 @@ void PeerManager::reset() {
     peers_[i] = PeerRuntime{};
   }
   peer_count_ = 0;
-  resetPollStorage();
 }
 
 PeerRuntime* PeerManager::find(uint8_t address) {
@@ -58,46 +50,7 @@ const PeerRuntime* PeerManager::findByIndex(size_t index) const {
   return &peers_[index];
 }
 
-bool PeerManager::ensurePollStorage() {
-  if (poll_states_ != nullptr && poll_state_capacity_ >= LRS_MAX_PEERS) return true;
-  freePollStorage();
-  poll_states_ = new (std::nothrow) PollRuntime[LRS_MAX_PEERS];
-  if (poll_states_ == nullptr) {
-    poll_state_capacity_ = 0;
-#if !defined(UNIT_TEST)
-    lrslog::event("poll_storage_oom", 0, static_cast<uint32_t>(LRS_MAX_PEERS & 0xFFFFU),
-                  static_cast<uint8_t>(sizeof(PollRuntime) & 0xFFU));
-#endif
-    return false;
-  }
-  poll_state_capacity_ = LRS_MAX_PEERS;
-  resetPollStorage();
-  return true;
-}
-
-PollRuntime* PeerManager::pollStateForIndex(size_t index) {
-  if (poll_states_ == nullptr || index >= poll_state_capacity_) return nullptr;
-  return &poll_states_[index];
-}
-
-const PollRuntime* PeerManager::pollStateForIndex(size_t index) const {
-  if (poll_states_ == nullptr || index >= poll_state_capacity_) return nullptr;
-  return &poll_states_[index];
-}
-
-PollRuntime* PeerManager::pollStateForPeer(const PeerRuntime *peer) {
-  if (peer == nullptr) return nullptr;
-  size_t idx = static_cast<size_t>(peer - peers_);
-  return pollStateForIndex(idx);
-}
-
-const PollRuntime* PeerManager::pollStateForPeer(const PeerRuntime *peer) const {
-  if (peer == nullptr) return nullptr;
-  size_t idx = static_cast<size_t>(peer - peers_);
-  return pollStateForIndex(idx);
-}
-
-PeerRuntime* PeerManager::findOrCreate(uint8_t address, uint32_t chipId, uint32_t defaultInterval, bool pollingEnabled, uint32_t now) {
+PeerRuntime* PeerManager::findOrCreate(uint8_t address, uint32_t chipId) {
   if (address == 0 || address == 255 || address == local_address_) {
     return nullptr;
   }
@@ -114,16 +67,6 @@ PeerRuntime* PeerManager::findOrCreate(uint8_t address, uint32_t chipId, uint32_
   new_node.address = address;
   new_node.chip_id = chipId;
 
-  uint32_t interval = defaultInterval;
-  new_node.poll_interval_ms = pollingEnabled ? interval : 0;
-  if (new_node.poll_interval_ms > 0) {
-    if (ensurePollStorage()) {
-      PollRuntime *poll = pollStateForIndex(peer_count_ - 1);
-      if (poll != nullptr) {
-        poll->next_poll_ms = now + new_node.poll_interval_ms;
-      }
-    }
-  }
   return &new_node;
 }
 
@@ -145,16 +88,10 @@ void PeerManager::removePeerAt(size_t idx) {
   if (idx >= peer_count_) return;
   for (size_t i = idx; i + 1 < peer_count_; ++i) {
     peers_[i] = peers_[i + 1];
-    if (poll_states_ != nullptr && i + 1 < poll_state_capacity_) {
-      poll_states_[i] = poll_states_[i + 1];
-    }
   }
   if (peer_count_ > 0) {
     peer_count_--;
     peers_[peer_count_] = PeerRuntime{};
-    if (poll_states_ != nullptr && peer_count_ < poll_state_capacity_) {
-      poll_states_[peer_count_] = PollRuntime{};
-    }
   }
 }
 
@@ -166,15 +103,6 @@ void PeerManager::clearAllPending() {
     peers_[i].pending_counter = 0;
     peers_[i].pending_deadline_ms = 0;
     peers_[i].wifi_pending = false;
-  }
-  if (poll_states_ != nullptr) {
-    for (size_t i = 0; i < poll_state_capacity_; ++i) {
-      poll_states_[i].poll_pending = false;
-      poll_states_[i].poll_retry_step = 0;
-      poll_states_[i].poll_next_retry_ms = 0;
-      poll_states_[i].poll_counter = 0;
-      poll_states_[i].poll_deadline_ms = 0;
-    }
   }
 }
 
@@ -194,16 +122,9 @@ bool PeerManager::buildStatusSnapshot(size_t index, PeerStatusSnapshot &out) con
   out.downlink_rssi_valid = p.downlink_rssi_valid;
   out.downlink_rssi = p.downlink_rssi;
   out.last_seen_ms = p.last_seen_ms;
+  out.operational_updated_ms = p.operational_updated_ms;
   out.last_cmd_counter = p.last_cmd_counter;
   out.ack_state = p.ack_state;
-  out.poll_interval_ms = p.poll_interval_ms;
-  
-  const PollRuntime *poll = pollStateForIndex(index);
-  if (poll != nullptr) {
-    out.poll_pending = poll->poll_pending;
-    out.last_poll_tx_ms = poll->last_poll_tx_ms;
-  }
-  
   out.wifi_state_known = p.wifi_state_known;
   out.wifi_enabled = p.wifi_enabled;
   out.wifi_connected_known = p.wifi_connected_known;
@@ -229,19 +150,4 @@ bool PeerManager::buildStatusSnapshot(size_t index, PeerStatusSnapshot &out) con
   out.power_save_listen_only = p.power_save_listen_only;
   out.power_save_active = p.power_save_active;
   return true;
-}
-
-void PeerManager::freePollStorage() {
-  if (poll_states_ != nullptr) {
-    delete[] poll_states_;
-    poll_states_ = nullptr;
-  }
-  poll_state_capacity_ = 0;
-}
-
-void PeerManager::resetPollStorage() {
-  if (poll_states_ == nullptr) return;
-  for (size_t i = 0; i < poll_state_capacity_; ++i) {
-    poll_states_[i] = PollRuntime{};
-  }
 }

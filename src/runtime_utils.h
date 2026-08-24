@@ -195,6 +195,16 @@ GatewayControlSchedule gatewayControlSchedule(bool pairedInputControlEnabled,
                                               bool debouncedInputTransition,
                                               bool groupActive);
 
+// One fleet-cycle target is divided across configured peers. Unsolicited
+// operational reports count toward freshness and suppress redundant polls.
+uint32_t operationalRefreshCycleMs(bool observerActive, bool periodicActive,
+                                   uint32_t periodicCycleMs,
+                                   uint32_t observerCycleMs);
+uint32_t operationalRefreshStepMs(uint32_t cycleMs, uint8_t peerCount,
+                                  uint32_t minimumStepMs);
+bool operationalStateIsFresh(uint32_t now, uint32_t updatedMs,
+                             uint32_t cycleMs);
+
 uint8_t resolveGatewayTargets(
     uint8_t localAddress,
     uint8_t knownPeerCount,

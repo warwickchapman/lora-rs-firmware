@@ -161,8 +161,8 @@ class NodeStateMachine {
   bool isPeerUdpLogsEligible(uint8_t address) const;
   void mqttSetLocalRelay(uint8_t relayState);
   bool mqttSendPeerRelay(uint8_t dstAddress, uint8_t relayState);
-  bool mqttSetPeerPollIntervalMs(uint8_t dstAddress, uint32_t pollIntervalMs);
   bool mqttPollPeerNow(uint8_t dstAddress);
+  bool renewOperationalObserverLease(uint32_t leaseMs);
   bool mqttForgetPeer(uint8_t dstAddress);
   uint32_t resolveChipIdForAddress(uint8_t address) const;
   uint32_t activePeerChipIdForAddress(uint8_t address) const;
@@ -288,7 +288,6 @@ class NodeStateMachine {
   void triggerIdentify(uint32_t durationMs = kIdentifyLedDurationMs);
 
   static size_t peerRuntimeSize();
-  static size_t pollRuntimeSize();
   static size_t replaySourceStateSize();
 
  private:
@@ -308,8 +307,8 @@ class NodeStateMachine {
     uint32_t heartbeat_ms = 60000;
     bool heartbeat_enabled = true;
     uint32_t ack_timeout_ms = 5000;
-    bool tx_mqtt_remote_polling_enabled = false;
-    uint32_t tx_mqtt_remote_default_poll_interval_ms = 60000;
+    bool remote_refresh_enabled = false;
+    uint32_t remote_refresh_cycle_ms = 60000;
     bool input_control_paired_lora_enabled = false;
     bool mqtt_control_enabled = false;
     RxFailsafeMode rx_failsafe_mode = RxFailsafeMode::HoldLast;
@@ -397,6 +396,7 @@ class NodeStateMachine {
   uint8_t rx_deferred_ack_dst_ = 0;
   uint8_t rx_deferred_ack_relay_ = 0;
   DeferredObservabilityKind rx_deferred_observability_kind_ = DeferredObservabilityKind::None;
+  uint32_t rx_deferred_observability_due_ms_ = 0;
   uint8_t rx_deferred_observability_dst_ = 0;
   bool rx_deferred_observability_diagnostics_ = false;
   int rx_deferred_observability_rssi_ = -127;
@@ -412,6 +412,16 @@ class NodeStateMachine {
   bool maintenance_version_pending_ = false;
   uint8_t maintenance_version_dst_ = 0;
   uint32_t last_maint_page_tx_ms_ = 0;
+
+  // One bounded operational refresh transaction serves both headless polling
+  // and a temporary Fleet/Monitor observer lease. No per-peer heap state.
+  uint32_t observer_lease_until_ms_ = 0;
+  uint32_t operational_refresh_next_ms_ = 0;
+  uint32_t operational_poll_deadline_ms_ = 0;
+  uint32_t operational_poll_counter_ = 0;
+  uint8_t operational_refresh_cursor_ = 0;
+  uint8_t operational_poll_address_ = 0;
+  uint8_t explicit_poll_address_ = 0;
 
   struct PendingMaintenanceRequest {
     bool pending = false;
@@ -629,9 +639,11 @@ class NodeStateMachine {
   void finishRadioTxBudgetForTick();
   void markRadioTxSentThisTick();
   void tickPeerMqttCommands(uint32_t now);
-  void tickPeerPolling(uint32_t now);
+  void tickOperationalRefresh(uint32_t now);
   void tickMaintenanceRequestQueue(uint32_t now);
   bool sendPeerMqttCommand(uint8_t dstAddress, uint8_t relayState, uint32_t commandId, uint32_t *sentCounter = nullptr);
+  bool hasPendingPeerControl() const;
+  bool hasPendingManagementTransaction() const;
   void tickPendingOtaPullControl(uint32_t now);
   void tickPendingFactoryResetControl(uint32_t now);
   void tickPendingFactoryResetStatus(uint32_t now);

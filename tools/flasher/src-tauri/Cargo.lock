@@ -5233,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "thanda-lora-flasher"
-version = "0.10.5-dev.22"
+version = "0.10.5-dev.28"
 dependencies = [
  "get_if_addrs",
  "hex",

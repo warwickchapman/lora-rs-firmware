@@ -14,22 +14,28 @@ void setUp() {
 void tearDown() {}
 
 void test_serializer_field_count_and_types() {
-  g_test_settings.schema_version = 5;
+  g_test_settings.schema_version = 6;
   g_test_settings.commissioned = true;
   g_test_settings.mode = "paired";
   g_test_settings.role_tx = false;
   g_test_settings.local_address = 1;
   g_test_settings.controller_address = 2;
+  g_test_settings.remote_refresh_enabled = true;
+  g_test_settings.remote_refresh_cycle_ms = 120000;
 
   JsonDocument doc;
   ConfigStore store;
   writeSettingsJson(doc, store, false);
 
   // The schema clean break is explicit: remote-only controller, no legacy keys.
-  TEST_ASSERT_EQUAL(5, doc["schema_version"].as<int>());
+  TEST_ASSERT_EQUAL(6, doc["schema_version"].as<int>());
   TEST_ASSERT_EQUAL(2, doc["controller_address"].as<int>());
   TEST_ASSERT_FALSE(doc.containsKey("remote_address"));
   TEST_ASSERT_FALSE(doc.containsKey("paired_target_addresses"));
+  TEST_ASSERT_TRUE(doc["remote_refresh_enabled"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT32(120000, doc["remote_refresh_cycle_ms"].as<uint32_t>());
+  TEST_ASSERT_FALSE(doc.containsKey("tx_mqtt_remote_polling_enabled"));
+  TEST_ASSERT_FALSE(doc.containsKey("tx_mqtt_remote_default_poll_interval_ms"));
 
   // 2. Booleans serialize as JSON booleans
   TEST_ASSERT_TRUE(doc["commissioned"].is<bool>());
@@ -96,7 +102,7 @@ void test_fleet_passphrase_default() {
 }
 
 void test_write_settings_json_object_nested() {
-  g_test_settings.schema_version = 5;
+  g_test_settings.schema_version = 6;
   g_test_settings.commissioned = true;
   g_test_settings.mode = "paired";
   g_test_settings.role_tx = false;
@@ -114,7 +120,7 @@ void test_write_settings_json_object_nested() {
   TEST_ASSERT_EQUAL_STRING("get_config", doc["cmd"].as<const char*>());
   TEST_ASSERT_FALSE(doc.containsKey("schema_version"));
   TEST_ASSERT_TRUE(doc["config"].containsKey("schema_version"));
-  TEST_ASSERT_EQUAL(5, doc["config"]["schema_version"].as<int>());
+  TEST_ASSERT_EQUAL(6, doc["config"]["schema_version"].as<int>());
   TEST_ASSERT_TRUE(doc["config"].containsKey("commissioned"));
   TEST_ASSERT_TRUE(doc["config"]["commissioned"].as<bool>());
   TEST_ASSERT_TRUE(doc["config"].containsKey("mode"));
@@ -127,7 +133,7 @@ void test_write_settings_json_object_nested() {
 }
 
 void test_gateway_serializer_omits_remote_only_and_legacy_fields() {
-  g_test_settings.schema_version = 5;
+  g_test_settings.schema_version = 6;
   g_test_settings.role_tx = true;
   g_test_settings.local_address = 254;
   g_test_settings.controller_address = 0;
@@ -135,14 +141,14 @@ void test_gateway_serializer_omits_remote_only_and_legacy_fields() {
   ConfigStore store;
   writeSettingsJson(doc, store, false);
 
-  TEST_ASSERT_EQUAL(5, doc["schema_version"].as<int>());
+  TEST_ASSERT_EQUAL(6, doc["schema_version"].as<int>());
   TEST_ASSERT_FALSE(doc.containsKey("controller_address"));
   TEST_ASSERT_FALSE(doc.containsKey("remote_address"));
   TEST_ASSERT_FALSE(doc.containsKey("paired_target_addresses"));
 }
 
-void test_schema_four_migration_serializes_clean_schema_five() {
-  g_test_settings.schema_version = 5;
+void test_schema_four_migration_serializes_clean_schema_six() {
+  g_test_settings.schema_version = 6;
   g_test_settings.role_tx = false;
   g_test_settings.local_address = 1;
   g_test_settings.controller_address = runtime_utils::migrateControllerAddress(
@@ -151,7 +157,7 @@ void test_schema_four_migration_serializes_clean_schema_five() {
   ConfigStore store;
   writeSettingsJson(doc, store, false);
 
-  TEST_ASSERT_EQUAL(5, doc["schema_version"].as<int>());
+  TEST_ASSERT_EQUAL(6, doc["schema_version"].as<int>());
   TEST_ASSERT_EQUAL(254, doc["controller_address"].as<int>());
   TEST_ASSERT_FALSE(doc.containsKey("remote_address"));
   TEST_ASSERT_FALSE(doc.containsKey("paired_target_addresses"));
@@ -165,6 +171,6 @@ int main(int argc, char **argv) {
   RUN_TEST(test_fleet_passphrase_default);
   RUN_TEST(test_write_settings_json_object_nested);
   RUN_TEST(test_gateway_serializer_omits_remote_only_and_legacy_fields);
-  RUN_TEST(test_schema_four_migration_serializes_clean_schema_five);
+  RUN_TEST(test_schema_four_migration_serializes_clean_schema_six);
   return UNITY_END();
 }

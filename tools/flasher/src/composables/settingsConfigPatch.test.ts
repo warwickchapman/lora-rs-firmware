@@ -7,7 +7,7 @@ describe('settingsConfigPatch', () => {
       mode: 'paired',
       role_tx: true,
       local_address: 254,
-      tx_mqtt_remote_polling_enabled: true
+      remote_refresh_enabled: true
     };
 
     expect(buildChangedSettingsConfigPatch(loaded, loaded)).toEqual({});
@@ -18,15 +18,15 @@ describe('settingsConfigPatch', () => {
       mode: 'paired',
       role_tx: true,
       local_address: 254,
-      tx_mqtt_remote_polling_enabled: false
+      remote_refresh_enabled: false
     };
     const current = {
       ...baseline,
-      tx_mqtt_remote_polling_enabled: true
+      remote_refresh_enabled: true
     };
 
     expect(buildChangedSettingsConfigPatch(current, baseline)).toEqual({
-      tx_mqtt_remote_polling_enabled: true
+      remote_refresh_enabled: true
     });
   });
 

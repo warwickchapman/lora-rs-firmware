@@ -409,6 +409,9 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     if (scan.active) {
       return 'Scanning configured remotes and same-key candidates...';
     }
+    if (!scan.sent) {
+      return 'Observing fleet; missing inventory details hydrate progressively';
+    }
     return `Scan finished, ${scan.sent || 0} probes sent; identity and WiFi details may still be pending`;
   });
 
@@ -604,8 +607,10 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
               return row;
             });
           }
-          if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
-          fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
+          if (payload.retain !== true) {
+            if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
+            fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
+          }
           return;
         }
         if (!cacheEntry.sensors[sKey]) {
@@ -620,7 +625,10 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
       }
     }
 
-    if (recognizedUpdate) {
+    // A broker replay carries cached values but is not evidence that the
+    // remote just checked in. MQTT sets retain=false for live delivery to an
+    // existing subscription, so only live messages advance row freshness.
+    if (recognizedUpdate && payload.retain !== true) {
       if (!fleetRowHistory.value[address]) fleetRowHistory.value[address] = {};
       fleetRowHistory.value[address].lastTelemetryTimestamp = options.fleetClockMs.value;
     }
@@ -740,4 +748,12 @@ export function applySeedWhitelist(existing: Partial<LoraInventoryDevice>, seed:
     input_state_known: seedRest.input_state_known !== undefined ? seedRest.input_state_known : existingRest.input_state_known,
     input_state: seedRest.input_state !== undefined ? seedRest.input_state : existingRest.input_state,
   } as LoraInventoryDevice;
+}
+
+export function missingInventoryDetailAddresses(rows: LoraInventoryDevice[]): number[] {
+  return rows
+    .filter(row => !row.fw_version || row.uptime_ms === undefined || row.wifi_connected_known !== true || row.input_state_known !== true)
+    .map(row => row.address)
+    .filter(address => Number.isFinite(address) && address >= 1 && address <= 12)
+    .sort((a, b) => a - b);
 }

@@ -10,8 +10,8 @@ const uint32_t kMinHeartbeatMs = 60000;
 const uint32_t kMaxHeartbeatMs = 3600000;
 const uint32_t kMinAckTimeoutMs = 5 * 1000;
 const uint32_t kMaxAckTimeoutMs = 600 * 1000;
-const uint32_t kMinTxPollDefaultIntervalMs = 60 * 1000;
-const uint32_t kMaxTxPollDefaultIntervalMs = 3600 * 1000;
+const uint32_t kMinRemoteRefreshCycleMs = 60 * 1000;
+const uint32_t kMaxRemoteRefreshCycleMs = 3600 * 1000;
 const size_t kMinDeploymentKeyLen = 16;
 
 #ifdef REGION_US

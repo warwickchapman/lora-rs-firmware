@@ -62,9 +62,8 @@ void writeSettingsJsonObject(JsonObject config, ConfigStore &store,
   config["heartbeat_ms"] = cfg.heartbeat_ms;
   config["heartbeat_enabled"] = cfg.heartbeat_enabled;
   config["ack_timeout_ms"] = cfg.ack_timeout_ms;
-  config["tx_mqtt_remote_polling_enabled"] = cfg.tx_mqtt_remote_polling_enabled;
-  config["tx_mqtt_remote_default_poll_interval_ms"] =
-      cfg.tx_mqtt_remote_default_poll_interval_ms;
+  config["remote_refresh_enabled"] = cfg.remote_refresh_enabled;
+  config["remote_refresh_cycle_ms"] = cfg.remote_refresh_cycle_ms;
   config["input_control_paired_lora_enabled"] =
       cfg.input_control_paired_lora_enabled;
   config["tx_command_retry_timeout_ms"] = cfg.tx_command_retry_timeout_ms;

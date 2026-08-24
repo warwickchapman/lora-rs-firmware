@@ -31,7 +31,7 @@ class MqttBridge {
     uint8_t local_address = 0;
     uint8_t controller_address = 0;
     uint16_t mqtt_port = 1883;
-    bool tx_mqtt_remote_polling_enabled = false;
+    bool remote_refresh_enabled = false;
   };
 
   ConfigStore *config_ = nullptr;
