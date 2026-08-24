@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Bootstrap the home fleet using the current ZA firmware.bin.
-#
-# This deliberately uses direct espota.py, not Flasher Remote OTA Pull. Older
-# remotes cannot acknowledge the new LoRa manifest protocol until bootstrapped.
+# Update the fixed home test fleet using the current ZA firmware.bin.
 
 set -e
 set -o pipefail
@@ -12,17 +9,14 @@ FIRMWARE="$ROOT/.pio/build/lrs_za/firmware.bin"
 ESPOTA="${HOME}/.platformio/packages/framework-arduinoespressif8266/tools/espota.py"
 DERIVE_PASSWORD="$ROOT/tools/derive_passwords.py"
 APPLY=false
-ALL=false
 
 usage() {
   cat <<'EOF'
-Usage: tools/update_fleet.sh [--apply] [--all] [remote-number ... | g]
+Usage: tools/update_fleet.sh [--apply] [remote-number ... | g]
 
-Default: print the direct-OTA bootstrap plan for the devices known to need a
-bootstrap from the captured Fleet inventory.
+Default: print the direct-OTA plan for all 12 remotes and the gateway.
 --apply: perform the updates, one device at a time.
---all: include every known device, including those not selected by default.
-remote-number: update one remote, for example 4 6 7.
+remote-number: select specific remotes, for example 4 6 7.
 g: update the gateway.
 
 The script derives credentials locally from the chip ID. It never prints them.
@@ -34,7 +28,6 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --apply) APPLY=true ;;
-    --all) ALL=true ;;
     --help|-h)
       usage
       exit 0
@@ -49,73 +42,56 @@ done
 name=()
 chip=()
 ip=()
-needs_bootstrap=()
-
 name[1]="12"
 chip[1]="lrs-00fc4f9f"
 ip[1]="192.168.133.23"
-needs_bootstrap[1]=true
 
 name[2]="11"
 chip[2]="lrs-00fc4f9e"
 ip[2]="192.168.133.24"
-needs_bootstrap[2]=true
 
 name[3]="10"
 chip[3]="lrs-00fc4f9d"
 ip[3]="192.168.133.25"
-needs_bootstrap[3]=true
 
 name[4]="7"
 chip[4]="lrs-0029ca55"
 ip[4]="192.168.133.26"
-needs_bootstrap[4]=true
 
 name[5]="8"
 chip[5]="lrs-004a9c27"
 ip[5]="192.168.133.27"
-needs_bootstrap[5]=true
 
 name[6]="9"
 chip[6]="lrs-00fc4f9c"
 ip[6]="192.168.133.28"
-needs_bootstrap[6]=true
 
 name[7]="6"
 chip[7]="lrs-0029ca51"
 ip[7]="192.168.133.30"
-needs_bootstrap[7]=true
 
 name[8]="4"
 chip[8]="lrs-0029ca6f"
 ip[8]="192.168.133.22"
-needs_bootstrap[8]=true
 
 name[9]="g"
 chip[9]="lrs-0048cb85"
 ip[9]="192.168.133.20"
-needs_bootstrap[9]=true
-
-# Not selected by default because they were already current in the captured view.
 name[10]="3"
 chip[10]="lrs-000af8e6"
 ip[10]="192.168.133.21"
-needs_bootstrap[10]=false
 
 name[11]="5"
 chip[11]="lrs-0048d1bb"
 ip[11]="192.168.133.29"
-needs_bootstrap[11]=false
 
 name[12]="2"
 chip[12]="lrs-000af8d9"
 ip[12]="192.168.133.31"
-needs_bootstrap[12]=false
 
 name[13]="1"
 chip[13]="lrs-000af8ce"
 ip[13]="192.168.133.32"
-needs_bootstrap[13]=false
 
 TOTAL_UNITS=13
 targets=()
@@ -149,12 +125,8 @@ if [[ ${#requested_names[@]} -gt 0 ]]; then
   for requested in "${requested_names[@]}"; do
     add_target_by_name "$requested"
   done
-elif [[ "$ALL" == true ]]; then
-  for requested in 1 2 3 4 5 6 7 8 9 10 11 12 g; do
-    add_target_by_name "$requested"
-  done
 else
-  for requested in 4 6 7 8 9 10 11 12 g; do
+  for requested in 1 2 3 4 5 6 7 8 9 10 11 12 g; do
     add_target_by_name "$requested"
   done
 fi
@@ -170,18 +142,13 @@ if [[ "$APPLY" == true ]]; then
   [[ -f "$DERIVE_PASSWORD" ]] || { echo "Password derivation tool not found: $DERIVE_PASSWORD" >&2; exit 2; }
 fi
 
-echo "Home fleet direct OTA bootstrap"
+echo "Home test fleet direct OTA update"
 echo "Firmware: $FIRMWARE"
 echo "Mode: $([[ "$APPLY" == true ]] && echo APPLY || echo DRY-RUN)"
 echo
 
 for i in "${targets[@]}"; do
-  printf '%-10s %-14s %s' "${name[$i]}" "${chip[$i]}" "${ip[$i]}"
-  if [[ "${needs_bootstrap[$i]}" == true ]]; then
-    printf '  bootstrap\n'
-  else
-    printf '  not selected by default\n'
-  fi
+  printf '%-10s %-14s %s\n' "${name[$i]}" "${chip[$i]}" "${ip[$i]}"
 done
 
 if [[ "$APPLY" != true ]]; then
@@ -212,4 +179,4 @@ for i in "${targets[@]}"; do
 done
 
 echo
-echo "Direct OTA bootstrap completed. Use Flasher to confirm every device reports the firmware version you built."
+echo "Direct OTA update completed. Use Flasher to confirm every device reports the firmware version you built."

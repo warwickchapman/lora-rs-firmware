@@ -45,7 +45,7 @@
 - Late remote OTA confirmation remains correlated for ten minutes without continued polling. A remote that returns after the active watchdog timeout is shown as `Updated` only when the requested version and a reboot are both observed, instead of being mislabelled `Restarted`.
 
 ### Developer Tooling
-- Added `tools/update_fleet.sh` for the one-time direct-Wi-Fi bootstrap of the recorded 12-remote test fleet and gateway. It uses the current ZA `firmware.bin`, derives each ArduinoOTA password locally, defaults to a dry run, accepts remote numbers or `g`, and stops at the first failed or indeterminate upload instead of retrying blindly.
+- Added `tools/update_fleet.sh` for repeatable direct-Wi-Fi updates of the fixed 12-remote test fleet and gateway. It uses the current ZA `firmware.bin`, derives each ArduinoOTA password locally, defaults to a dry run, updates the whole fleet when no targets are supplied, accepts remote numbers or `g` for a selected update, and stops at the first failed or indeterminate upload instead of retrying blindly.
 
 ## [0.10.3] - 2026-07-20
 
