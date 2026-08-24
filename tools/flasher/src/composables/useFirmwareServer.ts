@@ -21,9 +21,7 @@ export interface NetworkInterface {
 
 export interface UseFirmwareServerOptions {
   resolveFirmwareOptions: () => FirmwareServerOptions | null;
-  onStarting?: () => void;
-  onStarted?: (info: FirmwareServerInfo, message: string) => void;
-  onStopped?: (message: string) => void;
+  idleShutdownMs?: number;
   pushNetworkLog?: (msg: string) => void;
   notify?: (msg: string) => void;
 }
@@ -32,6 +30,9 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
   const isFirmwareServerStarting = ref(false);
   const firmwareServerInfo = ref<FirmwareServerInfo | null>(null);
   const firmwareServerRevalidatePending = ref(false);
+  const idleShutdownMs = options.idleShutdownMs ?? 60000;
+  let firmwareServerBusy = false;
+  let idleShutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
   function log(msg: string) {
     options.pushNetworkLog?.(msg);
@@ -41,10 +42,32 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
     options.notify?.(msg);
   }
 
+  function cancelIdleShutdown() {
+    if (!idleShutdownTimer) return;
+    clearTimeout(idleShutdownTimer);
+    idleShutdownTimer = null;
+  }
+
+  function scheduleIdleShutdown() {
+    cancelIdleShutdown();
+    if (firmwareServerBusy || !firmwareServerInfo.value) return;
+    idleShutdownTimer = setTimeout(() => {
+      idleShutdownTimer = null;
+      if (firmwareServerBusy || !firmwareServerInfo.value) return;
+      log('Firmware server idle for 60 seconds; stopping.');
+      stopFirmwareServer().catch(e => log(`Firmware server idle stop error: ${e}`));
+    }, idleShutdownMs);
+  }
+
+  function setFirmwareServerBusy(busy: boolean) {
+    firmwareServerBusy = busy;
+    if (busy) cancelIdleShutdown();
+    else scheduleIdleShutdown();
+  }
+
   async function startFirmwareServerWithOptions(fwOptions: FirmwareServerOptions | null) {
     if (!fwOptions) return;
     isFirmwareServerStarting.value = true;
-    options.onStarting?.();
     log('--- Firmware file server ---');
     try {
       const info = await invoke<FirmwareServerInfo>('start_firmware_file_server', {
@@ -52,8 +75,8 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
       });
       firmwareServerInfo.value = info;
       const statusMsg = `Serving ${info.filename} on ${info.urls[0] || `port ${info.port}`}.`;
-      options.onStarted?.(info, statusMsg);
       log(`${statusMsg} SHA256 ${info.sha256}`);
+      scheduleIdleShutdown();
     } catch (e) {
       log(`Firmware server failed: ${e}`);
       showNotification(`Firmware server failed: ${e}`);
@@ -62,12 +85,8 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
     }
   }
 
-  async function startFirmwareServer() {
-    const fwOptions = options.resolveFirmwareOptions();
-    await startFirmwareServerWithOptions(fwOptions);
-  }
-
   async function ensureFirmwareServer(): Promise<FirmwareServerInfo> {
+    cancelIdleShutdown();
     if (firmwareServerInfo.value) return firmwareServerInfo.value;
     const fwOptions = options.resolveFirmwareOptions();
     if (!fwOptions) throw new Error('Choose a firmware file or release first');
@@ -77,6 +96,7 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
   }
 
   async function stopFirmwareServer() {
+    cancelIdleShutdown();
     try {
       const stopped = await invoke<string>('stop_firmware_file_server');
       log(stopped);
@@ -84,7 +104,6 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
       log(`Firmware server stop error: ${e}`);
     } finally {
       firmwareServerInfo.value = null;
-      options.onStopped?.('Firmware server stopped.');
     }
   }
 
@@ -144,6 +163,7 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
   }
 
   async function cleanupFirmwareServer() {
+    cancelIdleShutdown();
     if (firmwareServerInfo.value) {
       await stopFirmwareServer();
     }
@@ -159,10 +179,9 @@ export function useFirmwareServer(options: UseFirmwareServerOptions) {
     isFirmwareServerStarting,
     firmwareServerInfo,
     firmwareServerRevalidatePending,
-    startFirmwareServer,
-    startFirmwareServerWithOptions,
     ensureFirmwareServer,
     stopFirmwareServer,
+    setFirmwareServerBusy,
     firmwareServerTarget,
     handleNetworkInterfacesChanged,
     revalidateFirmwareServerAfterNetworkChange,

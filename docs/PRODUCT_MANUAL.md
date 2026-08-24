@@ -71,6 +71,7 @@ Fleet workflow:
 - `Fleet > Devices`: configured remotes appear from the gateway cache immediately and refresh progressively while Fleet is open.
 - `Fleet > Manage > WiFi`: send WiFi credentials to all known peers or target a single peer with optional override credentials.
 - Selecting an available USB or MQTT gateway activates Fleet automatically. Flasher reads the compact gateway summary, then refreshes one configured peer at a time at a responsible RF cadence; no separate Load or Scan step is required.
+- Remote and MQTT-gateway OTA starts Flasher's temporary firmware server automatically. Fleet shows its active filename and URL as a read-only reference. The server remains available across queued and active updates, then stops 60 seconds after the final update settles; no server control is required.
 - A remote's **Actions > Flash LED** asks the selected USB or MQTT gateway to run the normal three-flash/pause/three-flash identification pattern on that remote. Flasher reports **acknowledged; flashing**, **not confirmed**, or **unavailable in Power Save**; an acknowledgement confirms that the remote accepted the request, not that an operator physically saw the LED.
 
 Addressing and mode/role together define effective behavior and control ownership.

@@ -8,35 +8,24 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 describe('useFirmwareServer', () => {
   const resolveFirmwareOptionsMock = vi.fn<() => FirmwareServerOptions | null>();
-  const onStartingMock = vi.fn();
-  const onStartedMock = vi.fn();
-  const onStoppedMock = vi.fn();
   const pushNetworkLogMock = vi.fn();
   const notifyMock = vi.fn();
 
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
+    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path/to/fw.bin', region: 'ZA' });
   });
 
   const createComposable = () => {
     return useFirmwareServer({
       resolveFirmwareOptions: resolveFirmwareOptionsMock,
-      onStarting: onStartingMock,
-      onStarted: onStartedMock,
-      onStopped: onStoppedMock,
       pushNetworkLog: pushNetworkLogMock,
       notify: notifyMock,
     });
   };
 
-  it('startFirmwareServerWithOptions(null) is a no-op and does not call Tauri', async () => {
-    const server = createComposable();
-    await server.startFirmwareServerWithOptions(null);
-    expect(invoke).not.toHaveBeenCalled();
-    expect(server.isFirmwareServerStarting.value).toBe(false);
-  });
-
-  it('successful start stores firmwareServerInfo, clears starting flag, calls onStarting and onStarted, and logs', async () => {
+  it('ensure starts the server, stores its details, and logs the served artifact', async () => {
     const server = createComposable();
     const mockInfo: FirmwareServerInfo = {
       filename: 'firmware.bin',
@@ -47,13 +36,10 @@ describe('useFirmwareServer', () => {
     };
     vi.mocked(invoke).mockResolvedValue(mockInfo);
 
-    const options: FirmwareServerOptions = { firmware_path: '/path/to/fw.bin', region: 'ZA' };
-    await server.startFirmwareServerWithOptions(options);
+    await server.ensureFirmwareServer();
 
     expect(server.isFirmwareServerStarting.value).toBe(false);
     expect(server.firmwareServerInfo.value).toEqual(mockInfo);
-    expect(onStartingMock).toHaveBeenCalledTimes(1);
-    expect(onStartedMock).toHaveBeenCalledWith(mockInfo, 'Serving firmware.bin on http://192.168.1.10:8080/firmware.bin.');
     expect(pushNetworkLogMock).toHaveBeenCalledWith('--- Firmware file server ---');
     expect(pushNetworkLogMock).toHaveBeenCalledWith('Serving firmware.bin on http://192.168.1.10:8080/firmware.bin. SHA256 abc123sha');
   });
@@ -62,8 +48,7 @@ describe('useFirmwareServer', () => {
     const server = createComposable();
     vi.mocked(invoke).mockRejectedValue(new Error('Port already in use'));
 
-    const options: FirmwareServerOptions = { firmware_path: '/path/to/fw.bin', region: 'ZA' };
-    await server.startFirmwareServerWithOptions(options);
+    await expect(server.ensureFirmwareServer()).rejects.toThrow('Firmware server did not start');
 
     expect(server.isFirmwareServerStarting.value).toBe(false);
     expect(server.firmwareServerInfo.value).toBeNull();
@@ -83,7 +68,7 @@ describe('useFirmwareServer', () => {
     vi.mocked(invoke).mockResolvedValue(mockInfo);
 
     // Initial start
-    await server.startFirmwareServerWithOptions({ firmware_path: '/path', region: null });
+    await server.ensureFirmwareServer();
     expect(invoke).toHaveBeenCalledTimes(1);
 
     vi.clearAllMocks();
@@ -151,7 +136,7 @@ describe('useFirmwareServer', () => {
     };
     vi.mocked(invoke).mockResolvedValue(mockInfo);
 
-    await server.startFirmwareServerWithOptions({ firmware_path: '/path', region: null });
+    await server.ensureFirmwareServer();
 
     await server.handleNetworkInterfacesChanged([{ ip: '192.168.1.20', netmask: '255.255.255.0' }], true);
 
@@ -181,7 +166,7 @@ describe('useFirmwareServer', () => {
 
     resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path', region: null });
 
-    await server.startFirmwareServerWithOptions({ firmware_path: '/path', region: null });
+    await server.ensureFirmwareServer();
     
     // Set pending manually or trigger it through busy handler
     await server.handleNetworkInterfacesChanged([{ ip: '192.168.1.20', netmask: '255.255.255.0' }], true);
@@ -192,7 +177,6 @@ describe('useFirmwareServer', () => {
 
     expect(server.firmwareServerRevalidatePending.value).toBe(false);
     expect(pushNetworkLogMock).toHaveBeenCalledWith('Firmware server is no longer reachable on this network. Restarting...');
-    expect(onStoppedMock).toHaveBeenCalledWith('Firmware server stopped.');
   });
 
   it('revalidation restarts the server when current URLs no longer match host interfaces', async () => {
@@ -211,14 +195,13 @@ describe('useFirmwareServer', () => {
     });
 
     resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path', region: null });
-    await server.startFirmwareServerWithOptions({ firmware_path: '/path', region: null });
+    await server.ensureFirmwareServer();
 
     // Handle change with busy = false (immediate revalidation)
     vi.clearAllMocks();
     await server.handleNetworkInterfacesChanged([{ ip: '192.168.1.20', netmask: '255.255.255.0' }], false);
 
     expect(pushNetworkLogMock).toHaveBeenCalledWith('Firmware server is no longer reachable on this network. Restarting...');
-    expect(onStoppedMock).toHaveBeenCalledWith('Firmware server stopped.');
   });
 
   it('stopFirmwareServer clears server info and logs correct stop messages', async () => {
@@ -236,7 +219,7 @@ describe('useFirmwareServer', () => {
       return null;
     });
 
-    await server.startFirmwareServerWithOptions({ firmware_path: '/path', region: null });
+    await server.ensureFirmwareServer();
     expect(server.firmwareServerInfo.value).toEqual(mockInfo);
 
     vi.clearAllMocks();
@@ -244,7 +227,6 @@ describe('useFirmwareServer', () => {
 
     expect(server.firmwareServerInfo.value).toBeNull();
     expect(pushNetworkLogMock).toHaveBeenCalledWith('Server stopped successfully');
-    expect(onStoppedMock).toHaveBeenCalledWith('Firmware server stopped.');
   });
 
   it('cleanupFirmwareServer stops the server if running', async () => {
@@ -262,7 +244,7 @@ describe('useFirmwareServer', () => {
       return null;
     });
 
-    await server.startFirmwareServerWithOptions({ firmware_path: '/path', region: null });
+    await server.ensureFirmwareServer();
     expect(server.firmwareServerInfo.value).not.toBeNull();
 
     vi.clearAllMocks();
@@ -270,5 +252,63 @@ describe('useFirmwareServer', () => {
 
     expect(server.firmwareServerInfo.value).toBeNull();
     expect(invoke).toHaveBeenCalledWith('stop_firmware_file_server');
+  });
+
+  it('stops 60 seconds after OTA activity becomes idle', async () => {
+    vi.useFakeTimers();
+    const server = createComposable();
+    const mockInfo: FirmwareServerInfo = {
+      filename: 'firmware.bin',
+      sha256: 'hash',
+      size_bytes: 1024,
+      port: 8080,
+      urls: ['http://192.168.1.10:8080/fw.bin'],
+    };
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'start_firmware_file_server') return mockInfo;
+      if (cmd === 'stop_firmware_file_server') return 'Server stopped';
+      return null;
+    });
+
+    server.setFirmwareServerBusy(true);
+    await server.ensureFirmwareServer();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(server.firmwareServerInfo.value).toEqual(mockInfo);
+
+    server.setFirmwareServerBusy(false);
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(server.firmwareServerInfo.value).toEqual(mockInfo);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(server.firmwareServerInfo.value).toBeNull();
+    expect(invoke).toHaveBeenCalledWith('stop_firmware_file_server');
+    expect(pushNetworkLogMock).toHaveBeenCalledWith('Firmware server idle for 60 seconds; stopping.');
+  });
+
+  it('cancels a pending idle shutdown when another OTA starts', async () => {
+    vi.useFakeTimers();
+    const server = createComposable();
+    const mockInfo: FirmwareServerInfo = {
+      filename: 'firmware.bin',
+      sha256: 'hash',
+      size_bytes: 1024,
+      port: 8080,
+      urls: ['http://192.168.1.10:8080/fw.bin'],
+    };
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'start_firmware_file_server') return mockInfo;
+      if (cmd === 'stop_firmware_file_server') return 'Server stopped';
+      return null;
+    });
+
+    server.setFirmwareServerBusy(true);
+    await server.ensureFirmwareServer();
+    server.setFirmwareServerBusy(false);
+    await vi.advanceTimersByTimeAsync(30000);
+    server.setFirmwareServerBusy(true);
+    await vi.advanceTimersByTimeAsync(60000);
+
+    expect(server.firmwareServerInfo.value).toEqual(mockInfo);
+    expect(invoke).not.toHaveBeenCalledWith('stop_firmware_file_server');
   });
 });

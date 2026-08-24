@@ -415,24 +415,14 @@ const networkInterfaceInterval = ref<ReturnType<typeof window.setInterval> | nul
 const {
   isFirmwareServerStarting,
   firmwareServerInfo,
-  startFirmwareServer: startFirmwareServerResolved,
   ensureFirmwareServer: ensureFirmwareServerResolved,
   stopFirmwareServer,
+  setFirmwareServerBusy,
   firmwareServerTarget,
   handleNetworkInterfacesChanged,
-  revalidateFirmwareServerAfterNetworkChange,
-  cleanupFirmwareServer
+  revalidateFirmwareServerAfterNetworkChange
 } = useFirmwareServer({
   resolveFirmwareOptions: networkOtaFirmwareOptions,
-  onStarting: () => {
-    activeMode.value = 'network';
-  },
-  onStarted: (_info, statusMsg) => {
-    networkStatusMessage.value = statusMsg;
-  },
-  onStopped: (statusMsg) => {
-    networkStatusMessage.value = statusMsg;
-  },
   pushNetworkLog,
   notify
 });
@@ -442,11 +432,6 @@ async function prepareSelectedFirmware(): Promise<void> {
   if (changed && firmwareServerInfo.value) {
     await stopFirmwareServer();
   }
-}
-
-async function startFirmwareServer(): Promise<void> {
-  await prepareSelectedFirmware();
-  await startFirmwareServerResolved();
 }
 
 async function ensureFirmwareServer(): Promise<FirmwareServerInfo> {
@@ -1091,6 +1076,12 @@ const {
   setNetworkStatusMessage: (msg) => { networkStatusMessage.value = msg; },
   serialFeatureError
 });
+const firmwareServerOtaBusy = computed(() =>
+  otaQueue.value.length > 0 ||
+  hasActiveRemoteOtaPulls.value ||
+  ['flashing', 'rebooting', 'waiting'].includes(fleetGatewayFlashPhase.value)
+);
+watch(firmwareServerOtaBusy, busy => setFirmwareServerBusy(busy), { immediate: true });
 // fleetRowHistory is managed by useFleetInventory
 const pairExpectedCount = ref(12);
 const pairPanelTab = ref<'pair' | 'wifi'>('pair');
@@ -6494,7 +6485,6 @@ onUnmounted(() => {
   if (isNetworkUdpMonitoring.value) {
     invoke('stop_network_udp_monitor').catch(() => {});
   }
-  cleanupFirmwareServer().catch(() => {});
 });
 
 function formatLabel(key: string) {
@@ -6685,12 +6675,11 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
 });
 
 const fleetServerStatusComputed = computed<FleetServerStatus>(() => ({
-  isServerOn: !!firmwareServerInfo.value,
-  serverFilename: firmwareServerInfo.value?.filename || null,
-  serverUrl: firmwareServerInfo.value?.urls[0] || null,
+  activeReference: firmwareServerInfo.value
+    ? `${firmwareServerInfo.value.filename} · ${firmwareServerInfo.value.urls[0] || `port ${firmwareServerInfo.value.port}`}`
+    : null,
   statusLine: remotesAndCandidatesStatusLine.value,
   progressLabel: loraInventoryProgressLabel.value,
-  isServerStarting: isFirmwareServerStarting.value,
   versions: firmwareVersions.value,
   localOption: LOCAL_OPTION,
   isFetchingFirmware: isFetchingFirmware.value,
@@ -7453,8 +7442,6 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         :inventory-summary="fleetInventorySummaryComputed"
         :candidate-summary="fleetCandidateSummaryComputed"
         @toggle-row-selection="handleToggleRowSelection"
-        @server-start="startFirmwareServer"
-        @server-stop="stopFirmwareServer"
         @udp-logging-start="triggerGatewayUdpLogging"
         @udp-logging-stop="stopNetworkUdpMonitor"
         @udp-logs-copy="copyNetworkUdpLog"

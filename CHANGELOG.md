@@ -20,6 +20,7 @@
 - A remote now saves its reset configuration before sending two staggered `FactoryResetStatus` confirmations under its current Fleet Key, then reboots. Save failure is reported without rebooting. A full reset removes the gateway peer record only after confirmation and successful gateway persistence; unconfirmed devices remain recoverable.
 
 ### Flasher Features
+- Removed the manual firmware-server controls from Fleet. Flasher now starts the temporary server only when an OTA needs it, keeps it alive across queued and active remote or gateway updates, cancels pending shutdown when more work arrives, and stops it automatically 60 seconds after the final update settles. Fleet shows the served filename and URL while the server is active; URL, checksum, failures, and shutdown also remain available in the activity log.
 - Added **Flash LED** to each remote's Fleet Actions menu. Flasher reports confirmed flashing, an explicit Power Save refusal, or an unconfirmed request.
 - MQTT Fleet Age now follows each remote's `last_seen_age_s` topic instead of assigning the gateway's batched publication time to multiple rows.
 - Removed **Scan** from the normal Fleet workflow. While Fleet or Monitor is observed over Serial or MQTT, Flasher now refreshes identity, firmware, WiFi/IP, and uptime from one configured remote every ten seconds. The single cursor never probes unused addresses, catches up in a burst, or continues after the observer closes; control and transactional RF work remain higher priority.

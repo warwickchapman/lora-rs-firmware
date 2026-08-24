@@ -36,12 +36,9 @@ export interface FleetGatewayStatus {
 }
 
 export interface FleetServerStatus {
-  isServerOn: boolean;
-  serverFilename: string | null;
-  serverUrl: string | null;
+  activeReference: string | null;
   statusLine: string;
   progressLabel: string;
-  isServerStarting: boolean;
   versions: string[];
   localOption: string;
   isFetchingFirmware: boolean;
@@ -163,8 +160,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle-row-selection', address: number | string, selected: boolean): void;
-  (e: 'server-start'): void;
-  (e: 'server-stop'): void;
   (e: 'udp-logging-start'): void;
   (e: 'udp-logging-stop'): void;
   (e: 'udp-logs-copy'): void;
@@ -323,16 +318,6 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
           </p>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-3">
-          <span :class="['rounded border px-2 py-1 text-[10px] font-bold', server.isServerOn ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-            Firmware server {{ server.isServerOn ? 'on' : 'off' }}
-          </span>
-          <button
-            @click="server.isServerOn ? emit('server-stop') : emit('server-start')"
-            :disabled="server.isServerStarting"
-            class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-60"
-          >
-            {{ server.isServerOn ? 'Stop server' : (server.isServerStarting ? 'Starting...' : 'Start server') }}
-          </button>
           <button
             @click="udpLogs.isMonitoring ? emit('udp-logging-stop') : emit('udp-logging-start')"
             class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 flex items-center justify-center gap-2 text-xs font-bold"
@@ -366,7 +351,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
 
       <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
         <span>{{ server.networkStatusMessage }}</span>
-        <span v-if="server.isServerOn" class="font-mono text-slate-500 truncate">{{ server.serverFilename }} · {{ server.serverUrl }}</span>
+        <span v-if="server.activeReference" class="font-mono text-slate-500 truncate">{{ server.activeReference }}</span>
       </div>
     </div>
 
@@ -706,7 +691,7 @@ function eventLevelClass(event: GatewayEventDisplayRecord): string {
                   >
                     <button
                       @click="emit('remote-flash', device.address); activeDropdownAddress = null"
-                      :disabled="server.isServerStarting || ['ota_queued', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'].includes(device.rowState || '') || !device.flashAvailable"
+                      :disabled="['ota_queued', 'ota_downloading', 'ota_apply_wait', 'ota_retrying'].includes(device.rowState || '') || !device.flashAvailable"
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
                       :title="device.flashUnavailableReason"
                     >
