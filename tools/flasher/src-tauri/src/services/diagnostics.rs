@@ -1,0 +1,158 @@
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
+
+/// Host-owned diagnostic evidence.  It deliberately knows nothing about serial
+/// ports, MQTT, UDP sockets, or device commands: those remain owned by Flasher.
+const MAX_EVENTS: usize = 4_000;
+const MAX_CAPTURES: usize = 64;
+const MAX_RAW_BYTES: usize = 1_024;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DiagnosticEvent {
+    pub sequence: u64,
+    pub received_monotonic_ms: u64,
+    pub received_unix_ms: u64,
+    pub source: String,
+    pub transport: String,
+    pub event: String,
+    pub raw: String,
+    pub operation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DiagnosticSnapshot {
+    pub next_sequence: u64,
+    pub events: Vec<DiagnosticEvent>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DiagnosticCapture {
+    pub id: String,
+    pub started_sequence: u64,
+    pub started_unix_ms: u64,
+    pub gateway_chip_id: String,
+    pub remote_address: Option<u8>,
+    pub remote_chip_id: Option<String>,
+    pub transfer_id: Option<u8>,
+    pub target_version: String,
+    pub firmware_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DiagnosticInput {
+    pub source: String,
+    pub transport: String,
+    pub event: String,
+    pub raw: String,
+    pub operation_id: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct DiagnosticStore {
+    inner: Arc<Mutex<DiagnosticStoreInner>>,
+}
+
+struct DiagnosticStoreInner {
+    started: Instant,
+    next_sequence: u64,
+    events: VecDeque<DiagnosticEvent>,
+    captures: VecDeque<DiagnosticCapture>,
+}
+
+impl Default for DiagnosticStore {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(DiagnosticStoreInner {
+                started: Instant::now(),
+                next_sequence: 1,
+                events: VecDeque::new(),
+                captures: VecDeque::new(),
+            })),
+        }
+    }
+}
+
+impl DiagnosticStore {
+    pub async fn record(
+        &self,
+        source: impl Into<String>,
+        transport: impl Into<String>,
+        event: impl Into<String>,
+        raw: impl AsRef<str>,
+        operation_id: Option<String>,
+    ) {
+        let mut inner = self.inner.lock().await;
+        let raw = redact_and_bound(raw.as_ref());
+        let record = DiagnosticEvent {
+            sequence: inner.next_sequence,
+            received_monotonic_ms: inner.started.elapsed().as_millis() as u64,
+            received_unix_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+            source: source.into(),
+            transport: transport.into(),
+            event: event.into(),
+            raw,
+            operation_id,
+        };
+        inner.next_sequence += 1;
+        inner.events.push_back(record);
+        while inner.events.len() > MAX_EVENTS { inner.events.pop_front(); }
+    }
+
+    pub async fn since(&self, after_sequence: Option<u64>, limit: usize) -> DiagnosticSnapshot {
+        let inner = self.inner.lock().await;
+        let after = after_sequence.unwrap_or(0);
+        let events = inner.events.iter().filter(|item| item.sequence > after).take(limit.min(MAX_EVENTS)).cloned().collect();
+        DiagnosticSnapshot { next_sequence: inner.next_sequence, events }
+    }
+
+    pub async fn begin_capture(&self, mut capture: DiagnosticCapture) -> DiagnosticCapture {
+        let mut inner = self.inner.lock().await;
+        capture.started_sequence = inner.next_sequence;
+        capture.started_unix_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        if capture.id.is_empty() { capture.id = format!("ota-{}", capture.started_sequence); }
+        inner.captures.push_back(capture.clone());
+        while inner.captures.len() > MAX_CAPTURES { inner.captures.pop_front(); }
+        capture
+    }
+
+    pub async fn captures(&self) -> Vec<DiagnosticCapture> {
+        self.inner.lock().await.captures.iter().cloned().collect()
+    }
+
+    pub async fn update_capture_transfer(&self, id: &str, transfer_id: u8) -> Result<(), String> {
+        let mut inner = self.inner.lock().await;
+        let capture = inner.captures.iter_mut().find(|capture| capture.id == id)
+            .ok_or_else(|| "diagnostic capture not found".to_string())?;
+        capture.transfer_id = Some(transfer_id);
+        Ok(())
+    }
+}
+
+fn redact_and_bound(raw: &str) -> String {
+    let mut value = raw.to_string();
+    for key in ["admin_password", "password", "fleet_key", "mqtt_password"] {
+        if let Some(start) = value.find(&format!("{key}=")) {
+            let end = value[start..].find(char::is_whitespace).map(|n| start + n).unwrap_or(value.len());
+            value.replace_range(start..end, &format!("{key}=<redacted>"));
+        }
+    }
+    if value.len() > MAX_RAW_BYTES { value.truncate(MAX_RAW_BYTES); value.push_str("…<truncated>"); }
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn records_monotonic_events_and_redacts_passwords() {
+        let store = DiagnosticStore::default();
+        store.record("remote:1", "udp", "boot", "event=boot password=secret", None).await;
+        let events = store.since(None, 10).await.events;
+        assert_eq!(events[0].sequence, 1);
+        assert!(events[0].raw.contains("password=<redacted>"));
+        assert!(!events[0].raw.contains("secret"));
+    }
+}

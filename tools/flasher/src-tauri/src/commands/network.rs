@@ -1,4 +1,5 @@
 use crate::services::{firmware, network};
+use crate::services::diagnostics::DiagnosticStore;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -74,6 +75,7 @@ pub async fn get_network_interfaces() -> Result<Vec<NetworkInterface>, String> {
 pub async fn start_firmware_file_server(
     app: AppHandle,
     state: State<'_, FirmwareServerState>,
+    diagnostics: State<'_, DiagnosticStore>,
     options: FirmwareServerOptions,
 ) -> Result<FirmwareServerInfo, String> {
     stop_firmware_file_server(state.clone()).await?;
@@ -92,13 +94,15 @@ pub async fn start_firmware_file_server(
     let urls = firmware_server_urls(port);
     let served_name = filename.clone();
     let task_bytes = firmware_bytes.clone();
+    let diagnostics = diagnostics.inner().clone();
     let task = tokio::spawn(async move {
         loop {
-            let Ok((mut socket, _peer)) = listener.accept().await else {
+            let Ok((mut socket, peer)) = listener.accept().await else {
                 break;
             };
             let body = task_bytes.clone();
             let name = served_name.clone();
+            let diagnostics = diagnostics.clone();
             tokio::spawn(async move {
                 let mut req = [0u8; 1024];
                 let n = match socket.read(&mut req).await {
@@ -109,6 +113,7 @@ pub async fn start_firmware_file_server(
                 let first_line = request.lines().next().unwrap_or_default();
                 let ok_path = first_line.starts_with("GET /firmware.bin ") || first_line.starts_with("GET /firmware ");
                 if !ok_path {
+                    diagnostics.record(peer.ip().to_string(), "http", "firmware_request_rejected", first_line, None).await;
                     let _ = socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
                     return;
                 }
@@ -118,9 +123,13 @@ pub async fn start_firmware_file_server(
                     body.len()
                 );
                 if socket.write_all(header.as_bytes()).await.is_err() {
+                    diagnostics.record(peer.ip().to_string(), "http", "firmware_delivery_disconnected", first_line, None).await;
                     return;
                 }
-                let _ = socket.write_all(&body).await;
+                match socket.write_all(&body).await {
+                    Ok(()) => diagnostics.record(peer.ip().to_string(), "http", "firmware_delivery_complete", format!("path=/firmware.bin bytes={}", body.len()), None).await,
+                    Err(err) => diagnostics.record(peer.ip().to_string(), "http", "firmware_delivery_disconnected", format!("path=/firmware.bin bytes={} error={}", body.len(), err), None).await,
+                }
             });
         }
     });
@@ -147,6 +156,7 @@ pub async fn stop_firmware_file_server(state: State<'_, FirmwareServerState>) ->
 pub async fn start_network_udp_monitor(
     app: AppHandle,
     state: State<'_, UdpMonitorState>,
+    diagnostics: State<'_, DiagnosticStore>,
 ) -> Result<String, String> {
     stop_network_udp_monitor(state.clone()).await?;
 
@@ -159,6 +169,7 @@ pub async fn start_network_udp_monitor(
                 e
             )
         })?;
+    let diagnostics = diagnostics.inner().clone();
     let task = tokio::spawn(async move {
         let mut buf = vec![0u8; 2048];
         loop {
@@ -168,6 +179,8 @@ pub async fn start_network_udp_monitor(
                     for line in text.split(|c| c == '\n' || c == '\r') {
                         let trimmed = line.trim();
                         if !trimmed.is_empty() {
+                            let event = trimmed.split_whitespace().find_map(|part| part.strip_prefix("event=")).unwrap_or("udp_log");
+                            diagnostics.record(from.ip().to_string(), "udp", event, trimmed, None).await;
                             let _ = app.emit(
                                 "network-monitor-log",
                                 UdpLogEvent {

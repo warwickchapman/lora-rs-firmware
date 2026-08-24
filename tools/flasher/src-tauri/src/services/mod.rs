@@ -5,4 +5,4 @@ pub mod easy_pair;
 pub mod serial_port_coordinator;
 pub mod mqtt;
 pub mod mqtt_broker;
-
+pub mod diagnostics;

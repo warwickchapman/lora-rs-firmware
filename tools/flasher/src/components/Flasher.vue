@@ -997,6 +997,25 @@ const {
     if (!portGatewayReady(port)) await loadNetworkGateway();
     const info = await ensureFirmwareServer();
     const target = firmwareServerTarget(info);
+    const captureId = `ota-${Date.now()}-${device.address}`;
+    await invoke('begin_ota_diagnostic_capture', { capture: {
+      id: captureId,
+      started_sequence: 0,
+      started_unix_ms: 0,
+      gateway_chip_id: gatewaySessionMqttGatewayChipId.value || port,
+      remote_address: device.address,
+      remote_chip_id: device.chip_id || null,
+      transfer_id: null,
+      target_version: selectedFirmwareCandidateVersion(),
+      firmware_sha256: info.sha256
+    }});
+    await invoke('record_diagnostic_event', { input: {
+      source: `gateway:${gatewaySessionMqttGatewayChipId.value || port}`,
+      transport: fleetTransport.value,
+      event: 'ota_command_dispatching',
+      raw: `addr=${device.address} sha256=${info.sha256} target=${target.host}:${target.port}`,
+      operation_id: captureId
+    }});
     const out = await sendEasyPairCommandOnPort<any>(port, 'remote_ota_pull', {
       admin_password: password,
       address: device.address,
@@ -1004,6 +1023,14 @@ const {
       port: target.port,
       sha256: info.sha256
     }, 8000);
+    await invoke('update_ota_capture_transfer', { id: captureId, transferId: out.transfer_id });
+    await invoke('record_diagnostic_event', { input: {
+      source: `gateway:${gatewaySessionMqttGatewayChipId.value || port}`,
+      transport: fleetTransport.value,
+      event: 'ota_command_accepted',
+      raw: `addr=${device.address} transfer_id=${out.transfer_id}`,
+      operation_id: captureId
+    }});
     return { out, target, sha256: info.sha256, targetVersion: selectedFirmwareCandidateVersion() };
   },
   queryOtaStatusCommand: async (address: number) => {
