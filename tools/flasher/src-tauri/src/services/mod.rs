@@ -6,3 +6,4 @@ pub mod serial_port_coordinator;
 pub mod mqtt;
 pub mod mqtt_broker;
 pub mod diagnostics;
+pub mod diagnostic_ipc;

@@ -3,7 +3,7 @@ pub mod services;
 
 use serde::Serialize;
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 #[cfg(target_os = "macos")]
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
@@ -133,6 +133,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             maybe_offer_move_to_applications(&app.handle().clone());
             start_serial_port_watcher(app.handle().clone());
+            crate::services::diagnostic_ipc::start(app.state::<crate::services::diagnostics::DiagnosticStore>().inner().clone());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
