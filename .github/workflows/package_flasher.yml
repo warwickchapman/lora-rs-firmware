@@ -193,8 +193,8 @@ jobs:
           # We search for them in the repo to bundle into the flasher if they exist
           find . -name "firmware.bin" | while read -r bin; do
             env_name=$(echo "$bin" | awk -F'/' '{print $(NF-1)}')
-            if [[ "$env_name" == "lrs_za" ]]; then cp "$bin" tools/flasher/src-tauri/resources/firmware-za.bin; fi
-            if [[ "$env_name" == "lrs_us" ]]; then cp "$bin" tools/flasher/src-tauri/resources/firmware-us.bin; fi
+            if [[ "$env_name" == "lrs_433_za" ]]; then cp "$bin" tools/flasher/src-tauri/resources/firmware-433_za.bin; fi
+            if [[ "$env_name" == "lrs_915_us" ]]; then cp "$bin" tools/flasher/src-tauri/resources/firmware-915_us.bin; fi
           done
 
       - name: Install esptool Sidecars

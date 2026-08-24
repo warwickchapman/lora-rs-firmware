@@ -338,7 +338,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
     cfg.rx_failsafe_timeout_ms = 3600000UL;
 
   const float maxWifiPower =
-#ifdef REGION_US
+#ifdef REGION_915_US
       19.37f;
 #else
       20.5f;
@@ -346,7 +346,7 @@ bool applySettingsPatch(JsonObjectConst doc, ConfigStore &config,
   if (cfg.wifi_tx_power_dbm < 0.0f || cfg.wifi_tx_power_dbm > maxWifiPower) {
     return fail("wifi_tx_power_dbm_out_of_range");
   }
-#ifdef REGION_US
+#ifdef REGION_915_US
   if (cfg.wifi_channel_override > 11)
 #else
   if (cfg.wifi_channel_override > 13)
@@ -630,6 +630,7 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
   if (id[0] != '\0')
     out["id"] = id;
   out["fw_version"] = LRS_FW_VERSION;
+  out["firmware_profile"] = LRS_FIRMWARE_PROFILE;
   out["min_flasher_compat_revision"] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
   out["flasher_compatibility_gate"] = LRS_RELEASE_COMPATIBILITY_ENABLED != 0;
   out["chip_id"] = config_->chipIdHex();
@@ -2211,6 +2212,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
       out["id"] = id;
     out["protocol"] = 1;
     out["fw_version"] = LRS_FW_VERSION;
+    out["firmware_profile"] = LRS_FIRMWARE_PROFILE;
     out["min_flasher_compat_revision"] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
     out["flasher_compatibility_gate"] = LRS_RELEASE_COMPATIBILITY_ENABLED != 0;
     out["max_remotes"] = Settings::kAddressListCap;
@@ -2237,6 +2239,7 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     out["local_address"] = cfg.local_address;
     if (!cfg.role_tx) out["controller_address"] = cfg.controller_address;
     out["fw_version"] = LRS_FW_VERSION;
+    out["firmware_profile"] = LRS_FIRMWARE_PROFILE;
     out["min_flasher_compat_revision"] = LRS_RELEASE_COMPATIBILITY_ENABLED ? LRS_COMPATIBILITY_REVISION : 0;
     sendOk(out, writer);
     return;

@@ -14,7 +14,7 @@ const uint32_t kMinRemoteRefreshCycleMs = 60 * 1000;
 const uint32_t kMaxRemoteRefreshCycleMs = 3600 * 1000;
 const size_t kMinDeploymentKeyLen = 16;
 
-#ifdef REGION_US
+#ifdef REGION_915_US
 const long kMinFrequencyHz = 902000000L;
 const long kMaxFrequencyHz = 928000000L;
 #else

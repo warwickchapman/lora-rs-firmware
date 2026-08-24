@@ -7,7 +7,7 @@ One command for:
 2) Windows/Linux flasher build+publish via CI from the release tag.
 3) Local macOS flasher portable ZIP build from the release tag.
 4) Upload macOS portable ZIPs to both repos.
-5) Full 10-asset verification in both repos.
+5) Full 9-asset verification in both repos.
 """
 
 from __future__ import annotations

@@ -15,10 +15,9 @@ class ReleaseAssetContractTest(unittest.TestCase):
 
     def test_expected_release_assets_match_current_contract(self):
         assets = expected_assets("1.0.0")
-        self.assertEqual(len(assets), 10)
-        self.assertIn("lrs-firmware-1.0.0-za.bin", assets)
-        self.assertIn("lrs-firmware-1.0.0-us.bin", assets)
-        self.assertIn("lrs-firmware-1.0.0-eu.bin", assets)
+        self.assertEqual(len(assets), 9)
+        self.assertIn("lrs-firmware-1.0.0-433_za.bin", assets)
+        self.assertIn("lrs-firmware-1.0.0-915_us.bin", assets)
         self.assertIn("thanda-lora-flasher-1.0.0-macos-arm64-portable.zip", assets)
         self.assertIn("thanda-lora-flasher-1.0.0-macos-x86_64-portable.zip", assets)
         self.assertNotIn("thanda-lora-flasher-1.0.0-macos-arm64.dmg", assets)

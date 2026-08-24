@@ -88,7 +88,7 @@ def update_readme(path: Path, version: str) -> None:
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
-    pattern = r"(lrs-firmware-)[0-9a-zA-Z.~-]+(-(za|us|eu)\.bin)"
+    pattern = r"(lrs-firmware-)[0-9a-zA-Z.~-]+(-(433_za|915_us)\.bin)"
     new_text, count = re.subn(pattern, rf"\g<1>{version}\g<2>", text)
     if count > 0:
         path.write_text(new_text, encoding="utf-8")
@@ -98,7 +98,7 @@ def read_readme_versions(path: Path) -> list[str]:
     if not path.exists():
         return []
     text = path.read_text(encoding="utf-8")
-    pattern = r"lrs-firmware-([0-9a-zA-Z.~-]+)-(za|us|eu)\.bin"
+    pattern = r"lrs-firmware-([0-9a-zA-Z.~-]+)-(433_za|915_us)\.bin"
     return re.findall(pattern, text)
 
 

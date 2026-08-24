@@ -5,6 +5,14 @@
 #define LRS_FW_VERSION "0.0.0-dev"
 #endif
 
+// Compile-time compatibility profile. This describes the approved firmware
+// build, rather than mutable device configuration.
+#ifdef REGION_915_US
+#define LRS_FIRMWARE_PROFILE "915_us"
+#else
+#define LRS_FIRMWARE_PROFILE "433_za"
+#endif
+
 #ifndef LRS_FW_MAJOR
 #define LRS_FW_MAJOR 0
 #endif

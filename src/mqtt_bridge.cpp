@@ -1054,6 +1054,7 @@ void MqttBridge::publishDiscovery() {
   doc["uptime_ms"] = millis();
   doc["fw"] = "lrs";
   doc["fw_version"] = LRS_FW_VERSION;
+  doc["firmware_profile"] = LRS_FIRMWARE_PROFILE;
   doc["fw_git_sha"] = LRS_GIT_SHA;
   doc["fw_git_branch"] = LRS_GIT_BRANCH;
   doc["fw_dirty"] = (LRS_GIT_DIRTY != 0);

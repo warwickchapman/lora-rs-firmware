@@ -20,7 +20,7 @@ pub async fn flash_firmware(
     monitor_state: State<'_, MonitorState>,
     port: String,
     firmware_path: String,
-    region: Option<String>,
+    profile: Option<String>,
     erase_first: Option<bool>,
 ) -> Result<String, String> {
     monitor::request_stop_for_port(&monitor_state, &port).await;
@@ -34,7 +34,7 @@ pub async fn flash_firmware(
         let _ = app_clone.emit("flash-log", LogEvent { port: port_clone.clone(), message: msg });
     };
 
-    let flash_file = firmware::resolve_firmware_path(&app, &firmware_path, region, Some(&log)).await?;
+    let flash_file = firmware::resolve_firmware_path(&app, &firmware_path, profile, Some(&log)).await?;
 
     let (erase_op, write_op) = detect_flash_ops(&app).await?;
     log(format!(

@@ -156,7 +156,7 @@ describe('useFirmwareManager', () => {
   describe('fetchFirmware', () => {
     it('fetches remote versions and inserts local items correctly', async () => {
       vi.mocked(invoke).mockImplementation(async (cmd) => {
-        if (cmd === 'get_firmware_list') return ['1.0.0', '0.9.9'];
+        if (cmd === 'get_firmware_list') return [{ tag_name: '1.0.0', profiles: ['433_za'] }, { tag_name: '0.9.9', profiles: ['915_us'] }];
         if (cmd === 'get_default_local_firmware') return '/default/fw.bin';
         return null;
       });
@@ -195,7 +195,7 @@ describe('useFirmwareManager', () => {
 
       expect(manager.networkOtaFirmwareOptions()).toEqual({
         firmware_path: '1.0.0',
-        region: 'EU'
+        profile: '433_za'
       });
     });
 
@@ -207,7 +207,7 @@ describe('useFirmwareManager', () => {
 
       expect(manager.networkOtaFirmwareOptions()).toEqual({
         firmware_path: '/path/fw.bin',
-        region: null
+        profile: null
       });
     });
   });

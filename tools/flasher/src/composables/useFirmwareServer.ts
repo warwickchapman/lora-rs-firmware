@@ -11,7 +11,7 @@ export interface FirmwareServerInfo {
 
 export interface FirmwareServerOptions {
   firmware_path: string;
-  region: string | null;
+  profile: string | null;
 }
 
 export interface NetworkInterface {

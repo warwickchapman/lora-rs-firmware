@@ -13,10 +13,10 @@ Repo:
 ## 2. Build Targets
 
 > [!IMPORTANT]
-> **We ONLY build `lrs_za` (South Africa), `lrs_us` (USA), and run the native tests (`native`).**
+> **We ONLY build `lrs_433_za` (South Africa), `lrs_915_us` (USA), and run the native tests (`native`).**
 > Any new automated process, compilation test, or developer must focus strictly on these core commands:
-> - South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
-> - USA (915 MHz): `python3 -m platformio run -e lrs_us`
+> - South Africa (433 MHz): `python3 -m platformio run -e lrs_433_za`
+> - USA (915 MHz): `python3 -m platformio run -e lrs_915_us`
 > - Unit Test Suite: `python3 -m platformio test -e native`
 > - Version Metadata Verification: `python3 tools/test_version_metadata.py`
 >
@@ -401,7 +401,7 @@ Deterministic release mode (preferred):
    - Windows/Linux flasher CI release dispatch from the release tag and completion wait,
    - local macOS arm64/x86_64 portable ZIP builds from the release tag,
    - macOS asset upload to both repos,
-   - full 10-asset contract verification in both repos,
+   - full 9-asset contract verification in both repos,
    - workflow run pruning for `package_flasher.yml` (keeps latest 10 completed runs by default).
 4. Release notes are deterministic in this mode: the file content is published verbatim.
 5. Optional pruning control: `--keep-workflow-runs <N>` (default `10`; use `0` to disable for a specific run).
@@ -413,8 +413,8 @@ Mandatory pre-release validation gate:
 - A release is not ready unless all four pass:
   - `pio test -e native`
   - `python3 tools/test_version_metadata.py`
-  - `pio run -e lrs_za`
-  - `pio run -e lrs_us`
+  - `pio run -e lrs_433_za`
+  - `pio run -e lrs_915_us`
 - This gate is wired into `tools/release_manager.py` and therefore also enforced by `tools/release_one_shot.py`.
 - Native tests are intentionally scoped to pure firmware helpers (`FixedSettingString`, mode/role parsing, version metadata parsing).
 - Hardware behavior still requires bench/soak validation (LoRa ACK behavior, WiFi reconnect, OTA pull, serial-admin/Flasher workflows, long-running heap stability).
@@ -445,10 +445,10 @@ Release binary set contract:
 
 Release tooling notes:
 - `tools/release_manager.py` now defaults to no asset verification unless explicitly requested:
-  - `--verify-firmware-only-assets` checks only firmware files (`za/us/eu`) in both repos.
-  - `--verify-full-assets` checks full 10-file contract (use after flasher upload is complete).
+  - `--verify-firmware-only-assets` checks only firmware profiles (`433_za`/`915_us`) in both repos.
+  - `--verify-full-assets` checks the full 9-file contract (use after flasher upload is complete).
 - In firmware-only reuse mode (`--reuse-flasher --reuse-flasher-keep-names`), `--verify-full-assets` validates firmware at new version and flasher filenames at the reused source-tag version.
-- `tools/release_manager.py` captures firmware memory/flash stats for `lrs_za` and `lrs_us` from PlatformIO output, prints deltas vs the previous release in the release run output, and appends them to:
+- `tools/release_manager.py` captures firmware memory/flash stats for `lrs_433_za` and `lrs_915_us` from PlatformIO output, prints deltas vs the previous release in the release run output, and appends them to:
   - `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.csv` (canonical)
   - `/Users/warwick/Code/LoRa/lora_rs/docs/release_build_metrics.md` (human-readable table)
 

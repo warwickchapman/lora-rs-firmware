@@ -26,7 +26,7 @@ pub struct UdpLogEvent {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FirmwareServerOptions {
     pub firmware_path: String,
-    pub region: Option<String>,
+    pub profile: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -80,7 +80,7 @@ pub async fn start_firmware_file_server(
 ) -> Result<FirmwareServerInfo, String> {
     stop_firmware_file_server(state.clone()).await?;
 
-    let firmware_path = firmware::resolve_firmware_path(&app, &options.firmware_path, options.region, None).await?;
+    let firmware_path = firmware::resolve_firmware_path(&app, &options.firmware_path, options.profile, None).await?;
     let firmware_bytes = Arc::new(tokio::fs::read(&firmware_path).await.map_err(|e| e.to_string())?);
     let sha256 = firmware::calculate_sha256(&firmware_path)?;
     let filename = firmware_path

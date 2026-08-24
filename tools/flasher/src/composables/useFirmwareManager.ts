@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 
 export type RegionCode = 'ZA' | 'EU' | 'US';
+export type FirmwareProfile = '433_za' | '915_us';
+export interface FirmwareRelease { tag_name: string; profiles: string[]; }
 
 export const LOCAL_OPTION = '__local_browse__';
 export const LOCAL_LABEL_PREFIX = 'Local: ';
@@ -35,6 +37,7 @@ function extractCountryCodes(locale: string): string[] {
 
 export function useFirmwareManager(options: UseFirmwareManagerOptions) {
   const firmwareVersions = ref<string[]>([LOCAL_OPTION]);
+  const firmwareReleaseProfiles = ref<Record<string, string[]>>({});
   const selectedVersion = ref('');
   const selectedLocalPath = ref('');
   const selectedLocalIsDefault = ref(false);
@@ -50,6 +53,10 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     if (!selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX)) return selectedVersion.value;
     const fileMatch = selectedLocalPath.value.match(/(\d+\.\d+\.\d+)(?:~(\d+))?/);
     return fileMatch ? fileMatch[0] : appVersionGetter();
+  }
+
+  function profileForRegion(regionCode = region.value): FirmwareProfile {
+    return regionCode === 'US' ? '915_us' : '433_za';
   }
 
   function setLocalFirmwareSelection(path: string, announce = true, isDefault = false) {
@@ -193,7 +200,9 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     isFetchingFirmware.value = true;
     try {
       await refreshDefaultLocalFirmware();
-      const remoteVersions = await invoke<string[]>('get_firmware_list');
+      const releases = await invoke<FirmwareRelease[]>('get_firmware_list');
+      const remoteVersions = releases.map(release => release.tag_name);
+      firmwareReleaseProfiles.value = Object.fromEntries(releases.map(release => [release.tag_name, release.profiles]));
       const localEntry = firmwareVersions.value.find(v => v.startsWith(LOCAL_LABEL_PREFIX));
       firmwareVersions.value = [LOCAL_OPTION, ...(localEntry ? [localEntry] : []), ...remoteVersions];
 
@@ -211,7 +220,7 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     }
   }
 
-  function networkOtaFirmwareOptions(): { firmware_path: string; region: RegionCode | null } | null {
+  function networkOtaFirmwareOptions(profileOverride?: FirmwareProfile): { firmware_path: string; profile: FirmwareProfile | null } | null {
     const isLocal = selectedVersion.value.startsWith(LOCAL_LABEL_PREFIX);
     const firmwarePath = isLocal ? selectedLocalPath.value : selectedVersion.value;
     if (!firmwarePath || (isLocal && !selectedLocalPath.value)) {
@@ -220,17 +229,19 @@ export function useFirmwareManager(options: UseFirmwareManagerOptions) {
     }
     return {
       firmware_path: firmwarePath,
-      region: isLocal ? null : region.value
+      profile: isLocal ? null : (profileOverride || profileForRegion())
     };
   }
 
   return {
     firmwareVersions,
+    firmwareReleaseProfiles,
     selectedVersion,
     selectedLocalPath,
     isFetchingFirmware,
     region,
     selectedFirmwareCandidateVersion,
+    profileForRegion,
     networkOtaFirmwareOptions,
     fetchFirmware,
     refreshDefaultLocalFirmware,

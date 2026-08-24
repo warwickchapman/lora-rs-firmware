@@ -24,7 +24,7 @@ constexpr char kProductSecret[] = "LRS-v1-rotate-this-secret";
 constexpr char kModeStandalone[] = "standalone";
 constexpr char kModePaired[] = "paired";
 constexpr char kRoleNone[] = "none";
-#ifdef REGION_US
+#ifdef REGION_915_US
 constexpr float kDefaultWifiTxPowerDbm = 19.37f;
 #else
 constexpr float kDefaultWifiTxPowerDbm = 20.5f;
@@ -403,7 +403,7 @@ bool ConfigStore::begin() {
   }
   if (cfg_.wifi_tx_power_dbm < 0.0f) cfg_.wifi_tx_power_dbm = 0.0f;
   if (cfg_.wifi_tx_power_dbm > kDefaultWifiTxPowerDbm) cfg_.wifi_tx_power_dbm = kDefaultWifiTxPowerDbm;
-#ifdef REGION_US
+#ifdef REGION_915_US
   if (cfg_.wifi_channel_override > 11) cfg_.wifi_channel_override = 0;
 #else
   if (cfg_.wifi_channel_override > 13) cfg_.wifi_channel_override = 0;

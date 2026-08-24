@@ -25,8 +25,8 @@ pub struct Asset {
 }
 
 impl Release {
-    pub fn find_asset_for_region(&self, region: &str) -> Option<&Asset> {
-        let search_suffix = format!("{}.bin", region.to_lowercase());
+    pub fn find_asset_for_profile(&self, profile: &str) -> Option<&Asset> {
+        let search_suffix = format!("-{}.bin", profile.to_lowercase());
         self.assets.iter().find(|a| a.name.to_lowercase().ends_with(&search_suffix))
     }
 }
@@ -95,7 +95,7 @@ pub fn calculate_sha256(path: &Path) -> Result<String, String> {
 pub async fn resolve_firmware_path(
     app: &tauri::AppHandle,
     firmware_path: &str,
-    region: Option<String>,
+    profile: Option<String>,
     progress_log: Option<&(dyn Fn(String) + Send + Sync)>,
 ) -> Result<PathBuf, String> {
     let local_path = PathBuf::from(firmware_path);
@@ -106,16 +106,16 @@ pub async fn resolve_firmware_path(
         return Ok(local_path);
     }
     
-    if region.is_none() {
+    if profile.is_none() {
         return Err(format!(
             "Local firmware file not found: {}. Build firmware first or choose a local .bin file.",
             firmware_path
         ));
     }
     
-    let reg = region.unwrap();
+    let profile = profile.unwrap();
     if let Some(log) = progress_log {
-        log(format!("Starting cloud flash for {} (Region: {})...", firmware_path, reg));
+        log(format!("Starting cloud flash for {} (Profile: {})...", firmware_path, profile));
     }
     
     // 1. Fetch releases
@@ -128,8 +128,8 @@ pub async fn resolve_firmware_path(
         .ok_or_else(|| format!("Release {} not found", firmware_path))?;
 
     // 2. Find asset
-    let asset = release.find_asset_for_region(&reg)
-        .ok_or_else(|| format!("No asset found for region {} in release {}", reg, firmware_path))?;
+    let asset = release.find_asset_for_profile(&profile)
+        .ok_or_else(|| format!("No asset found for profile {} in release {}", profile, firmware_path))?;
 
     // 3. Download
     if let Some(log) = progress_log {

@@ -14,7 +14,7 @@ describe('useFirmwareServer', () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
-    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path/to/fw.bin', region: 'ZA' });
+    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path/to/fw.bin', profile: '433_za' });
   });
 
   const createComposable = () => {
@@ -164,7 +164,7 @@ describe('useFirmwareServer', () => {
       return null;
     });
 
-    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path', region: null });
+    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path', profile: null });
 
     await server.ensureFirmwareServer();
     
@@ -194,7 +194,7 @@ describe('useFirmwareServer', () => {
       return null;
     });
 
-    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path', region: null });
+    resolveFirmwareOptionsMock.mockReturnValue({ firmware_path: '/path', profile: null });
     await server.ensureFirmwareServer();
 
     // Handle change with busy = false (immediate revalidation)

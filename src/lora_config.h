@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef REGION_US
+#ifdef REGION_915_US
 constexpr long kDefaultFrequencyHz = 915000000L;
 constexpr long kLockedLoraFrequencyHz = 915000000L;
 #else

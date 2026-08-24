@@ -44,9 +44,8 @@ def version_from_tag(tag: str) -> str:
 
 def expected_assets(version: str) -> Set[str]:
     return {
-        f"lrs-firmware-{version}-za.bin",
-        f"lrs-firmware-{version}-us.bin",
-        f"lrs-firmware-{version}-eu.bin",
+        f"lrs-firmware-{version}-433_za.bin",
+        f"lrs-firmware-{version}-915_us.bin",
         f"thanda-lora-flasher-{version}-macos-arm64-portable.zip",
         f"thanda-lora-flasher-{version}-macos-x86_64-portable.zip",
         f"thanda-lora-flasher-{version}-windows-x64.msi",
@@ -135,7 +134,7 @@ def parse_args() -> argparse.Namespace:
     ap_upload.add_argument("--repo-main", default=REPO_MAIN)
     ap_upload.add_argument("--repo-public", default=REPO_PUBLIC)
 
-    ap_verify = sub.add_parser("verify", help="Verify full 10-asset contract in both repos.")
+    ap_verify = sub.add_parser("verify", help="Verify full 9-asset contract in both repos.")
     ap_verify.add_argument("--tag", required=True, help="Release tag (vX.Y.Z-alpha or X.Y.Z-alpha)")
     ap_verify.add_argument("--repo-main", default=REPO_MAIN)
     ap_verify.add_argument("--repo-public", default=REPO_PUBLIC)

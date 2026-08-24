@@ -9,7 +9,7 @@ import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState, applySeedWhitelist, missingInventoryDetailAddresses } from '../composables/useFleetInventory';
 import { parseVersion, compareParsedVersions } from '../utils/versionHelper';
-import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX } from '../composables/useFirmwareManager';
+import { useFirmwareManager, LOCAL_OPTION, LOCAL_LABEL_PREFIX, type FirmwareProfile } from '../composables/useFirmwareManager';
 import {
   chooseMqttGatewaySelection,
   mqttBrokerSelectionKey,
@@ -197,6 +197,7 @@ interface SerialAdminStatus {
   ok: boolean;
   cmd: string;
   fw_version: string;
+  firmware_profile?: string;
   chip_id: string;
   uptime_ms: number;
   heap_free: number;
@@ -389,10 +390,12 @@ const flasherAppVersion = ref('');
 
 const {
   firmwareVersions,
+  firmwareReleaseProfiles,
   selectedVersion,
   selectedLocalPath,
   isFetchingFirmware,
   region,
+  profileForRegion,
   selectedFirmwareCandidateVersion,
   networkOtaFirmwareOptions,
   fetchFirmware,
@@ -1309,6 +1312,10 @@ const pairDiscoveredDeviceCount = computed(() => pairStatus.value?.devices?.leng
 const fleetGatewayDevice = computed(() => serialDeviceState(targetGatewayKey.value));
 const fleetGatewayIdentity = computed(() => fleetGatewayDevice.value?.deviceInfo || null);
 const fleetGatewayStatus = computed(() => fleetGatewayDevice.value?.status || null);
+const fleetGatewayFirmwareProfile = computed<FirmwareProfile | null>(() => {
+  const profile = fleetGatewayStatus.value?.firmware_profile;
+  return profile === '433_za' || profile === '915_us' ? profile : null;
+});
 
 
 
@@ -1343,7 +1350,7 @@ const fleetGatewayFlashDisabled = computed(() => {
   if (!port) return true;
   if (isMqtt && !sessionMqttConnected.value) return true;
   if (isMqtt && !password) return true;
-  return fleetGatewayFlashPhase.value !== 'idle' ||
+  return !fleetGatewayFirmwareProfile.value || fleetGatewayFlashPhase.value !== 'idle' ||
     isNetworkGatewayLoading.value ||
     isLoraInventoryScanning.value ||
     hasActiveRemoteOtaPulls.value ||
@@ -4294,6 +4301,7 @@ function fleetGatewayFlashUnavailableReason(): string {
   if (!port) return isMqtt ? 'Select an MQTT gateway first' : 'Select a USB gateway first';
   if (isMqtt && !sessionMqttConnected.value) return 'MQTT broker is not connected. Open Gateway Session connection settings first.';
   if (isMqtt && !fleetGatewayCommandTarget().password) return 'Enter the gateway admin password';
+  if (!fleetGatewayFirmwareProfile.value) return 'Gateway firmware profile unavailable; load a gateway running current firmware.';
   if (fleetGatewayFlashPhase.value !== 'idle') return 'Gateway flash is already running';
   if (isNetworkGatewayLoading.value) return 'Gateway identity is loading';
   if (isLoraInventoryScanning.value) return 'Stop the fleet scan before flashing the gateway';
@@ -4314,7 +4322,12 @@ async function flashFleetGateway() {
     return;
   }
   await prepareSelectedFirmware();
-  const firmwareOptions = networkOtaFirmwareOptions();
+  const profile = fleetGatewayFirmwareProfile.value;
+  if (!profile) {
+    notify('Gateway firmware profile unavailable. Load a gateway running current firmware before Fleet OTA.');
+    return;
+  }
+  const firmwareOptions = networkOtaFirmwareOptions(profile);
   if (!firmwareOptions) return;
   const label = isMqtt ? `lrs-${port}` : (fleetGatewayIdentity.value?.ssid || port);
   const currentFw = fleetGatewayStatus.value?.fw_version || 'unknown';
@@ -4420,7 +4433,7 @@ async function flashFleetGateway() {
       const out = await invoke<string>('flash_firmware', {
         port,
         firmwarePath: firmwareOptions.firmware_path,
-        region: firmwareOptions.region,
+        profile: firmwareOptions.profile,
         eraseFirst: false
       });
       pushNetworkLog(out || `Gateway flash completed on ${port}.`);
@@ -5762,7 +5775,7 @@ async function startFlash() {
     const result = await invoke('flash_firmware', {
       port: flashPort,
       firmwarePath,
-      region: isLocal ? null : region.value,
+      profile: isLocal ? null : profileForRegion(),
       eraseFirst: eraseBeforeFlash.value
     });
     pushSerialLog(result as string);
@@ -5832,7 +5845,7 @@ async function startBulkFlash() {
           const result = await invoke<string>('flash_firmware', {
             port,
             firmwarePath,
-            region: isLocal ? null : region.value,
+            profile: isLocal ? null : profileForRegion(),
             eraseFirst: eraseBeforeFlash.value
           });
 
@@ -6350,6 +6363,7 @@ onMounted(async () => {
         ok: true,
         cmd: 'status',
         fw_version: payload.fw_version || '',
+        firmware_profile: payload.firmware_profile || '',
         chip_id: payload.chip_id,
         uptime_ms: Number(payload.uptime_ms || 0),
         heap_free: state.status?.heap_free || 0,
@@ -6678,8 +6692,12 @@ const fleetServerStatusComputed = computed<FleetServerStatus>(() => ({
     : null,
   statusLine: remotesAndCandidatesStatusLine.value,
   progressLabel: loraInventoryProgressLabel.value,
-  versions: firmwareVersions.value,
+  versions: firmwareVersions.value.filter(version =>
+    version === LOCAL_OPTION || version.startsWith(LOCAL_LABEL_PREFIX) ||
+    (!!fleetGatewayFirmwareProfile.value && firmwareReleaseProfiles.value[version]?.includes(fleetGatewayFirmwareProfile.value))
+  ),
   localOption: LOCAL_OPTION,
+  firmwareProfile: fleetGatewayFirmwareProfile.value,
   isFetchingFirmware: isFetchingFirmware.value,
   networkStatusMessage: networkStatusMessage.value
 }));
@@ -7074,11 +7092,9 @@ const fleetCandidateSummaryComputed = computed<FleetCandidateSummary>(() => ({
 
 const fleetConfigComputed = computed<FleetConfig>({
   get: () => ({
-    region: region.value,
     selectedVersion: selectedVersion.value
   }),
   set: (val) => {
-    region.value = val.region as any;
     selectedVersion.value = val.selectedVersion;
   }
 });

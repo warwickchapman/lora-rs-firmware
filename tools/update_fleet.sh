@@ -5,7 +5,7 @@ set -e
 set -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FIRMWARE="$ROOT/.pio/build/lrs_za/firmware.bin"
+FIRMWARE="$ROOT/.pio/build/lrs_433_za/firmware.bin"
 ESPOTA="${HOME}/.platformio/packages/framework-arduinoespressif8266/tools/espota.py"
 DERIVE_PASSWORD="$ROOT/tools/derive_passwords.py"
 APPLY=false

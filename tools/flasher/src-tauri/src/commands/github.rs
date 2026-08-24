@@ -1,14 +1,26 @@
 use crate::services::firmware;
 use std::path::PathBuf;
 
-const DEV_BUILD_DIR: &str = ".pio/build/lrs_za";
+#[derive(serde::Serialize)]
+pub struct FirmwareRelease {
+    pub tag_name: String,
+    pub profiles: Vec<String>,
+}
+
+const DEV_BUILD_DIR: &str = ".pio/build/lrs_433_za";
 
 #[tauri::command]
-pub async fn get_firmware_list() -> Result<Vec<String>, String> {
+pub async fn get_firmware_list() -> Result<Vec<FirmwareRelease>, String> {
     match firmware::fetch_releases().await {
         Ok(releases) => {
-            let tags = releases.into_iter().map(|r| r.tag_name).collect();
-            Ok(tags)
+            Ok(releases.into_iter().map(|r| FirmwareRelease {
+                profiles: r.assets.iter().filter_map(|asset| {
+                    asset.name.strip_suffix(".bin")
+                        .and_then(|name| name.rsplit_once('-'))
+                        .map(|(_, profile)| profile.to_string())
+                }).collect(),
+                tag_name: r.tag_name,
+            }).collect())
         }
         Err(e) => Err(e),
     }

@@ -2,7 +2,6 @@
 import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue';
 
 export interface FleetConfig {
-  region: string;
   selectedVersion: string;
 }
 
@@ -40,6 +39,7 @@ export interface FleetServerStatus {
   statusLine: string;
   progressLabel: string;
   versions: string[];
+  firmwareProfile: string | null;
   localOption: string;
   isFetchingFirmware: boolean;
   networkStatusMessage: string;
@@ -203,10 +203,6 @@ onUnmounted(() => {
   window.removeEventListener('scroll', positionActionMenu, true);
 });
 
-const computedRegion = computed({
-  get: () => config.value.region,
-  set: (val) => { config.value = { ...config.value, region: val }; }
-});
 const computedSelectedVersion = computed({
   get: () => config.value.selectedVersion,
   set: (val) => { config.value = { ...config.value, selectedVersion: val }; }
@@ -239,44 +235,15 @@ const computedSelectedVersion = computed({
       </div>
     </div>
 
-    <div class="glass-card flex flex-col text-left shrink-0 p-3 gap-3">
-      <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-        <div class="min-w-0">
-          <h2 class="text-base font-bold text-cyan-300">
-            Fleet
-          </h2>
-          <p class="mt-1 text-xs text-slate-400 max-w-3xl">
-            {{ gateway.statusLabel }} · {{ server.statusLine }} · {{ server.progressLabel }}
-          </p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Region</label>
-          <select v-model="computedRegion" class="glass-input h-10 appearance-none">
-            <option v-for="r in ['ZA', 'EU', 'US']" :key="r" :value="r">{{ r }}</option>
-          </select>
-        </div>
-        <div class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">Firmware version</label>
-          <div class="flex gap-2">
-            <select v-model="computedSelectedVersion" class="glass-input h-10 flex-1 appearance-none">
-              <option v-for="v in server.versions" :key="v" :value="v">
-                {{ v === server.localOption ? 'Choose a file' : v }}
-              </option>
-            </select>
-            <button @click="emit('firmware-fetch')" :disabled="server.isFetchingFirmware" class="glass-input m-0 h-10 w-12 hover:bg-slate-700/70 flex items-center justify-center group/btn shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" :class="['w-7 h-7 text-slate-400 group-hover/btn:text-cyan-300 transition-colors', { 'animate-spin text-cyan-400': server.isFetchingFirmware }]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-        <span>{{ server.networkStatusMessage }}</span>
-        <span v-if="server.activeReference" class="font-mono text-slate-500 truncate">{{ server.activeReference }}</span>
-      </div>
+    <div class="glass-card flex flex-wrap items-center gap-3 text-left shrink-0 p-3 text-xs">
+      <div class="min-w-0 mr-auto"><span class="font-bold text-cyan-300">Fleet</span><span class="ml-2 text-slate-400">{{ gateway.statusLabel }} · {{ server.statusLine }} · {{ server.progressLabel }}</span></div>
+      <label class="font-medium text-slate-400">Target firmware</label>
+      <select v-model="computedSelectedVersion" :disabled="!server.firmwareProfile" class="glass-input h-9 min-w-48 appearance-none">
+        <option v-if="!server.firmwareProfile" value="">Profile unavailable</option>
+        <option v-for="v in server.versions" :key="v" :value="v">{{ v === server.localOption ? 'Choose a file' : v }}</option>
+      </select>
+      <button @click="emit('firmware-fetch')" :disabled="server.isFetchingFirmware" class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70">Refresh</button>
+      <span v-if="server.activeReference" class="font-mono text-slate-500 truncate max-w-80">{{ server.activeReference }}</span>
     </div>
 
     <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">

@@ -14,8 +14,8 @@ The former device-hosted Web UI, REST API, and captive-portal admin flow have be
 For shipped release `.bin` files, use `esptool` and the included helper:
 
 - Helper script (recommended):
-  - Windows: `python tools/flash_release.py --port COM7 --bin lrs-firmware-0.10.5~35-za.bin`
-  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin lrs-firmware-0.10.5~35-za.bin`
+  - Windows: `python tools/flash_release.py --port COM7 --bin lrs-firmware-0.10.5~36-433_za.bin`
+  - macOS: `python3 tools/flash_release.py --port /dev/cu.usbserial-XXXX --bin lrs-firmware-0.10.5~36-433_za.bin`
 
 The helper reads chip ID, flashes firmware, and prints:
 - device name: `lrs-<chipid>`
@@ -26,8 +26,8 @@ Direct `esptool` fallback:
   - Windows: `py -m esptool --port COM7 chip_id`
   - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX chip_id`
 - Flash at address `0x00000`:
-  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~35-za.bin`
-  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~35-za.bin`
+  - Windows: `py -m esptool --port COM7 --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~36-433_za.bin`
+  - macOS: `python3 -m esptool --port /dev/cu.usbserial-XXXX --baud 460800 write-flash 0x00000 lrs-firmware-0.10.5~36-433_za.bin`
 
 Password derivation is deterministic per device/chip ID, so users can recover credentials without PlatformIO tooling.
 
@@ -59,10 +59,10 @@ Main project:
 ## Build Targets
 
 > [!IMPORTANT]
-> **We ONLY build `lrs_za` (South Africa), `lrs_us` (USA), and run the native tests (`native`).**
+> **We ONLY build `lrs_433_za` (South Africa), `lrs_915_us` (USA), and run the native tests (`native`).**
 > Any new automated process, compilation test, or developer must focus strictly on these core commands:
-> - South Africa (433 MHz): `python3 -m platformio run -e lrs_za`
-> - USA (915 MHz): `python3 -m platformio run -e lrs_us`
+> - South Africa (433 MHz): `python3 -m platformio run -e lrs_433_za`
+> - USA (915 MHz): `python3 -m platformio run -e lrs_915_us`
 > - Unit Test Suite: `python3 -m platformio test -e native`
 >
 > All other environments defined in `platformio.ini` (such as the local `_ota` targets) are custom local, deployment-specific, or diagnostic environments. They are not part of the standard build or test pipeline and must be disregarded.
@@ -97,9 +97,9 @@ Use `tools/release_manager.py` to run the same release flow end-to-end:
 - Runs mandatory pre-release validation gate (release blocks unless all pass):
   - `pio test -e native`
   - `python3 tools/test_version_metadata.py`
-  - `pio run -e lrs_za`
-  - `pio run -e lrs_us`
-- Builds fresh `lrs_za` + `lrs_us` firmware
+  - `pio run -e lrs_433_za`
+  - `pio run -e lrs_915_us`
+- Builds fresh `lrs_433_za` + `lrs_915_us` firmware
 - Captures firmware RAM/Flash usage for both environments and prints deltas vs previous release in the release run output
 - Generates named assets + SHA256 checksums
 - Creates/updates GitHub release from `VERSION`
@@ -183,14 +183,14 @@ python3 tools/release_one_shot.py   --notes-file /absolute/path/to/release-notes
   - flasher Windows/Linux CI dispatch from the release tag and wait-for-success,
   - local macOS portable ZIP builds from the release tag,
   - macOS portable ZIP upload to both repos,
-  - full 10-asset verification in both repos,
+  - full 9-asset verification in both repos,
   - GitHub Actions run cleanup for `package_flasher.yml` (keeps latest 10 completed runs by default).
 - Release notes are used exactly as provided (no auto-generated summary/highlights).
 - Optional: `--keep-workflow-runs N` (default `10`, set `0` to disable pruning for that run).
 
 ## Direct Flash Commands
-- `python3 -m platformio run -e lrs_za -t upload --upload-port <PORT>`
-- `python3 -m platformio run -e lrs_us -t upload --upload-port <PORT>`
+- `python3 -m platformio run -e lrs_433_za -t upload --upload-port <PORT>`
+- `python3 -m platformio run -e lrs_915_us -t upload --upload-port <PORT>`
 
 ## Notes for New Contributors
 - Main runtime entrypoint: `src/main.cpp`

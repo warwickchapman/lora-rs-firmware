@@ -4,7 +4,7 @@ Release automation for lora-rs.
 
 Flow:
 1. Read VERSION (single source of truth).
-2. Build fresh firmware for lrs_za and lrs_us.
+2. Build fresh firmware for lrs_433_za and lrs_915_us.
 3. Create named assets and SHA256 hashes.
 4. Generate human-readable release notes.
 5. Create or update GitHub release (non-prerelease).
@@ -143,8 +143,8 @@ def run_pre_release_validation(root: Path) -> None:
     print("\nRunning mandatory pre-release validation gate...")
     run(["pio", "test", "-e", "native"], cwd=root)
     run(["python3", "tools/test_version_metadata.py"], cwd=root)
-    run(["pio", "run", "-e", "lrs_za"], cwd=root)
-    run(["pio", "run", "-e", "lrs_us"], cwd=root)
+    run(["pio", "run", "-e", "lrs_433_za"], cwd=root)
+    run(["pio", "run", "-e", "lrs_915_us"], cwd=root)
 
 
 def parse_platformio_metrics(output: str, env: str) -> BuildMetrics:
@@ -183,8 +183,8 @@ def build_env_and_collect_metrics(root: Path, env: str) -> BuildMetrics:
 
 def build_firmware(root: Path) -> List[BuildMetrics]:
     return [
-        build_env_and_collect_metrics(root, "lrs_za"),
-        build_env_and_collect_metrics(root, "lrs_us"),
+        build_env_and_collect_metrics(root, "lrs_433_za"),
+        build_env_and_collect_metrics(root, "lrs_915_us"),
     ]
 
 
@@ -193,22 +193,19 @@ def sha256_for(path: Path) -> str:
     return out.split()[0]
 
 
-def stage_assets(root: Path, version: str) -> Tuple[AssetInfo, AssetInfo, AssetInfo]:
-    za_src = root / ".pio" / "build" / "lrs_za" / "firmware.bin"
-    us_src = root / ".pio" / "build" / "lrs_us" / "firmware.bin"
+def stage_assets(root: Path, version: str) -> Tuple[AssetInfo, AssetInfo]:
+    za_src = root / ".pio" / "build" / "lrs_433_za" / "firmware.bin"
+    us_src = root / ".pio" / "build" / "lrs_915_us" / "firmware.bin"
     if not za_src.exists() or not us_src.exists():
         raise RuntimeError("Built firmware binaries not found under .pio/build")
 
     out_dir = Path(tempfile.gettempdir())
-    za_out = out_dir / f"lrs-firmware-{version}-za.bin"
-    us_out = out_dir / f"lrs-firmware-{version}-us.bin"
-    eu_out = out_dir / f"lrs-firmware-{version}-eu.bin"
+    za_out = out_dir / f"lrs-firmware-{version}-433_za.bin"
+    us_out = out_dir / f"lrs-firmware-{version}-915_us.bin"
     
     shutil.copy2(za_src, za_out)
     shutil.copy2(us_src, us_out)
-    shutil.copy2(za_src, eu_out)  # EU is a proxy/copy of ZA
-    
-    return AssetInfo(za_out, sha256_for(za_out)), AssetInfo(us_out, sha256_for(us_out)), AssetInfo(eu_out, sha256_for(eu_out))
+    return AssetInfo(za_out, sha256_for(za_out)), AssetInfo(us_out, sha256_for(us_out))
 
 
 def fetch_release_bodies(repo: str) -> List[dict]:
@@ -321,9 +318,9 @@ def build_release_notes(
         [
             "",
             "## Firmware Assets",
-            f"- `lrs-firmware-{version}-za.bin`",
+            f"- `lrs-firmware-{version}-433_za.bin`",
             f"  - SHA256: `{za.sha256}`",
-            f"- `lrs-firmware-{version}-us.bin`",
+            f"- `lrs-firmware-{version}-915_us.bin`",
             f"  - SHA256: `{us.sha256}`",
             "",
             f"> “{quote}”",
@@ -680,17 +677,15 @@ def expected_full_release_assets(
         else version
     )
     return [
-        f"lrs-firmware-{version}-za.bin",
-        f"lrs-firmware-{version}-us.bin",
-        f"lrs-firmware-{version}-eu.bin",
+        f"lrs-firmware-{version}-433_za.bin",
+        f"lrs-firmware-{version}-915_us.bin",
     ] + expected_flasher_assets(flasher_version)
 
 
 def expected_firmware_assets(version: str) -> List[str]:
     return [
-        f"lrs-firmware-{version}-za.bin",
-        f"lrs-firmware-{version}-us.bin",
-        f"lrs-firmware-{version}-eu.bin",
+        f"lrs-firmware-{version}-433_za.bin",
+        f"lrs-firmware-{version}-915_us.bin",
     ]
 
 
@@ -798,13 +793,13 @@ def parse_args() -> argparse.Namespace:
         "--verify-full-assets",
         dest="verify_full_assets",
         action="store_true",
-        help="Verify both repos contain the full 10-file release asset contract.",
+        help="Verify both repos contain the full 9-file release asset contract.",
     )
     verify_group.add_argument(
         "--no-verify-full-assets",
         dest="verify_full_assets",
         action="store_false",
-        help="Do not verify full 10-file release asset contract.",
+        help="Do not verify full 9-file release asset contract.",
     )
     ap.add_argument(
         "--verify-firmware-only-assets",
@@ -865,7 +860,7 @@ def main() -> int:
             args.repo, args.reuse_flasher, version, args.reuse_flasher_keep_names
         )
 
-    za_asset, us_asset, eu_asset = assets
+    za_asset, us_asset = assets
     
     if args.notes_file:
         notes = args.notes_file.read_text(encoding="utf-8")

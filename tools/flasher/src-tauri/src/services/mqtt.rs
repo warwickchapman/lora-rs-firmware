@@ -41,6 +41,8 @@ pub struct MqttGatewayPayload {
     pub sta_ssid: String,
     pub uptime_ms: u64,
     pub fw_version: String,
+    #[serde(default)]
+    pub firmware_profile: String,
     pub addr: u8,
     pub controller_addr: Option<u8>,
 }

@@ -24,7 +24,7 @@ Firmware USB serial admin protocol:
 - Mutating commands require the current admin password. If that password is lost, use physical erase-and-reflash recovery rather than resetting the password in place.
 
 Example:
-- `python3 /Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py --port /dev/cu.usbserial-XXXX --env lrs_za --flash --csv factory_sticker.csv`
+- `python3 /Users/warwick/Code/LoRa/lora_rs/tools/factory_provision.py --port /dev/cu.usbserial-XXXX --env lrs_433_za --flash --csv factory_sticker.csv`
 - Optional: generate deployment key per batch automatically by passing `--batch-id <YYMMDD>` (or explicit `--deployment-key <value>`).
 
 ## What the Script Produces
@@ -100,7 +100,7 @@ pairing is commissioned later: gateway fleet membership belongs only in
 ## Briefing Template for New Developer/Codex
 When handing over, include:
 1. Repo path and active branch.
-2. Hardware and region target (`lrs_za` or `lrs_us`).
+2. Hardware and firmware profile target (`lrs_433_za` or `lrs_915_us`).
 3. Build command and current compile status.
 4. Device role/address policy in production.
 5. Security policy (password derivation + secret handling).
@@ -108,7 +108,7 @@ When handing over, include:
 
 Suggested handoff block:
 - Product: LRS ESP8266 LoRa relay pair firmware
-- Build target: `<lrs_za|lrs_us>`
+- Build target: `<lrs_433_za|lrs_915_us>`
 - Hardware: ESP-12F + `<Ra-01|Ra-01H>`
 - Current state: state-machine runtime under `src/app.*`
 - Config path: LittleFS `/config.json`

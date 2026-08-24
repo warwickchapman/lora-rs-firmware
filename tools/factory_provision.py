@@ -87,7 +87,7 @@ def three_word_key(seed_text: str) -> str:
 def main():
     ap = argparse.ArgumentParser(description="Flash firmware and output sticker metadata")
     ap.add_argument("--port", required=True)
-    ap.add_argument("--env", choices=["lrs_za", "lrs_us", "lrs_eu"], default="lrs_za")
+    ap.add_argument("--env", choices=["lrs_433_za", "lrs_915_us"], default="lrs_433_za")
     ap.add_argument("--flash", action="store_true", help="Run pio upload before reading IDs")
     ap.add_argument("--csv", default="factory_sticker.csv")
     ap.add_argument("--batch-id", default=dt.date.today().strftime("%y%m%d"), help="Factory batch/run id used in suggested deployment key seed")

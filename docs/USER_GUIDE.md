@@ -65,6 +65,8 @@ Recovery is performed remotely over LoRa. To wake a node back to Full Power, sen
 ## Fleet
 Fleet uses a USB-connected TX/gateway as the source of truth.
 
+Fleet derives the fleet-wide OTA target from the selected gateway's reported firmware profile. It shows `Profile unavailable` for an older or unreachable gateway rather than guessing. Flash keeps its manual Region selector because a blank USB device cannot report a profile.
+
 - Fleet reads the gateway-owned peer cache immediately and refreshes one configured remote at a time while the view remains open.
 - The gateway row is separate from remote rows.
 - Remote rows show identity, firmware, role, WiFi/IP, MQTT, sensors, uptime, RSSI, age, and OTA eligibility.
