@@ -6721,42 +6721,6 @@ const gatewaySessionTargetKey = computed(() =>
     : gatewaySessionSerialPort.value
 );
 
-function publishSupportSnapshot() {
-  const remotes = loraInventory.value.map(device => ({
-    address: device.address,
-    chip_id: device.chip_id || null,
-    firmware: device.fw_version || null,
-    relay_state: device.relay_state ?? null,
-    input_state: device.input_state ?? null,
-    uptime_ms: device.uptime_ms ?? null,
-    wifi_connected: !!device.wifi_connected,
-    ip: device.ip || null,
-    row_state: device.row_state || null,
-  }));
-  const logs = logSession.records.value.slice(-200).map(record => ({
-    id: record.id, received_at: record.receivedAt, source: record.sourceLabel,
-    transport: record.transport, severity: record.severity, event: record.event, raw: record.raw,
-  }));
-  void invoke('publish_support_snapshot', { snapshot: {
-    observed_at: Date.now(),
-    selected_transport: fleetTransport.value,
-    gateway: {
-      target: gatewaySessionTargetKey.value || null,
-      connected: null,
-      firmware: fleetGatewayStatus.value?.fw_version || null,
-      relay_state: fleetGatewayStatus.value?.relay_state ?? null,
-      input_state: fleetGatewayStatus.value?.input_state ?? null,
-      uptime_ms: fleetGatewayStatus.value?.uptime_ms ?? null,
-      status: networkStatusMessage.value,
-    },
-    remotes,
-    operations: { fleet_scan: loraInventoryScan.value, gateway_flash_phase: fleetGatewayFlashPhase.value, remote_ota_active: hasActiveRemoteOtaPulls.value },
-    logs,
-  }}).catch(() => {});
-}
-
-watch([loraInventory, () => logSession.records.value, gatewaySessionTargetKey, fleetGatewayStatus, networkStatusMessage, fleetGatewayFlashPhase, loraInventoryScan, hasActiveRemoteOtaPulls], publishSupportSnapshot, { deep: true, immediate: true });
-
 const logAvailableSourcesComputed = computed(() => {
   const target = gatewaySessionTargetKey.value;
   const gateway = target ? [{
@@ -6835,6 +6799,42 @@ const gatewaySessionIsActive = computed(() => {
   }
   return true;
 });
+
+function publishSupportSnapshot() {
+  const remotes = loraInventory.value.map(device => ({
+    address: device.address,
+    chip_id: device.chip_id || null,
+    firmware: device.fw_version || null,
+    relay_state: device.relay_state ?? null,
+    input_state: device.input_state ?? null,
+    uptime_ms: device.uptime_ms ?? null,
+    wifi_connected: !!device.wifi_connected,
+    ip: device.ip || null,
+    row_state: device.row_state || null,
+  }));
+  const logs = logSession.records.value.slice(-200).map(record => ({
+    id: record.id, received_at: record.receivedAt, source: record.sourceLabel,
+    transport: record.transport, severity: record.severity, event: record.event, raw: record.raw,
+  }));
+  void invoke('publish_support_snapshot', { snapshot: {
+    observed_at: Date.now(),
+    selected_transport: fleetTransport.value,
+    gateway: {
+      target: gatewaySessionTargetKey.value || null,
+      connected: gatewaySessionIsActive.value,
+      firmware: fleetGatewayStatus.value?.fw_version || null,
+      relay_state: fleetGatewayStatus.value?.relay_state ?? null,
+      input_state: fleetGatewayStatus.value?.input_state ?? null,
+      uptime_ms: fleetGatewayStatus.value?.uptime_ms ?? null,
+      status: networkStatusMessage.value,
+    },
+    remotes,
+    operations: { fleet_scan: loraInventoryScan.value, gateway_flash_phase: fleetGatewayFlashPhase.value, remote_ota_active: hasActiveRemoteOtaPulls.value },
+    logs,
+  }}).catch(() => {});
+}
+
+watch([loraInventory, () => logSession.records.value, gatewaySessionTargetKey, gatewaySessionIsActive, fleetGatewayStatus, networkStatusMessage, fleetGatewayFlashPhase, loraInventoryScan, hasActiveRemoteOtaPulls], publishSupportSnapshot, { deep: true, immediate: true });
 
 const gatewaySessionChangeDisabledReason = computed(() => {
   if (isFlashing.value) return 'Gateway Session cannot change while flashing is active.';
