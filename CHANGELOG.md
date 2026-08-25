@@ -5,6 +5,7 @@
 - Fleet now derives its OTA target compatibility from the selected gateway's compile-time firmware profile (`433_za` or `915_us`) over USB serial or MQTT discovery. It no longer guesses a region, creates LoRa traffic, or offers a release target until the gateway profile is available.
 - Replaced Fleet's large region/firmware card with a compact fleet-wide target-firmware toolbar. The Flash pane retains its manual region choice for blank or unreachable devices.
 - Renamed firmware build environments, release assets, and compile flags to approved compatibility profiles: `lrs_433_za`/`REGION_433_ZA` and `lrs_915_us`/`REGION_915_US`. Removed the falsely distinct EU release copy.
+- Expanded Flasher's development-only diagnostics MCP from OTA evidence into a strictly read-only support view of already-cached gateway, Fleet, operation, and Logs state. MCP reads never trigger device traffic, and cached snapshots redact secrets before local IPC export.
 
 ## [Unreleased]
 
