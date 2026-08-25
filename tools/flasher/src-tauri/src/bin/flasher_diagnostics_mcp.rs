@@ -5,7 +5,10 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
 fn endpoint() -> (PathBuf, String) {
-    let dir = std::env::temp_dir().join("thanda-lora-flasher-diagnostics");
+    let dir = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".thanda-lora-flasher-diagnostics");
     let token = fs::read_to_string(dir.join("token"))
         .expect("Flasher is not running or diagnostics are unavailable");
     (dir.join("flasher.sock"), token)

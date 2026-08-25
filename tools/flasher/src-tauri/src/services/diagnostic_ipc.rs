@@ -29,7 +29,13 @@ struct Response {
 }
 
 fn runtime_dir() -> PathBuf {
-    std::env::temp_dir().join("thanda-lora-flasher-diagnostics")
+    // macOS gives GUI apps and terminal clients different TMPDIR values. A
+    // stable directory in the local user's home is required for the companion
+    // to discover Flasher's socket without widening access beyond that user.
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".thanda-lora-flasher-diagnostics")
 }
 
 fn token() -> String {
