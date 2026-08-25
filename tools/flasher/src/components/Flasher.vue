@@ -6801,6 +6801,37 @@ const gatewaySessionIsActive = computed(() => {
 });
 
 function publishSupportSnapshot() {
+  const gateways: Array<{
+    chip_id: string | null;
+    firmware: string | null;
+    firmware_profile: string | null;
+    ip: string | null;
+    uptime_ms: number | null;
+    discovered_at: number | null;
+    selected: boolean;
+    transport: string;
+  }> = Object.values(mqttGateways.value).map(gateway => ({
+    chip_id: gateway.chip_id || null,
+    firmware: gateway.fw_version || null,
+    firmware_profile: gateway.firmware_profile || null,
+    ip: gateway.sta_ip || null,
+    uptime_ms: gateway.uptime_ms ?? null,
+    discovered_at: lastMqttDiscoveryMs.value[gateway.chip_id] ?? null,
+    selected: fleetTransport.value === 'mqtt' && gateway.chip_id === gatewaySessionTargetKey.value,
+    transport: 'mqtt',
+  }));
+  if (fleetTransport.value === 'serial' && gatewaySessionTargetKey.value) {
+    gateways.unshift({
+      chip_id: fleetGatewayStatus.value?.chip_id || null,
+      firmware: fleetGatewayStatus.value?.fw_version || null,
+      firmware_profile: fleetGatewayStatus.value?.firmware_profile || null,
+      ip: fleetGatewayStatus.value?.wifi?.ip || null,
+      uptime_ms: fleetGatewayStatus.value?.uptime_ms ?? null,
+      discovered_at: null,
+      selected: true,
+      transport: 'serial',
+    });
+  }
   const remotes = loraInventory.value.map(device => ({
     address: device.address,
     chip_id: device.chip_id || null,
@@ -6828,13 +6859,14 @@ function publishSupportSnapshot() {
       uptime_ms: fleetGatewayStatus.value?.uptime_ms ?? null,
       status: networkStatusMessage.value,
     },
+    gateways,
     remotes,
     operations: { fleet_scan: loraInventoryScan.value, gateway_flash_phase: fleetGatewayFlashPhase.value, remote_ota_active: hasActiveRemoteOtaPulls.value },
     logs,
   }}).catch(() => {});
 }
 
-watch([loraInventory, () => logSession.records.value, gatewaySessionTargetKey, gatewaySessionIsActive, fleetGatewayStatus, networkStatusMessage, fleetGatewayFlashPhase, loraInventoryScan, hasActiveRemoteOtaPulls], publishSupportSnapshot, { deep: true, immediate: true });
+watch([loraInventory, mqttGateways, lastMqttDiscoveryMs, () => logSession.records.value, gatewaySessionTargetKey, gatewaySessionIsActive, fleetGatewayStatus, networkStatusMessage, fleetGatewayFlashPhase, loraInventoryScan, hasActiveRemoteOtaPulls], publishSupportSnapshot, { deep: true, immediate: true });
 
 const gatewaySessionChangeDisabledReason = computed(() => {
   if (isFlashing.value) return 'Gateway Session cannot change while flashing is active.';

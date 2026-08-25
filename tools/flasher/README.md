@@ -68,7 +68,7 @@ Flasher owns a local-user-only diagnostic socket while it is running. Its compan
 
 Every MCP read is served from that host cache. It never opens a serial, UDP, MQTT, or HTTP listener; triggers a Fleet scan or refresh; or sends a device, LoRa, OTA, or logging command. If a value is not already cached, the companion reports it as unavailable rather than causing control-path load. Secrets are redacted before the support snapshot reaches the local IPC socket.
 
-The available support tools are `flasher_status`, `get_gateway_snapshot`, `list_remote_devices`, `get_remote_snapshot`, `list_operations`, `get_log_sources`, and `get_log_events`. OTA-specific evidence remains available through `list_captures`, `get_events`, `get_timeline`, and `get_anomalies`.
+The available support tools are `flasher_status`, `list_gateways`, `get_gateway_snapshot`, `list_remote_devices`, `get_remote_snapshot`, `list_operations`, `get_log_sources`, and `get_log_events`. OTA-specific evidence remains available through `list_captures`, `get_events`, `get_timeline`, and `get_anomalies`.
 
 ```toml
 [mcp_servers.flasherDiagnostics]

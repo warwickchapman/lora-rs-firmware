@@ -48,6 +48,7 @@ fn tools() -> Value {
     json!([
         cached_tool("flasher_status", "Read Flasher's current cached support summary.", json!({}), json!([])),
         cached_tool("get_gateway_snapshot", "Read the selected gateway's cached session and operational fields.", json!({}), json!([])),
+        cached_tool("list_gateways", "List gateways already discovered by Flasher over MQTT or selected over USB.", json!({}), json!([])),
         cached_tool("list_remote_devices", "List cached remote inventory rows from the Fleet pane.", json!({}), json!([])),
         cached_tool("get_remote_snapshot", "Read one cached remote inventory row by LoRa address.", json!({"address": {"type": "integer", "minimum": 1, "maximum": 255}}), json!(["address"])),
         cached_tool("list_operations", "Read cached Fleet/flash/OTA operation status.", json!({}), json!([])),
@@ -72,6 +73,7 @@ fn support_result(name: &str, args: &Value) -> Result<Value, String> {
             "retained_log_count": snapshot["logs"].as_array().map_or(0, Vec::len),
         })),
         "get_gateway_snapshot" => Ok(snapshot["gateway"].clone()),
+        "list_gateways" => Ok(snapshot["gateways"].clone()),
         "list_remote_devices" => Ok(snapshot["remotes"].clone()),
         "get_remote_snapshot" => {
             let address = args["address"].as_u64().ok_or("address required")?;
@@ -120,6 +122,7 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
     match name {
         "flasher_status"
         | "get_gateway_snapshot"
+        | "list_gateways"
         | "list_remote_devices"
         | "get_remote_snapshot"
         | "list_operations"
