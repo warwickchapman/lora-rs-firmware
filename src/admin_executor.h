@@ -55,6 +55,8 @@ private:
   void sendOk(JsonDocument &doc, ResponseWriter writer);
   void buildProvisioningStatus(JsonDocument &doc, bool isMqtt = false);
   void handleStatus(JsonDocument &doc, ResponseWriter writer);
+  void handleGetDisplayName(JsonDocument &doc, ResponseWriter writer);
+  void handleSetDisplayName(JsonDocument &doc, ResponseWriter writer);
   void handleGetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
   void handleSetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt);
   void handleFactoryReset(JsonDocument &doc, ResponseWriter writer);

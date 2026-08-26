@@ -44,7 +44,8 @@ Fleet mode is a LoRa/MQTT admin helper:
 - keeps the gateway visible as its own Fleet panel with load, identify, and USB flash actions, while remote counts remain remote-only
 - reads the TX/gateway-owned peer cache over serial admin
 - keeps address-range discovery separate from normal Fleet refresh; explicit unlisted-device discovery belongs in Provision/recovery
-- shows cached remotes in a dense fleet table with LoRa address, chip ID, firmware version, role/mode, WiFi state/IP, MQTT state, link RSSI/freshness, and OTA eligibility
+- shows cached remotes in a dense fleet table with LoRa address, immutable chip ID, optional gateway-owned display name, firmware version, WiFi state/IP, link RSSI/freshness, and OTA eligibility
+- loads the gateway and configured-peer names once per selected gateway, progressively and through the same bounded serial/MQTT admin path; inline edits never poll or create LoRa traffic
 - starts a temporary local firmware file server automatically when an OTA needs the selected release/local `.bin`, keeps it available across queued/active updates, and stops it 60 seconds after the last update settles
 - defaults the shared firmware picker to the repo-local `.pio/build/lrs_433_za/firmware.bin` artifact when that PlatformIO build output exists
 - calculates the firmware SHA256 before devices are commanded to pull it and records the digest in the activity log

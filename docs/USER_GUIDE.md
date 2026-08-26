@@ -69,7 +69,8 @@ Fleet derives the fleet-wide OTA target from the selected gateway's reported fir
 
 - Fleet reads the gateway-owned peer cache immediately and refreshes one configured remote at a time while the view remains open.
 - The gateway row is separate from remote rows.
-- Remote rows show identity, firmware, role, WiFi/IP, MQTT, sensors, uptime, RSSI, age, and OTA eligibility.
+- The **Name** column is optional gateway-owned presentation metadata. Click a gateway or remote name to edit it; Enter or leaving the field saves, Escape cancels, and a blank value clears it. Names follow the physical chip ID through readdressing and survive OTA/reboot. Forget, confirmed full remote reset, or gateway factory reset removes the applicable name.
+- Remote rows show immutable device identity beside the editable name, plus firmware, WiFi/IP, sensors, uptime, RSSI, age, and OTA eligibility.
 - `Flash` on a remote row triggers OTA pull over WiFi; firmware bytes are not carried over LoRa. Flasher starts its temporary firmware server automatically and stops it 60 seconds after the final update settles.
 - Remote factory reset is confirmed only after the remote saves its new configuration. A full reset removes the row automatically after confirmation; an unconfirmed reset retains the row with a Retry-safe warning. Selected remotes are processed one at a time and the sequence stops at the first unconfirmed result.
 - Leaving **Keep WiFi Credentials** unchecked clears both the application credentials and the ESP8266 SDK station profile. **Reset but keep in fleet** preserves the fleet key, remote role, assigned address, and controller address so the remote remains reachable; it does not preserve WiFi.

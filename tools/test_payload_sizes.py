@@ -50,11 +50,41 @@ def test_payloads():
     set_config_sz = len(json.dumps(set_config_envelope))
     get_config_sz = len(json.dumps(get_config_envelope))
 
+    display_name_request = {
+        "cmd": "set_display_name",
+        "id": "req-abcdefghi",
+        "flasher_compat_revision": 3,
+        "admin_password": "A"*32,
+        "session_id": 4294967295,
+        "seq": 4294967295,
+        "ts": 1717171717,
+        "ttl_ms": 15000,
+        "chip_id": "ffffffff",
+        "display_name": "1234567890123456",
+        "mac": "f"*64,
+    }
+    display_name_response = {
+        "ok": True,
+        "cmd": "set_display_name",
+        "id": "req-abcdefghi",
+        "chip_id": "ffffffff",
+        "display_name": "1234567890123456",
+    }
+    display_name_request_sz = len(json.dumps(display_name_request))
+    display_name_response_sz = len(json.dumps(display_name_response))
+
     print(f"Serialized set_config (inbound) size: {set_config_sz} bytes")
     print(f"Serialized get_config (outbound) size: {get_config_sz} bytes")
+    print(f"Serialized set_display_name (authenticated inbound) size: {display_name_request_sz} bytes")
+    print(f"Serialized display-name response (outbound) size: {display_name_response_sz} bytes")
 
     failed = False
-    for name, size in [("set_config", set_config_sz), ("get_config", get_config_sz)]:
+    for name, size in [
+        ("set_config", set_config_sz),
+        ("get_config", get_config_sz),
+        ("set_display_name", display_name_request_sz),
+        ("display_name_response", display_name_response_sz),
+    ]:
         if size > 1024:
             print(f"FAIL: {name} exceeds contract ceiling of 1024 bytes! (Actual: {size})", file=sys.stderr)
             failed = True
@@ -64,8 +94,7 @@ def test_payloads():
     if failed:
         sys.exit(1)
     else:
-        print("PASS: Both payloads are within the contract limits.")
+        print("PASS: All payloads are within the contract limits.")
 
 if __name__ == "__main__":
     test_payloads()
-

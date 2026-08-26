@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import UiIcon from './UiIcon.vue';
 
 export interface RemoteSettingsDevice {
   address: number | string;
@@ -86,7 +87,10 @@ const computedShowFleetKey = computed({
       <div class="w-full max-w-lg rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl flex flex-col gap-4">
         <!-- Header with device info -->
         <div>
-          <h3 class="text-base font-bold text-slate-200">🛠️ Command Console — Device {{ device.address }}</h3>
+          <h3 class="flex items-center gap-2 text-base font-bold text-slate-200">
+            <UiIcon kind="settings" />
+            Remote Settings — Device {{ device.address }}
+          </h3>
           <p class="mt-1 text-xs text-slate-500">
             <span v-if="device.chip_id">{{ device.chip_id }}</span>
             <span v-if="device.fw_version"> · v{{ device.fw_version }}</span>
@@ -97,14 +101,15 @@ const computedShowFleetKey = computed({
         <!-- Tab bar -->
         <div class="flex gap-0 border-b border-slate-800">
           <button
-            v-for="tab in ([{key:'sensors',label:'🛠️ Sensors'},{key:'power',label:'⚡ Power'},{key:'wifi',label:'📶 WiFi'},{key:'security',label:'🔑 Security'}] as const)"
+            v-for="tab in ([{key:'sensors',label:'Sensors',icon:'commands'},{key:'power',label:'Power',icon:'power'},{key:'wifi',label:'WiFi',icon:'wifi'},{key:'security',label:'Security',icon:'security'}] as const)"
             :key="tab.key"
             @click="computedActiveTab = tab.key"
-            class="px-4 py-2 text-[11px] font-bold transition-colors"
+            class="flex items-center gap-1.5 px-4 py-2 text-[11px] font-bold transition-colors"
             :class="computedActiveTab === tab.key
               ? 'text-cyan-300 border-b-2 border-cyan-400 -mb-px'
               : 'text-slate-500 hover:text-slate-300'"
           >
+            <UiIcon :kind="tab.icon" />
             {{ tab.label }}
           </button>
         </div>
@@ -208,7 +213,8 @@ const computedShowFleetKey = computed({
           <p class="text-xs text-slate-500">Update the device's shared fleet passphrase over LoRa.</p>
           <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex flex-col gap-1.5 select-text leading-relaxed">
             <div class="flex items-center gap-1.5 font-bold">
-              <span class="text-sm">⚠️</span> CRITICAL OPERATIONAL WARNING
+              <UiIcon kind="warning" />
+              CRITICAL OPERATIONAL WARNING
             </div>
             <div>
               Changing the remote's Fleet Key will make it <span class="font-bold text-rose-200">immediately unreachable</span> by this Gateway once the remote reboots.

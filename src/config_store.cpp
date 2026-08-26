@@ -8,6 +8,7 @@
 
 #include "logger.h"
 #include "runtime_utils.h"
+#include "display_name_store.h"
 
 #include "lora_config.h"
 
@@ -179,6 +180,9 @@ bool ConfigStore::begin() {
   if (!LittleFS.begin()) {
     LRS_LOGE(FS, "event=fs_mount_failed path=%s", kConfigPath);
     return false;
+  }
+  if (!display_names::recover()) {
+    LRS_LOGE(FS, "event=display_names_recovery_failed");
   }
 
   setDefaults();
@@ -579,6 +583,10 @@ bool ConfigStore::removeKnownPeer(uint8_t address, uint32_t &chipId, bool &remov
 
   if (save()) {
     removed = true;
+    if (chipId != 0 && !display_names::clear(chipId)) {
+      LRS_LOGE(FS, "event=display_name_clear_failed chip=%08lx reason=peer_removed",
+               static_cast<unsigned long>(chipId));
+    }
     return true;
   }
 
@@ -592,7 +600,33 @@ bool ConfigStore::removeKnownPeer(uint8_t address, uint32_t &chipId, bool &remov
   return false;
 }
 
+bool ConfigStore::getDisplayName(uint32_t chipId, char output[17]) const {
+  return isDisplayNameTarget(chipId) && display_names::lookup(chipId, output);
+}
+
+bool ConfigStore::setDisplayName(uint32_t chipId, const char *displayName) {
+  return isDisplayNameTarget(chipId) && display_names::set(chipId, displayName);
+}
+
+bool ConfigStore::clearDisplayName(uint32_t chipId) {
+  return isDisplayNameTarget(chipId) && display_names::clear(chipId);
+}
+
+bool ConfigStore::clearAllDisplayNames() { return display_names::clearAll(); }
+
+bool ConfigStore::isDisplayNameTarget(uint32_t chipId) const {
+  if (!cfg_.role_tx || chipId == 0) return false;
+  const uint32_t ownChipId =
+      static_cast<uint32_t>(strtoul(chipIdHex().c_str(), nullptr, 16));
+  if (chipId == ownChipId) return true;
+  for (uint8_t i = 0; i < cfg_.known_peer_count; ++i) {
+    if (cfg_.known_peer_chip_ids[i] == chipId) return true;
+  }
+  return false;
+}
+
 bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials) {
+  const bool wasGateway = cfg_.role_tx;
   const String preservedFleetKey = cfg_.fleet_passphrase.c_str();
   const bool preservedFleetPromptDismissed = cfg_.fleet_setup_prompt_dismissed;
   const String preservedWifiSsid = cfg_.wifi_sta_ssid.c_str();
@@ -633,7 +667,11 @@ bool ConfigStore::factoryReset(bool keepSharedFleetKey, bool keepWifiCredentials
            keepWifiCredentials ? 1U : 0U,
            maskedKey,
            cfg_.wifi_sta_ssid.c_str());
-  return save();
+  if (!save()) return false;
+  if (wasGateway && !clearAllDisplayNames()) {
+    LRS_LOGE(FS, "event=display_names_clear_all_failed reason=gateway_factory_reset");
+  }
+  return true;
 }
 
 bool ConfigStore::schedulePostOtaFactoryReset(bool keepSharedFleetKey, bool keepWifiCredentials) {

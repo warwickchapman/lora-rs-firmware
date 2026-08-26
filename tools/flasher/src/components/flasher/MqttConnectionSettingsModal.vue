@@ -98,23 +98,23 @@ const computedShowPass = computed({
         </div>
       </div>
 
-      <div class="flex items-center justify-between border-t border-slate-800 bg-slate-950/30 px-3 py-2">
-        <span :class="['inline-flex h-8 items-center rounded border px-2 text-[10px] font-bold', sessionMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/30 px-3 py-3">
+        <span :class="['inline-flex h-9 items-center rounded border px-3 text-[10px] font-bold', sessionMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
           MQTT {{ sessionMqttConnected ? 'connected' : 'disconnected' }}
         </span>
-        <div class="flex gap-2">
-          <button @click="emit('close')" class="glass-input h-8 px-3 hover:bg-slate-700/70 text-xs font-bold">Cancel</button>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <button @click="emit('close')" class="glass-input inline-flex h-9 min-h-9 items-center justify-center px-4 py-0 text-xs font-bold leading-none hover:bg-slate-700/70">Cancel</button>
           <button
             v-if="sessionMqttConnected"
             @click="emit('disconnect')"
-            class="glass-input h-8 px-3 text-xs font-bold"
+            class="glass-input inline-flex h-9 min-h-9 items-center justify-center px-4 py-0 text-xs font-bold leading-none"
           >
             Disconnect
           </button>
           <button
             @click="emit('connect')"
             :disabled="!computedHost"
-            class="primary-btn h-8 px-3 text-xs font-bold disabled:opacity-50"
+            class="primary-btn inline-flex h-9 min-h-9 items-center justify-center whitespace-nowrap px-4 py-0 text-xs font-bold leading-none disabled:opacity-50"
           >
             {{ sessionMqttConnected ? 'Save and reconnect' : 'Connect' }}
           </button>

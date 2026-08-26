@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue';
+import InlineDisplayName from './InlineDisplayName.vue';
+import UiIcon from './UiIcon.vue';
 
 export interface FleetConfig {
   selectedVersion: string;
@@ -19,9 +21,13 @@ export interface FleetGatewayStatus {
   isFlashing: boolean;
   flashDisabled: boolean;
   flashUnavailableReason: string;
+  chipId: string;
   name: string;
+  displayName: string;
+  nameSaving: boolean;
+  nameLoading: boolean;
+  nameUnavailable: boolean;
   firmware: string;
-  role: string;
   addressLine: string;
   wifiLine: string;
   wifiIp?: string;
@@ -35,7 +41,7 @@ export interface FleetGatewayStatus {
 }
 
 export interface FleetServerStatus {
-  activeReference: string | null;
+  activeUrl: string | null;
   statusLine: string;
   progressLabel: string;
   versions: string[];
@@ -57,7 +63,6 @@ export interface FleetTransportState {
 export interface FleetInventorySummary {
   totalCount: number;
   selectedCount: number;
-  hasAnyRemoteIp: boolean;
 }
 
 export interface FleetCandidateSummary {
@@ -68,10 +73,14 @@ export interface FleetCandidateSummary {
 export interface FleetDisplayRow {
   address: number | string;
   selected: boolean;
+  chipId: string;
   deviceName: string;
+  displayName: string;
+  nameSaving: boolean;
+  nameLoading: boolean;
+  nameUnavailable: boolean;
   conflict_chip_id?: string;
   fw_version?: string;
-  roleModeLabel: string;
   wifi_pending_offline?: boolean;
   wifi_connected_known?: boolean;
   wifi_connected?: boolean;
@@ -150,10 +159,15 @@ const emit = defineEmits<{
   (e: 'remote-factory-reset', address: number | string): void;
   (e: 'selected-factory-reset'): void;
   (e: 'candidate-adopt', payload: FleetCandidateActionPayload): void;
+  (e: 'save-display-name', chipId: string, displayName: string): void;
 }>();
 
 const actionMenuTrigger = ref<HTMLElement | null>(null);
 const actionMenuStyle = ref<Record<string, string>>({ visibility: 'hidden' });
+const fleetColumnWidths = [
+  '2.5%', '4.5%', '9.5%', '7.5%', '13%', '7%', '7.5%',
+  '9.5%', '5%', '11%', '7%', '7%', '3.5%', '5.5%'
+] as const;
 
 function positionActionMenu() {
   const trigger = actionMenuTrigger.value;
@@ -208,6 +222,10 @@ const computedSelectedVersion = computed({
   set: (val) => { config.value = { ...config.value, selectedVersion: val }; }
 });
 
+function handleDisplayNameSave(chipId: string, displayName: string) {
+  emit('save-display-name', chipId, displayName);
+}
+
 </script>
 
 <template>
@@ -243,7 +261,7 @@ const computedSelectedVersion = computed({
         <option v-for="v in server.versions" :key="v" :value="v">{{ v === server.localOption ? 'Choose a file' : v }}</option>
       </select>
       <button @click="emit('firmware-fetch')" :disabled="server.isFetchingFirmware" class="glass-input m-0 h-9 px-3 hover:bg-slate-700/70">Refresh</button>
-      <span v-if="server.activeReference" class="font-mono text-slate-500 truncate max-w-80">{{ server.activeReference }}</span>
+      <span v-if="server.activeUrl" class="shrink-0 whitespace-nowrap font-mono text-slate-500">{{ server.activeUrl }}</span>
     </div>
 
     <div class="glass-card p-3 flex flex-col gap-3 text-left shrink-0">
@@ -257,27 +275,19 @@ const computedSelectedVersion = computed({
           </div>
           <div class="mt-1 text-xs text-slate-500">{{ gateway.summary }}</div>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            @click="emit('gateway-identify')"
-            :disabled="gateway.isIdentifyDisabled"
-            :class="['glass-input m-0 h-9 w-11 hover:bg-slate-700/70 flex items-center justify-center disabled:opacity-50', { 'identify-led-active': gateway.isIdentifying }]"
-            :title="transportState.fleetTransport === 'mqtt' ? 'Identify selected MQTT gateway' : 'Identify selected USB gateway'"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 identify-led-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8.5 14.5a6 6 0 1 1 7 0c-.8.7-1.5 1.6-1.5 2.5h-4c0-.9-.7-1.8-1.5-2.5Z"></path><path d="M12 2v2"></path><path d="m4.9 4.9 1.4 1.4"></path><path d="M2 12h2"></path><path d="m19.1 4.9-1.4 1.4"></path><path d="M20 12h2"></path></svg>
-          </button>
-
-        </div>
       </div>
       <div class="overflow-x-auto rounded-md border border-slate-800">
-        <table class="w-full min-w-[1180px] border-collapse text-xs">
+        <table class="w-full min-w-[1180px] table-fixed border-collapse text-xs">
+          <colgroup>
+            <col v-for="(width, index) in fleetColumnWidths" :key="index" :style="{ width }" />
+          </colgroup>
           <thead class="bg-slate-950/95 text-slate-500">
             <tr class="border-b border-slate-800">
               <th class="w-10 px-2 py-1.5 text-left"></th>
               <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
               <th class="px-2 py-1.5 text-left font-semibold">Device</th>
               <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
-              <th class="px-2 py-1.5 text-left font-semibold">Role</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Name</th>
               <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
               <th class="px-2 py-1.5 text-left font-semibold">Power Save</th>
               <th class="px-2 py-1.5 text-left font-semibold">IP</th>
@@ -297,7 +307,16 @@ const computedSelectedVersion = computed({
               </td>
               <td class="px-2 py-1.5 font-mono text-slate-300">{{ gateway.name }}</td>
               <td class="px-2 py-1.5 font-mono text-slate-400">{{ gateway.firmware }}</td>
-              <td class="px-2 py-1.5 text-slate-300">{{ gateway.role }}</td>
+              <td class="px-2 py-1.5">
+                <InlineDisplayName
+                  :chip-id="gateway.chipId"
+                  :display-name="gateway.displayName"
+                  :saving="gateway.nameSaving"
+                  :loading="gateway.nameLoading"
+                  :unavailable="gateway.nameUnavailable"
+                  @save="handleDisplayNameSave"
+                />
+              </td>
               <td class="px-2 py-1.5">
                 <template v-if="gateway.wifiConnected">
                   <span
@@ -348,12 +367,36 @@ const computedSelectedVersion = computed({
                     @click.stop
                     class="fixed z-[100] w-40 rounded-md border border-slate-800 bg-slate-950/95 backdrop-blur-md py-1 shadow-2xl origin-top-right select-none font-medium"
                   >
-                    <button @click="emit('gateway-flash'); activeDropdownAddress = null" :disabled="gateway.flashDisabled || !gateway.isUpgradeAvailable" :title="gateway.flashUnavailableReason" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none">⚡ Upgrade</button>
-                    <button @click="emit('gateway-settings'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">🛠️ Commands</button>
-                    <button @click="emit('gateway-reboot'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">🔄 Reboot</button>
-                    <button @click="emit('gateway-view-logs'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">📋 View Logs</button>
+                    <button @click="emit('gateway-flash'); activeDropdownAddress = null" :disabled="gateway.flashDisabled || !gateway.isUpgradeAvailable" :title="gateway.flashUnavailableReason" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none">
+                      <UiIcon kind="flash" />
+                      Upgrade
+                    </button>
+                    <button
+                      @click="emit('gateway-identify'); activeDropdownAddress = null"
+                      :disabled="gateway.isIdentifyDisabled"
+                      :class="['w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none', { 'identify-led-active': gateway.isIdentifying }]"
+                      :title="transportState.fleetTransport === 'mqtt' ? 'Identify selected MQTT gateway' : 'Identify selected USB gateway'"
+                    >
+                      <UiIcon kind="identify" />
+                      Flash LED
+                    </button>
+                    <button @click="emit('gateway-settings'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">
+                      <UiIcon kind="settings" />
+                      Settings
+                    </button>
+                    <button @click="emit('gateway-reboot'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">
+                      <UiIcon kind="reboot" />
+                      Reboot
+                    </button>
+                    <button @click="emit('gateway-view-logs'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none">
+                      <UiIcon kind="logs" />
+                      View Logs
+                    </button>
                     <div class="h-[1px] bg-slate-800/80 my-1"></div>
-                    <button @click="emit('gateway-factory-reset'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none">⚠️ Factory Reset</button>
+                    <button @click="emit('gateway-factory-reset'); activeDropdownAddress = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none">
+                      <UiIcon kind="warning" />
+                      Factory Reset
+                    </button>
                   </div>
                 </Teleport>
               </td>
@@ -381,17 +424,20 @@ const computedSelectedVersion = computed({
         </div>
       </div>
       <div class="min-h-0 flex-1 overflow-auto custom-scrollbar rounded-md border border-slate-800">
-        <table class="w-full min-w-[1180px] border-collapse text-xs">
+        <table class="w-full min-w-[1180px] table-fixed border-collapse text-xs">
+          <colgroup>
+            <col v-for="(width, index) in fleetColumnWidths" :key="index" :style="{ width }" />
+          </colgroup>
           <thead class="sticky top-0 bg-slate-950/95 text-slate-500">
             <tr class="border-b border-slate-800">
               <th class="w-10 px-2 py-1.5 text-left"></th>
               <th class="px-2 py-1.5 text-left font-semibold">Addr</th>
               <th class="px-2 py-1.5 text-left font-semibold">Device</th>
               <th class="px-2 py-1.5 text-left font-semibold">Firmware</th>
-              <th class="px-2 py-1.5 text-left font-semibold">Role</th>
+              <th class="px-2 py-1.5 text-left font-semibold">Name</th>
               <th class="px-2 py-1.5 text-left font-semibold">WiFi</th>
               <th class="px-2 py-1.5 text-left font-semibold">Power Save</th>
-              <th v-if="inventorySummary.hasAnyRemoteIp" class="px-2 py-1.5 text-left font-semibold">IP</th>
+              <th class="px-2 py-1.5 text-left font-semibold">IP</th>
               <th class="px-2 py-1.5 text-left font-semibold">Relay</th>
               <th class="px-2 py-1.5 text-left font-semibold">Sensors</th>
               <th class="px-2 py-1.5 text-left font-semibold">Uptime</th>
@@ -402,8 +448,8 @@ const computedSelectedVersion = computed({
           </thead>
           <tbody>
             <tr v-if="rows.length === 0">
-              <td :colspan="inventorySummary.hasAnyRemoteIp ? 14 : 13" class="px-3 py-8 text-center text-slate-600">
-                {{ transportState.fleetTransport === 'mqtt' ? 'Select an MQTT gateway to read its peer cache, or Scan to probe remotes.' : 'Select a USB gateway to read its peer cache, or Scan to probe remotes.' }}
+              <td colspan="14" class="px-3 py-8 text-center text-slate-600">
+                {{ transportState.fleetTransport === 'mqtt' ? 'Connect to an MQTT broker and select a gateway to read its peer cache.' : 'Connect a USB gateway to read its peer cache.' }}
               </td>
             </tr>
             <tr
@@ -434,7 +480,16 @@ const computedSelectedVersion = computed({
                 </div>
               </td>
               <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.fw_version || '-' }}</td>
-              <td class="px-2 py-1.5 text-slate-300">{{ device.roleModeLabel }}</td>
+              <td class="px-2 py-1.5">
+                <InlineDisplayName
+                  :chip-id="device.chipId"
+                  :display-name="device.displayName"
+                  :saving="device.nameSaving"
+                  :loading="device.nameLoading"
+                  :unavailable="device.nameUnavailable"
+                  @save="handleDisplayNameSave"
+                />
+              </td>
               <td class="px-2 py-1.5">
                 <span 
                   v-if="device.wifi_pending_offline"
@@ -491,7 +546,7 @@ const computedSelectedVersion = computed({
                 </template>
                 <span v-else class="text-slate-500">-</span>
               </td>
-              <td v-if="inventorySummary.hasAnyRemoteIp" class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
+              <td class="px-2 py-1.5 font-mono text-slate-400">{{ device.ip || '-' }}</td>
               <td class="px-2 py-1.5">
                 <template v-if="device.ageSeconds !== null">
                   <span :class="['rounded border px-2 py-1 text-[10px] font-bold', device.relayLabel === 'On' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : device.relayLabel === 'Off' ? 'border-slate-600 bg-slate-800/50 text-slate-300' : 'border-slate-800 bg-slate-900/50 text-slate-500']">
@@ -580,20 +635,23 @@ const computedSelectedVersion = computed({
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 disabled:opacity-40 transition-colors flex items-center gap-2 select-none"
                       :title="device.flashUnavailableReason"
                     >
-                      ⚡ Flash
+                      <UiIcon kind="flash" />
+                      Flash
                     </button>
 
                     <button
                       @click="emit('remote-settings', device.address)"
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                     >
-                      🛠️ Commands
+                      <UiIcon kind="settings" />
+                      Settings
                     </button>
                     <button
                       @click="emit('remote-reboot', device.address)"
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none"
                     >
-                      🔄 Reboot
+                      <UiIcon kind="reboot" />
+                      Reboot
                     </button>
                     <button
                       @click="emit('remote-identify', device.address); activeDropdownAddress = null"
@@ -601,7 +659,8 @@ const computedSelectedVersion = computed({
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none disabled:opacity-40"
                       :title="device.power_save_active ? 'Unavailable while Power Save is active' : (device.identifyPending ? 'Waiting for remote acknowledgement' : 'Flash the remote status LED')"
                     >
-                      💡 Flash LED
+                      <UiIcon kind="identify" />
+                      Flash LED
                     </button>
                     <button
                       @click="emit('remote-view-logs', device.address); activeDropdownAddress = null"
@@ -609,20 +668,23 @@ const computedSelectedVersion = computed({
                       class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-[11px] font-bold text-slate-300 transition-colors flex items-center gap-2 select-none disabled:opacity-40"
                       :title="(!device.wifi_connected || !device.ip) ? 'Remote device has no active WiFi or IP' : 'Trigger remote UDP logging'"
                     >
-                      📋 View Logs
+                      <UiIcon kind="logs" />
+                      View Logs
                     </button>
                     <button
                       @click="emit('remote-forget', device.address); activeDropdownAddress = null"
                       class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
                     >
-                      🗑️ Forget device
+                      <UiIcon kind="forget" />
+                      Forget device
                     </button>
                     <div class="h-[1px] bg-slate-800/80 my-1"></div>
                     <button
                       @click="emit('remote-factory-reset', device.address)"
                       class="w-full text-left px-3 py-1.5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-bold text-rose-300/80 transition-colors flex items-center gap-2 select-none"
                     >
-                      ⚠️ Factory Reset
+                      <UiIcon kind="warning" />
+                      Factory Reset
                     </button>
                   </div>
                 </Teleport>

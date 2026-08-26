@@ -387,10 +387,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
 
   const selectedLoraInventoryCount = computed(() => loraInventory.value.filter(d => d.selected).length);
 
-  const hasAnyRemoteIp = computed(() => {
-    return loraInventory.value.some(d => !!d.ip);
-  });
-
   const loraInventoryProgressLabel = computed(() => {
     const scan = loraInventoryScan.value;
     if (scan?.active) return 'Device discovery is running; normal inventory refresh is deferred';
@@ -657,7 +653,6 @@ export function useFleetInventory(options: UseFleetInventoryOptions) {
     loraInventoryProgressLabel,
     remotesAndCandidatesStatusLine,
     selectedLoraInventoryCount,
-    hasAnyRemoteIp,
     mergeInventoryRows,
     mergeMonitorRows,
     applyTelemetryUpdate,

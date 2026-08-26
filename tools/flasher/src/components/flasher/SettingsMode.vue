@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import UiIcon from './UiIcon.vue';
 
 export type SettingsTab = 'general' | 'control' | 'network' | 'mqtt' | 'sensors' | 'remote' | 'system';
 export type RemoteSubTab = 'serial' | 'mqtt' | 'lora';
@@ -51,7 +52,7 @@ export interface SettingsTransportState {
   mqttGateways: Record<string, SettingsTransportOptionGateway>;
   manualMqttGatewayError: string | null;
   isSelectedMqttGatewayDiscovered: boolean;
-  sessionMqttConnected: boolean;
+  mqttConnectionState: 'disconnected' | 'connecting' | 'connected' | 'error';
 }
 
 export interface SettingsAdminStatusState {
@@ -145,14 +146,11 @@ defineProps<{
   secretState: SettingsSecretState;
   wifiState: SettingsWifiState;
   serialAdminIsFactoryDefault: boolean;
-  hasActiveDeviceInfo: boolean;
   settingsEmptyMessage: string;
 }>();
 
 const emit = defineEmits<{
   (e: 'trigger-identify'): void;
-  (e: 'read-device-info'): void;
-  (e: 'refresh-status'): void;
   (e: 'fetch-settings'): void;
   (e: 'copy-config-json'): void;
   (e: 'refresh-ports'): void;
@@ -437,22 +435,30 @@ function handleManualMqttGatewayInput(val: string) {
               <circle cx="12" cy="8" r="2.1" fill="currentColor"></circle>
             </svg>
           </button>
-          <button v-if="transportState.settingsTransport !== 'mqtt'" @click="emit('read-device-info')" :disabled="headerState.isFlashing || headerState.isLoadingInfo" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-            {{ headerState.isLoadingInfo ? 'Reading...' : 'Read identity' }}
-          </button>
-          <button @click="emit('refresh-status')" :disabled="headerState.serialAdminDisabled" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-            {{ headerState.isSerialAdminLoading ? 'Loading...' : 'Refresh status' }}
-          </button>
           <button @click="emit('fetch-settings')" :disabled="!computedSelectedPort || headerState.isFlashing || headerState.isLoadingInfo || headerState.serialAdminBusy" class="primary-btn m-0 h-10 px-4 text-xs font-bold disabled:opacity-60">
             {{ headerState.isSerialAdminLoading ? 'Fetching...' : 'Fetch settings' }}
           </button>
-          <button @click="emit('copy-config-json')" :disabled="!headerState.serialAdminConfigExists" class="glass-input m-0 h-10 px-4 hover:bg-slate-700/70 text-xs font-bold disabled:opacity-60">
-            Copy config JSON
+          <button
+            @click="emit('copy-config-json')"
+            :disabled="!headerState.serialAdminConfigExists"
+            :class="[
+              'flex h-10 w-10 items-center justify-center rounded border transition-all',
+              headerState.serialAdminConfigExists
+                ? 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                : 'cursor-not-allowed border-slate-800 text-slate-600 opacity-50'
+            ]"
+            title="Copy config JSON"
+            aria-label="Copy config JSON"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
           </button>
         </div>
       </div>
 
-      <div :class="['grid grid-cols-1 gap-2', transportState.settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_8rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem]']">
+      <div :class="['grid grid-cols-1 gap-2', transportState.settingsTransport === 'mqtt' ? 'md:grid-cols-[minmax(0,1fr)_8rem_10rem_2.5rem_3.5rem]' : 'md:grid-cols-[minmax(0,1fr)_10rem]']">
         <div class="flex flex-col gap-1.5 text-xs">
           <label class="font-medium text-slate-400">Settings target</label>
           <div class="flex gap-2">
@@ -478,8 +484,8 @@ function handleManualMqttGatewayInput(val: string) {
                   {{ transportState.manualMqttGatewayError }}
                 </span>
               </div>
-              <select v-else v-model="computedSelectedMqttGatewayChipId" class="glass-input h-9 flex-1 appearance-none w-full">
-                <option value="" disabled>Select MQTT gateway</option>
+              <select v-else v-model="computedSelectedMqttGatewayChipId" class="glass-input h-9 w-full shrink-0 appearance-none">
+                <option value="" disabled>Select gateway</option>
                 <option v-for="gw in Object.values(transportState.mqttGateways)" :key="gw.chip_id" :value="gw.chip_id">
                   {{ lrsDeviceName(gw.chip_id) }} (lrs-{{ gw.chip_id }})
                 </option>
@@ -508,7 +514,7 @@ function handleManualMqttGatewayInput(val: string) {
               v-model="computedSettingsAdminPassword"
               :type="computedShowSettingsAdminPassword ? 'text' : 'password'"
               class="glass-input h-9 w-full pr-10 font-mono text-xs"
-              placeholder="Enter admin password"
+              placeholder="Enter password"
             />
             <button
               type="button"
@@ -521,19 +527,22 @@ function handleManualMqttGatewayInput(val: string) {
             </button>
           </div>
         </div>
-        <div v-if="transportState.settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">MQTT config</label>
+        <div v-if="transportState.settingsTransport === 'mqtt'" class="flex flex-col justify-end text-xs">
           <button
             @click="emit('open-mqtt-settings')"
-            class="glass-input h-9 hover:bg-slate-700/70 text-xs font-bold whitespace-nowrap"
+            class="glass-input flex h-9 w-10 items-center justify-center p-0 text-slate-400 hover:bg-slate-700/70 hover:text-slate-200"
+            aria-label="MQTT broker settings"
           >
-            Broker config
+            <UiIcon kind="settings" />
           </button>
         </div>
-        <div v-if="transportState.settingsTransport === 'mqtt'" class="flex flex-col gap-1.5 text-xs">
-          <label class="font-medium text-slate-400">MQTT broker</label>
-          <span :class="['inline-flex h-9 items-center justify-center rounded border px-2 text-[10px] font-bold whitespace-nowrap', transportState.sessionMqttConnected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-800/50 text-slate-400']">
-            {{ transportState.sessionMqttConnected ? 'Connected' : 'Offline' }}
+        <div v-if="transportState.settingsTransport === 'mqtt'" class="flex flex-col items-start justify-end pb-1 text-xs">
+          <span :class="['inline-flex h-7 min-w-12 items-center justify-center rounded border px-2 text-[9px] font-bold whitespace-nowrap',
+            transportState.mqttConnectionState === 'connected' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' :
+            transportState.mqttConnectionState === 'connecting' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
+            transportState.mqttConnectionState === 'error' ? 'border-rose-500/30 bg-rose-500/10 text-rose-300' :
+            'border-slate-700 bg-slate-800/50 text-slate-400']">
+            {{ transportState.mqttConnectionState === 'connected' ? 'OK' : transportState.mqttConnectionState === 'connecting' ? 'Wait' : transportState.mqttConnectionState === 'error' ? 'Error' : 'Offline' }}
           </span>
         </div>
       </div>
@@ -556,11 +565,8 @@ function handleManualMqttGatewayInput(val: string) {
           Factory default: this device is not commissioned yet. Use Provision before treating it as an operational gateway or remote.
         </div>
 
-        <div v-if="!hasActiveDeviceInfo && transportState.settingsTransport !== 'mqtt' && computedSettingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
-          Select a USB device and read device info before loading or saving settings.
-        </div>
-        <div v-if="transportState.settingsTransport === 'mqtt' && !config && computedSettingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
-          Select an MQTT gateway and fetch settings to edit configuration.
+        <div v-if="!config && !headerState.isSerialAdminLoading && computedSettingsTab !== 'remote'" class="rounded border border-slate-800 bg-slate-950/30 p-3 text-xs text-slate-500">
+          {{ settingsEmptyMessage }}
         </div>
 
         <div v-if="computedSettingsTab === 'general'" class="flex flex-col gap-3">
@@ -747,7 +753,8 @@ function handleManualMqttGatewayInput(val: string) {
               <div class="rounded border border-cyan-500/20 bg-cyan-950/15 p-3 text-cyan-200 leading-relaxed shadow-[inset_0_1px_0_rgba(6,182,212,0.15)] select-text">
                 <div class="font-bold text-sm text-cyan-100 mb-1 flex items-center gap-1.5">
                   <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]"></span>
-                  🌐 Remote MQTT Routing Bridge Active
+                  <UiIcon kind="mqtt" />
+                  Remote MQTT Routing Bridge Active
                 </div>
                 This device is configured with the <span class="font-bold text-cyan-100">Remote</span> role.
                 <p class="mt-2 text-slate-300">
@@ -757,7 +764,8 @@ function handleManualMqttGatewayInput(val: string) {
                   The Gateway automatically connects to the MQTT broker and bridges all sensor telemetry and command topics to the broker on behalf of this remote device.
                 </p>
                 <p class="mt-3 text-cyan-300 font-semibold border-t border-cyan-500/20 pt-2 flex items-center gap-2">
-                  💡 Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
+                  <UiIcon kind="identify" />
+                  Remote configuration (like WiFi provisioning, sensor toggles, or reboots) happens over LoRa from the Gateway's MQTT peer command interface.
                 </p>
               </div>
 
@@ -876,21 +884,24 @@ function handleManualMqttGatewayInput(val: string) {
               type="button"
               :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', computedRemoteSubTab === 'serial' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
             >
-              <span class="font-mono text-[10px]">🔌</span> Serial Admin API
+              <UiIcon kind="serial" />
+              Serial Admin API
             </button>
             <button
               @click="computedRemoteSubTab = 'mqtt'"
               type="button"
               :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', computedRemoteSubTab === 'mqtt' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
             >
-              <span class="font-mono text-[10px]">🌐</span> MQTT Bridge
+              <UiIcon kind="mqtt" />
+              MQTT Bridge
             </button>
             <button
               @click="computedRemoteSubTab = 'lora'"
               type="button"
               :class="['m-0 h-8 rounded px-4 font-bold transition-all flex items-center gap-1.5', computedRemoteSubTab === 'lora' ? 'bg-cyan-700 text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40']"
             >
-              <span class="font-mono text-[10px]">📡</span> LoRa OTA Protocol
+              <UiIcon kind="lora" />
+              LoRa OTA Protocol
             </button>
           </div>
 
@@ -900,7 +911,7 @@ function handleManualMqttGatewayInput(val: string) {
             <!-- ================== SERIAL PANEL ================== -->
             <div v-if="computedRemoteSubTab === 'serial'" class="flex flex-col gap-3">
               <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
-                <div class="font-semibold text-slate-100 mb-1">🔌 Local USB Admin Interface</div>
+                <div class="mb-1 flex items-center gap-1.5 font-semibold text-slate-100"><UiIcon kind="serial" /> Local USB Admin Interface</div>
                 Devices running this firmware listen on the hardware USB UART (**115200 Baud, 8N1**). All commands are JSON payloads transmitted on lines prefixed with <code class="font-mono text-cyan-400 font-bold bg-slate-950/50 px-1 rounded">LRS:</code> and terminated with a newline (<code class="font-mono text-slate-400">\n</code>).
               </div>
 
@@ -976,7 +987,7 @@ function handleManualMqttGatewayInput(val: string) {
 
               <!-- Fleet Coordination Commands Card -->
               <div class="glass-card p-3 flex flex-col gap-2">
-                <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📡 Gateway-Only Fleet Coordination Commands</div>
+                <div class="flex items-center gap-1.5 border-b border-slate-800 pb-1 font-bold text-slate-200"><UiIcon kind="lora" /> Gateway-Only Fleet Coordination Commands</div>
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 mt-1 text-slate-400">
                   <div class="bg-slate-950/20 border border-slate-800 p-2.5 rounded flex flex-col gap-1">
                     <div class="flex justify-between items-center">
@@ -1001,7 +1012,7 @@ function handleManualMqttGatewayInput(val: string) {
             <!-- ================== MQTT PANEL ================== -->
             <div v-if="computedRemoteSubTab === 'mqtt'" class="flex flex-col gap-3">
               <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
-                <div class="font-semibold text-slate-100 mb-1">🌐 MQTT Bridge Protocol</div>
+                <div class="mb-1 flex items-center gap-1.5 font-semibold text-slate-100"><UiIcon kind="mqtt" /> MQTT Bridge Protocol</div>
                 Operational gateways with <code class="font-mono bg-slate-950/50 px-1 rounded text-cyan-400">mqtt_client_enabled</code> configured will publish live local telemetry and all received LoRa remote reports, while listening on local and peer-specific control channels.
               </div>
 
@@ -1052,7 +1063,7 @@ function handleManualMqttGatewayInput(val: string) {
 
               <!-- Telemetry Publishing Details -->
               <div class="glass-card p-3 flex flex-col gap-2">
-                <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Telemetry & Status Publishing Map</div>
+                <div class="flex items-center gap-1.5 border-b border-slate-800 pb-1 font-bold text-slate-200"><UiIcon kind="diagnostics" /> Telemetry & Status Publishing Map</div>
                 <div class="text-slate-400 mt-1">
                   The gateway automatically publishes status and payload telemetry to these topics:
                   <div class="grid gap-3 sm:grid-cols-2 mt-2">
@@ -1086,14 +1097,14 @@ function handleManualMqttGatewayInput(val: string) {
             <!-- ================== LORA PANEL ================== -->
             <div v-if="computedRemoteSubTab === 'lora'" class="flex flex-col gap-3">
               <div class="rounded border border-slate-800 bg-slate-950/20 p-3 text-slate-300">
-                <div class="font-semibold text-slate-100 mb-1">📡 LoRa Over-the-Air Secured Protocol</div>
+                <div class="mb-1 flex items-center gap-1.5 font-semibold text-slate-100"><UiIcon kind="lora" /> LoRa Over-the-Air Secured Protocol</div>
                 Devices communicate over the air using highly robust, low-bandwidth sub-GHz LoRa modulation. All payloads are encrypted and signed using dynamic session keys derived from the shared <code class="font-mono bg-slate-950/50 px-1 rounded text-cyan-400">fleet_passphrase</code> via **AES-128 and SHA-256**, protecting the network against spoofing and replay attacks.
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">
                 <!-- Diagnostic Reports (Uplink) -->
                 <div class="glass-card p-3 flex flex-col gap-2">
-                  <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">📈 Secured Diagnostic Reports (Uplink)</div>
+                  <div class="flex items-center gap-1.5 border-b border-slate-800 pb-1 font-bold text-slate-200"><UiIcon kind="diagnostics" /> Secured Diagnostic Reports (Uplink)</div>
                   <div class="flex flex-col gap-3 mt-1 text-slate-400">
                     <div>
                       <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::Heartbeat / PollResponse</span>
@@ -1113,7 +1124,7 @@ function handleManualMqttGatewayInput(val: string) {
 
                 <!-- Remote Control Downlinks -->
                 <div class="glass-card p-3 flex flex-col gap-2">
-                  <div class="font-bold text-slate-200 border-b border-slate-800 pb-1">⚙️ Secured Remote Configuration (Downlink)</div>
+                  <div class="flex items-center gap-1.5 border-b border-slate-800 pb-1 font-bold text-slate-200"><UiIcon kind="settings" /> Secured Remote Configuration (Downlink)</div>
                   <div class="flex flex-col gap-3 mt-1 text-slate-400">
                     <div>
                       <span class="font-semibold text-slate-300 font-mono text-cyan-300 font-bold">MessageType::WifiProvision</span>
@@ -1134,15 +1145,13 @@ function handleManualMqttGatewayInput(val: string) {
           </div>
         </div>
 
-        <p v-if="!adminStatus && !config && !headerState.isSerialAdminLoading && computedSettingsTab !== 'remote'" class="mt-3 text-xs text-slate-500">
-          {{ settingsEmptyMessage }}
-        </p>
       </div>
 
       <!-- Sticky action footer for saving settings globally -->
       <div v-if="config && computedSettingsTab !== 'remote'" class="flex shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900/60 p-3 text-xs">
-        <span class="text-slate-400">
-          💡 Changes must be saved to apply to the device.
+        <span class="flex items-center gap-1.5 text-slate-400">
+          <UiIcon kind="identify" />
+          Changes must be saved to apply to the device.
         </span>
         <div class="flex items-center gap-2">
           <button

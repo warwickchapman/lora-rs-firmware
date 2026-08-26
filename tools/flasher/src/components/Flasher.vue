@@ -5,6 +5,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useMqttAdmin } from '../composables/useMqttAdmin';
 import { buildChangedSettingsConfigPatch, buildSettingsConfigPatch, splitMqttSettingsConfigPatches } from '../composables/settingsConfigPatch';
 import { useSerialAdmin, SerialJobOptions } from '../composables/useSerialAdmin';
+import { canonicalDisplayNameChipId, useFleetDisplayNames } from '../composables/useFleetDisplayNames';
 import { useMqttConfigBuffer } from '../composables/useMqttConfigBuffer';
 import type { DeviceMqttConfig } from '../composables/useMqttConfigBuffer';
 import { useFleetInventory, CANDIDATE_RECENT_IDENTITY_MS, deriveCandidateLocalTimestamp, calculateDynamicAgeMs, calculateCandidateAgeMs, fleetDeviceWithDisplayState, applySeedWhitelist, missingInventoryDetailAddresses } from '../composables/useFleetInventory';
@@ -794,6 +795,22 @@ watch(settingsMqttGatewayChipId, (newVal) => {
   }
 });
 
+watch(
+  [settingsConnectionType, () => Object.keys(mqttGateways.value).sort().join(',')],
+  ([transport]) => {
+    if (transport !== 'mqtt') return;
+    const decision = chooseMqttGatewaySelection(
+      '',
+      settingsMqttGatewayChipId.value,
+      Object.keys(mqttGateways.value),
+    );
+    if (decision && decision.chipId !== settingsMqttGatewayChipId.value) {
+      settingsMqttGatewayChipId.value = decision.chipId;
+    }
+  },
+  { immediate: true }
+);
+
 async function ensureMqttGatewayDefaultState(rawChipId: string | undefined | null) {
   const chipId = normalizeChipId(rawChipId);
   if (!/^[0-9a-f]{6,8}$/.test(chipId)) return;
@@ -902,7 +919,6 @@ const {
   loraInventoryProgressLabel,
   remotesAndCandidatesStatusLine,
   selectedLoraInventoryCount,
-  hasAnyRemoteIp,
   mergeInventoryRows,
   mergeMonitorRows,
   applyTelemetryUpdate,
@@ -1414,8 +1430,8 @@ const serialAdminDisabled = computed(() => {
 });
 const serialStatusSummary = computed(() => {
   const st = serialAdminStatus.value;
-  if (!st && serialAdminConfig.value) return 'Settings loaded. Refresh status to inspect live firmware health.';
-  if (!st) return 'Fetch settings to edit configuration, or refresh status for live health.';
+  if (!st && serialAdminConfig.value) return 'Settings loaded. Fetch settings to refresh live firmware health.';
+  if (!st) return 'Fetch settings to load configuration and live firmware health.';
   if (!st.commissioned || st.fleet_passphrase_default) {
     return `Factory default · awaiting commissioning · addr ${st.local_address} · heap ${formatBytes(st.heap_free)} free`;
   }
@@ -1547,7 +1563,7 @@ const settingsTransportStateComputed = computed<SettingsTransportState>(() => ({
   ),
   manualMqttGatewayError: settingsManualMqttGatewayError.value,
   isSelectedMqttGatewayDiscovered: isSettingsMqttGatewayDiscovered.value,
-  sessionMqttConnected: sessionMqttConnected.value,
+  mqttConnectionState: sessionMqttConnectionState.value,
 }));
 
 const settingsAdminStatusStateComputed = computed<SettingsAdminStatusState | null>(() => {
@@ -1728,13 +1744,20 @@ const settingsEmptyMessage = computed(() => {
   if (settingsTab.value === 'remote') {
     return '';
   }
+  if (settingsTransport.value === 'mqtt') {
+    if (sessionMqttConnectionState.value !== 'connected') {
+      return 'Connect to the MQTT broker to discover a gateway.';
+    }
+    if (!settingsMqttGatewayChipId.value) {
+      return 'Select a gateway, then fetch settings.';
+    }
+    return 'Fetch settings to load configuration and live firmware health.';
+  }
   if (!hasActiveDeviceInfo.value) {
-    return settingsTransport.value === 'mqtt'
-      ? 'Select an MQTT gateway, connect the broker, then fetch settings.'
-      : 'Select a USB device, then read identity or fetch settings.';
+    return 'Select a USB device. Its identity will be read automatically; then fetch settings.';
   }
   if (settingsTab.value === 'general') {
-    return 'Fetch settings to edit role, addresses, and fleet identity. Refresh status for live firmware health.';
+    return 'Fetch settings to load configuration and live firmware health.';
   }
   if (settingsTab.value === 'control') {
     return 'Fetch settings to choose MQTT or gateway-input control and configure the selected control path.';
@@ -2607,13 +2630,20 @@ function handleFleetSelectedFactoryReset() {
   openFactoryResetModal(selected);
 }
 
-function handleFleetGatewaySettings() {
+async function handleFleetGatewaySettings() {
   activeDropdownAddress.value = null;
   if (fleetTransport.value === 'serial') {
-    settingsSelectedPort.value = gatewaySelectedPort.value;
+    settingsConnectionType.value = 'serial';
+    settingsSelectedPort.value = gatewaySessionSerialPort.value;
+  } else {
+    settingsConnectionType.value = 'mqtt';
+    settingsMqttGatewayChipId.value = gatewaySessionMqttGatewayChipId.value;
+    settingsMqttManualChipId.value = gatewaySessionMqttGatewayChipId.value;
   }
   settingsTab.value = 'general';
   activeMode.value = 'settings';
+  await nextTick();
+  await fetchSerialDeviceSettings();
 }
 
 function handleFleetGatewayViewLogs() {
@@ -3225,6 +3255,13 @@ async function sendEasyPairCommandOnPort<T = any>(port: string, cmd: string, pay
 
   return await runSerialAdminCommand<T>(port, cmd, payload, timeoutMs, options);
 }
+
+const fleetDisplayNames = useFleetDisplayNames(
+  async (target: string, cmd: string, payload: Record<string, unknown>, timeoutMs: number) =>
+    await sendEasyPairCommandOnPort(target, cmd, payload, timeoutMs, {
+      label: cmd === 'get_display_name' ? 'Load fleet display name' : 'Save fleet display name',
+    })
+);
 
 async function loadNetworkGateway() {
   if (fleetTransport.value === 'mqtt') {
@@ -4791,7 +4828,7 @@ async function saveSerialAdminConfig() {
     } else {
       if (selectedPort.value === port) {
         if (settingsTransport.value === 'mqtt' || out.network_restarted) {
-          pushSerialLog('Networking or transport may be restarting. Click "Refresh status" or "Fetch settings" manually once the device settles.');
+          pushSerialLog('Networking or transport may be restarting. Click "Fetch settings" manually once the device settles.');
           setTimeout(async () => {
             try {
               await refreshSerialAdminStatus(port);
@@ -6560,10 +6597,14 @@ const fleetDisplayRows = computed<FleetDisplayRow[]>(() => {
     return {
       address: displayDevice.address,
       selected: !!displayDevice.selected,
+      chipId: canonicalDisplayNameChipId(displayDevice.chip_id),
       deviceName: displayDevice.chip_id ? lrsDeviceName(displayDevice.chip_id) : '-',
+      displayName: fleetDisplayNames.names.value[canonicalDisplayNameChipId(displayDevice.chip_id)] || '',
+      nameSaving: !!fleetDisplayNames.saving.value[canonicalDisplayNameChipId(displayDevice.chip_id)],
+      nameLoading: !!fleetDisplayNames.loading.value[canonicalDisplayNameChipId(displayDevice.chip_id)],
+      nameUnavailable: !!fleetDisplayNames.unavailable.value[canonicalDisplayNameChipId(displayDevice.chip_id)],
       conflict_chip_id: displayDevice.conflict_chip_id,
       fw_version: displayDevice.fw_version,
-      roleModeLabel: `${displayDevice.role || '-'} / ${displayDevice.mode || '-'}`,
       wifi_pending_offline: !!displayDevice.wifi_pending_offline,
       wifi_connected_known: !!displayDevice.wifi_connected_known,
       wifi_connected: !!displayDevice.wifi_connected,
@@ -6634,6 +6675,9 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
   const rebootAlertLine = rebootAlert
     ? `Uptime rolled back from ${formatUptime(rebootAlert.previousUptimeMs)} to ${formatUptime(rebootAlert.currentUptimeMs)}.`
     : '';
+  const gatewayChipId = canonicalDisplayNameChipId(
+    fleetGatewayStatus.value?.chip_id || fleetGatewayIdentity.value?.chip_id
+  );
   return {
     hasGatewayDeviceWarning: !!(gatewaySessionSerialPort.value && info?.status && !info.status.role_tx),
     hasUnexpectedReboot: !!rebootAlert,
@@ -6648,9 +6692,13 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
     isFlashing: isFlashing.value,
     flashDisabled: fleetGatewayFlashDisabled.value,
     flashUnavailableReason: fleetGatewayFlashUnavailableReason(),
-    name: lrsDeviceName(fleetGatewayStatus.value?.chip_id || fleetGatewayIdentity.value?.chip_id),
+    chipId: gatewayChipId,
+    name: lrsDeviceName(gatewayChipId),
+    displayName: fleetDisplayNames.names.value[gatewayChipId] || '',
+    nameSaving: !!fleetDisplayNames.saving.value[gatewayChipId],
+    nameLoading: !!fleetDisplayNames.loading.value[gatewayChipId],
+    nameUnavailable: !!fleetDisplayNames.unavailable.value[gatewayChipId],
     firmware: displayFirmwareVersion(fleetGatewayStatus.value?.fw_version),
-    role: fleetGatewayStatus.value?.role || '-',
     addressLine: fleetGatewayStatus.value
       ? `${fleetGatewayStatus.value.local_address}`
       : fleetGatewayIdentity.value
@@ -6687,8 +6735,8 @@ const fleetGatewayStatusComputed = computed<FleetGatewayStatus>(() => {
 });
 
 const fleetServerStatusComputed = computed<FleetServerStatus>(() => ({
-  activeReference: firmwareServerInfo.value
-    ? `${firmwareServerInfo.value.filename} · ${firmwareServerInfo.value.urls[0] || `port ${firmwareServerInfo.value.port}`}`
+  activeUrl: firmwareServerInfo.value
+    ? firmwareServerInfo.value.urls[0] || `port ${firmwareServerInfo.value.port}`
     : null,
   statusLine: remotesAndCandidatesStatusLine.value,
   progressLabel: loraInventoryProgressLabel.value,
@@ -6799,6 +6847,60 @@ const gatewaySessionIsActive = computed(() => {
   }
   return true;
 });
+
+const fleetDisplayNameContext = computed(() => {
+  const target = gatewaySessionTargetKey.value;
+  return target ? `${fleetTransport.value}:${target}` : '';
+});
+
+const fleetDisplayNameLoadState = computed(() => {
+  const gatewayChipId = canonicalDisplayNameChipId(
+    fleetGatewayStatus.value?.chip_id || fleetGatewayIdentity.value?.chip_id
+  );
+  const remoteChipIds = loraInventory.value
+    .map(device => canonicalDisplayNameChipId(device.chip_id))
+    .filter(Boolean);
+  return {
+    context: fleetDisplayNameContext.value,
+    target: gatewaySessionTargetKey.value,
+    adminPassword: gatewaySessionAdminPassword.value,
+    usable: activeMode.value === 'network' && gatewaySessionIsActive.value && !!gatewayChipId,
+    chipIds: [gatewayChipId, ...remoteChipIds],
+    chipKey: [gatewayChipId, ...remoteChipIds].join(','),
+  };
+});
+
+watch(fleetDisplayNameLoadState, state => {
+  if (!state.usable || !state.adminPassword) {
+    fleetDisplayNames.resetContext('');
+    return;
+  }
+  fleetDisplayNames.resetContext(state.context);
+  void fleetDisplayNames.load(
+    state.context,
+    state.target,
+    state.adminPassword,
+    state.chipIds,
+  );
+}, { immediate: true });
+
+watch(gatewaySessionAdminPassword, (password, previousPassword) => {
+  if (password !== previousPassword) fleetDisplayNames.resetContext('');
+}, { flush: 'sync' });
+
+async function saveFleetDisplayName(chipId: string, displayName: string) {
+  try {
+    await fleetDisplayNames.save(
+      fleetDisplayNameContext.value,
+      gatewaySessionTargetKey.value,
+      gatewaySessionAdminPassword.value,
+      chipId,
+      displayName,
+    );
+  } catch (reason) {
+    notify(`Name was not saved: ${String(reason instanceof Error ? reason.message : reason)}`);
+  }
+}
 
 function publishSupportSnapshot() {
   const gateways: Array<{
@@ -7149,8 +7251,7 @@ const fleetTransportStateComputed = computed<FleetTransportState>(() => ({
 
 const fleetInventorySummaryComputed = computed<FleetInventorySummary>(() => ({
   totalCount: loraInventory.value.length,
-  selectedCount: selectedLoraInventoryCount.value,
-  hasAnyRemoteIp: hasAnyRemoteIp.value
+  selectedCount: selectedLoraInventoryCount.value
 }));
 
 const fleetCandidateSummaryComputed = computed<FleetCandidateSummary>(() => ({
@@ -7515,11 +7616,8 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         :secret-state="settingsSecretStateComputed"
         :wifi-state="settingsWifiStateComputed"
         :serial-admin-is-factory-default="serialAdminIsFactoryDefault"
-        :has-active-device-info="hasActiveDeviceInfo"
         :settings-empty-message="settingsEmptyMessage"
         @trigger-identify="triggerIdentify"
-        @read-device-info="readDeviceInfo"
-        @refresh-status="refreshSerialAdminStatus"
         @fetch-settings="fetchSerialDeviceSettings"
         @copy-config-json="copySerialAdminConfigJson"
         @refresh-ports="refreshPorts"
@@ -7605,6 +7703,7 @@ const provisionIdentifyStateComputed = computed<ProvisionIdentifyState>(() => ({
         @remote-factory-reset="handleFleetRemoteFactoryReset"
         @selected-factory-reset="handleFleetSelectedFactoryReset"
         @candidate-adopt="handleAdoptCandidatePayload"
+        @save-display-name="saveFleetDisplayName"
       />
     </div>
 

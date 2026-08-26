@@ -1,5 +1,7 @@
 #include "admin_executor.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <cstring>
 #include <ESP8266WiFi.h>
 
@@ -14,6 +16,7 @@
 #include "mqtt_bridge.h"
 #include "runtime_utils.h"
 #include "config_fields.h"
+#include "display_name_store.h"
 
 using namespace admin_config_utils;
 
@@ -24,6 +27,25 @@ const char *cmdName(const JsonDocument &doc) {
 }
 
 const char *requestId(const JsonDocument &doc) { return doc["id"] | ""; }
+
+bool parseChipId(const JsonVariantConst &value, uint32_t &chipId) {
+  chipId = 0;
+  if (value.is<uint32_t>() || value.is<unsigned long>()) {
+    chipId = value.as<uint32_t>();
+    return chipId != 0;
+  }
+  const char *text = value | "";
+  if (!text || !text[0]) return false;
+  errno = 0;
+  char *end = nullptr;
+  const unsigned long parsed = strtoul(text, &end, 16);
+  if (errno == ERANGE || end == text || *end != '\0' || parsed == 0 ||
+      parsed > UINT32_MAX) {
+    return false;
+  }
+  chipId = static_cast<uint32_t>(parsed);
+  return true;
+}
 
 uint8_t clampMaxRemotes(int raw) {
   if (raw < 1)
@@ -692,6 +714,40 @@ void AdminExecutor::handleStatus(JsonDocument &doc, ResponseWriter writer) {
     }
   }
   sendOk(out, writer);
+}
+
+void AdminExecutor::handleGetDisplayName(JsonDocument &doc, ResponseWriter writer) {
+  const char *cmd = "get_display_name";
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) { sendError(cmd, "auth_failed", id, writer); return; }
+  if (!config_ || !config_->settings().role_tx) { sendError(cmd, "gateway_required", id, writer); return; }
+  uint32_t chipId = 0;
+  if (!parseChipId(doc["chip_id"], chipId) ||
+      !config_->isDisplayNameTarget(chipId)) {
+    sendError(cmd, "unknown_chip_id", id, writer); return;
+  }
+  char name[display_names::kMaxNameChars + 1]{};
+  if (!config_->getDisplayName(chipId, name)) { sendError(cmd, "read_failed", id, writer); return; }
+  char chip[9]; snprintf(chip, sizeof(chip), "%08lx", static_cast<unsigned long>(chipId));
+  JsonDocument out; out["cmd"] = cmd; if (id[0]) out["id"] = id; out["chip_id"] = chip; out["display_name"] = name; sendOk(out, writer);
+}
+
+void AdminExecutor::handleSetDisplayName(JsonDocument &doc, ResponseWriter writer) {
+  const char *cmd = "set_display_name";
+  const char *id = requestId(doc);
+  if (!requireAdmin(doc)) { sendError(cmd, "auth_failed", id, writer); return; }
+  if (!config_ || !config_->settings().role_tx) { sendError(cmd, "gateway_required", id, writer); return; }
+  uint32_t chipId = 0;
+  if (!parseChipId(doc["chip_id"], chipId) ||
+      !config_->isDisplayNameTarget(chipId)) {
+    sendError(cmd, "unknown_chip_id", id, writer); return;
+  }
+  const char *raw = doc["display_name"] | "";
+  char name[display_names::kMaxNameChars + 1]{};
+  if (!display_names::normalize(raw, name)) { sendError(cmd, "invalid_display_name", id, writer); return; }
+  if (!config_->setDisplayName(chipId, name)) { sendError(cmd, "save_failed", id, writer); return; }
+  char chip[9]; snprintf(chip, sizeof(chip), "%08lx", static_cast<unsigned long>(chipId));
+  JsonDocument out; out["cmd"] = cmd; if (id[0]) out["id"] = id; out["chip_id"] = chip; out["display_name"] = name; sendOk(out, writer);
 }
 
 void AdminExecutor::handleGetConfig(JsonDocument &doc, ResponseWriter writer, bool isMqtt) {
@@ -2125,6 +2181,24 @@ void AdminExecutor::handleSetGatewayTargets(JsonDocument &doc, ResponseWriter wr
     sendError(cmd, "save_failed", id, writer);
     return;
   }
+  if (replaceTargets) {
+    for (uint8_t i = 0; i < prevCount; ++i) {
+      const uint32_t previousChipId = prevChipIds[i];
+      if (previousChipId == 0) continue;
+      bool retained = false;
+      for (uint8_t j = 0; j < cfg.known_peer_count; ++j) {
+        if (cfg.known_peer_chip_ids[j] == previousChipId) {
+          retained = true;
+          break;
+        }
+      }
+      if (!retained && !display_names::clear(previousChipId)) {
+        LRS_LOGE(API,
+                 "event=display_name_clear_failed chip=%08lx reason=targets_replaced",
+                 static_cast<unsigned long>(previousChipId));
+      }
+    }
+  }
   if (on_apply_)
     on_apply_(on_apply_ctx_, false, false);
   JsonDocument out;
@@ -2249,6 +2323,9 @@ void AdminExecutor::handleCommand(JsonDocument &doc, ResponseWriter writer, bool
     handleStatus(doc, writer);
     return;
   }
+
+  if (strcmp(cmd, "get_display_name") == 0) { handleGetDisplayName(doc, writer); return; }
+  if (strcmp(cmd, "set_display_name") == 0) { handleSetDisplayName(doc, writer); return; }
 
   if (strcmp(cmd, "get_config") == 0) {
     handleGetConfig(doc, writer, isMqtt);
