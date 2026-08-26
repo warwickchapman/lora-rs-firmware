@@ -1,5 +1,5 @@
 {
   "revision": 3,
-  "minimum_flasher_version": "0.10.5",
-  "summary": "Correlated remote factory-reset and adoption confirmation workflows."
+  "minimum_flasher_version": "0.11.0",
+  "summary": "Correlated remote factory-reset and adoption confirmation workflows, gateway-owned display names, and firmware profile alignment."
 }

@@ -1,20 +1,13 @@
 # Changelog
 
-## Unreleased
-
-- Added optional 16-character gateway and remote display names in Fleet. Names are owned by the selected gateway in a checksummed, recoverable LittleFS sidecar, load progressively over the existing authenticated serial/MQTT admin path, and never add LoRa traffic or enlarge fleet inventory payloads. Fleet's redundant Role column is now the inline-editable Name column; immutable `lrs-…` identity remains visible.
-- Fleet action menus now use consistent Settings labels: gateway Settings carries the active USB or MQTT gateway into the main Settings pane and fetches its configuration immediately, while remote Settings opens the selected remote's gateway-mediated settings dialog.
-- Display-name lifecycle now follows physical chip identity: readdressing, OTA, reboot, and reset-keep-in-fleet preserve names; Forget and confirmed full remote reset remove a peer name only after gateway persistence succeeds; gateway factory reset clears all names.
-- Fleet now derives its OTA target compatibility from the selected gateway's compile-time firmware profile (`433_za` or `915_us`) over USB serial or MQTT discovery. It no longer guesses a region, creates LoRa traffic, or offers a release target until the gateway profile is available.
-- Replaced Fleet's large region/firmware card with a compact fleet-wide target-firmware toolbar. The Flash pane retains its manual region choice for blank or unreachable devices.
-- Renamed firmware build environments, release assets, and compile flags to approved compatibility profiles: `lrs_433_za`/`REGION_433_ZA` and `lrs_915_us`/`REGION_915_US`. Removed the falsely distinct EU release copy.
-- Expanded Flasher's development-only diagnostics MCP from OTA evidence into a strictly read-only support view of already-cached gateway, Fleet, operation, and Logs state. MCP reads never trigger device traffic, and cached snapshots redact secrets before local IPC export.
-- Fixed the development diagnostics MCP socket location on macOS: Flasher and Codex now use one user-private stable path instead of their separate temporary directories.
-- MQTT **Fetch settings** now explicitly replays the selected gateway's retained configuration topics after a frontend reload instead of waiting for messages consumed by the former frontend instance. The diagnostics MCP exposes only the resulting redacted configuration-cache metadata and fields.
-
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-26
+
 ### Firmware Changes
+- Added optional 16-character gateway and remote display names in Fleet. Names are owned by the selected gateway in a checksummed, recoverable LittleFS sidecar, load progressively over the existing authenticated serial/MQTT admin path, and never add LoRa traffic or enlarge fleet inventory payloads.
+- Display-name lifecycle now follows physical chip identity: readdressing, OTA, reboot, and reset-keep-in-fleet preserve names; Forget and confirmed full remote reset remove a peer name only after gateway persistence succeeds; gateway factory reset clears all names.
+- Renamed firmware build environments, release assets, and compile flags to approved compatibility profiles: `lrs_433_za`/`REGION_433_ZA` and `lrs_915_us`/`REGION_915_US`. Removed the falsely distinct EU release copy.
 - Added a compact, authenticated remote LED-identification transaction. The gateway sends one targeted request, retries it once if necessary, and accepts only an exactly correlated acknowledgement. Remotes reuse the existing Identify pattern, reject identification while Power Save is active, and answer duplicate requests without restarting the LED sequence. Relay/control traffic remains higher priority.
 - Added a 120 ms receive-turnaround guard before direct maintenance and operational-poll replies. This prevents the first maintenance Identity page—and therefore WiFi, IP, power-save, relay, and input state—from being transmitted while the gateway radio is still returning from request TX to receive mode.
 - Replaced heap-backed per-peer polling timers with one fixed-size operational-refresh cursor shared by persistent headless monitoring and temporary Fleet/Monitor observer leases. The gateway targets one fleet cycle per configured interval, suppresses redundant polls after fresh operational reports, and never sends catch-up bursts after control traffic.
@@ -32,6 +25,13 @@
 - A remote now saves its reset configuration before sending two staggered `FactoryResetStatus` confirmations under its current Fleet Key, then reboots. Save failure is reported without rebooting. A full reset removes the gateway peer record only after confirmation and successful gateway persistence; unconfirmed devices remain recoverable.
 
 ### Flasher Features
+- Fleet's redundant Role column is now the inline-editable Name column; immutable `lrs-…` identity remains visible.
+- Fleet action menus now use consistent Settings labels: gateway Settings carries the active USB or MQTT gateway into the main Settings pane and fetches its configuration immediately, while remote Settings opens the selected remote's gateway-mediated settings dialog.
+- Fleet now derives its OTA target compatibility from the selected gateway's compile-time firmware profile (`433_za` or `915_us`) over USB serial or MQTT discovery. It no longer guesses a region, creates LoRa traffic, or offers a release target until the gateway profile is available.
+- Replaced Fleet's large region/firmware card with a compact fleet-wide target-firmware toolbar. The Flash pane retains its manual region choice for blank or unreachable devices.
+- Expanded Flasher's development-only diagnostics MCP from OTA evidence into a strictly read-only support view of already-cached gateway, Fleet, operation, and Logs state. MCP reads never trigger device traffic, and cached snapshots redact secrets before local IPC export.
+- Fixed the development diagnostics MCP socket location on macOS: Flasher and Codex now use one user-private stable path instead of their separate temporary directories.
+- MQTT **Fetch settings** now explicitly replays the selected gateway's retained configuration topics after a frontend reload instead of waiting for messages consumed by the former frontend instance. The diagnostics MCP exposes only the resulting redacted configuration-cache metadata and fields.
 - Simplified Monitor into an observed view: opening the tab now starts its bounded low-priority refresh automatically, leaving stops it, and the redundant **Monitor** and **Auto refresh** controls have been removed.
 - Added a dedicated **Logs** tab for bounded USB gateway, MQTT gateway, and WiFi-remote diagnostic logs. Operators can focus one device, stack selected devices, or merge them chronologically; Copy, Clear, and JSONL export preserve receive time, source, transport, parsed event/severity, and raw text. Fleet Actions now open Logs with the selected gateway or remote, and Fleet no longer owns a UDP-listener control or inline log panels. UDP delivery is explicitly displayed as best-effort diagnostics, never device-health truth.
 - Removed the manual firmware-server controls from Fleet. Flasher now starts the temporary server only when an OTA needs it, keeps it alive across queued and active remote or gateway updates, cancels pending shutdown when more work arrives, and stops it automatically 60 seconds after the final update settles. Fleet shows the served filename and URL while the server is active; URL, checksum, failures, and shutdown also remain available in the activity log.
