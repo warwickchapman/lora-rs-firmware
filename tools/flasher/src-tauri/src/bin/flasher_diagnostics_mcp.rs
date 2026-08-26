@@ -1,9 +1,11 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
+#[cfg(unix)]
 fn endpoint() -> (PathBuf, String) {
     let dir = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -14,6 +16,7 @@ fn endpoint() -> (PathBuf, String) {
     (dir.join("flasher.sock"), token)
 }
 
+#[cfg(unix)]
 fn query(method: &str, args: &Value) -> Result<Value, String> {
     let (socket, token) = endpoint();
     let mut stream = UnixStream::connect(socket).map_err(|error| error.to_string())?;
@@ -37,6 +40,11 @@ fn query(method: &str, args: &Value) -> Result<Value, String> {
             .unwrap_or("IPC request failed")
             .into())
     }
+}
+
+#[cfg(not(unix))]
+fn query(_method: &str, _args: &Value) -> Result<Value, String> {
+    Err("Flasher diagnostics MCP is only supported on Unix platforms".into())
 }
 
 fn cached_tool(name: &str, description: &str, properties: Value, required: Value) -> Value {

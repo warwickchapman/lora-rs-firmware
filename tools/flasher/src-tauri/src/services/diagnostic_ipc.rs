@@ -1,15 +1,24 @@
 use crate::services::diagnostics::DiagnosticStore;
+#[cfg(unix)]
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use serde_json::{json, Value};
+#[cfg(unix)]
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 
+#[cfg(unix)]
 #[derive(Deserialize)]
 struct Request {
     token: String,
@@ -20,6 +29,7 @@ struct Request {
     limit: Option<usize>,
 }
 
+#[cfg(unix)]
 #[derive(Serialize)]
 struct Response {
     id: Option<String>,
@@ -28,6 +38,7 @@ struct Response {
     error: Option<String>,
 }
 
+#[cfg(unix)]
 fn runtime_dir() -> PathBuf {
     // macOS gives GUI apps and terminal clients different TMPDIR values. A
     // stable directory in the local user's home is required for the companion
@@ -38,6 +49,7 @@ fn runtime_dir() -> PathBuf {
         .join(".thanda-lora-flasher-diagnostics")
 }
 
+#[cfg(unix)]
 fn token() -> String {
     let mut hash = Sha256::new();
     hash.update(format!(
@@ -51,6 +63,7 @@ fn token() -> String {
     hex::encode(hash.finalize())
 }
 
+#[cfg(unix)]
 pub fn start(store: DiagnosticStore) {
     let dir = runtime_dir();
     let _ = fs::create_dir_all(&dir);
@@ -77,6 +90,7 @@ pub fn start(store: DiagnosticStore) {
     });
 }
 
+#[cfg(unix)]
 async fn serve(stream: UnixStream, store: DiagnosticStore, token: String) {
     let (read, mut write) = stream.into_split();
     let mut lines = BufReader::new(read).lines();
@@ -98,6 +112,7 @@ async fn serve(stream: UnixStream, store: DiagnosticStore, token: String) {
 
 /// This narrow local IPC only exposes values already held by DiagnosticStore.
 /// It never calls a Flasher command or owns a device-facing transport.
+#[cfg(unix)]
 async fn dispatch(request: Request, store: &DiagnosticStore) -> Response {
     let id = request.id;
     match request.method.as_str() {
@@ -175,3 +190,6 @@ async fn dispatch(request: Request, store: &DiagnosticStore) -> Response {
         },
     }
 }
+
+#[cfg(not(unix))]
+pub fn start(_store: DiagnosticStore) {}
