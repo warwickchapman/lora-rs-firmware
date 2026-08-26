@@ -198,6 +198,15 @@ impl MqttService {
         }
     }
 
+    /// Re-subscribe to one gateway's retained configuration subtree. This is a
+    /// host/broker operation only: it does not publish or contact the gateway.
+    pub async fn replay_gateway_config(&self, topic_root: &str, chip_id: &str) -> Result<(), String> {
+        let filter = gateway_config_filter(topic_root, chip_id)?;
+        let client_guard = self.client.lock().await;
+        let client = client_guard.as_ref().ok_or_else(|| "MQTT client not connected".to_string())?;
+        client.subscribe(filter, QoS::AtMostOnce).await.map_err(|error| error.to_string())
+    }
+
     fn handle_publish(app: &AppHandle, topic_root: &str, topic: String, payload_bytes: Vec<u8>, retain: bool) {
         let payload_str = match String::from_utf8(payload_bytes) {
             Ok(s) => s,
@@ -234,6 +243,18 @@ impl MqttService {
             }
         }
     }
+}
+
+fn gateway_config_filter(topic_root: &str, chip_id: &str) -> Result<String, String> {
+    let topic_root = topic_root.trim_matches('/');
+    if topic_root.is_empty() || topic_root.contains(['#', '+']) {
+        return Err("invalid MQTT topic root".into());
+    }
+    let chip_id = chip_id.trim().trim_start_matches("lrs-").trim_start_matches("0x");
+    if chip_id.is_empty() || !chip_id.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err("invalid gateway chip ID".into());
+    }
+    Ok(format!("{topic_root}/lrs-{}/config/#", chip_id.to_ascii_lowercase()))
 }
 
 #[derive(Debug, PartialEq)]
@@ -426,5 +447,15 @@ mod tests {
             value: serde_json::json!(1),
             retain: false,
         })));
+    }
+
+    #[test]
+    fn config_replay_filter_is_targeted_and_rejects_wildcards() {
+        assert_eq!(
+            gateway_config_filter("lora", "lrs-0030EB55").unwrap(),
+            "lora/lrs-0030eb55/config/#"
+        );
+        assert!(gateway_config_filter("lora/#", "0030eb55").is_err());
+        assert!(gateway_config_filter("lora", "not-a-chip").is_err());
     }
 }

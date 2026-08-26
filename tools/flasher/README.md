@@ -69,7 +69,9 @@ Flasher owns a local-user-only diagnostic socket while it is running. Its compan
 
 Every MCP read is served from that host cache. It never opens a serial, UDP, MQTT, or HTTP listener; triggers a Fleet scan or refresh; or sends a device, LoRa, OTA, or logging command. If a value is not already cached, the companion reports it as unavailable rather than causing control-path load. Secrets are redacted before the support snapshot reaches the local IPC socket.
 
-The available support tools are `flasher_status`, `list_gateways`, `get_gateway_snapshot`, `list_remote_devices`, `get_remote_snapshot`, `list_operations`, `get_log_sources`, and `get_log_events`. OTA-specific evidence remains available through `list_captures`, `get_events`, `get_timeline`, and `get_anomalies`.
+The available support tools are `flasher_status`, `list_gateways`, `get_gateway_snapshot`, `list_remote_devices`, `get_remote_snapshot`, `list_operations`, `get_log_sources`, `get_log_events`, `list_mqtt_config_buffers`, and `get_mqtt_config_snapshot`. MQTT configuration reads show Flasher's retained-message buffer, completeness, and freshness metadata; secret values are never exported. OTA-specific evidence remains available through `list_captures`, `get_events`, `get_timeline`, and `get_anomalies`.
+
+**Fetch settings** over MQTT explicitly re-subscribes to the selected gateway's retained `config/#` subtree and waits for its settled `_complete=true` marker. This repairs a frontend reload without reconnecting the broker or sending a gateway, LoRa, or OTA command.
 
 ```toml
 [mcp_servers.flasherDiagnostics]

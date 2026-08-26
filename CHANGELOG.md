@@ -10,6 +10,7 @@
 - Renamed firmware build environments, release assets, and compile flags to approved compatibility profiles: `lrs_433_za`/`REGION_433_ZA` and `lrs_915_us`/`REGION_915_US`. Removed the falsely distinct EU release copy.
 - Expanded Flasher's development-only diagnostics MCP from OTA evidence into a strictly read-only support view of already-cached gateway, Fleet, operation, and Logs state. MCP reads never trigger device traffic, and cached snapshots redact secrets before local IPC export.
 - Fixed the development diagnostics MCP socket location on macOS: Flasher and Codex now use one user-private stable path instead of their separate temporary directories.
+- MQTT **Fetch settings** now explicitly replays the selected gateway's retained configuration topics after a frontend reload instead of waiting for messages consumed by the former frontend instance. The diagnostics MCP exposes only the resulting redacted configuration-cache metadata and fields.
 
 ## [Unreleased]
 

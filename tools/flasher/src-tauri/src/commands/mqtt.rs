@@ -26,6 +26,16 @@ pub async fn publish_mqtt_command(
     service.publish_command(topic, payload).await
 }
 
+/// Request retained config replay for one gateway without sending any device command.
+#[tauri::command]
+pub async fn replay_mqtt_gateway_config(
+    service: State<'_, MqttService>,
+    topic_root: String,
+    chip_id: String,
+) -> Result<(), String> {
+    service.replay_gateway_config(&topic_root, &chip_id).await
+}
+
 #[tauri::command]
 pub async fn get_mqtt_state(
     service: State<'_, MqttService>,

@@ -161,6 +161,7 @@ pub fn run() {
             crate::commands::mqtt::connect_mqtt_broker,
             crate::commands::mqtt::disconnect_mqtt_broker,
             crate::commands::mqtt::publish_mqtt_command,
+            crate::commands::mqtt::replay_mqtt_gateway_config,
             crate::commands::mqtt::get_mqtt_state,
             crate::commands::mqtt_broker::start_local_mqtt_broker,
             crate::commands::mqtt_broker::get_local_mqtt_broker_status,

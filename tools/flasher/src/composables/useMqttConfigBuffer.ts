@@ -4,6 +4,9 @@ export interface DeviceMqttConfig {
   buffer: Record<string, any>;
   complete: boolean;
   secretsMetadata: Record<string, boolean>;
+  receivedAt: number | null;
+  completeAt: number | null;
+  settledAt: number | null;
 }
 
 export function canonicalChipId(raw: string | undefined | null): string {
@@ -26,17 +29,22 @@ export function useMqttConfigBuffer() {
   ) {
     const canonical = canonicalChipId(chip_id);
     if (!mqttConfigBuffers.value[canonical]) {
-      mqttConfigBuffers.value[canonical] = { buffer: {}, complete: false, secretsMetadata: {} };
+      mqttConfigBuffers.value[canonical] = {
+        buffer: {}, complete: false, secretsMetadata: {},
+        receivedAt: null, completeAt: null, settledAt: null,
+      };
     }
     const deviceConfig = mqttConfigBuffers.value[canonical];
+    deviceConfig.receivedAt = Date.now();
 
     const scheduleSettle = () => {
       if (settleTimers[canonical]) {
         clearTimeout(settleTimers[canonical]);
       }
       settleTimers[canonical] = setTimeout(() => {
-        if (deviceConfig.complete && onComplete) {
-          onComplete(chip_id, { ...deviceConfig.buffer });
+        if (deviceConfig.complete) {
+          deviceConfig.settledAt = Date.now();
+          if (onComplete) onComplete(chip_id, { ...deviceConfig.buffer });
         }
         delete settleTimers[canonical];
       }, 50); // 50ms settle debounce window
@@ -52,8 +60,11 @@ export function useMqttConfigBuffer() {
         deviceConfig.buffer = {};
         deviceConfig.secretsMetadata = {};
         deviceConfig.complete = false;
+        deviceConfig.completeAt = null;
+        deviceConfig.settledAt = null;
       } else {
         deviceConfig.complete = true;
+        deviceConfig.completeAt = Date.now();
         scheduleSettle();
       }
     } else {
@@ -85,8 +96,21 @@ export function useMqttConfigBuffer() {
     }
   }
 
+  function clearConfigBuffer(chip_id: string) {
+    const canonical = canonicalChipId(chip_id);
+    if (settleTimers[canonical]) {
+      clearTimeout(settleTimers[canonical]);
+      delete settleTimers[canonical];
+    }
+    mqttConfigBuffers.value[canonical] = {
+      buffer: {}, complete: false, secretsMetadata: {},
+      receivedAt: null, completeAt: null, settledAt: null,
+    };
+  }
+
   return {
     mqttConfigBuffers,
-    handleConfigUpdate
+    handleConfigUpdate,
+    clearConfigBuffer,
   };
 }

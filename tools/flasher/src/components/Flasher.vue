@@ -700,7 +700,7 @@ const settingsMqttGatewayChipId = ref('');
 const settingsMqttManualChipId = ref('');
 const settingsManualMqttGatewayError = ref('');
 
-const { mqttConfigBuffers, handleConfigUpdate } = useMqttConfigBuffer();
+const { mqttConfigBuffers, handleConfigUpdate, clearConfigBuffer } = useMqttConfigBuffer();
 
 async function ensureMqttConfigLoaded(rawChipId: string, timeoutMs = 5000): Promise<DeviceMqttConfig> {
   const canonical = normalizeChipId(rawChipId);
@@ -4691,16 +4691,19 @@ async function loadSerialAdminConfig(port: unknown = selectedPort.value) {
   pushSerialLog('Loading device configuration...');
   try {
     if (settingsTransport.value === 'mqtt') {
-      if (!state?.config) {
-        pushSerialLog('Waiting for retained MQTT config topics to load...');
-        const bufState = await ensureMqttConfigLoaded(targetPort);
-        if (state) {
-          setLoadedSerialAdminConfig(
-            state,
-            normalizeSerialAdminConfig(bufState.buffer as Partial<SerialAdminConfig>, state.status),
-            true
-          );
-        }
+      clearConfigBuffer(targetPort);
+      pushSerialLog('Requesting a fresh retained MQTT configuration snapshot...');
+      await invoke('replay_mqtt_gateway_config', {
+        topicRoot: sessionMqttTopicRoot.value,
+        chipId: normalizeChipId(targetPort),
+      });
+      const bufState = await ensureMqttConfigLoaded(targetPort);
+      if (state) {
+        setLoadedSerialAdminConfig(
+          state,
+          normalizeSerialAdminConfig(bufState.buffer as Partial<SerialAdminConfig>, state.status),
+          true
+        );
       }
       pushSerialLog('Configuration loaded from retained MQTT topics. Password fields stay blank.');
       return;
@@ -6945,6 +6948,26 @@ function publishSupportSnapshot() {
     ip: device.ip || null,
     row_state: device.row_state || null,
   }));
+  const mqttConfigBuffersSnapshot = Object.fromEntries(
+    Object.entries(mqttConfigBuffers.value).map(([chipId, config]) => {
+      const fields = Object.fromEntries(
+        Object.entries(config.buffer).filter(([field]) =>
+          !/(password|passphrase|secret|credential|fleet_key|mqtt_key|auth_token)/i.test(field)
+        )
+      );
+      return [chipId, {
+        complete: config.complete,
+        field_count: Object.keys(config.buffer).length,
+        received_at: config.receivedAt,
+        complete_at: config.completeAt,
+        settled_at: config.settledAt,
+        protected_fields_configured: Object.entries(config.secretsMetadata)
+          .filter(([, configured]) => configured)
+          .map(([field]) => field),
+        fields,
+      }];
+    })
+  );
   const logs = logSession.records.value.slice(-200).map(record => ({
     id: record.id, received_at: record.receivedAt, source: record.sourceLabel,
     transport: record.transport, severity: record.severity, event: record.event, raw: record.raw,
@@ -6963,12 +6986,13 @@ function publishSupportSnapshot() {
     },
     gateways,
     remotes,
+    mqtt_config_buffers: mqttConfigBuffersSnapshot,
     operations: { fleet_scan: loraInventoryScan.value, gateway_flash_phase: fleetGatewayFlashPhase.value, remote_ota_active: hasActiveRemoteOtaPulls.value },
     logs,
   }}).catch(() => {});
 }
 
-watch([loraInventory, mqttGateways, lastMqttDiscoveryMs, () => logSession.records.value, gatewaySessionTargetKey, gatewaySessionIsActive, fleetGatewayStatus, networkStatusMessage, fleetGatewayFlashPhase, loraInventoryScan, hasActiveRemoteOtaPulls], publishSupportSnapshot, { deep: true, immediate: true });
+watch([loraInventory, mqttGateways, mqttConfigBuffers, lastMqttDiscoveryMs, () => logSession.records.value, gatewaySessionTargetKey, gatewaySessionIsActive, fleetGatewayStatus, networkStatusMessage, fleetGatewayFlashPhase, loraInventoryScan, hasActiveRemoteOtaPulls], publishSupportSnapshot, { deep: true, immediate: true });
 
 const gatewaySessionChangeDisabledReason = computed(() => {
   if (isFlashing.value) return 'Gateway Session cannot change while flashing is active.';

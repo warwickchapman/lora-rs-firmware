@@ -57,6 +57,8 @@ fn tools() -> Value {
         cached_tool("list_operations", "Read cached Fleet/flash/OTA operation status.", json!({}), json!([])),
         cached_tool("get_log_sources", "List log sources represented in Flasher's retained log cache.", json!({}), json!([])),
         cached_tool("get_log_events", "Read up to 200 retained UI log records, optionally filtered by source.", json!({"source": {"type": "string"}}), json!([])),
+        cached_tool("list_mqtt_config_buffers", "List cached MQTT configuration-buffer metadata for discovered gateways.", json!({}), json!([])),
+        cached_tool("get_mqtt_config_snapshot", "Read one redacted cached MQTT configuration snapshot. Defaults to the selected MQTT gateway.", json!({"gateway_chip_id": {"type": "string"}}), json!([])),
         {"name":"list_captures","description":"List bounded Flasher OTA diagnostic captures.","inputSchema":{"type":"object","properties":{}}},
         {"name":"get_events","description":"Read bounded host diagnostic events after a sequence number.","inputSchema":{"type":"object","properties":{"after_sequence":{"type":"integer"},"limit":{"type":"integer"}}}},
         {"name":"get_timeline","description":"Read one OTA capture timeline, including passive evidence.","inputSchema":{"type":"object","properties":{"capture_id":{"type":"string"}},"required":["capture_id"]}},
@@ -117,6 +119,18 @@ fn support_result(name: &str, args: &Value) -> Result<Value, String> {
                 .unwrap_or_default();
             Ok(json!(logs))
         }
+        "list_mqtt_config_buffers" => Ok(snapshot["mqtt_config_buffers"].clone()),
+        "get_mqtt_config_snapshot" => {
+            let raw_chip_id = args["gateway_chip_id"].as_str()
+                .or_else(|| snapshot["gateway"]["target"].as_str())
+                .ok_or("gateway_chip_id required when no MQTT gateway is selected")?;
+            let chip_id = canonical_chip_id(raw_chip_id);
+            snapshot["mqtt_config_buffers"][&chip_id]
+                .as_object()
+                .cloned()
+                .map(Value::Object)
+                .ok_or_else(|| format!("no cached MQTT configuration buffer for gateway {chip_id}"))
+        }
         _ => Err("read-only tool not found".into()),
     }
 }
@@ -130,13 +144,19 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
         | "get_remote_snapshot"
         | "list_operations"
         | "get_log_sources"
-        | "get_log_events" => support_result(name, args),
+        | "get_log_events"
+        | "list_mqtt_config_buffers"
+        | "get_mqtt_config_snapshot" => support_result(name, args),
         "list_captures" => query("list_captures", args),
         "get_events" => query("get_events", args),
         "get_timeline" => query("get_timeline", args),
         "get_anomalies" => query("get_anomalies", args),
         _ => Err("read-only tool not found".into()),
     }
+}
+
+fn canonical_chip_id(raw: &str) -> String {
+    raw.trim().trim_start_matches("lrs-").trim_start_matches("0x").to_ascii_lowercase()
 }
 
 fn main() {
